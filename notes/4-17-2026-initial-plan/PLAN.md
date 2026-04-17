@@ -323,3 +323,264 @@ Examples:
   (`public` \| `restricted`), `tag` (dist-tag, default `latest`).
 
 ---
+
+## 7. Plugin Interface
+
+All plugins implement a single default-exported object conforming to this TS
+interface (shipped from `@piot/pilot-core/types`):
+
+```ts
+export interface PilotPlugin {
+  /** Registered kind; must match `package.kind` in pilot.toml */
+  kind: string;
+
+  /** Validate plugin-specific fields against this plugin's expectations. */
+  validate(pkg: PackageConfig): ValidationResult;
+
+  /**
+   * Query the registry: is this exact version already live?
+   * Must be safe to retry; must not require write credentials.
+   */
+  isPublished(
+    pkg: PackageConfig,
+    version: string,
+    ctx: PluginContext,
+  ): Promise<boolean>;
+
+  /**
+   * Update the version-file(s) inside `pkg.path` to `version`.
+   * Returns the list of modified file paths.
+   * MUST be deterministic and idempotent.
+   */
+  writeVersion(
+    pkg: PackageConfig,
+    version: string,
+    ctx: PluginContext,
+  ): Promise<string[]>;
+
+  /**
+   * Publish the package at `version`. Throws on hard failure; returns
+   * cleanly on already-published (idempotent) or success.
+   * Responsible for: auth, artifact collection, retry on 5xx.
+   */
+  publish(
+    pkg: PackageConfig,
+    version: string,
+    ctx: PluginContext,
+  ): Promise<PublishResult>;
+
+  /**
+   * Optional: run a smoke test in a clean environment.
+   * Default implementation: shell-exec `pkg.smoke` inside a throwaway
+   * container (Docker) with the package freshly installed.
+   */
+  smokeTest?(
+    pkg: PackageConfig,
+    version: string,
+    ctx: PluginContext,
+  ): Promise<SmokeResult>;
+}
+
+export interface PluginContext {
+  cwd: string;                 // repo root
+  dryRun: boolean;
+  log: Logger;
+  env: Record<string, string>; // filtered env (tokens masked in logs)
+  artifacts: ArtifactStore;    // access to GHA artifacts
+}
+
+export interface PublishResult {
+  status: 'published' | 'already-published' | 'skipped';
+  url?: string;                // canonical URL on the registry
+  bytes?: number;              // artifact size, for logs
+}
+```
+
+### 7.1 Error model
+
+Plugins throw typed errors:
+
+- `PluginAuthError` — auth failed; do not retry.
+- `PluginTransientError` — 5xx or network; core retries up to 3 times with
+  exponential backoff (1s, 2s, 4s).
+- `PluginFatalError` — anything else; fail the run loud.
+
+The core treats an unthrown unknown error as fatal; plugins are expected to
+annotate.
+
+### 7.2 Built-in plugins
+
+Three plugins ship in this repo alongside core:
+
+- **`@piot/pilot-crates`** — `cargo publish` + crates.io HEAD-check for
+  idempotency. Reads version from Cargo.toml; supports workspace crates via
+  `path` pointing at the crate dir.
+- **`@piot/pilot-pypi`** — supports `maturin`, `setuptools`, and `hatch`
+  build backends. Downloads wheels from GHA artifacts (built by user's
+  matrix), publishes via `twine` or `pypa/gh-action-pypi-publish` (delegated
+  to a sub-action when OIDC is used). Idempotency via PyPI JSON API
+  (`/pypi/{name}/{version}/json` returns 200 if published).
+- **`@piot/pilot-npm`** — `npm publish --provenance` with OIDC; idempotency
+  via `npm view <pkg>@<version> version` exit code.
+
+---
+
+## 8. Plugin Discovery & Loading
+
+### 8.1 Resolution order
+
+For a package of kind `X`:
+
+1. **Built-in registry** — if core ships a plugin for kind `X`, use it.
+2. **User's repo node_modules** — `require.resolve(\`@piot/pilot-${X}\`)` from
+   the repo root.
+3. **Explicit `plugin` field** in the package entry:
+   ```toml
+   [[package]]
+   kind = "pypi"
+   plugin = "@acme/pilot-pypi-custom"   # overrides built-in
+   ```
+4. Error if none found.
+
+### 8.2 Installing plugins
+
+Users install plugins into their repo:
+
+```bash
+npm i -D @piot/pilot-pypi @piot/pilot-crates @piot/pilot-npm
+```
+
+Or, for zero-config users, the action auto-installs the three built-in
+plugins into an ephemeral `node_modules` when it runs. `pilot.toml` can opt
+out with `[pilot] auto_install_plugins = false`.
+
+### 8.3 Plugin versioning
+
+Each plugin is independently versioned and published to npm under `@piot/*`.
+Core declares a peer-dep range:
+
+```json
+"peerDependencies": {
+  "@piot/pilot-core": "^0.x"
+}
+```
+
+Core ships a `supports(pluginApiVersion)` check; plugins built against an
+older API continue to work until a major bump.
+
+---
+
+## 9. Workflow Shape
+
+### 9.1 Canonical auto-release workflow
+
+User copies this into `.github/workflows/release.yml`:
+
+```yaml
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Comma-separated package names to force-release"
+        required: false
+      bump:
+        description: "Version bump (patch|minor|major)"
+        required: false
+        default: "patch"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # trailer lookup needs history
+      - id: plan
+        uses: thekevinscott/put-it-out-there@v0
+        with:
+          command: plan
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: actions/checkout@v4
+      # --- User-owned build logic below ---
+      - if: matrix.kind == 'pypi'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+          working-directory: ${{ matrix.path }}
+      - if: matrix.kind == 'crates'
+        run: cargo build --release --manifest-path ${{ matrix.path }}/Cargo.toml
+      - if: matrix.kind == 'npm'
+        run: |
+          cd ${{ matrix.path }}
+          npm ci
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pilot-${{ matrix.name }}
+          path: ${{ matrix.artifact_path }}
+
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write              # OIDC
+      contents: write              # tag + release
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - uses: thekevinscott/put-it-out-there@v0
+        with:
+          command: publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}       # fallback if no OIDC
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+```
+
+### 9.2 Why three jobs
+
+The `plan` job computes the release matrix from the merge commit's trailer
+and path-filter cascade. It emits JSON so the `build` job can fan out across
+the user's build tooling (they own this step — pilot doesn't know how to
+compile every possible project). The `publish` job then picks up artifacts
+and hands them to plugins.
+
+### 9.3 PR check workflow
+
+Separate file, `.github/workflows/pilot-check.yml`:
+
+```yaml
+on: pull_request
+
+jobs:
+  pilot-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: thekevinscott/put-it-out-there@v0
+        with:
+          command: plan
+          dry_run: true
+          fail_on_error: true
+```
+
+This surfaces misconfigurations (missing plugin, invalid trailer, tag
+collision) before the merge.
+
+---
