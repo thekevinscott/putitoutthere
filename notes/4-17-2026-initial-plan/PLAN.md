@@ -584,3 +584,259 @@ This surfaces misconfigurations (missing plugin, invalid trailer, tag
 collision) before the merge.
 
 ---
+
+## 10. Release Trailer Convention
+
+### 10.1 Syntax
+
+The trailer lives in the merge commit body (GitHub preserves commit bodies
+on squash-merge when the PR description contains them, or the user writes
+them directly). Format follows Git's existing trailer conventions (RFC
+822-style key/value lines at the end of the commit message):
+
+```
+Add streaming reader API
+
+Adds a chunked reader to dirsql that yields rows lazily instead
+of buffering the full result set.
+
+release: minor
+```
+
+### 10.2 Grammar
+
+```
+trailer     = "release:" WS ( "patch" | "minor" | "major" | "skip" ) [ WS packages ]
+packages    = "[" package-list "]"
+package-list = package-name *( "," WS package-name )
+```
+
+### 10.3 Examples
+
+```
+release: patch
+```
+Bumps every package whose `paths` intersect the changed files.
+
+```
+release: minor [dirsql-python, dirsql-rust]
+```
+Bumps only the listed packages at minor; other cascaded packages are NOT
+released (explicit override).
+
+```
+release: skip
+```
+Force no release, even if files changed in a package's `paths`. Useful for
+docs-only changes mixed with a code commit.
+
+(absence of trailer)
+- If `pilot.require_trailer = true`, the `pilot-check` workflow fails on PRs
+  that would cascade to any package. Otherwise the commit is no-op.
+
+### 10.4 Parsing
+
+The trailer parser uses `git interpret-trailers` when available, with a
+pure-TS fallback (`parse-trailers`). Case-insensitive key match. Only the
+**last** `release:` line in the commit wins, consistent with `git trailer`
+semantics.
+
+### 10.5 Precedence
+
+When `workflow_dispatch` is triggered manually:
+
+1. Manual `packages` + `bump` inputs are **authoritative** — they override
+   any trailer.
+2. If no manual inputs are provided but the event is `workflow_dispatch`,
+   behave as if the tip of `main` had `release: patch`.
+3. On `push` events, the trailer on the HEAD commit of `main` is canonical.
+4. If the HEAD commit lacks a trailer and the user opts into
+   `require_trailer`, the run fails with a clear message including the
+   commit SHA.
+
+---
+
+## 11. Path-Filter Cascade
+
+### 11.1 Algorithm
+
+For each `[[package]]` in `pilot.toml`:
+
+1. Resolve `last_tag` for this package (see §14 for tag-format resolution).
+2. Compute `git diff --name-only $last_tag..HEAD`.
+3. If any changed file matches any glob in `package.paths`, the package is
+   **cascaded** — it will be released.
+
+### 11.2 Glob semantics
+
+Globs use `minimatch` with these flags: `{ dot: true, matchBase: false }`.
+Double-star crosses directory boundaries. Brace-expansion enabled.
+
+Examples:
+
+| Glob                                | Matches                                        |
+|-------------------------------------|------------------------------------------------|
+| `packages/python/**/*.py`           | any `.py` under `packages/python/`             |
+| `packages/python/**`                | any file under `packages/python/`              |
+| `packages/{python,rust}/**`         | either subtree                                 |
+| `Cargo.lock`                        | exact file at repo root                        |
+
+### 11.3 First release
+
+If no tag matches this package's `tag_format`, diff from the **repo root
+commit** — every file in `paths` counts as "changed." The plugin uses
+`first_version` (default `0.1.0`).
+
+### 11.4 Explicit overrides
+
+The `release:` trailer's optional `[packages, ...]` suffix allows bypassing
+the path-filter cascade:
+
+- If listed: only those packages publish, regardless of path-filter match.
+- If omitted: default cascade applies.
+
+---
+
+## 12. Build Step (User-Owned Matrix)
+
+### 12.1 Rationale
+
+Pilot deliberately does not run `cargo build`, `maturin build`, `npm run
+build`, or any build-tool. Reasons:
+
+- Every project has idiosyncratic build setups (cross-compile, feature
+  flags, bundled native deps). Pilot would either be opinionated
+  (excluding valid projects) or become a thin shell around the user's
+  `Makefile` (pointless).
+- Build matrices require GitHub Actions matrix syntax (`strategy.matrix`)
+  which is static YAML, generated from the `plan` output.
+- Builds are cacheable via GHA-native mechanisms (setup-actions emit cache
+  keys). Pilot would reinvent this badly.
+
+### 12.2 Matrix output contract
+
+`pilot plan` emits this JSON on stdout (and GHA-output `matrix`):
+
+```json
+[
+  {
+    "name": "dirsql-rust",
+    "kind": "crates",
+    "path": "packages/rust",
+    "version": "0.3.4",
+    "runs_on": "ubuntu-latest",
+    "artifact_path": "packages/rust/target/package/*.crate",
+    "artifact_name": "pilot-dirsql-rust"
+  },
+  {
+    "name": "dirsql-python",
+    "kind": "pypi",
+    "path": "packages/python",
+    "version": "0.3.4",
+    "runs_on": "${{ matrix.os }}",
+    "artifact_path": "packages/python/dist/*.whl",
+    "artifact_name": "pilot-dirsql-python"
+  }
+]
+```
+
+The `build` job's matrix expands each row. The user's YAML does the actual
+build, keyed on `matrix.kind`.
+
+### 12.3 Platform-matrixed builds (wheels)
+
+For Python/Rust wheels across multiple OS/arch, the user-authored matrix
+expands beyond what pilot emits:
+
+```yaml
+build-pypi:
+  needs: plan
+  strategy:
+    matrix:
+      include: ${{ fromJson(needs.plan.outputs.matrix) }}
+      os: [ubuntu-latest, macos-latest, windows-latest]
+  ...
+```
+
+This is user-authored because pilot has no opinion on which platforms a
+package targets.
+
+### 12.4 Artifact handoff
+
+Build job uploads via `actions/upload-artifact@v4` using the `artifact_name`
+from the matrix row. Publish job downloads with `actions/download-artifact@v4`
+and the plugin picks up files from `artifacts/<artifact_name>/`.
+
+Plugins are documented to look at `ctx.artifacts.get(pkg.name)` which returns
+an absolute path.
+
+---
+
+## 13. Publishing & Idempotency
+
+### 13.1 Per-registry idempotency strategy
+
+| Registry    | Check                                           | Write window            |
+|-------------|-------------------------------------------------|-------------------------|
+| crates.io   | `GET /api/v1/crates/{name}/{version}` 200 check | Permanent (yank only)   |
+| PyPI        | `GET /pypi/{name}/{version}/json` 200 check     | Permanent (no unpublish)|
+| npm         | `npm view {name}@{version} version` exit 0      | 72-hour unpublish window|
+
+If `isPublished(version) === true`, the plugin returns
+`{ status: 'already-published' }` and the run succeeds. This makes retries
+safe and lets users re-trigger a failed workflow without consequences.
+
+### 13.2 Retry policy
+
+Defined in core (not per-plugin for consistency):
+
+```
+retries:        3
+initial_delay:  1s
+multiplier:     2
+jitter:         ±25%
+retry_on:       PluginTransientError, fetch 5xx, ECONNRESET, ETIMEDOUT
+no_retry_on:    PluginAuthError, PluginFatalError, 4xx other than 429
+```
+
+429 is treated as transient with respect for `Retry-After`.
+
+### 13.3 Publish order
+
+Packages publish in parallel when safe. "Safe" = no two packages in the
+cascade declare each other in their `paths`. In practice, a Python package
+wrapping a Rust crate has the Rust crate's paths inside its own `paths`, so:
+
+- If `dirsql-rust.paths` is `["packages/rust/**"]`, and
+- `dirsql-python.paths` is `["packages/python/**", "packages/rust/**"]`,
+
+a change to `packages/rust/src/lib.rs` cascades both. Pilot detects the
+overlap and publishes `dirsql-rust` **first** (because its paths are a
+subset of `dirsql-python`'s), then `dirsql-python`. The ordering rule: if
+`A.paths ⊆ B.paths`, publish A before B.
+
+This is the only implicit ordering in the system. If the user wants
+different ordering, they structure paths accordingly.
+
+### 13.4 Failure handling mid-cascade
+
+If package N in a 3-package cascade fails, packages 1..N-1 stay published
+(registries don't support rollback anyway). Package N+1..end are skipped.
+The run exits non-zero. Re-running after fixing the issue is safe because
+of §13.1 idempotency.
+
+### 13.5 Tag creation
+
+Tags are created **after** a successful publish, not before. Otherwise a
+crashed publish leaves a tag pointing at an unpublished version.
+
+Order within a single package's release:
+1. `writeVersion()` modifies version file(s) in-memory check only during
+   plan.
+2. On publish: `writeVersion()` actually writes; a version-bump commit is
+   made and pushed (signed if `pilot.commit_sign`).
+3. `publish()` runs.
+4. On success, `git tag <tag_format>` and `git push --tags`.
+5. GitHub Release created via API (§15).
+
+---
