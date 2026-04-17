@@ -177,3 +177,149 @@ Explicit list of things pilot does **not** try to do:
 | **Smoke test**    | Post-release check: install the published artifact in a clean env, run a user-defined snippet. |
 
 ---
+
+## 5. System Architecture
+
+### 5.1 Components
+
+```
+put-it-out-there/                         ← this repo
+├── action.yml                            ← GitHub Action entry (type: node20)
+├── src/
+│   ├── action/                           ← thin TS wrapper invoked by GHA
+│   │   └── main.ts                       ← parses inputs, invokes core
+│   ├── core/                             ← @piot/pilot-core
+│   │   ├── config.ts                     ← pilot.toml loader + schema
+│   │   ├── cascade.ts                    ← path-filter → package set
+│   │   ├── trailer.ts                    ← parse `release:` from merge commit
+│   │   ├── version.ts                    ← bump logic, tag formatting
+│   │   ├── plugin.ts                     ← plugin interface + loader
+│   │   ├── registry.ts                   ← built-in plugin registry
+│   │   ├── git.ts                        ← git wrapper (tag, log, trailer)
+│   │   ├── state.ts                      ← read last-published tags
+│   │   └── run.ts                        ← top-level orchestration
+│   └── cli/                              ← @piot/pilot
+│       └── bin.ts                        ← yargs/commander entry
+└── plugins/
+    ├── crates/                           ← @piot/pilot-crates
+    ├── pypi/                             ← @piot/pilot-pypi
+    └── npm/                              ← @piot/pilot-npm
+```
+
+### 5.2 Runtime shape
+
+The GHA action is a **native JS action** (not a composite shell action, not a
+Docker action). Rationale:
+
+| Action type    | Cold start       | Ergonomics for plugins                     |
+|----------------|------------------|--------------------------------------------|
+| Docker         | 30–60s           | Plugin system requires in-container npm i  |
+| Composite shell| 1–3s             | Hard to pass structured data between steps |
+| Node (JS)      | ~100ms           | npm module system → natural plugin host    |
+
+At runtime:
+
+1. GHA invokes `dist/action.js` (bundled via `@vercel/ncc`).
+2. Wrapper parses action inputs (command, optional overrides) and invokes
+   `pilot-core` directly in-process.
+3. Core loads `pilot.toml`, resolves plugins from `node_modules` or from the
+   user's repo (if they have a `package.json`).
+4. Core computes the cascade and dispatches to plugins.
+
+For local use, the same `pilot-core` is reachable via the `pilot` CLI which
+users install globally (`npm i -g @piot/pilot`) or via `npx @piot/pilot`. The
+GHA and CLI share identical execution paths — `pilot plan` in CI and locally
+produce the same output.
+
+### 5.3 Why the action wrapper is thin
+
+The wrapper is intentionally about 50 lines: read `INPUT_COMMAND`, set env
+for auth tokens, call `pilotRun(command, cwd)`, surface exit code. All
+business logic lives in `pilot-core`, so:
+
+- Testability: no GHA mocks needed for unit tests.
+- Portability: the same logic runs in other CI systems if ever needed
+  (not an explicit v0 goal, but a useful side-effect).
+- Upgradability: bumping the action (`uses: ...@v0` → `...@v1`) doesn't
+  require users to also reinstall a CLI; the action pins its own
+  `pilot-core` version.
+
+---
+
+## 6. Config Schema (`pilot.toml`)
+
+TOML chosen for ergonomic nested arrays and existing familiarity (Cargo.toml,
+pyproject.toml). The file lives at the repo root.
+
+### 6.1 Top-level
+
+```toml
+[pilot]
+version          = 1                         # schema version (required)
+default_branch   = "main"                    # release branch
+tag_format       = "v{version}"              # or "{package}-v{version}"
+commit_sign      = false                     # sign the version-bump commit?
+require_trailer  = true                      # fail if merge commit lacks `release:`
+agents_path      = "pilot/AGENTS.md"         # where `pilot init` writes the trailer doc
+```
+
+### 6.2 `[[package]]` entries
+
+Each publishable unit gets one entry. Field reference:
+
+```toml
+[[package]]
+name    = "dirsql-python"                    # unique pilot-internal name
+kind    = "pypi"                             # plugin discriminator
+path    = "packages/python"                  # working dir for build/publish
+paths   = [                                  # cascade triggers (globs)
+  "packages/python/**/*.py",
+  "packages/python/pyproject.toml",
+  "packages/rust/**",
+]
+
+# Registry-specific:
+pypi    = "dirsql"                           # name on PyPI (may differ from name)
+build   = "maturin"                          # build recipe (plugin-interpreted)
+smoke   = "python -c 'import dirsql; dirsql.DirSQL'"
+
+# Versioning:
+tag_format  = "python-v{version}"            # overrides pilot.tag_format
+first_version = "0.1.0"                      # initial version if no tag exists
+
+# Auth:
+auth = "oidc"                                # "oidc" | "token"
+token_env = "PYPI_TOKEN"                     # used when auth = "token"
+```
+
+### 6.3 Field reference (all packages)
+
+| Field            | Required | Type         | Default           | Notes                                            |
+|------------------|----------|--------------|-------------------|--------------------------------------------------|
+| `name`           | yes      | string       | —                 | Unique within the repo                           |
+| `kind`           | yes      | string       | —                 | `crates` \| `pypi` \| `npm` (extensible)          |
+| `path`           | yes      | string       | —                 | Working directory; relative to repo root         |
+| `paths`          | yes      | [string]     | —                 | Glob patterns for cascade                        |
+| `tag_format`     | no       | string       | `pilot.tag_format`| `{version}` and `{package}` interpolation        |
+| `first_version`  | no       | string       | `0.1.0`           | Semver                                           |
+| `auth`           | no       | string       | `oidc`            | `oidc` \| `token`                                 |
+| `token_env`      | if token | string       | —                 | Env var holding the token                        |
+| `smoke`          | no       | string       | —                 | Shell command run post-publish in clean env      |
+
+### 6.4 Plugin-specific fields
+
+Each plugin documents its own fields. The core does **no** validation of
+fields outside its top-level reference; it passes the raw TOML sub-table to
+the plugin. Plugins that need schema validation use Zod (shipped alongside
+core).
+
+Examples:
+
+- **`@piot/pilot-crates`**: `crate` (crates.io name if differs), `features`,
+  `target` (publishing target triple list).
+- **`@piot/pilot-pypi`**: `pypi`, `build` (`maturin` \| `setuptools` \| `hatch`),
+  `wheels_artifact` (artifact name to download from build matrix).
+- **`@piot/pilot-npm`**: `npm` (package name if differs), `access`
+  (`public` \| `restricted`), `tag` (dist-tag, default `latest`).
+
+---
