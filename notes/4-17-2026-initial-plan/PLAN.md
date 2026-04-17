@@ -104,15 +104,37 @@ OSS project:
 | Release review step              | Peer review + release PR    | Merge-to-main = intent to ship         |
 | Cross-registry coordination      | Separate tools per ecosystem| Single cascade via path filters        |
 
-### 2.2 Why a git trailer
+### 2.2 Release signal: path filter primary, trailer as override
 
-- **Locatable:** `git log --format=%B -1 $COMMIT` yields it cleanly; no parsing
-  of prose required.
-- **Machine-writable:** Claude can be instructed to append a trailer deterministically.
-- **GitHub-preserved:** squash-merge concatenates commit bodies; the trailer
-  survives on the merge commit.
-- **Opt-in:** absence of the trailer means "no release," which is the safe
-  default for docs-only or infra commits.
+Pilot's primary release signal is the **path-filter cascade**: any merge to
+`main` that touches a file matching a package's `paths` globs auto-releases
+that package at **patch**. This matches the "merge-to-main = intent to ship"
+philosophy for LLM-authored, high-cadence repos.
+
+The **`release:` trailer is an optional override**, not a required signal:
+
+- `release: minor` or `release: major` — bump beyond the default patch.
+- `release: skip` — suppress release for this commit (docs-only PRs that
+  happen to touch code paths).
+- Omit the trailer — default to patch.
+
+Why keep the trailer at all, if path filters carry the load?
+
+- **Bump type has to come from somewhere.** PR labels are GitHub-only,
+  editable after merge, and fragile. Commit-message prefixes (conventional
+  commits) are noisier than a single trailer. A trailer is the lightest
+  way to convey "this was a breaking change" without conventions that rot.
+- **Machine-writable.** `git log --format=%B -1 $COMMIT` yields it cleanly;
+  Claude can be instructed to append it deterministically when needed.
+- **GitHub-preserved.** Squash-merge concatenates commit bodies; the
+  trailer survives on the merge commit.
+- **Skip is a real need.** A PR fixing a typo in code that lives inside a
+  `paths` glob shouldn't ship a patch. `release: skip` solves that without
+  new UI.
+
+Changelog generation is orthogonal: it reads PR titles and descriptions for
+the commits since the last release tag — the trailer doesn't need to
+duplicate that.
 
 ### 2.3 Why path filters (instead of a cascade graph)
 
@@ -259,7 +281,7 @@ version          = 1                         # schema version (required)
 default_branch   = "main"                    # release branch
 tag_format       = "v{version}"              # or "{package}-v{version}"
 commit_sign      = false                     # sign the version-bump commit?
-require_trailer  = true                      # fail if merge commit lacks `release:`
+require_trailer  = false                     # if true, missing trailer fails PR check
 agents_path      = "pilot/AGENTS.md"         # where `pilot init` writes the trailer doc
 ```
 
@@ -585,14 +607,22 @@ collision) before the merge.
 
 ---
 
-## 10. Release Trailer Convention
+## 10. Release Trailer (Optional Override)
 
-### 10.1 Syntax
+### 10.1 Default behavior: no trailer needed
 
-The trailer lives in the merge commit body (GitHub preserves commit bodies
-on squash-merge when the PR description contains them, or the user writes
-them directly). Format follows Git's existing trailer conventions (RFC
-822-style key/value lines at the end of the commit message):
+Every merge to `main` that changes files matching a package's `paths` globs
+releases that package at **patch**. No trailer required. This is the 90%
+case for LLM-authored, high-cadence projects.
+
+The `release:` trailer exists only to **override** that default in the three
+cases where patch-on-cascade is wrong.
+
+### 10.2 Syntax
+
+Trailer lives in the merge commit body. Format follows Git's trailer
+conventions (RFC 822-style key/value lines at the end of the commit
+message):
 
 ```
 Add streaming reader API
@@ -603,56 +633,69 @@ of buffering the full result set.
 release: minor
 ```
 
-### 10.2 Grammar
+### 10.3 Grammar
 
 ```
-trailer     = "release:" WS ( "patch" | "minor" | "major" | "skip" ) [ WS packages ]
+trailer     = "release:" WS value [ WS packages ]
+value       = "patch" | "minor" | "major" | "skip"
 packages    = "[" package-list "]"
 package-list = package-name *( "," WS package-name )
 ```
 
-### 10.3 Examples
+### 10.4 Values and when to use them
+
+| Value   | Effect                                                               |
+|---------|----------------------------------------------------------------------|
+| _(omitted)_ | Default. Path-filter match → patch. No match → no release.       |
+| `patch` | Same as omitted. Explicit for clarity; overrides `require_trailer`.  |
+| `minor` | Bump minor for all cascaded packages.                                |
+| `major` | Bump major for all cascaded packages.                                |
+| `skip`  | Suppress release even if paths match (e.g., typo fix inside code).   |
+
+Optional `[pkg1, pkg2]` suffix scopes the override to specific packages;
+unlisted packages follow the default (patch on cascade).
+
+### 10.5 Examples
 
 ```
-release: patch
+release: minor
 ```
-Bumps every package whose `paths` intersect the changed files.
+All packages whose paths matched get minor instead of patch.
 
 ```
-release: minor [dirsql-python, dirsql-rust]
+release: major [dirsql-python]
 ```
-Bumps only the listed packages at minor; other cascaded packages are NOT
-released (explicit override).
+`dirsql-python` bumps major; any other cascaded packages still get patch.
 
 ```
 release: skip
 ```
-Force no release, even if files changed in a package's `paths`. Useful for
-docs-only changes mixed with a code commit.
+Nothing releases this commit, even if paths matched.
 
-(absence of trailer)
-- If `pilot.require_trailer = true`, the `pilot-check` workflow fails on PRs
-  that would cascade to any package. Otherwise the commit is no-op.
+_(no trailer)_
+Path-filter cascade runs normally. Matching packages get patch.
 
-### 10.4 Parsing
+### 10.6 Parsing
 
-The trailer parser uses `git interpret-trailers` when available, with a
-pure-TS fallback (`parse-trailers`). Case-insensitive key match. Only the
-**last** `release:` line in the commit wins, consistent with `git trailer`
-semantics.
+Uses `git interpret-trailers` when available, with a pure-TS fallback
+(`parse-trailers`). Case-insensitive key match. Only the **last**
+`release:` line in the commit wins, consistent with git trailer semantics.
 
-### 10.5 Precedence
+### 10.7 Precedence
 
 When `workflow_dispatch` is triggered manually:
 
 1. Manual `packages` + `bump` inputs are **authoritative** — they override
-   any trailer.
-2. If no manual inputs are provided but the event is `workflow_dispatch`,
-   behave as if the tip of `main` had `release: patch`.
-3. On `push` events, the trailer on the HEAD commit of `main` is canonical.
-4. If the HEAD commit lacks a trailer and the user opts into
-   `require_trailer`, the run fails with a clear message including the
-   commit SHA.
+   any trailer and any default cascade logic.
+2. If no manual inputs are provided on `workflow_dispatch`, behave as if
+   the tip of `main` had `release: patch` (no path filter required —
+   manual dispatch is an explicit force-release).
+3. On `push` events, path-filter cascade runs unconditionally; the trailer
+   on the HEAD commit of `main` may override bump type or skip.
+4. If `pilot.require_trailer = true` **and** the cascade is non-empty
+   **and** no trailer is present, the `pilot-check` workflow fails on the
+   PR. This is opt-in strict mode for repos that want explicit intent on
+   every release.
 
 ---
 
