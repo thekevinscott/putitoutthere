@@ -777,60 +777,84 @@ build`, or any build-tool. Reasons:
 - Builds are cacheable via GHA-native mechanisms (setup-actions emit cache
   keys). Pilot would reinvent this badly.
 
-### 12.2 Matrix output contract
+### 12.2 Targets: per-package platform list
 
-`pilot plan` emits this JSON on stdout (and GHA-output `matrix`):
+Packages that ship binary artifacts (wheels, compiled CLIs) declare
+which platforms they target:
+
+```toml
+[[package]]
+name    = "dirsql-python"
+kind    = "pypi"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+```
+
+- `targets` is a list of triples (Rust-style, reused because they're
+  unambiguous and familiar to the PyO3/maturin crowd).
+- If `targets` is omitted, the package has a single noarch artifact.
+- Pypi packages that ship source-only can set `targets = ["sdist"]`.
+- Pypi packages that ship both wheels and sdist list the wheel targets
+  explicitly; pilot emits an extra `sdist` matrix row automatically
+  (always `runs_on: ubuntu-latest`).
+
+### 12.3 Matrix output contract
+
+`pilot plan` emits one JSON row per (package × target). The row names
+the expected artifact deterministically:
 
 ```json
 [
   {
     "name": "dirsql-rust",
     "kind": "crates",
-    "path": "packages/rust",
-    "version": "0.3.4",
+    "version": "0.2.0",
+    "target": "noarch",
     "runs_on": "ubuntu-latest",
     "artifact_path": "packages/rust/target/package/*.crate",
-    "artifact_name": "pilot-dirsql-rust"
+    "artifact_name": "dirsql-rust-crate"
   },
   {
     "name": "dirsql-python",
     "kind": "pypi",
-    "path": "packages/python",
-    "version": "0.3.4",
-    "runs_on": "${{ matrix.os }}",
+    "version": "0.2.0",
+    "target": "aarch64-unknown-linux-gnu",
+    "runs_on": "ubuntu-24.04-arm",
     "artifact_path": "packages/python/dist/*.whl",
-    "artifact_name": "pilot-dirsql-python"
+    "artifact_name": "dirsql-python-wheel-aarch64-unknown-linux-gnu"
+  },
+  {
+    "name": "dirsql-python",
+    "kind": "pypi",
+    "version": "0.2.0",
+    "target": "sdist",
+    "runs_on": "ubuntu-latest",
+    "artifact_path": "packages/python/dist/*.tar.gz",
+    "artifact_name": "dirsql-python-sdist"
   }
 ]
 ```
 
-The `build` job's matrix expands each row. The user's YAML does the actual
-build, keyed on `matrix.kind`.
+Artifact naming is **pilot's contract**, not the user's: the build job
+uploads under the exact `artifact_name` pilot gave it, and `pilot publish`
+looks for that exact name. Users don't pick artifact names; pilot does.
 
-### 12.3 Platform-matrixed builds (wheels)
-
-For Python/Rust wheels across multiple OS/arch, the user-authored matrix
-expands beyond what pilot emits:
-
-```yaml
-build-pypi:
-  needs: plan
-  strategy:
-    matrix:
-      include: ${{ fromJson(needs.plan.outputs.matrix) }}
-      os: [ubuntu-latest, macos-latest, windows-latest]
-  ...
-```
-
-This is user-authored because pilot has no opinion on which platforms a
-package targets.
+Pilot ships opinionated `runs_on` defaults per target (e.g., native
+aarch64 on `ubuntu-24.04-arm` to avoid cross-compile). The user can
+override in their workflow YAML if their project needs something else.
 
 ### 12.4 Artifact handoff
 
-Build job uploads via `actions/upload-artifact@v4` using the `artifact_name`
-from the matrix row. Publish job downloads with `actions/download-artifact@v4`
-and the handler picks up files from `artifacts/<artifact_name>/` via
-`ctx.artifacts.get(pkg.name)`, which returns an absolute path.
+Build job uploads via `actions/upload-artifact@v4` using the
+`artifact_name` from the matrix row. Publish job downloads with
+`actions/download-artifact@v4` and pilot reads the artifact tree by the
+canonical names. See §13.2 for the completeness check that runs before
+publishing.
 
 ---
 
