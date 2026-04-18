@@ -39,7 +39,7 @@ monorepo, one `pilot.toml`, one flow.
 | 4 | `release:` trailer with `[pkg]` list is additive (Rule B): listed packages get the bump, unlisted cascaded packages still get patch | Covers both scoped bump and force-include with one mechanism |
 | 5 | Three registry handlers live in-repo as internal modules; no plugin system | Speculative flexibility costs too much; PR upstream to add a registry |
 | 6 | No-push tag model: manifest edits are CI-worktree-only; tag points at the merge commit | Kills the push race; `main`'s manifest stays stale by design |
-| 7 | OIDC trusted publishing preferred; token fallback supported | Hybrid forever — crates.io still has no OIDC |
+| 7 | OIDC trusted publishing preferred on all three registries; token fallback supported | crates.io added OIDC in 2025 (via `rust-lang/crates-io-auth-action`) |
 | 8 | No `pilot rollback` primitive; use `cargo yank` / `npm deprecate` + `git revert` | Republishing old code under new version misleads `>=` pinned consumers |
 | 9 | TOML config (`pilot.toml`) at repo root | Familiar (Cargo.toml, pyproject.toml); nested arrays work cleanly |
 | 10 | `pilot init` scaffolds `pilot/AGENTS.md` and appends `@pilot/AGENTS.md` to CLAUDE.md | Teaches the LLM agent the trailer convention |
@@ -49,12 +49,22 @@ monorepo, one `pilot.toml`, one flow.
 - `pilot.toml` parsing, Zod schema validation
 - Cascade algorithm (paths + `depends_on`, two-pass fixed-point, cycle detection)
 - Trailer parsing (`release: <bump> [packages]`)
-- Three handlers: crates, pypi, npm
+- Three handlers × multiple build modes:
+  - crates
+  - pypi: `maturin` (Rust-in-Python) / `setuptools` / `hatch` / vanilla
+  - npm: `napi` (Rust-in-JS native) / `bundled-cli` (wrapper around a
+    pre-built executable, e.g., cargo-dist archives) / vanilla
   - Idempotency check per registry
   - Retry on transient (5xx / network) up to 3x with backoff
-  - OIDC + token auth
+  - OIDC on all three (crates.io via `crates-io-auth-action`) + token
+    fallback
   - Manifest edits in CI worktree (no push to main)
+- Artifact completeness check (default on) — no partial ship on matrix holes
+- npm platform-package orchestration (publishes platform pkgs, then
+  main with `optionalDependencies`)
 - Tag creation at merge commit; GitHub Release auto-created per tag
+- Two cadence modes: `immediate` (every merge ships) and `scheduled`
+  (cron-triggered). Manual dispatch always runs.
 - Dry-run as PR check (catches config errors before merge)
 - `pilot init`, `pilot plan`, `pilot publish`, `pilot doctor`
 - CLAUDE.md / AGENTS.md scaffolding
@@ -69,7 +79,6 @@ monorepo, one `pilot.toml`, one flow.
 - Pre-release dist-tags (`-rc`, `-beta`, `-alpha`)
 - Private registries
 - Hotfix branches
-- Scheduled / batched releases
 - Non-Claude agent variants for `pilot init`
 
 ## Shape of config

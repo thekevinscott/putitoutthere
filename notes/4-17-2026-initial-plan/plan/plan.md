@@ -204,10 +204,6 @@ Explicit list of things pilot does **not** try to do:
   private registries later but the OIDC code paths are public-registry-only.
 - **Non-main release branches.** Everything ships from `main`. Hotfix branches
   are out of scope for v0.
-- **Batched / nightly / scheduled releases.** Every merge to `main` that
-  cascades releases immediately. No "batch up the day's merges and ship at
-  5pm" mode. A scheduled runner may arrive in v2 if there's demand; v0 is
-  immediate-only.
 - **A replaceable planner / external policy layer.** Pilot has one flow:
   read `pilot.toml`, read git, cascade, publish. Consumer freedom lives in
   config. If a user wants fundamentally different release logic, they
@@ -488,7 +484,25 @@ straightforward refactor. v0 does not pay that cost speculatively.
 
 ## 9. Workflow Shape
 
-### 9.1 Canonical auto-release workflow
+### 9.1 Release cadence modes
+
+Pilot supports two cadence modes, chosen per-repo via `pilot.toml`:
+
+```toml
+[pilot]
+cadence = "immediate"   # or "scheduled"
+```
+
+- **`immediate`** (default) — every merge to `main` that cascades
+  ships immediately. Matches the "merge = ship" philosophy.
+- **`scheduled`** — pushes to `main` accumulate; releases fire on a
+  cron schedule (configurable via workflow YAML). A `workflow_dispatch`
+  always runs immediately regardless.
+
+Both modes share the same trailer/cascade logic. The only difference
+is what `on:` block the workflow uses.
+
+### 9.2 Canonical auto-release workflow (`immediate`)
 
 User copies this into `.github/workflows/release.yml`:
 
@@ -568,7 +582,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
 ```
 
-### 9.2 Why three jobs
+### 9.3 Why three jobs
 
 The `plan` job computes the release matrix from the merge commit's trailer
 and path-filter cascade. It emits JSON so the `build` job can fan out across
@@ -576,7 +590,39 @@ the user's build tooling (they own this step — pilot doesn't know how to
 compile every possible project). The `publish` job then picks up artifacts
 and dispatches each to its handler.
 
-### 9.3 PR check workflow
+### 9.4 Scheduled cadence (`scheduled`)
+
+For repos that prefer to accumulate merges and ship on a timer, swap
+the `on:` block:
+
+```yaml
+on:
+  schedule:
+    - cron: "0 2 * * *"     # 02:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      bump: { description: "...", required: false, default: "patch" }
+      packages: { description: "...", required: false }
+```
+
+Behavior:
+- Merges to `main` between runs do **not** release. The trailer(s) on
+  the merges in the window are still honored — if any say
+  `release: skip`, that package is skipped; `release: major` bumps
+  accordingly; default is patch.
+- When the scheduled run fires, pilot diffs from the last tag, computes
+  cascade + bump, and publishes. Same flow as immediate mode, just
+  time-triggered.
+- `workflow_dispatch` runs immediately regardless of cadence — useful
+  for hotfixes and first-release bootstrapping.
+- If no commits touch any package's `paths` since the last tag, the
+  scheduled run exits cleanly with "nothing to release."
+
+Pilot infers `cadence` from the workflow's `on:` block if unambiguous,
+but explicit `[pilot] cadence = "scheduled"` is the recommended form
+and required for `pilot doctor` to give useful output.
+
+### 9.5 PR check workflow
 
 Separate file, `.github/workflows/pilot-check.yml`:
 
@@ -789,12 +835,28 @@ the matrix takes:
 | pypi   | `maturin`                          | Yes     | N wheels + 1 sdist → one PyPI name |
 | pypi   | `setuptools` / `hatch` / _omitted_ | No      | One sdist (+ one pure wheel)       |
 | npm    | `napi`                             | Yes     | N platform packages + 1 main pkg   |
+| npm    | `bundled-cli`                      | Yes     | N platform packages + 1 main pkg   |
 | npm    | _omitted_ (vanilla JS/TS)          | No      | One `npm publish`                  |
 
 The thesis: pure-language projects — pure Python, pure JS, pure Rust —
-have no matrix overhead. Users touching Rust-in-Python (PyO3/maturin) or
-Rust-in-JS (napi-rs) get the full multi-target dance automatically.
+have no matrix overhead. Users touching Rust-in-Python (PyO3/maturin)
+or Rust-in-JS (napi-rs) get the full multi-target dance automatically.
+`bundled-cli` covers the esbuild-style case where the npm package wraps
+a pre-built CLI binary (from `cargo-dist`, `goreleaser`, or any other
+source) — same orchestration as napi, different build source.
 Everyone else gets one artifact, one publish.
+
+**`build = "bundled-cli"` (npm, the dirsql case).** The npm package
+ships a thin JS launcher that shells out to a platform-specific binary
+held in an optional-dep package. Unlike `napi` where the build tooling
+produces `.node` files natively, `bundled-cli` expects the user's build
+step to deposit one CLI binary per target. Pilot wraps each binary in a
+minimal per-platform package, publishes them, then publishes the main
+package with `optionalDependencies` wired up (§13.7).
+
+User-side build freedom is the point: you bring the binaries however
+(`cargo build --target`, cross-compile tooling, cargo-dist archives),
+pilot owns the package synthesis and publish dance.
 
 ### 12.3 Targets: per-package platform list
 
@@ -999,20 +1061,30 @@ Consequences:
   want local builds labeled with the current version can set manifest
   to `0.0.0-dev` as a sentinel.
 
-### 13.7 npm platform-package orchestration (`build = "napi"`)
+### 13.7 npm platform-package orchestration (`napi` and `bundled-cli`)
 
 npm has no native platform resolution, so pilot implements the
-community-standard optional-deps pattern used by esbuild, swc, and
-every napi-rs project.
+community-standard optional-deps pattern used by esbuild, swc, napi-rs,
+and CLI-shipping projects like dirsql.
 
-For a napi package `dirsql-cli` with targets
-`[linux-x64-gnu, darwin-arm64, ...]`:
+The orchestration is identical for `build = "napi"` and
+`build = "bundled-cli"`. The only difference is what's inside each
+per-platform package:
+
+| `build`        | Per-platform package contents                        |
+|----------------|------------------------------------------------------|
+| `napi`         | `.node` native addon, loaded via Node-API binding    |
+| `bundled-cli`  | Pre-built executable + minimal JS launcher shim      |
+
+Both produce an N-target matrix; pilot's publish flow is the same.
+
+For a package `dirsql-cli` with targets `[linux-x64-gnu, darwin-arm64, ...]`:
 
 1. **Platform packages first.** For each target, pilot publishes a
    per-platform package named `{name}-{target}` (e.g.,
-   `dirsql-cli-linux-x64-gnu`) containing just the `.node` binary and
-   a minimal package.json with `os`/`cpu` fields narrowed to that
-   platform. These publish in parallel.
+   `dirsql-cli-linux-x64-gnu`) containing the platform-specific binary
+   (`.node` or executable) and a minimal `package.json` with `os`/`cpu`
+   fields narrowed to that platform. These publish in parallel.
 
 2. **Main package last.** The parent package's `package.json` is
    rewritten in the CI worktree to add an `optionalDependencies` block
@@ -1028,8 +1100,7 @@ For a napi package `dirsql-cli` with targets
 
    Only then does pilot publish the main package. npm's installer
    reads `optionalDependencies`, filters by `os`/`cpu` of the end
-   user's machine, and pulls down just the matching platform
-   package.
+   user's machine, and pulls down just the matching platform package.
 
 3. **Ordering is enforced.** If any platform-package publish fails,
    the main package is **not** published — otherwise installers would
@@ -1044,6 +1115,14 @@ For a napi package `dirsql-cli` with targets
 5. **Idempotency.** Each platform package's `isPublished` check runs
    independently; partial re-publishes skip already-shipped ones
    cleanly.
+
+6. **Artifact naming for `bundled-cli`.** The user's build job uploads
+   the executable under the matrix row's `artifact_name`
+   (e.g., `dirsql-cli-binary-aarch64-unknown-linux-gnu` containing the
+   single executable file). Pilot packages it into the platform npm
+   package at synthesis time. The main npm package provides the JS
+   launcher shim (pilot doesn't generate that — it's part of the
+   user's TS source).
 
 ---
 
@@ -1145,8 +1224,11 @@ is where credential policy belongs.
   uses it. Falls back on token if unavailable.
 - **npm:** `npm publish --provenance` requires `id-token: write` in the
   job `permissions`. Works with no token at all when OIDC is configured.
-- **crates.io:** does **not** support OIDC as of 2026-04; always uses a
-  token.
+- **crates.io:** OIDC is supported via `rust-lang/crates-io-auth-action@v1`,
+  which exchanges the OIDC JWT for a short-lived crates.io token. Pilot's
+  crates handler invokes that action when OIDC is available and uses the
+  resulting short-lived token for `cargo publish`. Falls back on a
+  long-lived `CARGO_REGISTRY_TOKEN` if OIDC is unavailable.
 
 OIDC requires adding `permissions: { id-token: write }` to the publish
 job. Pilot does not configure this — the user's workflow does.
@@ -1186,7 +1268,7 @@ Per-handler requirement:
 
 | Handler | Requires                                                        |
 |---------|-----------------------------------------------------------------|
-| crates  | `CARGO_REGISTRY_TOKEN` (OIDC not supported)                     |
+| crates  | OIDC **or** `CARGO_REGISTRY_TOKEN`                              |
 | pypi    | OIDC **or** `PYPI_API_TOKEN`                                    |
 | npm     | OIDC **or** `NODE_AUTH_TOKEN`                                   |
 
@@ -1330,14 +1412,47 @@ Reference: https://docs.npmjs.com/generating-provenance-statements
 
 Reference: https://docs.npmjs.com/creating-and-viewing-access-tokens
 
-#### 16.4.5 crates.io — token (only option)
+#### 16.4.5 crates.io — OIDC trusted publishing (preferred)
 
-crates.io does not support OIDC as of this writing. Always uses a
-token.
+crates.io added OIDC trusted publishing in 2025. Pilot uses
+`rust-lang/crates-io-auth-action@v1` to exchange the OIDC JWT for a
+short-lived token; no long-lived secret in GHA.
 
-1. Log in to https://crates.io/ and click your avatar → **Account
-   Settings**, or go directly to:
-   `https://crates.io/settings/tokens`
+1. Log in to https://crates.io/ and navigate to your crate's trusted
+   publishing settings:
+   `https://crates.io/crates/<your-crate>/settings`
+
+   [screenshot: crates.io crate "Trusted Publishing" settings]
+
+2. Under **Trusted Publishers**, click **Add a new GitHub publisher**.
+
+3. Fill in:
+   - **Repository owner:** your GitHub org/user (e.g., `thekevinscott`)
+   - **Repository name:** the repo name (e.g., `dirsql`)
+   - **Workflow name:** the filename exactly (case-sensitive,
+     e.g., `release.yml`). Renaming the workflow file invalidates the
+     publisher — same constraint as PyPI.
+   - **Environment name:** leave blank unless you use GH Environments.
+
+   [screenshot: filled-out crates.io trusted publisher form]
+
+4. Save.
+
+5. In the publish job, ensure `permissions: { id-token: write }` is set.
+   Pilot's generated workflow includes this.
+
+Reference: https://crates.io/docs/trusted-publishing
+
+**First-publish caveat.** OIDC trusted publishing requires the crate
+name to already exist on crates.io. For a brand-new crate, do a one-time
+manual `cargo publish` with a classic token to claim the name, then
+configure the trusted publisher for subsequent releases.
+
+#### 16.4.6 crates.io — token (fallback)
+
+If OIDC is unavailable:
+
+1. Go to https://crates.io/settings/tokens
 2. Click **New Token**.
 
    [screenshot: crates.io token creation form]
@@ -1361,22 +1476,23 @@ token.
 
 Reference: https://doc.rust-lang.org/cargo/reference/publishing.html#before-your-first-publish
 
-**First-publish caveat for crates.io.** The first `cargo publish` of a
-new crate name requires the `publish-new` scope on the token. After
-that, `publish-update` alone is sufficient. Pilot's pre-flight check
-can't tell scopes apart — if the first publish fails with a permission
-error, regenerate the token with `publish-new` added.
+**First-publish caveat.** `publish-new` scope is required for the first
+publish of a new crate name; `publish-update` alone is sufficient after.
+Pilot's pre-flight can't inspect token scopes — if first publish fails
+with a permission error, regenerate the token with `publish-new`.
 
-#### 16.4.6 Putting it together: the publish job
+#### 16.4.7 Putting it together: the publish job
 
-A complete `release.yml` publish job wiring all three:
+A complete `release.yml` publish job. OIDC for all three registries
+covers the happy path; the env block is a fallback for any registry
+where OIDC isn't yet configured.
 
 ```yaml
 publish:
   needs: [plan, build]
   runs-on: ubuntu-latest
   permissions:
-    id-token: write   # OIDC for pypi + npm
+    id-token: write   # OIDC for pypi, npm, crates.io
     contents: write   # tag + GH Release
   steps:
     - uses: actions/checkout@v4
@@ -1386,10 +1502,9 @@ publish:
     - uses: thekevinscott/put-it-out-there@v0
       with: { command: publish }
       env:
-        # Used only when OIDC unavailable for that registry:
+        # Fallbacks if OIDC isn't set up for that registry:
         PYPI_API_TOKEN:       ${{ secrets.PYPI_TOKEN }}
         NODE_AUTH_TOKEN:      ${{ secrets.NPM_TOKEN }}
-        # Always used (crates.io has no OIDC):
         CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
 ```
 
@@ -1822,6 +1937,11 @@ reference `examples/rust-python-ts/` repo:
 - [x] Idempotency check + retry per registry
 - [x] Version-file updates (Cargo.toml, pyproject.toml, package.json)
 - [x] Tag creation + GitHub Release per package
+- [x] Three handlers × two npm build modes: crates, pypi (maturin /
+      setuptools / hatch), npm (napi / bundled-cli / vanilla)
+- [x] Cadence: `immediate` and `scheduled` (cron-triggered)
+- [x] Artifact completeness check (default on)
+- [x] npm platform-package orchestration (napi + bundled-cli)
 - [x] `pilot init` (Claude variant only)
 - [x] `pilot plan` / `plan --dry-run`
 - [x] `pilot publish`
@@ -1884,7 +2004,6 @@ etc. based on dogfooding outcomes.
 - Private registry support (self-hosted crates registry, private PyPI,
   GitHub Packages for npm).
 - Hotfix branches with back-port tooling.
-- Scheduled/batched release mode (opposite of v0's immediate mode).
 - Additional built-in handlers: Ruby gems, Go modules (if/when Go moves
   to a first-class registry), Docker images, Homebrew taps.
 - Multi-repo orchestration (one `pilot.toml` pointing at multiple repos).
