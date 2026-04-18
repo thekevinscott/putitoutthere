@@ -304,13 +304,16 @@ pyproject.toml). The file lives at the repo root.
 
 ```toml
 [pilot]
-version          = 1                         # schema version (required)
-default_branch   = "main"                    # release branch
-tag_format       = "v{version}"              # or "{package}-v{version}"
-commit_sign      = false                     # sign the version-bump commit?
-require_trailer  = false                     # if true, missing trailer fails PR check
-agents_path      = "pilot/AGENTS.md"         # where `pilot init` writes the trailer doc
+version      = 1                             # schema version (required)
+agents_path  = "pilot/AGENTS.md"             # where `pilot init` writes the trailer doc
 ```
+
+Fixed conventions (not configurable):
+
+- Release branch is always `main`.
+- Tag format is always `{package}-v{version}` (e.g., `dirsql-python-v0.3.5`).
+- Trailer is optional; missing trailer = patch on cascade. No enforcement
+  mode.
 
 ### 6.2 `[[package]]` entries
 
@@ -334,7 +337,6 @@ build   = "maturin"                          # build recipe (handler-interpreted
 smoke   = "python -c 'import dirsql; dirsql.DirSQL'"
 
 # Versioning:
-tag_format  = "python-v{version}"            # overrides pilot.tag_format
 first_version = "0.1.0"                      # initial version if no tag exists
 ```
 
@@ -351,13 +353,11 @@ See §16.
 | `path`           | yes      | string       | —                 | Working directory; relative to repo root         |
 | `paths`          | yes      | [string]     | —                 | Glob patterns for cascade                        |
 | `depends_on`     | no       | [string]     | `[]`              | Other package names; transitive cascade          |
-| `tag_format`     | no       | string       | `pilot.tag_format`| `{version}` and `{package}` interpolation        |
 | `first_version`  | no       | string       | `0.1.0`           | Semver                                           |
 | `smoke`          | no       | string       | —                 | Shell command run post-publish in clean env      |
 
-Auth is deliberately absent. OIDC availability is detected at runtime
-(presence of `ACTIONS_ID_TOKEN_REQUEST_TOKEN`); token fallback reads
-well-known env var names wired up in the workflow (§16).
+No `tag_format` override — tags are always `{name}-v{version}`.
+No `auth` / `token_env` — secrets are wired in the workflow YAML (§16).
 
 ### 6.4 Registry-specific fields
 
@@ -641,7 +641,7 @@ package-list = package-name *( "," WS package-name )
 | Value   | Effect                                                               |
 |---------|----------------------------------------------------------------------|
 | _(omitted)_ | Default. Path-filter match → patch. No match → no release.       |
-| `patch` | Same as omitted. Explicit for clarity; overrides `require_trailer`.  |
+| `patch` | Same as omitted. Explicit for clarity.                               |
 | `minor` | Bump minor for all cascaded packages.                                |
 | `major` | Bump major for all cascaded packages.                                |
 | `skip`  | Suppress release even if paths match (e.g., typo fix inside code).   |
@@ -686,10 +686,6 @@ When `workflow_dispatch` is triggered manually:
    manual dispatch is an explicit force-release).
 3. On `push` events, path-filter cascade runs unconditionally; the trailer
    on the HEAD commit of `main` may override bump type or skip.
-4. If `pilot.require_trailer = true` **and** the cascade is non-empty
-   **and** no trailer is present, the `pilot-check` workflow fails on the
-   PR. This is opt-in strict mode for repos that want explicit intent on
-   every release.
 
 ---
 
@@ -753,8 +749,8 @@ crosses directory boundaries. Brace expansion enabled.
 
 ### 11.5 First release
 
-If no tag matches this package's `tag_format`, diff from the **repo root
-commit** — every file in `paths` counts as "changed." The handler uses
+If no tag matches `{name}-v*.*.*`, diff from the **repo root commit** —
+every file in `paths` counts as "changed." The handler uses
 `first_version` (default `0.1.0`).
 
 ### 11.6 Explicit trailer overrides
@@ -899,7 +895,7 @@ Order within a single package's release:
    writes the new version into the manifest; user's build tooling
    produces artifacts labeled with it.
 3. **Publish:** handler uploads artifacts to the registry.
-4. **Tag:** on publish success, `git tag <tag_format> <merge_commit_sha>`
+4. **Tag:** on publish success, `git tag <name>-v<version> <merge_commit_sha>`
    and `git push --tags`. Tag points at the merge commit, not a synthetic
    bump commit.
 5. **Release:** GitHub Release created via API (§15).
@@ -925,28 +921,21 @@ Consequences:
 
 ## 14. Versioning & Tags
 
-### 14.1 Tag format
+### 14.1 Tag format (fixed)
 
-`pilot.tag_format` sets the default; each package may override. Two supported
-templates:
+Tags are always `{package.name}-v{version}` — e.g.,
+`dirsql-python-v0.3.4`. Per-package tags are required because packages
+release independently.
 
-- `v{version}` — shared tag (e.g., `v0.3.4`). Works when all packages
-  release in lockstep.
-- `{package}-v{version}` — per-package tag (e.g., `dirsql-python-v0.3.4`).
-  Required when packages can release independently.
-
-Interpolation tokens:
-- `{version}` — semver string (e.g., `0.3.4`).
-- `{package}` — `package.name` from pilot.toml.
+The format is not configurable. If every package released in lockstep
+you could argue for a shared `v{version}` tag, but that's not the
+supported mode.
 
 ### 14.2 Resolving `last_tag`
 
-Given a `tag_format`, convert to a glob pattern for `git tag -l`:
-- `v{version}` → `v*.*.*`
-- `{package}-v{version}` → `<name>-v*.*.*` (with `name` literal)
-
-Take the highest semver-sorted match. Use `git describe --tags --match <glob>`
-fall-back for robustness.
+For each package, `git tag -l '<name>-v*.*.*'` yields candidates. Take
+the highest semver-sorted match. Use `git describe --tags --match <glob>`
+as a fallback for robustness.
 
 ### 14.3 Bump semantics
 
@@ -1004,12 +993,7 @@ tag with:
 - **Prerelease:** set if version is `-rc`, `-beta`, `-alpha` suffixed
   (not v0 scope, but the flag exists).
 
-### 15.2 Shared release (optional)
-
-When `pilot.tag_format = "v{version}"` (shared tag), a single GH Release is
-created per version spanning all packages. Body groups commits by package.
-
-### 15.3 Release creation API
+### 15.2 Release creation API
 
 Uses `actions/github-script` via the core — no external action dependency.
 Handled in the same `publish` job after tags push.
@@ -1063,7 +1047,36 @@ The user wires these up in `release.yml`:
 Secret *names* (on the left side of `${{ secrets.X }}`) are the user's
 choice; only the env var names on the right are pilot's convention.
 
-### 16.3 Log safety
+### 16.3 Pre-flight check
+
+Before any publish actually runs, pilot verifies that every cascaded
+package has usable credentials. Each handler declares the env var(s) it
+needs; pilot checks for either (a) OIDC availability or (b) the expected
+env var present and non-empty.
+
+Per-handler requirement:
+
+| Handler | Requires                                                        |
+|---------|-----------------------------------------------------------------|
+| crates  | `CARGO_REGISTRY_TOKEN` (OIDC not supported)                     |
+| pypi    | OIDC **or** `PYPI_API_TOKEN`                                    |
+| npm     | OIDC **or** `NODE_AUTH_TOKEN`                                   |
+
+If the check fails, the run aborts **before** any side effects (no tag
+push, no partial publish) with a message naming the missing env var and
+the package that needs it:
+
+```
+error: dirsql-rust (crates) needs CARGO_REGISTRY_TOKEN.
+  Set it in .github/workflows/release.yml under the publish job:
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+  See plan.md §16.
+```
+
+The same check is the core of `pilot doctor`.
+
+### 16.4 Log safety
 
 Any env var matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, or `*KEY*` is
 auto-masked in pilot's logs. Values found in `process.env` whose names
@@ -1143,8 +1156,7 @@ commit):
 1. `pilot.toml` parses and conforms to the schema.
 2. Every `[[package]]`'s `kind` maps to a known handler.
 3. Every package passes its handler's Zod schema.
-4. The PR description or the tip commit has a well-formed `release:` trailer
-   if `require_trailer = true`.
+4. If a `release:` trailer is present, it parses into a recognized form.
 5. Path-filter cascade produces a non-empty set when the trailer is
    non-skip, and vice versa.
 6. Computed next version for each cascaded package does not collide with an
@@ -1341,50 +1353,88 @@ for debugging failed runs without re-running them.
 
 ## 23. Testing Strategy
 
-### 23.1 Layers
+Follows the same layered strategy used in `dirsql`. Non-negotiable.
+Red → green TDD for everything; tests are written before the
+implementation. Target coverage: **90%+**.
 
-1. **Unit tests (vitest)** — cover every pure function: trailer parser,
-   version bumper, cascade calculator, tag resolver, glob matcher, retry
-   policy. Target: 100% coverage for `src/` excluding handler bodies that
-   shell out to external tools.
+### 23.1 Architectural precondition: CLI is a thin wrapper
 
-2. **Handler tests (mocked registries)** — each handler has its own test
-   suite. `verdaccio` for npm, `pypiserver` for PyPI, `msw`-stubbed HTTP
-   for crates.io. Verifies idempotency check, publish path, and retry on
-   5xx/transient. No shared testkit — handlers are internal and tested
-   directly.
+The `pilot` package exports a JS SDK (library API) **and** a CLI binary.
+The CLI is ~50 lines: argv parsing, process-level concerns (exit codes,
+stdin/stdout), and a call into the SDK. All logic lives in the SDK.
 
-3. **End-to-end tests** — full publish cycles against the mocked
-   registries driven through the `pilot` CLI. Asserts correct dispatch,
-   tag creation, and GitHub Release API calls (stubbed).
+This is load-bearing for the test strategy: the SDK is the primary
+testable surface, and the CLI gets a small set of smoke tests rather
+than a full test pyramid.
 
-4. **Workflow tests (`act`)** — run the GHA action locally via `act` on
-   fixture repos. Catches action.yml misconfig and wrapper bugs.
+### 23.2 Unit tests (colocated)
 
-5. **Smoke scenarios** — the `examples/` directory holds reference
-   monorepos (rust+python+ts, rust-only, python-only, npm-only). CI runs
-   the full workflow on each.
+- **Location:** colocated with the code under test. `src/cascade.ts` →
+  `src/cascade.test.ts`, etc.
+- **Scope:** a single function or a tight cluster. Mock **everything**
+  but the function under test — fs, git, network, clock, env, and any
+  in-repo collaborator.
+- **Runner:** vitest.
+- **Covers:** every pure function — trailer parser, version bumper,
+  cascade calculator, glob matcher, tag resolver, retry policy, config
+  loader, handler pure helpers.
 
-### 23.2 TDD for release logic
+### 23.3 Integration tests (SDK level)
 
-The release semantics (trailer parsing, cascade, version bumps, tag
-ordering) are the most error-prone parts. These must be TDD'd:
-**red → green → refactor**, tests written first in every PR that changes
-this logic. The CI runs a strict lint: core PRs without a test file in the
-diff fail the build.
+- **Location:** `test/integration/`.
+- **Target:** the exported JS SDK, not the CLI.
+- **Mocks:** anything **external to this library** — network, git
+  (where appropriate), filesystem for large fixtures, registry APIs.
+  In-repo modules are not mocked at this layer.
+- **Registry mocks:**
+  - npm — `verdaccio` running in-process.
+  - PyPI — `pypiserver` or `msw`-stubbed HTTP.
+  - crates.io — `msw`-stubbed HTTP.
+- **Covers:** full publish flows end-to-end through the SDK, including
+  cascade → build-matrix emit → handler dispatch → idempotency → retry
+  → tag computation. No real network, no real registries.
 
-### 23.3 Golden tests for CLI output
+### 23.4 End-to-end tests (agent-run, not CI)
 
-`pilot plan --json` output is snapshot-tested against golden files in
-`test/golden/`. This catches accidental changes in the matrix contract
-(which would break user workflow YAMLs).
+- **Mocks:** nothing. Real everything.
+- **Entry point:** the `pilot` CLI binary, invoked via `execa` or
+  equivalent.
+- **Registry targets:**
+  - **PyPI** — [TestPyPI](https://test.pypi.org) (test instance).
+  - **npm** — a dedicated canary package, `pilot-canary`, on real
+    npmjs.com. Published + unpublished as part of the test.
+  - **crates.io** — no test instance exists, so a dedicated canary
+    crate, `pilot-canary`, on real crates.io. Each e2e run bumps a
+    monotonic patch version; old versions are yanked periodically.
+- **Not run in CI.** The e2e suite:
+  - Hits external services (flaky if CI runs it on every push).
+  - Costs real registry state (crates.io in particular can't be reset).
+  - Can take minutes to run serially.
+- **Run often by the agent** during development. Typical cadence: every
+  meaningful change to handler or publish code.
+- **Entry:** `pnpm test:e2e` or equivalent.
 
-### 23.4 Publish on real registries (gated)
+### 23.5 TDD red/green
 
-A separate workflow (`.github/workflows/real-publish-test.yml`) runs
-weekly against real registries using a canary package (`pilot-canary`).
-Verifies OIDC remains configured correctly after any registry policy
-change.
+Every PR that changes release logic must include tests written first.
+Workflow:
+
+1. Write a failing test that describes the new behavior.
+2. Verify it fails (red).
+3. Implement minimally until it passes (green).
+4. Refactor with tests still green.
+
+CI lint rejects PRs that modify `src/` without touching a test file.
+
+### 23.6 Coverage
+
+Target **90%+** line and branch coverage across `src/`. Reported by
+vitest's built-in c8 integration. CI fails if a PR drops coverage
+below 90%. Exclusions (narrow, justified, commented):
+
+- CLI argv parser glue (covered by e2e).
+- Shell-out glue in handlers when the external command is trivially
+  constructed (covered by integration).
 
 ---
 
@@ -1544,11 +1594,8 @@ dirsql/
 
 ```toml
 [pilot]
-version        = 1
-default_branch = "main"
-tag_format     = "{package}-v{version}"
-require_trailer = false
-agents_path    = "pilot/AGENTS.md"
+version     = 1
+agents_path = "pilot/AGENTS.md"
 
 [[package]]
 name          = "dirsql-rust"

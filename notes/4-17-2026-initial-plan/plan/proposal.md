@@ -76,10 +76,7 @@ monorepo, one `pilot.toml`, one flow.
 
 ```toml
 [pilot]
-version         = 1
-default_branch  = "main"
-tag_format      = "{package}-v{version}"
-require_trailer = false
+version = 1
 
 [[package]]
 name          = "dirsql-rust"
@@ -133,15 +130,23 @@ every possible project.
 
 ## Testing
 
-Non-negotiable. Three layers:
-- Unit (vitest): pure functions — trailer parser, cascade, version bumper,
-  tag resolver, glob matcher, retry policy. ~100% coverage.
-- Handler: mocked registries — verdaccio (npm), pypiserver (PyPI),
-  msw-stubbed HTTP (crates.io).
-- End-to-end: full publish cycles via the CLI against mocked registries.
+Non-negotiable. Follows dirsql's strategy. Red/green TDD for everything.
+Target coverage **90%+**.
 
-Optional weekly real-registry canary using a dedicated `pilot-canary`
-package to catch registry API drift.
+The `pilot` package exports a JS SDK (library API); the CLI is a thin
+wrapper around it. The SDK is the primary testable surface.
+
+- **Unit (colocated, vitest):** `src/cascade.test.ts` next to
+  `src/cascade.ts`. Mock everything but the function under test.
+- **Integration (`test/integration/`):** target the SDK, not the CLI.
+  Mock anything external to this library (network, registries, git
+  where appropriate). Registry mocks: verdaccio (npm), pypiserver /
+  msw (PyPI), msw (crates.io).
+- **End-to-end:** mock nothing. Exercise the CLI directly. **Not run
+  in CI** — run often by the agent during development. Registry
+  targets: TestPyPI for PyPI, a dedicated `pilot-canary` package on
+  real npm, a dedicated `pilot-canary` crate on real crates.io
+  (no test instance exists for crates.io).
 
 ## Open decisions for review
 
