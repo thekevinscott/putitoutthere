@@ -33,10 +33,11 @@
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:e2e": "echo 'e2e suite landing in #28'"
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:unit:coverage": "vitest run --coverage",
+    "test:integration": "echo 'integration suite lands in tests/integration/ via #27' && exit 0",
+    "test:e2e": "echo 'e2e suite lands in tests/e2e/ via #28' && exit 0"
   },
   "devDependencies": {
     "@eslint/js": "^9.12.0",
