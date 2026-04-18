@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pilot` CLI entry. Thin wrapper around the SDK.
+ * `putitoutthere` CLI entry. Thin wrapper around the SDK.
  *
  * Command implementations land in #20 (init), #21 (plan), #22 (publish),
  * #23 (doctor). This scaffold just parses the command name and prints a
@@ -17,10 +17,10 @@ function isCommand(value: string): value is Command {
 function printUsage(): void {
   process.stderr.write(
     [
-      'Usage: pilot <command> [options]',
+      'Usage: putitoutthere <command> [options]',
       '',
       'Commands:',
-      '  init       Scaffold pilot.toml + workflows + AGENTS.md (#20)',
+      '  init       Scaffold putitoutthere.toml + workflows + AGENTS.md (#20)',
       '  plan       Compute and emit the release plan (#21)',
       '  publish    Execute the plan (#22)',
       '  doctor     Validate config + handlers + auth (#23)',
@@ -39,21 +39,21 @@ export function run(argv: readonly string[]): Promise<number> {
     return Promise.resolve(cmd === undefined ? 1 : 0);
   }
   if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
-    process.stdout.write('pilot 0.0.0 (pre-release scaffold)\n');
+    process.stdout.write('putitoutthere 0.0.0 (pre-release scaffold)\n');
     return Promise.resolve(0);
   }
   if (!isCommand(cmd)) {
-    process.stderr.write(`pilot: unknown command: ${cmd}\n`);
+    process.stderr.write(`putitoutthere: unknown command: ${cmd}\n`);
     printUsage();
     return Promise.resolve(1);
   }
   process.stderr.write(
-    `pilot: '${cmd}' is not implemented yet in this scaffold. See the v0 epic: https://github.com/thekevinscott/put-it-out-there/issues/2\n`,
+    `putitoutthere: '${cmd}' is not implemented yet in this scaffold. See the v0 epic: https://github.com/thekevinscott/put-it-out-there/issues/2\n`,
   );
   return Promise.resolve(2);
 }
 
-// Entry point when invoked as `pilot` or `node dist/cli.js`.
+// Entry point when invoked as `putitoutthere` or `node dist/cli.js`.
 /* v8 ignore start -- entry-point guard; only reachable when invoked as a binary */
 if (import.meta.url === `file://${process.argv[1]}`) {
   run(process.argv).then(
@@ -61,7 +61,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exit(code);
     },
     (err: unknown) => {
-      process.stderr.write(`pilot: fatal: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`putitoutthere: fatal: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(4);
     },
   );

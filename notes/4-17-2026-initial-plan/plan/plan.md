@@ -8,8 +8,8 @@
 > roadmap sections call out what is deliberately deferred.
 >
 > **Repo:** https://github.com/thekevinscott/put-it-out-there
-> **CLI:** `pilot`
-> **npm package:** `pilot`
+> **CLI:** `putitoutthere`
+> **npm package:** `putitoutthere`
 > **Date:** 2026-04-17
 
 ---
@@ -21,7 +21,7 @@
 3. [Non-Goals](#3-non-goals)
 4. [Glossary](#4-glossary)
 5. [System Architecture](#5-system-architecture)
-6. [Config Schema (`pilot.toml`)](#6-config-schema-pilottoml)
+6. [Config Schema (`putitoutthere.toml`)](#6-config-schema-putitoutthere-toml)
 7. [Registry Handlers](#7-registry-handlers)
 8. [Adding a New Registry](#8-adding-a-new-registry)
 9. [Workflow Shape](#9-workflow-shape)
@@ -36,7 +36,7 @@
 18. [Dry-Run as PR Check](#18-dry-run-as-pr-check)
 19. [When a Release Goes Bad](#19-when-a-release-goes-bad)
 20. [Post-Release Verifier](#20-post-release-verifier)
-21. [Command Surface (`pilot` CLI)](#21-command-surface-pilot-cli)
+21. [Command Surface (`putitoutthere` CLI)](#21-command-surface-putitoutthere-cli)
 22. [State & Logs](#22-state--logs)
 23. [Testing Strategy](#23-testing-strategy)
 24. [Distribution](#24-distribution)
@@ -51,7 +51,7 @@
 
 ## 1. Overview
 
-**Put It Out There** (`pilot`) is a polyglot release orchestrator for
+**Put It Out There** (`putitoutthere`) is a polyglot release orchestrator for
 single-maintainer, LLM-authored projects that publish to multiple package
 registries (crates.io, PyPI, npm) from a single monorepo.
 
@@ -67,7 +67,7 @@ don't hold when Claude is writing 90% of the commits:
 - Cranko is the closest match but requires the `rc:` branch convention and
   does not cover PyPI or npm first-class.
 
-Pilot's thesis: the release signal should be **path filters plus an optional
+Putitoutthere's thesis: the release signal should be **path filters plus an optional
 git trailer on the merge commit**; the cascade should be determined by
 **`depends_on` edges between packages**; and the publishing step should
 handle the ugly parts uniformly (OIDC auth, idempotency, retries,
@@ -81,8 +81,8 @@ version-file edits) across crates.io, PyPI, and npm.
 │  └─ uses: thekevinscott/put-it-out-there@v0            │
 │       │                                                 │
 │       ▼ (thin TS wrapper; ~100ms cold start)           │
-│     pilot (single TS package)                           │
-│       ├─ reads pilot.toml                               │
+│     putitoutthere (single TS package)                           │
+│       ├─ reads putitoutthere.toml                               │
 │       ├─ computes cascade (paths + depends_on)          │
 │       └─ dispatches by package.kind:                    │
 │             ├─ crates → crates.io                       │
@@ -102,7 +102,7 @@ the primary author, merges to `main` frequently, and wants releases to be
 mechanical. That framing produces different defaults than a multi-committer
 OSS project:
 
-| Assumption                       | Traditional tool            | Pilot                                  |
+| Assumption                       | Traditional tool            | Putitoutthere                                  |
 |----------------------------------|-----------------------------|----------------------------------------|
 | Who writes commits?              | Humans                      | LLMs + human merges                    |
 | Cadence                          | Weekly–monthly              | Multiple times/day                     |
@@ -112,7 +112,7 @@ OSS project:
 
 ### 2.2 Release signal: path filter primary, trailer as override
 
-Pilot's primary release signal is the **path-filter cascade**: any merge to
+Putitoutthere's primary release signal is the **path-filter cascade**: any merge to
 `main` that touches a file matching a package's `paths` globs auto-releases
 that package at **patch**. This matches the "merge-to-main = intent to ship"
 philosophy for LLM-authored, high-cadence repos.
@@ -146,7 +146,7 @@ duplicate that.
 
 Cross-language dependencies (a Python package wrapping a Rust crate via
 PyO3, for instance) can't be expressed in Cargo.toml or pyproject.toml.
-The user has to tell pilot about the relationship somehow.
+The user has to tell putitoutthere about the relationship somehow.
 
 Each package declares the globs that directly trigger its release (`paths`)
 plus an optional `depends_on` list naming other packages. The cascade
@@ -157,7 +157,7 @@ their `paths` and omit `depends_on` — while the dep-graph case stays
 explicit and DRY. The Rust path lives in one place (`dirsql-rust.paths`);
 `dirsql-python` says `depends_on = ["dirsql-rust"]`.
 
-Pilot does not try to infer the graph from Cargo.toml path-deps or
+Putitoutthere does not try to infer the graph from Cargo.toml path-deps or
 maturin config. Cross-ecosystem edges aren't declarable anywhere in the
 source-of-truth manifests, so inference would break silently where it
 matters most.
@@ -181,7 +181,7 @@ foreseeable future. A plugin system costs peer-dep management, version
 compatibility checks, discovery logic, a testkit, and a public API
 contract — all paid up front for speculative flexibility. Collapsing to
 internal dispatch saves ~50 lines of infra code per handler and keeps
-everything one-version, one-release, one-test-suite. If pilot ever sees
+everything one-version, one-release, one-test-suite. If putitoutthere ever sees
 real demand for external registries, factoring a handler out is a
 refactor, not a redesign.
 
@@ -189,30 +189,30 @@ refactor, not a redesign.
 
 ## 3. Non-Goals
 
-Explicit list of things pilot does **not** try to do:
+Explicit list of things putitoutthere does **not** try to do:
 
 - **Changelog generation from commit prose.** The trailer says what version
   to ship; if you want a changelog, use `git log v1.2.2..v1.2.3 --oneline`.
-  A `pilot changelog` command may arrive in v0.2+ but it is not in v0.
-- **Multi-repo orchestration.** One repo, one `pilot.toml`.
+  A `putitoutthere changelog` command may arrive in v0.2+ but it is not in v0.
+- **Multi-repo orchestration.** One repo, one `putitoutthere.toml`.
 - **Release PRs.** No intermediate PR between "merge to main" and "publish."
   Every merge to main with a valid trailer ships.
 - **Dependency-graph inference across ecosystems.** The user declares path
-  filters; pilot does not walk Cargo.toml, pyproject.toml, and package.json
+  filters; putitoutthere does not walk Cargo.toml, pyproject.toml, and package.json
   to infer them.
 - **Private registries.** Not v0. Token-based auth may be extensible to
   private registries later but the OIDC code paths are public-registry-only.
 - **Non-main release branches.** Everything ships from `main`. Hotfix branches
   are out of scope for v0.
-- **A replaceable planner / external policy layer.** Pilot has one flow:
-  read `pilot.toml`, read git, cascade, publish. Consumer freedom lives in
+- **A replaceable planner / external policy layer.** Putitoutthere has one flow:
+  read `putitoutthere.toml`, read git, cascade, publish. Consumer freedom lives in
   config. If a user wants fundamentally different release logic, they
-  don't use pilot for that step — that's a feature, not a bug.
+  don't use putitoutthere for that step — that's a feature, not a bug.
 - **A plugin system.** See §2.4. Handlers are internal modules, not
   pluggable packages. Adding a new registry means a PR to this repo
   (§8), not a separate package.
 - **Monorepo tooling it doesn't own.** Nx, Turborepo, Pants, Bazel integration
-  is out of scope. Pilot reads `pilot.toml` and does the release; the user's
+  is out of scope. Putitoutthere reads `putitoutthere.toml` and does the release; the user's
   build system does the build.
 
 ---
@@ -226,7 +226,7 @@ Explicit list of things pilot does **not** try to do:
 | **Release trailer** | A `release: patch|minor|major` line in the merge commit message body.                         |
 | **Cascade**       | Packages that release on a given commit, computed from `paths` + `depends_on` (§11).           |
 | **Idempotency check** | Handler-side check: "is this version already published?" If yes, skip cleanly.            |
-| **Dry-run**       | `pilot plan --dry-run`: resolves versions and prints the publish graph without side effects.   |
+| **Dry-run**       | `putitoutthere plan --dry-run`: resolves versions and prints the publish graph without side effects.   |
 | **Smoke test**    | Post-release check: install the published artifact in a clean env, run a user-defined snippet. |
 
 ---
@@ -242,7 +242,7 @@ put-it-out-there/                         ← this repo, one npm package
 │   ├── action.ts                         ← thin GHA wrapper; invokes run()
 │   ├── cli.ts                            ← yargs/commander CLI entry
 │   ├── run.ts                            ← top-level orchestration
-│   ├── config.ts                         ← pilot.toml loader + schema
+│   ├── config.ts                         ← putitoutthere.toml loader + schema
 │   ├── cascade.ts                        ← paths + depends_on → package set
 │   ├── trailer.ts                        ← parse `release:` from merge commit
 │   ├── version.ts                        ← bump logic, tag formatting
@@ -256,7 +256,7 @@ put-it-out-there/                         ← this repo, one npm package
 └── dist/                                 ← ncc-bundled action.js
 ```
 
-One package, one version, one release. The `pilot` CLI and the GHA action
+One package, one version, one release. The `putitoutthere` CLI and the GHA action
 are two entry points into the same code.
 
 ### 5.2 Runtime shape
@@ -275,11 +275,11 @@ At runtime:
 1. GHA invokes `dist/action.js` (bundled via `@vercel/ncc`).
 2. Wrapper parses action inputs (command, optional overrides) and invokes
    `run(command, cwd)` in-process.
-3. `run` loads `pilot.toml`, computes the cascade, dispatches each package
+3. `run` loads `putitoutthere.toml`, computes the cascade, dispatches each package
    to its handler by `kind`.
 
-For local use, the `pilot` CLI (`npm i -g pilot` or
-`npx pilot`) calls the same `run` function. `pilot plan` in CI and
+For local use, the `putitoutthere` CLI (`npm i -g putitoutthere` or
+`npx putitoutthere`) calls the same `run` function. `putitoutthere plan` in CI and
 locally produce the same output.
 
 ### 5.3 Why the action wrapper is thin
@@ -291,7 +291,7 @@ the same code is reachable from the CLI.
 
 ---
 
-## 6. Config Schema (`pilot.toml`)
+## 6. Config Schema (`putitoutthere.toml`)
 
 TOML chosen for ergonomic nested arrays and existing familiarity (Cargo.toml,
 pyproject.toml). The file lives at the repo root.
@@ -299,9 +299,9 @@ pyproject.toml). The file lives at the repo root.
 ### 6.1 Top-level
 
 ```toml
-[pilot]
+[putitoutthere]
 version      = 1                             # schema version (required)
-agents_path  = "pilot/AGENTS.md"             # where `pilot init` writes the trailer doc
+agents_path  = "putitoutthere/AGENTS.md"             # where `putitoutthere init` writes the trailer doc
 ```
 
 Fixed conventions (not configurable):
@@ -317,7 +317,7 @@ Each publishable unit gets one entry. Field reference:
 
 ```toml
 [[package]]
-name    = "dirsql-python"                    # unique pilot-internal name
+name    = "dirsql-python"                    # unique putitoutthere-internal name
 kind    = "pypi"                             # handler key: crates | pypi | npm
 path    = "packages/python"                  # working dir for build/publish
 paths   = [                                  # cascade triggers (globs)
@@ -336,7 +336,7 @@ smoke   = "python -c 'import dirsql; dirsql.DirSQL'"
 first_version = "0.1.0"                      # initial version if no tag exists
 ```
 
-**No auth fields in `pilot.toml`.** Secrets and env var wiring live in
+**No auth fields in `putitoutthere.toml`.** Secrets and env var wiring live in
 the repository settings and the workflow YAML, never in committed config.
 See §16.
 
@@ -461,7 +461,7 @@ Handlers throw typed errors caught by the orchestrator:
 
 ## 8. Adding a New Registry
 
-Pilot has no plugin system. Adding a new registry (Ruby gems, Go modules,
+Putitoutthere has no plugin system. Adding a new registry (Ruby gems, Go modules,
 Homebrew, Docker images, etc.) means:
 
 1. Add `src/handlers/<name>.ts` implementing the `Handler` interface.
@@ -476,7 +476,7 @@ Benefits of collapsing to internal dispatch:
 - No public API to maintain across minor bumps.
 - Refactoring a handler is a local change, not a coordinated release.
 
-If pilot ever sees real demand for third-party registries that can't be
+If putitoutthere ever sees real demand for third-party registries that can't be
 upstreamed, factoring a handler out into a separate package is a
 straightforward refactor. v0 does not pay that cost speculatively.
 
@@ -486,10 +486,10 @@ straightforward refactor. v0 does not pay that cost speculatively.
 
 ### 9.1 Release cadence modes
 
-Pilot supports two cadence modes, chosen per-repo via `pilot.toml`:
+Putitoutthere supports two cadence modes, chosen per-repo via `putitoutthere.toml`:
 
 ```toml
-[pilot]
+[putitoutthere]
 cadence = "immediate"   # or "scheduled"
 ```
 
@@ -560,7 +560,7 @@ jobs:
           npm run build
       - uses: actions/upload-artifact@v4
         with:
-          name: pilot-${{ matrix.name }}
+          name: putitoutthere-${{ matrix.name }}
           path: ${{ matrix.artifact_path }}
 
   publish:
@@ -586,7 +586,7 @@ jobs:
 
 The `plan` job computes the release matrix from the merge commit's trailer
 and path-filter cascade. It emits JSON so the `build` job can fan out across
-the user's build tooling (they own this step — pilot doesn't know how to
+the user's build tooling (they own this step — putitoutthere doesn't know how to
 compile every possible project). The `publish` job then picks up artifacts
 and dispatches each to its handler.
 
@@ -610,7 +610,7 @@ Behavior:
   the merges in the window are still honored — if any say
   `release: skip`, that package is skipped; `release: major` bumps
   accordingly; default is patch.
-- When the scheduled run fires, pilot diffs from the last tag, computes
+- When the scheduled run fires, putitoutthere diffs from the last tag, computes
   cascade + bump, and publishes. Same flow as immediate mode, just
   time-triggered.
 - `workflow_dispatch` runs immediately regardless of cadence — useful
@@ -618,19 +618,19 @@ Behavior:
 - If no commits touch any package's `paths` since the last tag, the
   scheduled run exits cleanly with "nothing to release."
 
-Pilot infers `cadence` from the workflow's `on:` block if unambiguous,
-but explicit `[pilot] cadence = "scheduled"` is the recommended form
-and required for `pilot doctor` to give useful output.
+Putitoutthere infers `cadence` from the workflow's `on:` block if unambiguous,
+but explicit `[putitoutthere] cadence = "scheduled"` is the recommended form
+and required for `putitoutthere doctor` to give useful output.
 
 ### 9.5 PR check workflow
 
-Separate file, `.github/workflows/pilot-check.yml`:
+Separate file, `.github/workflows/putitoutthere-check.yml`:
 
 ```yaml
 on: pull_request
 
 jobs:
-  pilot-dry-run:
+  putitoutthere-dry-run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -777,8 +777,8 @@ leave `depends_on` out entirely — no graph for them.
 
 ### 11.3 Cycle detection
 
-If `depends_on` forms a cycle (A → B → A), `pilot plan` fails loud at
-validation time. Cycles are a config error; pilot does not try to break
+If `depends_on` forms a cycle (A → B → A), `putitoutthere plan` fails loud at
+validation time. Cycles are a config error; putitoutthere does not try to break
 them.
 
 ### 11.4 Glob semantics
@@ -811,22 +811,22 @@ for precedence and §10.5 for the full semantics).
 
 ### 12.1 Rationale
 
-Pilot deliberately does not run `cargo build`, `maturin build`, `npm run
+Putitoutthere deliberately does not run `cargo build`, `maturin build`, `npm run
 build`, or any build-tool. Reasons:
 
 - Every project has idiosyncratic build setups (cross-compile, feature
-  flags, bundled native deps). Pilot would either be opinionated
+  flags, bundled native deps). Putitoutthere would either be opinionated
   (excluding valid projects) or become a thin shell around the user's
   `Makefile` (pointless).
 - Build matrices require GitHub Actions matrix syntax (`strategy.matrix`)
   which is static YAML, generated from the `plan` output.
 - Builds are cacheable via GHA-native mechanisms (setup-actions emit cache
-  keys). Pilot would reinvent this badly.
+  keys). Putitoutthere would reinvent this badly.
 
 ### 12.2 Build-type detection
 
 Whether a package needs a build matrix at all depends on the `build`
-field. Pilot looks at `kind` + `build` together and decides what shape
+field. Putitoutthere looks at `kind` + `build` together and decides what shape
 the matrix takes:
 
 | `kind` | `build`                            | Matrix? | Publishes                          |
@@ -850,13 +850,13 @@ Everyone else gets one artifact, one publish.
 ships a thin JS launcher that shells out to a platform-specific binary
 held in an optional-dep package. Unlike `napi` where the build tooling
 produces `.node` files natively, `bundled-cli` expects the user's build
-step to deposit one CLI binary per target. Pilot wraps each binary in a
+step to deposit one CLI binary per target. Putitoutthere wraps each binary in a
 minimal per-platform package, publishes them, then publishes the main
 package with `optionalDependencies` wired up (§13.7).
 
 User-side build freedom is the point: you bring the binaries however
 (`cargo build --target`, cross-compile tooling, cargo-dist archives),
-pilot owns the package synthesis and publish dance.
+putitoutthere owns the package synthesis and publish dance.
 
 ### 12.3 Targets: per-package platform list
 
@@ -879,20 +879,20 @@ targets = [
 
 - `targets` is a list of triples (Rust-style, reused because they're
   unambiguous and familiar to the PyO3/maturin/napi crowds).
-- For `build = "maturin"`: pilot emits one matrix row per target
+- For `build = "maturin"`: putitoutthere emits one matrix row per target
   (produces the platform wheel) plus one `sdist` row automatically.
   All wheels + sdist upload to a **single** PyPI package name.
-- For `build = "napi"`: pilot emits one matrix row per target (produces
+- For `build = "napi"`: putitoutthere emits one matrix row per target (produces
   a platform-specific npm package `{name}-{target}`) plus one `main`
   row (builds and publishes the parent package with
   `optionalDependencies` pointing at the platform packages it just
   shipped). See §13.6.
 - For any build that doesn't need a matrix, `targets` is ignored (with
-  a warning at `pilot doctor` time if set).
+  a warning at `putitoutthere doctor` time if set).
 
 ### 12.4 Matrix output contract
 
-`pilot plan` emits one JSON row per (package × target). The row names
+`putitoutthere plan` emits one JSON row per (package × target). The row names
 the expected artifact deterministically:
 
 ```json
@@ -927,11 +927,11 @@ the expected artifact deterministically:
 ]
 ```
 
-Artifact naming is **pilot's contract**, not the user's: the build job
-uploads under the exact `artifact_name` pilot gave it, and `pilot publish`
-looks for that exact name. Users don't pick artifact names; pilot does.
+Artifact naming is **putitoutthere's contract**, not the user's: the build job
+uploads under the exact `artifact_name` putitoutthere gave it, and `putitoutthere publish`
+looks for that exact name. Users don't pick artifact names; putitoutthere does.
 
-Pilot ships opinionated `runs_on` defaults per target (e.g., native
+Putitoutthere ships opinionated `runs_on` defaults per target (e.g., native
 aarch64 on `ubuntu-24.04-arm` to avoid cross-compile). The user can
 override in their workflow YAML if their project needs something else.
 
@@ -939,7 +939,7 @@ override in their workflow YAML if their project needs something else.
 
 Build job uploads via `actions/upload-artifact@v4` using the
 `artifact_name` from the matrix row. Publish job downloads with
-`actions/download-artifact@v4` and pilot reads the artifact tree by the
+`actions/download-artifact@v4` and putitoutthere reads the artifact tree by the
 canonical names. See §13.2 for the completeness check that runs before
 publishing.
 
@@ -961,7 +961,7 @@ safe and lets users re-trigger a failed workflow without consequences.
 
 ### 13.2 Artifact completeness check (default on)
 
-Before any publish side effect, pilot validates that every artifact the
+Before any publish side effect, putitoutthere validates that every artifact the
 plan expected is present. For each cascaded package:
 
 1. Enumerate expected artifacts from the plan's matrix rows for this
@@ -989,7 +989,7 @@ user who wants to publish partial sets has to explicitly override with
 `--allow-incomplete`, which is not supported in v0.
 
 This check also guards against user-authored workflow bugs (wrong
-`needs:` gate, `fail-fast: false` hiding a failure, etc.) — pilot's
+`needs:` gate, `fail-fast: false` hiding a failure, etc.) — putitoutthere's
 check runs regardless of what the workflow YAML did.
 
 ### 13.3 Retry policy
@@ -1026,7 +1026,7 @@ of §13.1 idempotency.
 
 ### 13.6 Tag creation (no-push model)
 
-Pilot does **not** create or push a synthetic "bump" commit back to main.
+Putitoutthere does **not** create or push a synthetic "bump" commit back to main.
 Manifest edits live in the CI worktree for the duration of the build and
 publish steps only. The tag points at the merge commit that triggered the
 release.
@@ -1063,7 +1063,7 @@ Consequences:
 
 ### 13.7 npm platform-package orchestration (`napi` and `bundled-cli`)
 
-npm has no native platform resolution, so pilot implements the
+npm has no native platform resolution, so putitoutthere implements the
 community-standard optional-deps pattern used by esbuild, swc, napi-rs,
 and CLI-shipping projects like dirsql.
 
@@ -1076,11 +1076,11 @@ per-platform package:
 | `napi`         | `.node` native addon, loaded via Node-API binding    |
 | `bundled-cli`  | Pre-built executable + minimal JS launcher shim      |
 
-Both produce an N-target matrix; pilot's publish flow is the same.
+Both produce an N-target matrix; putitoutthere's publish flow is the same.
 
 For a package `dirsql-cli` with targets `[linux-x64-gnu, darwin-arm64, ...]`:
 
-1. **Platform packages first.** For each target, pilot publishes a
+1. **Platform packages first.** For each target, putitoutthere publishes a
    per-platform package named `{name}-{target}` (e.g.,
    `dirsql-cli-linux-x64-gnu`) containing the platform-specific binary
    (`.node` or executable) and a minimal `package.json` with `os`/`cpu`
@@ -1088,7 +1088,7 @@ For a package `dirsql-cli` with targets `[linux-x64-gnu, darwin-arm64, ...]`:
 
 2. **Main package last.** The parent package's `package.json` is
    rewritten in the CI worktree to add an `optionalDependencies` block
-   pointing at the exact versions pilot just published:
+   pointing at the exact versions putitoutthere just published:
 
    ```json
    "optionalDependencies": {
@@ -1098,7 +1098,7 @@ For a package `dirsql-cli` with targets `[linux-x64-gnu, darwin-arm64, ...]`:
    }
    ```
 
-   Only then does pilot publish the main package. npm's installer
+   Only then does putitoutthere publish the main package. npm's installer
    reads `optionalDependencies`, filters by `os`/`cpu` of the end
    user's machine, and pulls down just the matching platform package.
 
@@ -1109,7 +1109,7 @@ For a package `dirsql-cli` with targets `[linux-x64-gnu, darwin-arm64, ...]`:
 
 4. **Naming convention.** `{name}-{target}` follows napi-rs's
    scaffolded convention (`@scope/package-linux-x64-gnu` for scoped
-   packages). Pilot computes the names deterministically from `name`
+   packages). Putitoutthere computes the names deterministically from `name`
    and `targets`; the user doesn't pick them.
 
 5. **Idempotency.** Each platform package's `isPublished` check runs
@@ -1119,9 +1119,9 @@ For a package `dirsql-cli` with targets `[linux-x64-gnu, darwin-arm64, ...]`:
 6. **Artifact naming for `bundled-cli`.** The user's build job uploads
    the executable under the matrix row's `artifact_name`
    (e.g., `dirsql-cli-binary-aarch64-unknown-linux-gnu` containing the
-   single executable file). Pilot packages it into the platform npm
+   single executable file). Putitoutthere packages it into the platform npm
    package at synthesis time. The main npm package provides the JS
-   launcher shim (pilot doesn't generate that — it's part of the
+   launcher shim (putitoutthere doesn't generate that — it's part of the
    user's TS source).
 
 ---
@@ -1209,29 +1209,29 @@ Handled in the same `publish` job after tags push.
 
 ## 16. Credentials
 
-**Nothing credential-related lives in `pilot.toml`.** Secrets are stored
+**Nothing credential-related lives in `putitoutthere.toml`.** Secrets are stored
 as GitHub Actions secrets (repo or org level); the workflow YAML wires
-them into the `publish` job as env vars under well-known names; pilot
+them into the `publish` job as env vars under well-known names; putitoutthere
 reads those names directly. There is no indirection field in config —
-the connection between `secrets.X` and pilot is the workflow YAML, which
+the connection between `secrets.X` and putitoutthere is the workflow YAML, which
 is where credential policy belongs.
 
 ### 16.1 OIDC trusted publishing (preferred)
 
 - **PyPI:** configure a trusted publisher in PyPI project settings pointing
-  at this repo + workflow file. Pilot's PyPI handler detects OIDC
+  at this repo + workflow file. Putitoutthere's PyPI handler detects OIDC
   availability at runtime (`ACTIONS_ID_TOKEN_REQUEST_TOKEN` present) and
   uses it. Falls back on token if unavailable.
 - **npm:** `npm publish --provenance` requires `id-token: write` in the
   job `permissions`. Works with no token at all when OIDC is configured.
 - **crates.io:** OIDC is supported via `rust-lang/crates-io-auth-action@v1`,
-  which exchanges the OIDC JWT for a short-lived crates.io token. Pilot's
+  which exchanges the OIDC JWT for a short-lived crates.io token. Putitoutthere's
   crates handler invokes that action when OIDC is available and uses the
   resulting short-lived token for `cargo publish`. Falls back on a
   long-lived `CARGO_REGISTRY_TOKEN` if OIDC is unavailable.
 
 OIDC requires adding `permissions: { id-token: write }` to the publish
-job. Pilot does not configure this — the user's workflow does.
+job. Putitoutthere does not configure this — the user's workflow does.
 
 ### 16.2 Token fallback (well-known env vars)
 
@@ -1255,13 +1255,13 @@ The user wires these up in `release.yml`:
 ```
 
 Secret *names* (on the left side of `${{ secrets.X }}`) are the user's
-choice; only the env var names on the right are pilot's convention.
+choice; only the env var names on the right are putitoutthere's convention.
 
 ### 16.3 Pre-flight check
 
-Before any publish actually runs, pilot verifies that every cascaded
+Before any publish actually runs, putitoutthere verifies that every cascaded
 package has usable credentials. Each handler declares the env var(s) it
-needs; pilot checks for either (a) OIDC availability or (b) the expected
+needs; putitoutthere checks for either (a) OIDC availability or (b) the expected
 env var present and non-empty.
 
 Per-handler requirement:
@@ -1284,7 +1284,7 @@ error: dirsql-rust (crates) needs CARGO_REGISTRY_TOKEN.
   See plan.md §16.
 ```
 
-The same check is the core of `pilot doctor`.
+The same check is the core of `putitoutthere doctor`.
 
 ### 16.4 Step-by-step setup
 
@@ -1326,7 +1326,7 @@ Preferred. No long-lived secret in GHA.
      id-token: write
      contents: write
    ```
-   Pilot's generated workflow includes this.
+   Putitoutthere's generated workflow includes this.
 
 Reference: https://docs.pypi.org/trusted-publishers/
 
@@ -1352,14 +1352,14 @@ If you can't use OIDC:
    New repository secret.**
    - Name: e.g., `PYPI_TOKEN` (your choice)
    - Value: the token
-6. Wire it into the workflow as the env var pilot reads:
+6. Wire it into the workflow as the env var putitoutthere reads:
    ```yaml
    env:
      PYPI_API_TOKEN: ${{ secrets.PYPI_TOKEN }}
    ```
    (The env var name on the **right** side of `secrets.X` is your
    naming; the env var on the **left** — `PYPI_API_TOKEN` — is
-   pilot's convention.)
+   putitoutthere's convention.)
 
 Reference: https://pypi.org/help/#apitoken
 
@@ -1376,13 +1376,13 @@ Reference: https://pypi.org/help/#apitoken
      id-token: write
      contents: read
    ```
-   and the `npm publish --provenance` flag (which pilot's npm handler
+   and the `npm publish --provenance` flag (which putitoutthere's npm handler
    sets automatically when OIDC is detected).
 
 3. For scoped packages (`@scope/pkg`) or packages set to `restricted`:
    ensure the package's `package.json` has a `repository` field
    pointing at the GitHub repo. npm uses this to verify the OIDC
-   claim. Pilot's pre-flight check enforces this.
+   claim. Putitoutthere's pre-flight check enforces this.
 
 Reference: https://docs.npmjs.com/generating-provenance-statements
 
@@ -1414,7 +1414,7 @@ Reference: https://docs.npmjs.com/creating-and-viewing-access-tokens
 
 #### 16.4.5 crates.io — OIDC trusted publishing (preferred)
 
-crates.io added OIDC trusted publishing in 2025. Pilot uses
+crates.io added OIDC trusted publishing in 2025. Putitoutthere uses
 `rust-lang/crates-io-auth-action@v1` to exchange the OIDC JWT for a
 short-lived token; no long-lived secret in GHA.
 
@@ -1439,7 +1439,7 @@ short-lived token; no long-lived secret in GHA.
 4. Save.
 
 5. In the publish job, ensure `permissions: { id-token: write }` is set.
-   Pilot's generated workflow includes this.
+   Putitoutthere's generated workflow includes this.
 
 Reference: https://crates.io/docs/trusted-publishing
 
@@ -1458,7 +1458,7 @@ If OIDC is unavailable:
    [screenshot: crates.io token creation form]
 
 3. Scope it:
-   - **Name:** e.g., `pilot-release-<repo>` — something identifiable.
+   - **Name:** e.g., `putitoutthere-release-<repo>` — something identifiable.
    - **Expiration:** 90 days or your policy.
    - **Scopes:** `publish-update` at minimum. For first-time publish
      of a new crate name, also include `publish-new`.
@@ -1478,7 +1478,7 @@ Reference: https://doc.rust-lang.org/cargo/reference/publishing.html#before-your
 
 **First-publish caveat.** `publish-new` scope is required for the first
 publish of a new crate name; `publish-update` alone is sufficient after.
-Pilot's pre-flight can't inspect token scopes — if first publish fails
+Putitoutthere's pre-flight can't inspect token scopes — if first publish fails
 with a permission error, regenerate the token with `publish-new`.
 
 #### 16.4.7 Putting it together: the publish job
@@ -1508,12 +1508,12 @@ publish:
         CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
 ```
 
-Run `pilot doctor` locally (pointing at a PR or the current branch) to
+Run `putitoutthere doctor` locally (pointing at a PR or the current branch) to
 verify everything resolves before the first release:
 
 ```
-$ pilot doctor
-  ✓ pilot.toml parses
+$ putitoutthere doctor
+  ✓ putitoutthere.toml parses
   ✓ all package kinds map to a handler
   ✓ dirsql-rust      needs CARGO_REGISTRY_TOKEN → set (CI only)
   ✓ dirsql-python    OIDC trusted publisher configured
@@ -1531,24 +1531,24 @@ documented in §22.5.
 ### 17.1 The problem
 
 For the trailer convention to work, the LLM agent authoring commits has to
-know about it. `pilot init` solves this.
+know about it. `putitoutthere init` solves this.
 
-### 17.2 `pilot init`
+### 17.2 `putitoutthere init`
 
 ```
-$ pilot init
-✓ Wrote pilot.toml (scaffold — edit with your packages)
-✓ Wrote pilot/AGENTS.md (trailer convention)
-✓ Appended @pilot/AGENTS.md to CLAUDE.md
+$ putitoutthere init
+✓ Wrote putitoutthere.toml (scaffold — edit with your packages)
+✓ Wrote putitoutthere/AGENTS.md (trailer convention)
+✓ Appended @putitoutthere/AGENTS.md to CLAUDE.md
 ✓ Wrote .github/workflows/release.yml
-✓ Wrote .github/workflows/pilot-check.yml
+✓ Wrote .github/workflows/putitoutthere-check.yml
 ```
 
-The `@pilot/AGENTS.md` syntax is a reference to CLAUDE.md's `@-import`
+The `@putitoutthere/AGENTS.md` syntax is a reference to CLAUDE.md's `@-import`
 mechanism: any line starting with `@` is treated by Claude Code as an
-inclusion of that file. The agent reads `pilot/AGENTS.md` transitively.
+inclusion of that file. The agent reads `putitoutthere/AGENTS.md` transitively.
 
-### 17.3 `pilot/AGENTS.md` contents (generated)
+### 17.3 `putitoutthere/AGENTS.md` contents (generated)
 
 ```markdown
 # Release signaling for Put It Out There
@@ -1570,16 +1570,16 @@ The trailer on the merge commit determines the release. If merging via
 in the squashed commit body.
 ```
 
-### 17.4 Idempotency of `pilot init`
+### 17.4 Idempotency of `putitoutthere init`
 
-- If `pilot.toml` exists, print a diff and require `--force` to overwrite.
-- If `CLAUDE.md` already contains `@pilot/AGENTS.md`, skip the append.
+- If `putitoutthere.toml` exists, print a diff and require `--force` to overwrite.
+- If `CLAUDE.md` already contains `@putitoutthere/AGENTS.md`, skip the append.
 - If `.github/workflows/release.yml` exists, rename to `release.yml.bak`
   before writing (loud and visible).
 
 ### 17.5 Variant for non-Claude agents
 
-`pilot init --agent=cursor` writes to `.cursorrules` instead. v0 supports
+`putitoutthere init --agent=cursor` writes to `.cursorrules` instead. v0 supports
 `claude` (default) and `cursor`. Other agents added on request.
 
 ---
@@ -1592,10 +1592,10 @@ Surface release errors while the change is still in review, not after merge.
 
 ### 18.2 What the check validates
 
-Running `pilot plan --dry-run` in PR mode (where HEAD is the merge-preview
+Running `putitoutthere plan --dry-run` in PR mode (where HEAD is the merge-preview
 commit):
 
-1. `pilot.toml` parses and conforms to the schema.
+1. `putitoutthere.toml` parses and conforms to the schema.
 2. Every `[[package]]`'s `kind` maps to a known handler.
 3. Every package passes its handler's Zod schema.
 4. If a `release:` trailer is present, it parses into a recognized form.
@@ -1629,7 +1629,7 @@ Skipped (no matching path changes):
 
 ## 19. When a Release Goes Bad
 
-Pilot intentionally does **not** ship a `rollback` command. Republishing
+Putitoutthere intentionally does **not** ship a `rollback` command. Republishing
 old code under a new version number misleads consumers with `>=` pins:
 they upgrade expecting forward motion and silently get older behavior.
 That's worse than the disease.
@@ -1647,12 +1647,12 @@ Use the registries' own primitives:
 The correct "rollback" path when a release goes bad:
 
 1. `git revert` the problem commit on a branch, PR, merge.
-2. Pilot ships the revert as a normal patch (e.g., `0.1.46` containing
+2. Putitoutthere ships the revert as a normal patch (e.g., `0.1.46` containing
    the known-good behavior).
 3. Yank/deprecate `0.1.45` on the registry so installers skip it.
 
 This gives consumers monotonic version numbers and correct resolution
-semantics. It also keeps pilot's scope small — registry-side actions are
+semantics. It also keeps putitoutthere's scope small — registry-side actions are
 one-shot operator commands, not workflow primitives.
 
 ---
@@ -1697,8 +1697,8 @@ smoke  = "python -c 'import dirsql; dirsql.DirSQL'"
 
 Smoke test failure does **not** unpublish (it usually can't). It:
 - Fails the publish job loudly.
-- Opens a GitHub issue (`pilot: smoke test failed for dirsql-python 0.3.5`)
-  if `pilot.smoke_opens_issue = true`.
+- Opens a GitHub issue (`putitoutthere: smoke test failed for dirsql-python 0.3.5`)
+  if `putitoutthere.smoke_opens_issue = true`.
 - Suggests yanking/deprecating the broken version and preparing a
   `git revert` patch release (§19).
 
@@ -1709,33 +1709,33 @@ to 3 times with 10s spacing before declaring failure.
 
 ### 20.5 Opt-out
 
-`pilot.smoke_test = false` disables globally. Individual packages can
+`putitoutthere.smoke_test = false` disables globally. Individual packages can
 disable by omitting `smoke`.
 
 ---
 
-## 21. Command Surface (`pilot` CLI)
+## 21. Command Surface (`putitoutthere` CLI)
 
-All commands also runnable via `npx pilot <cmd>` if not installed
+All commands also runnable via `npx putitoutthere <cmd>` if not installed
 globally.
 
 ### 21.1 Commands
 
 ```
-pilot init                      Scaffold pilot.toml, workflows, AGENTS.md
-pilot plan                      Print release plan for HEAD (dry-run by default)
-pilot plan --dry-run            Explicit dry-run (no side effects)
-pilot plan --json               JSON output for CI
-pilot publish                   Execute the plan (CI-intended)
-pilot status                    Show last released version per package
-pilot doctor                    Validate config + handlers + auth
-pilot version                   Print CLI version
+putitoutthere init                      Scaffold putitoutthere.toml, workflows, AGENTS.md
+putitoutthere plan                      Print release plan for HEAD (dry-run by default)
+putitoutthere plan --dry-run            Explicit dry-run (no side effects)
+putitoutthere plan --json               JSON output for CI
+putitoutthere publish                   Execute the plan (CI-intended)
+putitoutthere status                    Show last released version per package
+putitoutthere doctor                    Validate config + handlers + auth
+putitoutthere version                   Print CLI version
 ```
 
 ### 21.2 Global flags
 
 ```
---config <path>      Path to pilot.toml (default: ./pilot.toml)
+--config <path>      Path to putitoutthere.toml (default: ./putitoutthere.toml)
 --cwd <path>         Working directory (default: cwd)
 --quiet              Warnings and errors only
 --verbose            Debug logs
@@ -1759,14 +1759,14 @@ pilot version                   Print CLI version
 
 ### 22.1 State is in git
 
-Pilot stores **no external state**. Everything it needs is either in
-`pilot.toml` or recoverable from:
+Putitoutthere stores **no external state**. Everything it needs is either in
+`putitoutthere.toml` or recoverable from:
 
 - `git tag` — for last-published version per package.
 - `git log` — for the release trailer and file changes.
 - Registry API — for publish idempotency.
 
-This makes `pilot` a pure function of the git history and registry state.
+This makes `putitoutthere` a pure function of the git history and registry state.
 Re-running it always produces the same result for the same input.
 
 ### 22.2 Logs
@@ -1787,18 +1787,18 @@ In `--log-format=text` (default for interactive terms), these render as:
 
 ### 22.3 Artifacts saved by the workflow
 
-The `publish` job uploads a `pilot-release-log.json` artifact with the full
+The `publish` job uploads a `putitoutthere-release-log.json` artifact with the full
 run record — plan, computed versions, handler outputs, timings. Useful
 for debugging failed runs without re-running them.
 
 ### 22.4 Verbose-on-failure
 
 When a handler fails (publish error, smoke-test failure, artifact
-mismatch, anything non-transient), pilot automatically captures and
+mismatch, anything non-transient), putitoutthere automatically captures and
 emits a rich diagnostic dump to `$GITHUB_STEP_SUMMARY` and to the
 structured log stream. No extra workflow wiring required.
 
-For each failure, pilot writes:
+For each failure, putitoutthere writes:
 
 - **Tool versions.** `cargo --version`, `python --version`, `maturin
   --version`, `npm --version`, `node --version`, whichever apply to
@@ -1835,7 +1835,7 @@ strictly a failure-path feature.
 Values matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, or `*KEY*` in
 `process.env` are redacted from every log line, including the
 verbose-on-failure dump. Applies to command output captured from
-external tools as well as pilot's own log lines.
+external tools as well as putitoutthere's own log lines.
 
 ---
 
@@ -1847,7 +1847,7 @@ implementation. Target coverage: **90%+**.
 
 ### 23.1 Architectural precondition: CLI is a thin wrapper
 
-The `pilot` package exports a JS SDK (library API) **and** a CLI binary.
+The `putitoutthere` package exports a JS SDK (library API) **and** a CLI binary.
 The CLI is ~50 lines: argv parsing, process-level concerns (exit codes,
 stdin/stdout), and a call into the SDK. All logic lives in the SDK.
 
@@ -1885,14 +1885,14 @@ than a full test pyramid.
 ### 23.4 End-to-end tests (agent-run, not CI)
 
 - **Mocks:** nothing. Real everything.
-- **Entry point:** the `pilot` CLI binary, invoked via `execa` or
+- **Entry point:** the `putitoutthere` CLI binary, invoked via `execa` or
   equivalent.
 - **Registry targets:**
   - **PyPI** — [TestPyPI](https://test.pypi.org) (test instance).
-  - **npm** — a dedicated canary package, `pilot-canary`, on real
+  - **npm** — a dedicated canary package, `putitoutthere-canary`, on real
     npmjs.com. Published + unpublished as part of the test.
   - **crates.io** — no test instance exists, so a dedicated canary
-    crate, `pilot-canary`, on real crates.io. Each e2e run bumps a
+    crate, `putitoutthere-canary`, on real crates.io. Each e2e run bumps a
     monotonic patch version; old versions are yanked periodically.
 - **Not run in CI.** The e2e suite:
   - Hits external services (flaky if CI runs it on every push).
@@ -1906,14 +1906,14 @@ than a full test pyramid.
 
 E2E tests are driven off a library of fixture repos under
 `test/fixtures/`. Each fixture is a self-contained mini-repo with
-`pilot.toml`, source code, and a generated `release.yml`. Fixtures
-exist to cover every combination of `(kind, build, target)` that pilot
+`putitoutthere.toml`, source code, and a generated `release.yml`. Fixtures
+exist to cover every combination of `(kind, build, target)` that putitoutthere
 claims to support — including polyglot combinations.
 
 Every fixture is exercised on every supported platform where that fixture
 is buildable. The fixtures are not representative — they are
-**exhaustive**. If pilot claims to support `build = "napi"`, there is a
-fixture for it; if pilot claims to support `aarch64-apple-darwin`, every
+**exhaustive**. If putitoutthere claims to support `build = "napi"`, there is a
+fixture for it; if putitoutthere claims to support `aarch64-apple-darwin`, every
 matrix-using fixture targets it.
 
 Required fixtures (minimum set; add more as handlers grow):
@@ -1935,9 +1935,9 @@ test/fixtures/
 ```
 
 Each fixture asserts:
-- `pilot.toml` parses and validates.
-- `pilot plan` emits the expected matrix (golden-file snapshot).
-- `pilot publish` (dry-run) resolves correctly and pre-flight auth check
+- `putitoutthere.toml` parses and validates.
+- `putitoutthere plan` emits the expected matrix (golden-file snapshot).
+- `putitoutthere publish` (dry-run) resolves correctly and pre-flight auth check
   passes.
 - E2E run against canary registries produces the expected packages,
   correct platform tags, correct `optionalDependencies` (for napi /
@@ -1955,8 +1955,8 @@ Each fixture asserts:
 | `js-bundled-cli` | platform packages for all 5 targets + main |
 
 **Not representative.** Real users will have some subset of these
-combinations. The fixture library exists to guarantee pilot never
-silently breaks a combination it claims to support. A release of pilot
+combinations. The fixture library exists to guarantee putitoutthere never
+silently breaks a combination it claims to support. A release of putitoutthere
 must not ship if the e2e suite fails on any fixture for any supported
 target.
 
@@ -1988,7 +1988,7 @@ below 90%. Exclusions (narrow, justified, commented):
 
 ### 24.1 npm package
 
-One published package: `pilot`. Contains the CLI, the handler
+One published package: `putitoutthere`. Contains the CLI, the handler
 modules, and everything else. Single version, single release cadence.
 
 ### 24.2 The action
@@ -2000,18 +2000,18 @@ A release workflow on this repo tags `v0`, `v0.1.x`, etc.
 ### 24.3 Global install
 
 ```
-npm i -g pilot
+npm i -g putitoutthere
 ```
 
-Or `npx pilot <cmd>` for one-off use.
+Or `npx putitoutthere <cmd>` for one-off use.
 
 ### 24.4 First-run for new users
 
 ```
 cd my-monorepo
-npx pilot init
-# edit pilot.toml
-git add . && git commit -m "chore: add pilot
+npx putitoutthere init
+# edit putitoutthere.toml
+git add . && git commit -m "chore: add putitoutthere
 
 release: skip"
 git push
@@ -2031,7 +2031,7 @@ reference fixture `test/fixtures/polyglot-everything/`:
 
 ### 25.1 In scope
 
-- [x] `pilot.toml` parsing and schema validation
+- [x] `putitoutthere.toml` parsing and schema validation
 - [x] Trailer parsing (`release: patch|minor|major|skip [packages]`)
 - [x] Cascade: paths + `depends_on` (two-pass fixed-point)
 - [x] Three built-in handlers (crates, pypi, npm) dispatched internally
@@ -2044,40 +2044,40 @@ reference fixture `test/fixtures/polyglot-everything/`:
 - [x] Cadence: `immediate` and `scheduled` (cron-triggered)
 - [x] Artifact completeness check (default on)
 - [x] npm platform-package orchestration (napi + bundled-cli)
-- [x] `pilot init` (Claude variant only)
-- [x] `pilot plan` / `plan --dry-run`
-- [x] `pilot publish`
+- [x] `putitoutthere init` (Claude variant only)
+- [x] `putitoutthere plan` / `plan --dry-run`
+- [x] `putitoutthere publish`
 - [x] Dry-run PR check workflow
 - [x] Structured logs
-- [x] `pilot doctor`
+- [x] `putitoutthere doctor`
 
 ### 25.2 Explicitly out of v0
 
 - [ ] Post-release smoke tests — design locked (§20), deferred.
-- [ ] `pilot changelog` — not designed.
-- [ ] Non-Claude agent variants for `pilot init`.
+- [ ] `putitoutthere changelog` — not designed.
+- [ ] Non-Claude agent variants for `putitoutthere init`.
 - [ ] Private registry support.
 - [ ] Pre-release dist-tags (rc, beta, alpha).
 - [ ] Hotfix branches.
-- [ ] `pilot status` dashboard.
+- [ ] `putitoutthere status` dashboard.
 
 ### 25.3 Success criteria
 
 v0 is "done" when:
 
 1. The dirsql monorepo (user's canonical use case) releases cleanly via
-   pilot, replacing whatever ad-hoc script it has today.
+   putitoutthere, replacing whatever ad-hoc script it has today.
 2. The `test/fixtures/polyglot-everything/` reference fixture publishes cleanly to all
    three registries on a real cadence — this is the polyglot validation
-   path, since the pilot repo itself only exercises npm.
+   path, since the putitoutthere repo itself only exercises npm.
 3. Full publish cycle completes successfully on the reference repo.
-   Wall-clock is bounded by the user's build (pilot doesn't own compile
-   time); pilot's own overhead should be minimal (action cold start +
+   Wall-clock is bounded by the user's build (putitoutthere doesn't own compile
+   time); putitoutthere's own overhead should be minimal (action cold start +
    registry calls).
 4. Adding a new handler (e.g., for Ruby gems) takes under a day for
    someone familiar with the target registry — one file under
    `src/handlers/`, one switch case, tests.
-5. README walkthrough is reproducible by someone who has never seen pilot
+5. README walkthrough is reproducible by someone who has never seen putitoutthere
    in under 30 minutes.
 
 ---
@@ -2090,15 +2090,15 @@ etc. based on dogfooding outcomes.
 ### 26.1 v0.1 (quick follow-ups)
 
 - Post-release smoke tests (§20).
-- `pilot changelog` — generate markdown release notes from PR titles and
+- `putitoutthere changelog` — generate markdown release notes from PR titles and
   bodies since last tag.
-- `pilot init --agent=cursor`, `--agent=copilot` variants.
+- `putitoutthere init --agent=cursor`, `--agent=copilot` variants.
 
 ### 26.2 v0.2
 
 - Pre-release dist-tags (`-rc.N`, `-beta.N`, `-alpha.N`) with dedicated
   bump command: `release: prerelease`.
-- `pilot status` — dashboard command showing last-released version,
+- `putitoutthere status` — dashboard command showing last-released version,
   pending cascade, outstanding failures.
 
 ### 26.3 v0.3+
@@ -2108,7 +2108,7 @@ etc. based on dogfooding outcomes.
 - Hotfix branches with back-port tooling.
 - Additional built-in handlers: Ruby gems, Go modules (if/when Go moves
   to a first-class registry), Docker images, Homebrew taps.
-- Multi-repo orchestration (one `pilot.toml` pointing at multiple repos).
+- Multi-repo orchestration (one `putitoutthere.toml` pointing at multiple repos).
 
 ---
 
@@ -2120,13 +2120,13 @@ A complete reference monorepo shape that v0 must support.
 
 ```
 dirsql/
-├── pilot.toml
-├── pilot/
+├── putitoutthere.toml
+├── putitoutthere/
 │   └── AGENTS.md
-├── CLAUDE.md                       # imports @pilot/AGENTS.md
+├── CLAUDE.md                       # imports @putitoutthere/AGENTS.md
 ├── .github/workflows/
 │   ├── release.yml
-│   └── pilot-check.yml
+│   └── putitoutthere-check.yml
 ├── packages/
 │   ├── rust/                       # dirsql crate
 │   │   ├── Cargo.toml
@@ -2140,12 +2140,12 @@ dirsql/
 └── README.md
 ```
 
-### 27.2 `pilot.toml`
+### 27.2 `putitoutthere.toml`
 
 ```toml
-[pilot]
+[putitoutthere]
 version     = 1
-agents_path = "pilot/AGENTS.md"
+agents_path = "putitoutthere/AGENTS.md"
 
 [[package]]
 name          = "dirsql-rust"
@@ -2268,26 +2268,26 @@ from dogfooding.
 
 ### 28.1 Monorepo vs. multirepo
 
-Pilot v0 assumes a single monorepo with one `pilot.toml`. The alternative
+Putitoutthere v0 assumes a single monorepo with one `putitoutthere.toml`. The alternative
 (many single-package repos) is already well-served by existing per-ecosystem
 tooling. An open question: when does the monorepo overhead stop being
-worth it? Probably not pilot's problem to solve, but we should notice if
-users are reaching for both pilot and tools like `release-please` in the
+worth it? Probably not putitoutthere's problem to solve, but we should notice if
+users are reaching for both putitoutthere and tools like `release-please` in the
 same repo.
 
 ### 28.2 Build caching
 
 The user-authored build step will benefit from GHA caching (`actions/cache`,
-language-specific setup actions). Pilot currently has no opinion on this
+language-specific setup actions). Putitoutthere currently has no opinion on this
 — the workflow example shows naive builds. As the reference examples grow,
 we'll document recommended cache patterns but **not** implement caching
-inside pilot itself.
+inside putitoutthere itself.
 
 ### 28.3 Signed tags
 
-`pilot.tag_sign = true` (config not yet added) would enable GPG-signed
+`putitoutthere.tag_sign = true` (config not yet added) would enable GPG-signed
 tags via the GHA action's GPG import step. Deferred until asked. Signed
-commits are moot — pilot doesn't create commits in the no-push model
+commits are moot — putitoutthere doesn't create commits in the no-push model
 (§13.5).
 
 ### 28.4 How opinionated should handler defaults be?
@@ -2316,24 +2316,24 @@ either way a code change in this repo, not an external package.
 
 ## 29. Risks & Mitigations
 
-### 29.1 "A registry changes its API and pilot breaks."
+### 29.1 "A registry changes its API and putitoutthere breaks."
 
 **Likelihood:** Medium (crates.io/PyPI/npm all actively evolving).
 **Impact:** High (release workflow broken).
 **Mitigation:**
 - Handler modules localize registry-specific code; fix is a one-file PR.
 - Weekly canary publish (§23.4) catches drift before users hit it.
-- Patch release of `pilot` rolls the fix out to everyone.
+- Patch release of `putitoutthere` rolls the fix out to everyone.
 
 ### 29.2 "OIDC configuration is fiddly and scares users off."
 
 **Likelihood:** High.
 **Impact:** Medium (users fall back to tokens, which is still fine).
 **Mitigation:**
-- `pilot doctor` explicitly diagnoses OIDC misconfiguration with exact
+- `putitoutthere doctor` explicitly diagnoses OIDC misconfiguration with exact
   fix steps (URLs, repo settings).
 - Token fallback is documented as first-class, not second-class.
-- `pilot init` writes tokens-only workflows by default and surfaces the
+- `putitoutthere init` writes tokens-only workflows by default and surfaces the
   OIDC upgrade path in a follow-up tip.
 
 ### 29.3 "Trailer convention is a conceptual hurdle for new users."
@@ -2342,7 +2342,7 @@ either way a code change in this repo, not an external package.
 **Impact:** Medium (they get releases they didn't expect, or miss bumps).
 **Mitigation:**
 - Path-filter cascade handles the 90% case with no trailer needed.
-- `pilot init` writes `pilot/AGENTS.md` which explains the trailer for
+- `putitoutthere init` writes `putitoutthere/AGENTS.md` which explains the trailer for
   LLM agents.
 - Dry-run PR check surfaces "this will auto-release" before merge so
   surprises are caught early.
@@ -2374,7 +2374,7 @@ either way a code change in this repo, not an external package.
 **Mitigation:**
 - User-owned build matrix means they choose how much to parallelize.
 - Reference example shows `maturin-action` with cross-compile.
-- Not pilot's problem to solve the build-speed question.
+- Not putitoutthere's problem to solve the build-speed question.
 
 ### 29.7 "npm provenance / OIDC requires repo metadata in package.json."
 
@@ -2431,7 +2431,7 @@ Short case against each alternative considered.
 - Each registry's auth, idempotency, and retry logic is non-trivial.
 - Version-file updates (Cargo.toml / pyproject.toml / package.json) are
   ecosystem-specific and easy to get subtly wrong.
-- Every team re-solves the same problem; pilot's thesis is that a small,
+- Every team re-solves the same problem; putitoutthere's thesis is that a small,
   shared tool with plugin seams beats N bespoke bash scripts.
 
 ### 30.7 Why not GoReleaser?
@@ -2442,7 +2442,7 @@ Short case against each alternative considered.
 
 ### 30.8 Why not Nx / Turborepo release plugins?
 
-- Tied to the Nx/Turborepo build systems. Pilot intentionally does not
+- Tied to the Nx/Turborepo build systems. Putitoutthere intentionally does not
   own the build system — users pick their own (bazel, make, native
   cargo/pip/npm, etc.).
 

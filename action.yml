@@ -4,20 +4,20 @@ author: 'Kevin Scott'
 
 inputs:
   command:
-    description: 'Which pilot command to run: plan | publish'
+    description: 'Which putitoutthere command to run: plan | publish'
     required: true
   dry_run:
     description: 'If true, resolve the plan but skip all destructive operations.'
     required: false
     default: 'false'
   fail_on_error:
-    description: 'If true, non-zero pilot exit codes fail the step.'
+    description: 'If true, non-zero putitoutthere exit codes fail the step.'
     required: false
     default: 'true'
 
 outputs:
   matrix:
-    description: 'JSON matrix emitted by `pilot plan`. Empty string for other commands.'
+    description: 'JSON matrix emitted by `putitoutthere plan`. Empty string for other commands.'
 
 runs:
   using: 'node20'

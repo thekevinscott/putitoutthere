@@ -7,22 +7,22 @@ detail lives in `plan.md`.
 
 ## What it is
 
-A GitHub Action + npm-published CLI (`pilot`) that turns `git push` to
+A GitHub Action + npm-published CLI (`putitoutthere`) that turns `git push` to
 `main` into a coordinated release across crates.io, PyPI, and npm. One
-monorepo, one `pilot.toml`, one flow.
+monorepo, one `putitoutthere.toml`, one flow.
 
 ## Shape
 
-- **One npm package:** `pilot`. Contains the CLI, the GHA wrapper,
+- **One npm package:** `putitoutthere`. Contains the CLI, the GHA wrapper,
   and three internal registry handlers (crates, pypi, npm). Not pluggable.
 - **One GHA action:** `thekevinscott/put-it-out-there@v0`. Thin JS
   wrapper (~100ms cold start) that invokes the same code the CLI runs.
 
 ## Core model
 
-1. User writes `pilot.toml` declaring packages, glob patterns, and
+1. User writes `putitoutthere.toml` declaring packages, glob patterns, and
    optional `depends_on` edges.
-2. Merge to `main` → pilot reads the merge commit → computes cascade
+2. Merge to `main` → putitoutthere reads the merge commit → computes cascade
    from paths ∪ `depends_on` → builds → publishes → tags.
 3. Default bump is **patch**. Optional `release:` git trailer overrides
    to `minor` / `major` / `skip`.
@@ -40,13 +40,13 @@ monorepo, one `pilot.toml`, one flow.
 | 5 | Three registry handlers live in-repo as internal modules; no plugin system | Speculative flexibility costs too much; PR upstream to add a registry |
 | 6 | No-push tag model: manifest edits are CI-worktree-only; tag points at the merge commit | Kills the push race; `main`'s manifest stays stale by design |
 | 7 | OIDC trusted publishing preferred on all three registries; token fallback supported | crates.io added OIDC in 2025 (via `rust-lang/crates-io-auth-action`) |
-| 8 | No `pilot rollback` primitive; use `cargo yank` / `npm deprecate` + `git revert` | Republishing old code under new version misleads `>=` pinned consumers |
-| 9 | TOML config (`pilot.toml`) at repo root | Familiar (Cargo.toml, pyproject.toml); nested arrays work cleanly |
-| 10 | `pilot init` scaffolds `pilot/AGENTS.md` and appends `@pilot/AGENTS.md` to CLAUDE.md | Teaches the LLM agent the trailer convention |
+| 8 | No `putitoutthere rollback` primitive; use `cargo yank` / `npm deprecate` + `git revert` | Republishing old code under new version misleads `>=` pinned consumers |
+| 9 | TOML config (`putitoutthere.toml`) at repo root | Familiar (Cargo.toml, pyproject.toml); nested arrays work cleanly |
+| 10 | `putitoutthere init` scaffolds `putitoutthere/AGENTS.md` and appends `@putitoutthere/AGENTS.md` to CLAUDE.md | Teaches the LLM agent the trailer convention |
 
 ## In scope for v0
 
-- `pilot.toml` parsing, Zod schema validation
+- `putitoutthere.toml` parsing, Zod schema validation
 - Cascade algorithm (paths + `depends_on`, two-pass fixed-point, cycle detection)
 - Trailer parsing (`release: <bump> [packages]`)
 - Three handlers × multiple build modes:
@@ -66,25 +66,25 @@ monorepo, one `pilot.toml`, one flow.
 - Two cadence modes: `immediate` (every merge ships) and `scheduled`
   (cron-triggered). Manual dispatch always runs.
 - Dry-run as PR check (catches config errors before merge)
-- `pilot init`, `pilot plan`, `pilot publish`, `pilot doctor`
+- `putitoutthere init`, `putitoutthere plan`, `putitoutthere publish`, `putitoutthere doctor`
 - CLAUDE.md / AGENTS.md scaffolding
 - Structured logs (JSON in CI, plain in TTY)
 
 ## Explicitly out of v0 (on roadmap)
 
 - Post-release smoke-test verifier (Docker install + user snippet)
-- `pilot status` dashboard
-- `pilot changelog` generator
+- `putitoutthere status` dashboard
+- `putitoutthere changelog` generator
 - Rollback primitive (deliberately rejected, not deferred)
 - Pre-release dist-tags (`-rc`, `-beta`, `-alpha`)
 - Private registries
 - Hotfix branches
-- Non-Claude agent variants for `pilot init`
+- Non-Claude agent variants for `putitoutthere init`
 
 ## Shape of config
 
 ```toml
-[pilot]
+[putitoutthere]
 version = 1
 
 [[package]]
@@ -114,25 +114,25 @@ auto-detected when available. See `plan.md` §16.
 
 User writes `.github/workflows/release.yml` with three jobs:
 
-1. **plan** — `pilot plan` computes the release matrix.
+1. **plan** — `putitoutthere plan` computes the release matrix.
 2. **build** — user-authored matrix; their build tools produce artifacts.
-3. **publish** — `pilot publish` picks up artifacts, publishes, tags.
+3. **publish** — `putitoutthere publish` picks up artifacts, publishes, tags.
 
-Pilot owns plan + publish. User owns build (matrix, caching,
-cross-compile). That split means pilot doesn't need to know how to build
+Putitoutthere owns plan + publish. User owns build (matrix, caching,
+cross-compile). That split means putitoutthere doesn't need to know how to build
 every possible project.
 
 ## Success criteria for v0
 
-1. The `dirsql` monorepo releases cleanly via pilot, replacing its ad-hoc
+1. The `dirsql` monorepo releases cleanly via putitoutthere, replacing its ad-hoc
    script.
 2. The `test/fixtures/polyglot-everything/` reference fixture publishes to all three
-   registries on a real cadence (polyglot validation — pilot itself is
+   registries on a real cadence (polyglot validation — putitoutthere itself is
    npm-only).
 3. Full publish cycle completes successfully on the reference repo.
-   Runtime is whatever the user's build takes — pilot's own overhead
+   Runtime is whatever the user's build takes — putitoutthere's own overhead
    should be minimal (action cold start + registry calls), but total
-   wall-clock is dominated by builds pilot doesn't own.
+   wall-clock is dominated by builds putitoutthere doesn't own.
 4. Adding a new registry handler takes under a day for someone familiar
    with the target registry.
 5. README walkthrough is reproducible by a new user in under 30 minutes.
@@ -142,7 +142,7 @@ every possible project.
 Non-negotiable. Follows dirsql's strategy. Red/green TDD for everything.
 Target coverage **90%+**.
 
-The `pilot` package exports a JS SDK (library API); the CLI is a thin
+The `putitoutthere` package exports a JS SDK (library API); the CLI is a thin
 wrapper around it. The SDK is the primary testable surface.
 
 - **Unit (colocated, vitest):** `src/cascade.test.ts` next to
@@ -153,8 +153,8 @@ wrapper around it. The SDK is the primary testable surface.
   msw (PyPI), msw (crates.io).
 - **End-to-end:** mock nothing. Exercise the CLI directly. **Not run
   in CI** — run often by the agent during development. Registry
-  targets: TestPyPI for PyPI, a dedicated `pilot-canary` package on
-  real npm, a dedicated `pilot-canary` crate on real crates.io
+  targets: TestPyPI for PyPI, a dedicated `putitoutthere-canary` package on
+  real npm, a dedicated `putitoutthere-canary` crate on real crates.io
   (no test instance exists for crates.io).
 
 ## Open decisions for review
