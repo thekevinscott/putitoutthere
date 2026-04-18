@@ -1,22 +1,8 @@
-# Put It Out There
+# Put It Out There — Plan
 
-Section One is human written. Section Two is LLM written.
-
-Where there are conflicts, prefer Section One over section Two.
-
-# Section One
-
-This is a library for performing automated releases in Github repositories. A commit produces a new patch version.
-
-A user first defines patterns (globs) that are watched to trigger new builds. For example, `**/*.py` will watch for python changes and trigger a python build. Typescript, Python, and Rust are supported. (A package can also watch other packages.)
-
-Runs are triggered automatically (on merge to main) as well as manually via a workflow trigger.
-
-On manual runs, variables define versioning. Variables also can override path globs, so that a user can choose the packages to rebuild and re-version.
-
-On automatic runs, variables are extracted from trailers in commits, and path globs define what gets picked up to build.
-
-# Section Two
+> Exhaustive implementation plan. For the concise yay/nay summary see
+> `proposal.md`. For the canonical scope statement see `../INSTRUCTIONS.md`
+> (takes precedence over this document on any conflict).
 
 > **Status:** v0 design doc. Locked decisions below are locked for v0; the
 > roadmap sections call out what is deliberately deferred.
