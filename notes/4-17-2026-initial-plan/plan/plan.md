@@ -1204,7 +1204,208 @@ error: dirsql-rust (crates) needs CARGO_REGISTRY_TOKEN.
 
 The same check is the core of `pilot doctor`.
 
-### 16.4 Log safety
+### 16.4 Step-by-step setup
+
+The subsections below walk through configuring each registry from
+scratch. They're intentionally verbose — the most common source of
+first-release failures is auth misconfiguration, and the cost of a 10-
+second misstep here is a wedged release workflow.
+
+Screenshot placeholders (`[screenshot: ...]`) call out where a captured
+image should go. External links point at each registry's official docs
+(which themselves have up-to-date screenshots).
+
+#### 16.4.1 PyPI — trusted publishing (OIDC)
+
+Preferred. No long-lived secret in GHA.
+
+1. Log in to https://pypi.org and navigate to your project:
+   `https://pypi.org/manage/project/<your-package>/settings/publishing/`
+
+   [screenshot: PyPI project "Publishing" settings tab]
+
+2. Click **Add a new publisher** under "Trusted Publisher Management."
+
+3. Select **GitHub** and fill in:
+   - **Owner:** your GitHub org/user (e.g., `thekevinscott`)
+   - **Repository name:** the repo name (e.g., `dirsql`)
+   - **Workflow name:** the filename, exactly as on disk (e.g.,
+     `release.yml`). Case-sensitive. **Renaming the workflow file
+     invalidates the publisher** — you'll have to edit it here to match.
+   - **Environment name:** leave blank unless you use GH Environments.
+
+   [screenshot: filled-out trusted publisher form]
+
+4. Save. PyPI stores the relationship; no token is ever generated.
+
+5. In `.github/workflows/release.yml`, the publish job needs:
+   ```yaml
+   permissions:
+     id-token: write
+     contents: write
+   ```
+   Pilot's generated workflow includes this.
+
+Reference: https://docs.pypi.org/trusted-publishers/
+
+**First release caveat.** Trusted publishing requires the project to
+already exist on PyPI. For a brand-new package, do a one-time manual
+upload (`twine upload --repository testpypi dist/*` to TestPyPI first,
+then the real one) to claim the name — then configure the trusted
+publisher for subsequent releases. Or use the **pending publisher**
+flow: https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/
+
+#### 16.4.2 PyPI — token (fallback)
+
+If you can't use OIDC:
+
+1. Go to https://pypi.org/manage/account/token/
+2. Click **Add API token**.
+3. Scope it narrowly: select the specific project, not "all projects."
+
+   [screenshot: token creation form with project scope selected]
+
+4. Copy the `pypi-...` token value (shown once).
+5. In your GitHub repo: **Settings → Secrets and variables → Actions →
+   New repository secret.**
+   - Name: e.g., `PYPI_TOKEN` (your choice)
+   - Value: the token
+6. Wire it into the workflow as the env var pilot reads:
+   ```yaml
+   env:
+     PYPI_API_TOKEN: ${{ secrets.PYPI_TOKEN }}
+   ```
+   (The env var name on the **right** side of `secrets.X` is your
+   naming; the env var on the **left** — `PYPI_API_TOKEN` — is
+   pilot's convention.)
+
+Reference: https://pypi.org/help/#apitoken
+
+#### 16.4.3 npm — OIDC with provenance (preferred)
+
+1. Log in to https://www.npmjs.com/ and go to the package page
+   (or create the package on first publish — npm auto-claims on
+   first `npm publish`).
+2. Provenance is surfaced automatically when the publish is OIDC-
+   backed; no per-package npm configuration is required. **The GitHub
+   side is where the work is**: your publish job needs
+   ```yaml
+   permissions:
+     id-token: write
+     contents: read
+   ```
+   and the `npm publish --provenance` flag (which pilot's npm handler
+   sets automatically when OIDC is detected).
+
+3. For scoped packages (`@scope/pkg`) or packages set to `restricted`:
+   ensure the package's `package.json` has a `repository` field
+   pointing at the GitHub repo. npm uses this to verify the OIDC
+   claim. Pilot's pre-flight check enforces this.
+
+Reference: https://docs.npmjs.com/generating-provenance-statements
+
+#### 16.4.4 npm — token (fallback)
+
+1. Go to https://www.npmjs.com/settings/<your-username>/tokens
+2. Click **Generate New Token → Granular Access Token** (preferred over
+   classic).
+
+   [screenshot: granular token creation form]
+
+3. Scope it:
+   - **Expiration:** whatever your policy allows; 90 days is a
+     reasonable default.
+   - **Packages and scopes:** select only the package(s) this token
+     publishes. Don't use "all packages."
+   - **Permissions:** **Read and write** on those packages.
+
+4. Copy the token. **Settings → Secrets → New repository secret.**
+   Store as e.g. `NPM_TOKEN`.
+
+5. Wire into the workflow:
+   ```yaml
+   env:
+     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+   ```
+
+Reference: https://docs.npmjs.com/creating-and-viewing-access-tokens
+
+#### 16.4.5 crates.io — token (only option)
+
+crates.io does not support OIDC as of this writing. Always uses a
+token.
+
+1. Log in to https://crates.io/ and click your avatar → **Account
+   Settings**, or go directly to:
+   `https://crates.io/settings/tokens`
+2. Click **New Token**.
+
+   [screenshot: crates.io token creation form]
+
+3. Scope it:
+   - **Name:** e.g., `pilot-release-<repo>` — something identifiable.
+   - **Expiration:** 90 days or your policy.
+   - **Scopes:** `publish-update` at minimum. For first-time publish
+     of a new crate name, also include `publish-new`.
+   - **Crates:** list the specific crate name(s). Leave blank only if
+     you really mean "all crates owned by me."
+
+4. Copy the token. **Settings → Secrets → New repository secret.**
+   Store as e.g. `CARGO_TOKEN`.
+
+5. Wire into the workflow:
+   ```yaml
+   env:
+     CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+   ```
+
+Reference: https://doc.rust-lang.org/cargo/reference/publishing.html#before-your-first-publish
+
+**First-publish caveat for crates.io.** The first `cargo publish` of a
+new crate name requires the `publish-new` scope on the token. After
+that, `publish-update` alone is sufficient. Pilot's pre-flight check
+can't tell scopes apart — if the first publish fails with a permission
+error, regenerate the token with `publish-new` added.
+
+#### 16.4.6 Putting it together: the publish job
+
+A complete `release.yml` publish job wiring all three:
+
+```yaml
+publish:
+  needs: [plan, build]
+  runs-on: ubuntu-latest
+  permissions:
+    id-token: write   # OIDC for pypi + npm
+    contents: write   # tag + GH Release
+  steps:
+    - uses: actions/checkout@v4
+      with: { fetch-depth: 0 }
+    - uses: actions/download-artifact@v4
+      with: { path: artifacts }
+    - uses: thekevinscott/put-it-out-there@v0
+      with: { command: publish }
+      env:
+        # Used only when OIDC unavailable for that registry:
+        PYPI_API_TOKEN:       ${{ secrets.PYPI_TOKEN }}
+        NODE_AUTH_TOKEN:      ${{ secrets.NPM_TOKEN }}
+        # Always used (crates.io has no OIDC):
+        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+```
+
+Run `pilot doctor` locally (pointing at a PR or the current branch) to
+verify everything resolves before the first release:
+
+```
+$ pilot doctor
+  ✓ pilot.toml parses
+  ✓ all package kinds map to a handler
+  ✓ dirsql-rust      needs CARGO_REGISTRY_TOKEN → set (CI only)
+  ✓ dirsql-python    OIDC trusted publisher configured
+  ✓ dirsql-cli       OIDC configured
+```
+
+### 16.5 Log safety
 
 Any env var matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, or `*KEY*` is
 auto-masked in pilot's logs. Values found in `process.env` whose names
