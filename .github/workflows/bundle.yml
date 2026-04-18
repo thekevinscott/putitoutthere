@@ -20,9 +20,8 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+      - name: Install pnpm
+        run: npm install -g pnpm@9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -30,10 +29,6 @@ jobs:
       - name: Rebuild dist-action/
         run: pnpm run build:action
 
-      # Native JS actions resolve the bundled entry point at runtime from
-      # the checked-in repo state. If dist-action/ drifts from src/action.ts
-      # the action is broken at `uses:` time. This job fails the PR if the
-      # rebuild produced a different bundle than what's committed.
       - name: Check dist-action/ matches source
         run: |
           if ! git diff --exit-code dist-action/; then

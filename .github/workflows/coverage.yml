@@ -19,16 +19,12 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+      - name: Install pnpm
+        run: npm install -g pnpm@9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # vitest is configured with 90% thresholds in vitest.config.ts.
-      # The command exits non-zero when any of lines/statements/branches/
-      # functions drops below the configured threshold, which fails this job.
       - name: Run tests with coverage
         run: pnpm run test:coverage
 
