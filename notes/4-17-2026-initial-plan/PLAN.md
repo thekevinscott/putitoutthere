@@ -180,6 +180,15 @@ Explicit list of things pilot does **not** try to do:
   private registries later but the OIDC code paths are public-registry-only.
 - **Non-main release branches.** Everything ships from `main`. Hotfix branches
   are out of scope for v0.
+- **Batched / nightly / scheduled releases.** Every merge to `main` that
+  cascades releases immediately. No "batch up the day's merges and ship at
+  5pm" mode. A scheduled runner may arrive in v2 if there's demand; v0 is
+  immediate-only.
+- **A replaceable planner / external policy layer.** Pilot has one flow:
+  read `pilot.toml`, read git, cascade, publish. Consumer freedom lives in
+  config and plugins, not in a plan-JSON seam between stages. If a user
+  wants fundamentally different release logic, they don't use pilot for
+  that step — that's a feature, not a bug.
 - **Monorepo tooling it doesn't own.** Nx, Turborepo, Pants, Bazel integration
   is out of scope. Pilot reads `pilot.toml` and does the release; the user's
   build system does the build.
@@ -1437,5 +1446,193 @@ v0 is "done" when:
    someone familiar with Ruby gem publishing.
 5. README walkthrough is reproducible by someone who has never seen pilot
    in under 30 minutes.
+
+---
+
+## 26. v0.1+ Roadmap
+
+Ordered roughly by likely-value, not commitment. Items move into v0.2, v0.3
+etc. based on dogfooding outcomes.
+
+### 26.1 v0.1 (quick follow-ups)
+
+- `pilot rollback` implementation.
+- Post-release smoke tests (§20).
+- `pilot changelog` — generate markdown release notes from PR titles and
+  bodies since last tag.
+- `pilot init --agent=cursor`, `--agent=copilot` variants.
+
+### 26.2 v0.2
+
+- Pre-release dist-tags (`-rc.N`, `-beta.N`, `-alpha.N`) with dedicated
+  bump command: `release: prerelease`.
+- `pilot status` — dashboard command showing last-released version,
+  pending cascade, outstanding failures.
+- Plugin auto-update check (warn if installed plugin is behind latest).
+
+### 26.3 v0.3+
+
+- Private registry support (self-hosted crates registry, private PyPI,
+  GitHub Packages for npm).
+- Hotfix branches with back-port tooling.
+- Scheduled/batched release mode (opposite of v0's immediate mode).
+- Additional built-in plugins: Ruby gems, Go modules (if/when Go moves
+  to a first-class registry), Docker images, Homebrew taps.
+- Multi-repo orchestration (one `pilot.toml` pointing at multiple repos).
+
+---
+
+## 27. Worked Example
+
+A complete reference monorepo shape that v0 must support.
+
+### 27.1 Repo layout
+
+```
+dirsql/
+├── pilot.toml
+├── pilot/
+│   └── AGENTS.md
+├── CLAUDE.md                       # imports @pilot/AGENTS.md
+├── .github/workflows/
+│   ├── release.yml
+│   └── pilot-check.yml
+├── packages/
+│   ├── rust/                       # dirsql crate
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   ├── python/                     # dirsql PyPI package (wraps rust)
+│   │   ├── pyproject.toml
+│   │   └── src/
+│   └── ts/                         # dirsql-cli npm package
+│       ├── package.json
+│       └── src/
+└── README.md
+```
+
+### 27.2 `pilot.toml`
+
+```toml
+[pilot]
+version        = 1
+default_branch = "main"
+tag_format     = "{package}-v{version}"
+require_trailer = false
+agents_path    = "pilot/AGENTS.md"
+
+[[package]]
+name          = "dirsql-rust"
+kind          = "crates"
+path          = "packages/rust"
+paths         = [
+  "packages/rust/**/*.rs",
+  "packages/rust/Cargo.toml",
+  "Cargo.lock",
+]
+first_version = "0.1.0"
+auth          = "token"
+token_env     = "CARGO_REGISTRY_TOKEN"
+
+[[package]]
+name          = "dirsql-python"
+kind          = "pypi"
+path          = "packages/python"
+pypi          = "dirsql"
+paths         = [
+  "packages/python/**",
+  "packages/rust/**",                # PyO3 wrapper — Rust changes cascade
+]
+build         = "maturin"
+auth          = "oidc"
+first_version = "0.1.0"
+smoke         = "python -c 'import dirsql; dirsql.DirSQL'"
+
+[[package]]
+name          = "dirsql-cli"
+kind          = "npm"
+path          = "packages/ts"
+npm           = "dirsql-cli"
+paths         = ["packages/ts/**"]
+auth          = "oidc"
+access        = "public"
+first_version = "0.1.0"
+smoke         = "dirsql --version"
+```
+
+### 27.3 Merge scenarios
+
+**Scenario A: change a `.rs` file, merge PR with no trailer.**
+
+- Path-filter cascade: `dirsql-rust` (direct match), `dirsql-python`
+  (transitive via `packages/rust/**`).
+- Default bump: patch for both.
+- Result: `dirsql-rust@0.1.4`, `dirsql-python@0.1.8`.
+- `dirsql-cli` untouched (no path match).
+
+**Scenario B: fix a typo in `packages/python/README.md`, commit with
+`release: skip`.**
+
+- Path-filter cascade: `dirsql-python`.
+- Trailer overrides: skip.
+- Result: nothing releases.
+
+**Scenario C: add breaking change to npm CLI, commit with
+`release: major [dirsql-cli]`.**
+
+- Path-filter cascade: `dirsql-cli`.
+- Trailer: major, scoped.
+- Result: `dirsql-cli@1.0.0`.
+
+**Scenario D: `workflow_dispatch` with `bump=minor`, no packages input.**
+
+- Cascade ignored; all packages release at minor.
+- Result: `dirsql-rust@0.2.0`, `dirsql-python@0.2.0`, `dirsql-cli@0.2.0`.
+
+### 27.4 Excerpt: `release.yml`
+
+(Full version in §9.1; abbreviated here.)
+
+```yaml
+jobs:
+  plan:
+    outputs: { matrix: ${{ steps.p.outputs.matrix }} }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: p
+        uses: thekevinscott/put-it-out-there@v0
+        with: { command: plan }
+
+  build:
+    needs: plan
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: matrix.kind == 'pypi'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+          working-directory: ${{ matrix.path }}
+      # ...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-${{ matrix.os }}
+          path: ${{ matrix.artifact_path }}
+
+  publish:
+    needs: [plan, build]
+    permissions: { id-token: write, contents: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/download-artifact@v4
+      - uses: thekevinscott/put-it-out-there@v0
+        with: { command: publish }
+```
 
 ---
