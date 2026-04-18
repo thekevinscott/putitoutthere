@@ -87,8 +87,6 @@ kind          = "crates"
 path          = "packages/rust"
 paths         = ["packages/rust/**/*.rs", "packages/rust/Cargo.toml"]
 first_version = "0.1.0"
-auth          = "token"
-token_env     = "CARGO_REGISTRY_TOKEN"
 
 [[package]]
 name          = "dirsql-python"
@@ -98,9 +96,13 @@ pypi          = "dirsql"
 paths         = ["packages/python/**"]
 depends_on    = ["dirsql-rust"]
 build         = "maturin"
-auth          = "oidc"
 first_version = "0.1.0"
 ```
+
+No auth/token fields in config. Secrets live in GitHub Actions settings
+and are wired into `release.yml` as env vars under well-known names
+(`CARGO_REGISTRY_TOKEN`, `PYPI_API_TOKEN`, `NODE_AUTH_TOKEN`). OIDC is
+auto-detected when available. See `plan.md` §16.
 
 ## Shape of workflow
 
@@ -121,7 +123,10 @@ every possible project.
 2. The `examples/rust-python-ts/` reference repo publishes to all three
    registries on a real cadence (polyglot validation — pilot itself is
    npm-only).
-3. Full publish cycle runs in under 5 minutes on the reference repo.
+3. Full publish cycle completes successfully on the reference repo.
+   Runtime is whatever the user's build takes — pilot's own overhead
+   should be minimal (action cold start + registry calls), but total
+   wall-clock is dominated by builds pilot doesn't own.
 4. Adding a new registry handler takes under a day for someone familiar
    with the target registry.
 5. README walkthrough is reproducible by a new user in under 30 minutes.

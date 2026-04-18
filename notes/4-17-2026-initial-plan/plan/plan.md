@@ -336,11 +336,11 @@ smoke   = "python -c 'import dirsql; dirsql.DirSQL'"
 # Versioning:
 tag_format  = "python-v{version}"            # overrides pilot.tag_format
 first_version = "0.1.0"                      # initial version if no tag exists
-
-# Auth:
-auth = "oidc"                                # "oidc" | "token"
-token_env = "PYPI_TOKEN"                     # used when auth = "token"
 ```
+
+**No auth fields in `pilot.toml`.** Secrets and env var wiring live in
+the repository settings and the workflow YAML, never in committed config.
+See §16.
 
 ### 6.3 Field reference (all packages)
 
@@ -353,9 +353,11 @@ token_env = "PYPI_TOKEN"                     # used when auth = "token"
 | `depends_on`     | no       | [string]     | `[]`              | Other package names; transitive cascade          |
 | `tag_format`     | no       | string       | `pilot.tag_format`| `{version}` and `{package}` interpolation        |
 | `first_version`  | no       | string       | `0.1.0`           | Semver                                           |
-| `auth`           | no       | string       | `oidc`            | `oidc` \| `token`                                 |
-| `token_env`      | if token | string       | —                 | Env var holding the token                        |
 | `smoke`          | no       | string       | —                 | Shell command run post-publish in clean env      |
+
+Auth is deliberately absent. OIDC availability is detected at runtime
+(presence of `ACTIONS_ID_TOKEN_REQUEST_TOKEN`); token fallback reads
+well-known env var names wired up in the workflow (§16).
 
 ### 6.4 Registry-specific fields
 
@@ -1014,35 +1016,58 @@ Handled in the same `publish` job after tags push.
 
 ---
 
-## 16. Credentials (OIDC + Tokens)
+## 16. Credentials
+
+**Nothing credential-related lives in `pilot.toml`.** Secrets are stored
+as GitHub Actions secrets (repo or org level); the workflow YAML wires
+them into the `publish` job as env vars under well-known names; pilot
+reads those names directly. There is no indirection field in config —
+the connection between `secrets.X` and pilot is the workflow YAML, which
+is where credential policy belongs.
 
 ### 16.1 OIDC trusted publishing (preferred)
 
-- **PyPI:** configure trusted publisher in PyPI project settings pointing at
-  this repo + workflow file. Pilot's PyPI handler detects OIDC availability
-  (`ACTIONS_ID_TOKEN_REQUEST_TOKEN` env) and uses it. Falls back on token.
-- **npm:** `npm publish --provenance` requires `id-token: write` and no
-  token at all when `NODE_AUTH_TOKEN` is unset but OIDC is configured.
-- **crates.io:** does **not** support OIDC as of 2026-04; always uses
-  `CARGO_REGISTRY_TOKEN`.
+- **PyPI:** configure a trusted publisher in PyPI project settings pointing
+  at this repo + workflow file. Pilot's PyPI handler detects OIDC
+  availability at runtime (`ACTIONS_ID_TOKEN_REQUEST_TOKEN` present) and
+  uses it. Falls back on token if unavailable.
+- **npm:** `npm publish --provenance` requires `id-token: write` in the
+  job `permissions`. Works with no token at all when OIDC is configured.
+- **crates.io:** does **not** support OIDC as of 2026-04; always uses a
+  token.
 
-### 16.2 Token fallback
+OIDC requires adding `permissions: { id-token: write }` to the publish
+job. Pilot does not configure this — the user's workflow does.
 
-When OIDC is unavailable or disabled:
+### 16.2 Token fallback (well-known env vars)
 
-| Registry  | Env var                 | Secret name convention      |
-|-----------|-------------------------|-----------------------------|
-| crates.io | `CARGO_REGISTRY_TOKEN`  | `secrets.CARGO_TOKEN`       |
-| PyPI      | `PYPI_TOKEN`            | `secrets.PYPI_TOKEN`        |
-| npm       | `NODE_AUTH_TOKEN`       | `secrets.NPM_TOKEN`         |
+When OIDC is unavailable or disabled, handlers look for these env vars:
 
-Override via `package.token_env`.
+| Registry  | Env var                 |
+|-----------|-------------------------|
+| crates.io | `CARGO_REGISTRY_TOKEN`  |
+| PyPI      | `PYPI_API_TOKEN`        |
+| npm       | `NODE_AUTH_TOKEN`       |
+
+The user wires these up in `release.yml`:
+
+```yaml
+- uses: thekevinscott/put-it-out-there@v0
+  with: { command: publish }
+  env:
+    CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+    PYPI_API_TOKEN:       ${{ secrets.PYPI_TOKEN }}
+    NODE_AUTH_TOKEN:      ${{ secrets.NPM_TOKEN }}
+```
+
+Secret *names* (on the left side of `${{ secrets.X }}`) are the user's
+choice; only the env var names on the right are pilot's convention.
 
 ### 16.3 Log safety
 
-All env vars matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*KEY*` are
-auto-masked in logs. The core's logger redacts values found in
-`process.env` whose names match these patterns.
+Any env var matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, or `*KEY*` is
+auto-masked in pilot's logs. Values found in `process.env` whose names
+match these patterns are redacted before any log line is emitted.
 
 ---
 
@@ -1444,7 +1469,10 @@ v0 is "done" when:
 2. The `examples/rust-python-ts/` reference repo publishes cleanly to all
    three registries on a real cadence — this is the polyglot validation
    path, since the pilot repo itself only exercises npm.
-3. Full publish cycle runs in under 5 minutes on the reference repo.
+3. Full publish cycle completes successfully on the reference repo.
+   Wall-clock is bounded by the user's build (pilot doesn't own compile
+   time); pilot's own overhead should be minimal (action cold start +
+   registry calls).
 4. Adding a new handler (e.g., for Ruby gems) takes under a day for
    someone familiar with the target registry — one file under
    `src/handlers/`, one switch case, tests.
@@ -1532,8 +1560,6 @@ paths         = [
   "Cargo.lock",
 ]
 first_version = "0.1.0"
-auth          = "token"
-token_env     = "CARGO_REGISTRY_TOKEN"
 
 [[package]]
 name          = "dirsql-python"
@@ -1543,7 +1569,6 @@ pypi          = "dirsql"
 paths         = ["packages/python/**"]
 depends_on    = ["dirsql-rust"]       # PyO3 wrapper: Rust changes cascade
 build         = "maturin"
-auth          = "oidc"
 first_version = "0.1.0"
 smoke         = "python -c 'import dirsql; dirsql.DirSQL'"
 
@@ -1553,11 +1578,13 @@ kind          = "npm"
 path          = "packages/ts"
 npm           = "dirsql-cli"
 paths         = ["packages/ts/**"]
-auth          = "oidc"
 access        = "public"
 first_version = "0.1.0"
 smoke         = "dirsql --version"
 ```
+
+Credentials are set up in `release.yml` (GHA secrets → env), not here.
+See §16.
 
 ### 27.3 Merge scenarios
 
