@@ -1,0 +1,163 @@
+# Proposal: Put It Out There
+
+Concise summary of the v0 design. Major decisions only; implementation
+detail lives in `plan.md`.
+
+---
+
+## What it is
+
+A GitHub Action + npm-published CLI (`pilot`) that turns `git push` to
+`main` into a coordinated release across crates.io, PyPI, and npm. One
+monorepo, one `pilot.toml`, one flow.
+
+## Shape
+
+- **One npm package:** `pilot`. Contains the CLI, the GHA wrapper,
+  and three internal registry handlers (crates, pypi, npm). Not pluggable.
+- **One GHA action:** `thekevinscott/put-it-out-there@v0`. Thin JS
+  wrapper (~100ms cold start) that invokes the same code the CLI runs.
+
+## Core model
+
+1. User writes `pilot.toml` declaring packages, glob patterns, and
+   optional `depends_on` edges.
+2. Merge to `main` → pilot reads the merge commit → computes cascade
+   from paths ∪ `depends_on` → builds → publishes → tags.
+3. Default bump is **patch**. Optional `release:` git trailer overrides
+   to `minor` / `major` / `skip`.
+4. Manual trigger (`workflow_dispatch`) takes explicit bump + package
+   list; overrides both cascade and trailer.
+
+## Locked design decisions
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | Path filter is the primary release signal; trailer is an optional override | Matches merge-to-main = ship, no ceremony needed for 90% case |
+| 2 | `depends_on` expresses transitive cascade, not duplicated globs | DRY; scales past 2 packages |
+| 3 | Every merge touching relevant paths produces a patch release | Matches high-cadence LLM-authored workflow |
+| 4 | `release:` trailer with `[pkg]` list is additive (Rule B): listed packages get the bump, unlisted cascaded packages still get patch | Covers both scoped bump and force-include with one mechanism |
+| 5 | Three registry handlers live in-repo as internal modules; no plugin system | Speculative flexibility costs too much; PR upstream to add a registry |
+| 6 | No-push tag model: manifest edits are CI-worktree-only; tag points at the merge commit | Kills the push race; `main`'s manifest stays stale by design |
+| 7 | OIDC trusted publishing preferred on all three registries; token fallback supported | crates.io added OIDC in 2025 (via `rust-lang/crates-io-auth-action`) |
+| 8 | No `pilot rollback` primitive; use `cargo yank` / `npm deprecate` + `git revert` | Republishing old code under new version misleads `>=` pinned consumers |
+| 9 | TOML config (`pilot.toml`) at repo root | Familiar (Cargo.toml, pyproject.toml); nested arrays work cleanly |
+| 10 | `pilot init` scaffolds `pilot/AGENTS.md` and appends `@pilot/AGENTS.md` to CLAUDE.md | Teaches the LLM agent the trailer convention |
+
+## In scope for v0
+
+- `pilot.toml` parsing, Zod schema validation
+- Cascade algorithm (paths + `depends_on`, two-pass fixed-point, cycle detection)
+- Trailer parsing (`release: <bump> [packages]`)
+- Three handlers × multiple build modes:
+  - crates
+  - pypi: `maturin` (Rust-in-Python) / `setuptools` / `hatch` / vanilla
+  - npm: `napi` (Rust-in-JS native) / `bundled-cli` (wrapper around a
+    pre-built executable, e.g., cargo-dist archives) / vanilla
+  - Idempotency check per registry
+  - Retry on transient (5xx / network) up to 3x with backoff
+  - OIDC on all three (crates.io via `crates-io-auth-action`) + token
+    fallback
+  - Manifest edits in CI worktree (no push to main)
+- Artifact completeness check (default on) — no partial ship on matrix holes
+- npm platform-package orchestration (publishes platform pkgs, then
+  main with `optionalDependencies`)
+- Tag creation at merge commit; GitHub Release auto-created per tag
+- Two cadence modes: `immediate` (every merge ships) and `scheduled`
+  (cron-triggered). Manual dispatch always runs.
+- Dry-run as PR check (catches config errors before merge)
+- `pilot init`, `pilot plan`, `pilot publish`, `pilot doctor`
+- CLAUDE.md / AGENTS.md scaffolding
+- Structured logs (JSON in CI, plain in TTY)
+
+## Explicitly out of v0 (on roadmap)
+
+- Post-release smoke-test verifier (Docker install + user snippet)
+- `pilot status` dashboard
+- `pilot changelog` generator
+- Rollback primitive (deliberately rejected, not deferred)
+- Pre-release dist-tags (`-rc`, `-beta`, `-alpha`)
+- Private registries
+- Hotfix branches
+- Non-Claude agent variants for `pilot init`
+
+## Shape of config
+
+```toml
+[pilot]
+version = 1
+
+[[package]]
+name          = "dirsql-rust"
+kind          = "crates"
+path          = "packages/rust"
+paths         = ["packages/rust/**/*.rs", "packages/rust/Cargo.toml"]
+first_version = "0.1.0"
+
+[[package]]
+name          = "dirsql-python"
+kind          = "pypi"
+path          = "packages/python"
+pypi          = "dirsql"
+paths         = ["packages/python/**"]
+depends_on    = ["dirsql-rust"]
+build         = "maturin"
+first_version = "0.1.0"
+```
+
+No auth/token fields in config. Secrets live in GitHub Actions settings
+and are wired into `release.yml` as env vars under well-known names
+(`CARGO_REGISTRY_TOKEN`, `PYPI_API_TOKEN`, `NODE_AUTH_TOKEN`). OIDC is
+auto-detected when available. See `plan.md` §16.
+
+## Shape of workflow
+
+User writes `.github/workflows/release.yml` with three jobs:
+
+1. **plan** — `pilot plan` computes the release matrix.
+2. **build** — user-authored matrix; their build tools produce artifacts.
+3. **publish** — `pilot publish` picks up artifacts, publishes, tags.
+
+Pilot owns plan + publish. User owns build (matrix, caching,
+cross-compile). That split means pilot doesn't need to know how to build
+every possible project.
+
+## Success criteria for v0
+
+1. The `dirsql` monorepo releases cleanly via pilot, replacing its ad-hoc
+   script.
+2. The `test/fixtures/polyglot-everything/` reference fixture publishes to all three
+   registries on a real cadence (polyglot validation — pilot itself is
+   npm-only).
+3. Full publish cycle completes successfully on the reference repo.
+   Runtime is whatever the user's build takes — pilot's own overhead
+   should be minimal (action cold start + registry calls), but total
+   wall-clock is dominated by builds pilot doesn't own.
+4. Adding a new registry handler takes under a day for someone familiar
+   with the target registry.
+5. README walkthrough is reproducible by a new user in under 30 minutes.
+
+## Testing
+
+Non-negotiable. Follows dirsql's strategy. Red/green TDD for everything.
+Target coverage **90%+**.
+
+The `pilot` package exports a JS SDK (library API); the CLI is a thin
+wrapper around it. The SDK is the primary testable surface.
+
+- **Unit (colocated, vitest):** `src/cascade.test.ts` next to
+  `src/cascade.ts`. Mock everything but the function under test.
+- **Integration (`test/integration/`):** target the SDK, not the CLI.
+  Mock anything external to this library (network, registries, git
+  where appropriate). Registry mocks: verdaccio (npm), pypiserver /
+  msw (PyPI), msw (crates.io).
+- **End-to-end:** mock nothing. Exercise the CLI directly. **Not run
+  in CI** — run often by the agent during development. Registry
+  targets: TestPyPI for PyPI, a dedicated `pilot-canary` package on
+  real npm, a dedicated `pilot-canary` crate on real crates.io
+  (no test instance exists for crates.io).
+
+## Open decisions for review
+
+None that block v0. `plan.md` enumerates ~6 open questions but all are
+safe-to-defer.
