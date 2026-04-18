@@ -1,0 +1,23 @@
+name: CI Gate
+
+# Aggregator check that turns green when every other required check on
+# this PR has passed. Set this as the single required status check in
+# branch protection rather than enumerating each workflow -- that way
+# adding a new workflow doesn't require updating branch protection.
+#
+# Mirrors dirsql's pr-monitor pattern.
+
+on:
+  pull_request:
+
+permissions:
+  checks: read
+
+jobs:
+  monitor:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: clankerbot/pr-monitor@v1
+        with:
+          job-name: CI Gate
