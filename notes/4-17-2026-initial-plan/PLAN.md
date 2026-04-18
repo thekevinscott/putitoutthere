@@ -18,8 +18,8 @@
 4. [Glossary](#4-glossary)
 5. [System Architecture](#5-system-architecture)
 6. [Config Schema (`pilot.toml`)](#6-config-schema-pilottoml)
-7. [Plugin Interface](#7-plugin-interface)
-8. [Plugin Discovery & Loading](#8-plugin-discovery--loading)
+7. [Registry Handlers](#7-registry-handlers)
+8. [Adding a New Registry](#8-adding-a-new-registry)
 9. [Workflow Shape](#9-workflow-shape)
 10. [Release Trailer Convention](#10-release-trailer-convention)
 11. [Cascade Algorithm](#11-cascade-algorithm)
@@ -63,11 +63,11 @@ don't hold when Claude is writing 90% of the commits:
 - Cranko is the closest match but requires the `rc:` branch convention and
   does not cover PyPI or npm first-class.
 
-Pilot's thesis: the release signal should be a **git trailer on the merge
-commit**, the cascade should be determined by **path filters declared by each
-package**, and the publishing step itself should be **pluggable per registry**
-so the tool stays small and testable while handling the ugly parts (OIDC
-auth, idempotency, retries, version-file edits) consistently.
+Pilot's thesis: the release signal should be **path filters plus an optional
+git trailer on the merge commit**; the cascade should be determined by
+**`depends_on` edges between packages**; and the publishing step should
+handle the ugly parts uniformly (OIDC auth, idempotency, retries,
+version-file edits) across crates.io, PyPI, and npm.
 
 ### Shape of the solution
 
@@ -77,11 +77,13 @@ auth, idempotency, retries, version-file edits) consistently.
 │  └─ uses: thekevinscott/put-it-out-there@v0            │
 │       │                                                 │
 │       ▼ (thin TS wrapper; ~100ms cold start)           │
-│     @pilot/pilot-core  ◄── reads pilot.toml             │
-│       │                                                 │
-│       ├─► @pilot/pilot-crates  (Rust → crates.io)       │
-│       ├─► @pilot/pilot-pypi    (Python → PyPI)          │
-│       └─► @pilot/pilot-npm     (TS/JS → npm)            │
+│     pilot (single TS package)                           │
+│       ├─ reads pilot.toml                               │
+│       ├─ computes cascade (paths + depends_on)          │
+│       └─ dispatches by package.kind:                    │
+│             ├─ crates → crates.io                       │
+│             ├─ pypi   → PyPI                            │
+│             └─ npm    → npm                             │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -156,7 +158,7 @@ maturin config. Cross-ecosystem edges aren't declarable anywhere in the
 source-of-truth manifests, so inference would break silently where it
 matters most.
 
-### 2.4 Why pluggable publishing
+### 2.4 Why internal dispatch (not plugins)
 
 Each registry has its own sharp edges:
 
@@ -164,10 +166,20 @@ Each registry has its own sharp edges:
 - **PyPI:** same permanence; OIDC trusted publishing via `pypa/gh-action-pypi-publish`; wheels per-platform via maturin/cibuildwheel.
 - **npm:** 72-hour unpublish window; OIDC provenance; `package.json` version bump; supports pre-release dist-tags.
 
-A monolithic publisher would accumulate `if ecosystem == "x"` forks. Plugins
-let each registry's logic live in a small, focused, separately-versioned
-package while the core handles the shared work (parsing trailers, computing
-versions, managing tags, running dry-run checks).
+The natural shape for accommodating these is per-registry handlers behind
+a common interface. We considered making those handlers external plugins
+(separate npm packages, versioned API, discovery/loading machinery). For
+v0 we're not doing that: the handlers live in `src/handlers/` as internal
+modules, dispatched by a switch on `package.kind`.
+
+Why: three registries, likely zero third-party extensions for the
+foreseeable future. A plugin system costs peer-dep management, version
+compatibility checks, discovery logic, a testkit, and a public API
+contract — all paid up front for speculative flexibility. Collapsing to
+internal dispatch saves ~50 lines of infra code per handler and keeps
+everything one-version, one-release, one-test-suite. If pilot ever sees
+real demand for external registries, factoring a handler out is a
+refactor, not a redesign.
 
 ---
 
@@ -194,9 +206,11 @@ Explicit list of things pilot does **not** try to do:
   immediate-only.
 - **A replaceable planner / external policy layer.** Pilot has one flow:
   read `pilot.toml`, read git, cascade, publish. Consumer freedom lives in
-  config and plugins, not in a plan-JSON seam between stages. If a user
-  wants fundamentally different release logic, they don't use pilot for
-  that step — that's a feature, not a bug.
+  config. If a user wants fundamentally different release logic, they
+  don't use pilot for that step — that's a feature, not a bug.
+- **A plugin system.** See §2.4. Handlers are internal modules, not
+  pluggable packages. Adding a new registry means a PR to this repo
+  (§8), not a separate package.
 - **Monorepo tooling it doesn't own.** Nx, Turborepo, Pants, Bazel integration
   is out of scope. Pilot reads `pilot.toml` and does the release; the user's
   build system does the build.
@@ -208,10 +222,10 @@ Explicit list of things pilot does **not** try to do:
 | Term              | Meaning                                                                                       |
 |-------------------|-----------------------------------------------------------------------------------------------|
 | **Package**       | One row in `[[package]]` — a publishable unit (one crate, one wheel-set, one npm package).    |
-| **Plugin**        | An npm module implementing the plugin interface for one registry (`@pilot/pilot-crates`, etc).  |
+| **Handler**       | Internal module for a single registry kind (crates, pypi, npm). Not pluggable.                 |
 | **Release trailer** | A `release: patch|minor|major` line in the merge commit message body.                         |
-| **Cascade**       | The set of packages whose `paths` globs intersect the changed files since last release.        |
-| **Idempotency check** | Plugin-side check: "is this version already published?" If yes, skip cleanly.             |
+| **Cascade**       | Packages that release on a given commit, computed from `paths` + `depends_on` (§11).           |
+| **Idempotency check** | Handler-side check: "is this version already published?" If yes, skip cleanly.            |
 | **Dry-run**       | `pilot plan --dry-run`: resolves versions and prints the publish graph without side effects.   |
 | **Smoke test**    | Post-release check: install the published artifact in a clean env, run a user-defined snippet. |
 
@@ -222,66 +236,58 @@ Explicit list of things pilot does **not** try to do:
 ### 5.1 Components
 
 ```
-put-it-out-there/                         ← this repo
+put-it-out-there/                         ← this repo, one npm package
 ├── action.yml                            ← GitHub Action entry (type: node20)
 ├── src/
-│   ├── action/                           ← thin TS wrapper invoked by GHA
-│   │   └── main.ts                       ← parses inputs, invokes core
-│   ├── core/                             ← @pilot/pilot-core
-│   │   ├── config.ts                     ← pilot.toml loader + schema
-│   │   ├── cascade.ts                    ← path-filter → package set
-│   │   ├── trailer.ts                    ← parse `release:` from merge commit
-│   │   ├── version.ts                    ← bump logic, tag formatting
-│   │   ├── plugin.ts                     ← plugin interface + loader
-│   │   ├── registry.ts                   ← built-in plugin registry
-│   │   ├── git.ts                        ← git wrapper (tag, log, trailer)
-│   │   ├── state.ts                      ← read last-published tags
-│   │   └── run.ts                        ← top-level orchestration
-│   └── cli/                              ← @pilot/pilot
-│       └── bin.ts                        ← yargs/commander entry
-└── plugins/
-    ├── crates/                           ← @pilot/pilot-crates
-    ├── pypi/                             ← @pilot/pilot-pypi
-    └── npm/                              ← @pilot/pilot-npm
+│   ├── action.ts                         ← thin GHA wrapper; invokes run()
+│   ├── cli.ts                            ← yargs/commander CLI entry
+│   ├── run.ts                            ← top-level orchestration
+│   ├── config.ts                         ← pilot.toml loader + schema
+│   ├── cascade.ts                        ← paths + depends_on → package set
+│   ├── trailer.ts                        ← parse `release:` from merge commit
+│   ├── version.ts                        ← bump logic, tag formatting
+│   ├── git.ts                            ← git wrapper (tag, log, trailer)
+│   ├── handlers/                         ← internal per-registry modules
+│   │   ├── index.ts                      ← dispatch by `kind`
+│   │   ├── crates.ts
+│   │   ├── pypi.ts
+│   │   └── npm.ts
+│   └── types.ts                          ← Handler interface (internal)
+└── dist/                                 ← ncc-bundled action.js
 ```
+
+One package, one version, one release. The `pilot` CLI and the GHA action
+are two entry points into the same code.
 
 ### 5.2 Runtime shape
 
 The GHA action is a **native JS action** (not a composite shell action, not a
 Docker action). Rationale:
 
-| Action type    | Cold start       | Ergonomics for plugins                     |
+| Action type    | Cold start       | Notes                                      |
 |----------------|------------------|--------------------------------------------|
-| Docker         | 30–60s           | Plugin system requires in-container npm i  |
+| Docker         | 30–60s           | Slow; registry auth inside container       |
 | Composite shell| 1–3s             | Hard to pass structured data between steps |
-| Node (JS)      | ~100ms           | npm module system → natural plugin host    |
+| Node (JS)      | ~100ms           | Fast, direct TS → JS entry point           |
 
 At runtime:
 
 1. GHA invokes `dist/action.js` (bundled via `@vercel/ncc`).
 2. Wrapper parses action inputs (command, optional overrides) and invokes
-   `pilot-core` directly in-process.
-3. Core loads `pilot.toml`, resolves plugins from `node_modules` or from the
-   user's repo (if they have a `package.json`).
-4. Core computes the cascade and dispatches to plugins.
+   `run(command, cwd)` in-process.
+3. `run` loads `pilot.toml`, computes the cascade, dispatches each package
+   to its handler by `kind`.
 
-For local use, the same `pilot-core` is reachable via the `pilot` CLI which
-users install globally (`npm i -g @pilot/pilot`) or via `npx @pilot/pilot`. The
-GHA and CLI share identical execution paths — `pilot plan` in CI and locally
-produce the same output.
+For local use, the `pilot` CLI (`npm i -g @pilot/pilot` or
+`npx @pilot/pilot`) calls the same `run` function. `pilot plan` in CI and
+locally produce the same output.
 
 ### 5.3 Why the action wrapper is thin
 
 The wrapper is intentionally about 50 lines: read `INPUT_COMMAND`, set env
-for auth tokens, call `pilotRun(command, cwd)`, surface exit code. All
-business logic lives in `pilot-core`, so:
-
-- Testability: no GHA mocks needed for unit tests.
-- Portability: the same logic runs in other CI systems if ever needed
-  (not an explicit v0 goal, but a useful side-effect).
-- Upgradability: bumping the action (`uses: ...@v0` → `...@v1`) doesn't
-  require users to also reinstall a CLI; the action pins its own
-  `pilot-core` version.
+for auth tokens, call `run(command, cwd)`, surface exit code. All business
+logic lives in the library code so unit tests don't need GHA mocks, and
+the same code is reachable from the CLI.
 
 ---
 
@@ -309,7 +315,7 @@ Each publishable unit gets one entry. Field reference:
 ```toml
 [[package]]
 name    = "dirsql-python"                    # unique pilot-internal name
-kind    = "pypi"                             # plugin discriminator
+kind    = "pypi"                             # handler key: crates | pypi | npm
 path    = "packages/python"                  # working dir for build/publish
 paths   = [                                  # cascade triggers (globs)
   "packages/python/**/*.py",
@@ -320,7 +326,7 @@ depends_on = ["dirsql-rust"]                 # transitive cascade: if
 
 # Registry-specific:
 pypi    = "dirsql"                           # name on PyPI (may differ from name)
-build   = "maturin"                          # build recipe (plugin-interpreted)
+build   = "maturin"                          # build recipe (handler-interpreted)
 smoke   = "python -c 'import dirsql; dirsql.DirSQL'"
 
 # Versioning:
@@ -347,167 +353,130 @@ token_env = "PYPI_TOKEN"                     # used when auth = "token"
 | `token_env`      | if token | string       | —                 | Env var holding the token                        |
 | `smoke`          | no       | string       | —                 | Shell command run post-publish in clean env      |
 
-### 6.4 Plugin-specific fields
+### 6.4 Registry-specific fields
 
-Each plugin documents its own fields. The core does **no** validation of
-fields outside its top-level reference; it passes the raw TOML sub-table to
-the plugin. Plugins that need schema validation use Zod (shipped alongside
-core).
+Each handler declares its own schema for fields outside the core reference.
+All schemas live in-repo (`src/handlers/*.ts`) and are validated with Zod.
 
-Examples:
-
-- **`@pilot/pilot-crates`**: `crate` (crates.io name if differs), `features`,
+- **crates**: `crate` (crates.io name if differs from `name`), `features`,
   `target` (publishing target triple list).
-- **`@pilot/pilot-pypi`**: `pypi`, `build` (`maturin` \| `setuptools` \| `hatch`),
+- **pypi**: `pypi` (PyPI name), `build` (`maturin` \| `setuptools` \| `hatch`),
   `wheels_artifact` (artifact name to download from build matrix).
-- **`@pilot/pilot-npm`**: `npm` (package name if differs), `access`
-  (`public` \| `restricted`), `tag` (dist-tag, default `latest`).
+- **npm**: `npm` (npm name), `access` (`public` \| `restricted`), `tag`
+  (dist-tag, default `latest`).
 
 ---
 
-## 7. Plugin Interface
+## 7. Registry Handlers
 
-All plugins implement a single default-exported object conforming to this TS
-interface (shipped from `@pilot/pilot-core/types`):
+Three built-in handlers cover crates.io, PyPI, and npm. They live in
+`src/handlers/` as internal modules, dispatched by a switch on
+`package.kind`. They are not plugins — no external loading, no peer deps,
+no separately-published packages.
+
+### 7.1 Handler contract (internal)
 
 ```ts
-export interface PilotPlugin {
-  /** Registered kind; must match `package.kind` in pilot.toml */
-  kind: string;
+// src/types.ts
+export interface Handler {
+  kind: 'crates' | 'pypi' | 'npm';
 
-  /** Validate plugin-specific fields against this plugin's expectations. */
-  validate(pkg: PackageConfig): ValidationResult;
+  /** Zod schema for registry-specific fields. */
+  schema: ZodType<PackageConfig>;
 
-  /**
-   * Query the registry: is this exact version already live?
-   * Must be safe to retry; must not require write credentials.
-   */
-  isPublished(
-    pkg: PackageConfig,
-    version: string,
-    ctx: PluginContext,
-  ): Promise<boolean>;
+  /** Registry query: is this version already published? No write auth. */
+  isPublished(pkg: PackageConfig, version: string, ctx: Ctx): Promise<boolean>;
 
-  /**
-   * Update the version-file(s) inside `pkg.path` to `version`.
-   * Returns the list of modified file paths.
-   * MUST be deterministic and idempotent.
-   */
-  writeVersion(
-    pkg: PackageConfig,
-    version: string,
-    ctx: PluginContext,
-  ): Promise<string[]>;
+  /** Update manifest file(s) in the CI worktree. Returns modified paths. */
+  writeVersion(pkg: PackageConfig, version: string, ctx: Ctx): Promise<string[]>;
 
-  /**
-   * Publish the package at `version`. Throws on hard failure; returns
-   * cleanly on already-published (idempotent) or success.
-   * Responsible for: auth, artifact collection, retry on 5xx.
-   */
-  publish(
-    pkg: PackageConfig,
-    version: string,
-    ctx: PluginContext,
-  ): Promise<PublishResult>;
+  /** Publish. Throws on hard failure; returns cleanly if already-published. */
+  publish(pkg: PackageConfig, version: string, ctx: Ctx): Promise<PublishResult>;
 
-  /**
-   * Optional: run a smoke test in a clean environment.
-   * Default implementation: shell-exec `pkg.smoke` inside a throwaway
-   * container (Docker) with the package freshly installed.
-   */
-  smokeTest?(
-    pkg: PackageConfig,
-    version: string,
-    ctx: PluginContext,
-  ): Promise<SmokeResult>;
+  /** Optional: docker-based install + user smoke command. */
+  smokeTest?(pkg: PackageConfig, version: string, ctx: Ctx): Promise<SmokeResult>;
 }
 
-export interface PluginContext {
-  cwd: string;                 // repo root
+export interface Ctx {
+  cwd: string;
   dryRun: boolean;
   log: Logger;
-  env: Record<string, string>; // filtered env (tokens masked in logs)
-  artifacts: ArtifactStore;    // access to GHA artifacts
+  env: Record<string, string>;  // tokens masked in logs
+  artifacts: ArtifactStore;     // GHA artifact access
 }
 
 export interface PublishResult {
   status: 'published' | 'already-published' | 'skipped';
-  url?: string;                // canonical URL on the registry
-  bytes?: number;              // artifact size, for logs
+  url?: string;
+  bytes?: number;
 }
 ```
 
-### 7.1 Error model
+The interface is an internal convenience for testability and consistency
+between the three handlers. It is not a public API — callers import
+handlers directly by name.
 
-Plugins throw typed errors:
+### 7.2 Dispatch
 
-- `PluginAuthError` — auth failed; do not retry.
-- `PluginTransientError` — 5xx or network; core retries up to 3 times with
-  exponential backoff (1s, 2s, 4s).
-- `PluginFatalError` — anything else; fail the run loud.
+```ts
+// src/handlers/index.ts
+import { crates } from './crates.js';
+import { pypi } from './pypi.js';
+import { npm } from './npm.js';
 
-The core treats an unthrown unknown error as fatal; plugins are expected to
-annotate.
+export function handlerFor(kind: string): Handler {
+  switch (kind) {
+    case 'crates': return crates;
+    case 'pypi':   return pypi;
+    case 'npm':    return npm;
+    default:       throw new Error(`unknown package kind: ${kind}`);
+  }
+}
+```
 
-### 7.2 Built-in plugins
+### 7.3 Error model
 
-Three plugins ship in this repo alongside core:
+Handlers throw typed errors caught by the orchestrator:
 
-- **`@pilot/pilot-crates`** — `cargo publish` + crates.io HEAD-check for
-  idempotency. Reads version from Cargo.toml; supports workspace crates via
-  `path` pointing at the crate dir.
-- **`@pilot/pilot-pypi`** — supports `maturin`, `setuptools`, and `hatch`
-  build backends. Downloads wheels from GHA artifacts (built by user's
-  matrix), publishes via `twine` or `pypa/gh-action-pypi-publish` (delegated
-  to a sub-action when OIDC is used). Idempotency via PyPI JSON API
-  (`/pypi/{name}/{version}/json` returns 200 if published).
-- **`@pilot/pilot-npm`** — `npm publish --provenance` with OIDC; idempotency
-  via `npm view <pkg>@<version> version` exit code.
+- `AuthError` — auth failed; do not retry.
+- `TransientError` — 5xx or network; retry up to 3x with exponential
+  backoff (1s, 2s, 4s, jitter ±25%).
+- Any other thrown error is treated as fatal.
+
+### 7.4 Built-in handler summaries
+
+- **crates** — `cargo publish` + crates.io HEAD-check for idempotency.
+  Reads version from Cargo.toml; supports workspace crates via `path`
+  pointing at the crate dir.
+- **pypi** — supports `maturin`, `setuptools`, and `hatch` build backends.
+  Downloads wheels from GHA artifacts (built by user's matrix), publishes
+  via `twine` or delegates to `pypa/gh-action-pypi-publish` when OIDC is
+  in use. Idempotency via PyPI JSON API (`/pypi/{name}/{version}/json`).
+- **npm** — `npm publish --provenance` with OIDC; idempotency via
+  `npm view <pkg>@<version> version` exit code.
 
 ---
 
-## 8. Plugin Discovery & Loading
+## 8. Adding a New Registry
 
-### 8.1 Resolution order
+Pilot has no plugin system. Adding a new registry (Ruby gems, Go modules,
+Homebrew, Docker images, etc.) means:
 
-For a package of kind `X`:
+1. Add `src/handlers/<name>.ts` implementing the `Handler` interface.
+2. Add a case in `src/handlers/index.ts`.
+3. Add unit tests.
+4. Add an integration test against a mocked registry.
+5. Send a PR.
 
-1. **Built-in registry** — if core ships a plugin for kind `X`, use it.
-2. **User's repo node_modules** — `require.resolve(\`@pilot/pilot-${X}\`)` from
-   the repo root.
-3. **Explicit `plugin` field** in the package entry:
-   ```toml
-   [[package]]
-   kind = "pypi"
-   plugin = "@acme/pilot-pypi-custom"   # overrides built-in
-   ```
-4. Error if none found.
+Benefits of collapsing to internal dispatch:
+- One codebase, one version, one test suite.
+- No peer-dep compatibility matrix.
+- No public API to maintain across minor bumps.
+- Refactoring a handler is a local change, not a coordinated release.
 
-### 8.2 Installing plugins
-
-Users install plugins into their repo:
-
-```bash
-npm i -D @pilot/pilot-pypi @pilot/pilot-crates @pilot/pilot-npm
-```
-
-Or, for zero-config users, the action auto-installs the three built-in
-plugins into an ephemeral `node_modules` when it runs. `pilot.toml` can opt
-out with `[pilot] auto_install_plugins = false`.
-
-### 8.3 Plugin versioning
-
-Each plugin is independently versioned and published to npm under `@pilot/*`.
-Core declares a peer-dep range:
-
-```json
-"peerDependencies": {
-  "@pilot/pilot-core": "^0.x"
-}
-```
-
-Core ships a `supports(pluginApiVersion)` check; plugins built against an
-older API continue to work until a major bump.
+If pilot ever sees real demand for third-party registries that can't be
+upstreamed, factoring a handler out into a separate package is a
+straightforward refactor. v0 does not pay that cost speculatively.
 
 ---
 
@@ -599,7 +568,7 @@ The `plan` job computes the release matrix from the merge commit's trailer
 and path-filter cascade. It emits JSON so the `build` job can fan out across
 the user's build tooling (they own this step — pilot doesn't know how to
 compile every possible project). The `publish` job then picks up artifacts
-and hands them to plugins.
+and dispatches each to its handler.
 
 ### 9.3 PR check workflow
 
@@ -621,7 +590,7 @@ jobs:
           fail_on_error: true
 ```
 
-This surfaces misconfigurations (missing plugin, invalid trailer, tag
+This surfaces misconfigurations (unknown `kind`, invalid trailer, tag
 collision) before the merge.
 
 ---
@@ -779,7 +748,7 @@ crosses directory boundaries. Brace expansion enabled.
 ### 11.5 First release
 
 If no tag matches this package's `tag_format`, diff from the **repo root
-commit** — every file in `paths` counts as "changed." The plugin uses
+commit** — every file in `paths` counts as "changed." The handler uses
 `first_version` (default `0.1.0`).
 
 ### 11.6 Explicit trailer overrides
@@ -858,10 +827,8 @@ package targets.
 
 Build job uploads via `actions/upload-artifact@v4` using the `artifact_name`
 from the matrix row. Publish job downloads with `actions/download-artifact@v4`
-and the plugin picks up files from `artifacts/<artifact_name>/`.
-
-Plugins are documented to look at `ctx.artifacts.get(pkg.name)` which returns
-an absolute path.
+and the handler picks up files from `artifacts/<artifact_name>/` via
+`ctx.artifacts.get(pkg.name)`, which returns an absolute path.
 
 ---
 
@@ -875,21 +842,21 @@ an absolute path.
 | PyPI        | `GET /pypi/{name}/{version}/json` 200 check     | Permanent (no unpublish)|
 | npm         | `npm view {name}@{version} version` exit 0      | 72-hour unpublish window|
 
-If `isPublished(version) === true`, the plugin returns
+If `isPublished(version) === true`, the handler returns
 `{ status: 'already-published' }` and the run succeeds. This makes retries
 safe and lets users re-trigger a failed workflow without consequences.
 
 ### 13.2 Retry policy
 
-Defined in core (not per-plugin for consistency):
+Applied uniformly by the orchestrator (not per-handler):
 
 ```
 retries:        3
 initial_delay:  1s
 multiplier:     2
 jitter:         ±25%
-retry_on:       PluginTransientError, fetch 5xx, ECONNRESET, ETIMEDOUT
-no_retry_on:    PluginAuthError, PluginFatalError, 4xx other than 429
+retry_on:       TransientError, fetch 5xx, ECONNRESET, ETIMEDOUT
+no_retry_on:    AuthError, other errors, 4xx other than 429
 ```
 
 429 is treated as transient with respect for `Retry-After`.
@@ -911,19 +878,42 @@ If package N in a 3-package cascade fails, packages 1..N-1 stay published
 The run exits non-zero. Re-running after fixing the issue is safe because
 of §13.1 idempotency.
 
-### 13.5 Tag creation
+### 13.5 Tag creation (no-push model)
 
-Tags are created **after** a successful publish, not before. Otherwise a
-crashed publish leaves a tag pointing at an unpublished version.
+Pilot does **not** create or push a synthetic "bump" commit back to main.
+Manifest edits live in the CI worktree for the duration of the build and
+publish steps only. The tag points at the merge commit that triggered the
+release.
 
 Order within a single package's release:
-1. `writeVersion()` modifies version file(s) in-memory check only during
-   plan.
-2. On publish: `writeVersion()` actually writes; a version-bump commit is
-   made and pushed (signed if `pilot.commit_sign`).
-3. `publish()` runs.
-4. On success, `git tag <tag_format>` and `git push --tags`.
-5. GitHub Release created via API (§15).
+
+1. **Plan:** compute next version from last tag; `writeVersion()` invoked
+   in dry-run mode to validate the edit would succeed.
+2. **Build:** CI worktree checked out at the merge commit; `writeVersion()`
+   writes the new version into the manifest; user's build tooling
+   produces artifacts labeled with it.
+3. **Publish:** handler uploads artifacts to the registry.
+4. **Tag:** on publish success, `git tag <tag_format> <merge_commit_sha>`
+   and `git push --tags`. Tag points at the merge commit, not a synthetic
+   bump commit.
+5. **Release:** GitHub Release created via API (§15).
+
+`main`'s committed manifest stays at whatever version it was before. Next
+release reads the last tag (not the manifest) to compute the next version.
+Tags are the source of truth; manifests in main are stale and that's
+intentional.
+
+Consequences:
+
+- No push race. Ever.
+- No `[skip ci]` recursion hack needed.
+- No `concurrency: release` group required for correctness (though it's
+  still fine to add for UX — serialized runs are easier to read in the
+  Actions UI).
+- `cargo build` from local main produces an artifact labeled with the
+  stale manifest version. Documented as expected behavior; users who
+  want local builds labeled with the current version can set manifest
+  to `0.0.0-dev` as a sentinel.
 
 ---
 
@@ -974,28 +964,22 @@ always get `first_version` on the first release.
 
 ### 14.5 Version-file updates
 
-Plugin-owned. Contract:
-- Plugin reads the current version file.
+Handler-owned. Contract:
+- Handler reads the current version file.
 - If version already equals target, no-op (return `[]`).
-- Otherwise, update in-place and return the path list.
+- Otherwise, update in-place (in the CI worktree only) and return the
+  path list.
 
-Examples of what each plugin edits:
+Examples of what each handler edits:
 
-| Plugin              | File(s)                                                         |
-|---------------------|-----------------------------------------------------------------|
-| `@pilot/pilot-crates`| `Cargo.toml` (`[package] version`), `Cargo.lock` (via `cargo update --workspace`) |
-| `@pilot/pilot-pypi`  | `pyproject.toml` (`[project] version` or tool-specific)          |
-| `@pilot/pilot-npm`   | `package.json` (`version`), `package-lock.json` regenerated      |
+| Handler | File(s)                                                               |
+|---------|-----------------------------------------------------------------------|
+| crates  | `Cargo.toml` (`[package] version`), `Cargo.lock` (`cargo update --workspace`) |
+| pypi    | `pyproject.toml` (`[project] version` or tool-specific)               |
+| npm     | `package.json` (`version`), `package-lock.json` regenerated           |
 
-### 14.6 The version-bump commit
-
-After plugins write version files, core creates a single commit on `main`
-named `chore(release): bump <pkg1>@<v1>, <pkg2>@<v2>` with a `[skip ci]` tag
-in the body to prevent recursive workflow triggers.
-
-This commit is pushed to `main` **before** the publish step runs. If push
-fails (non-fast-forward — someone else pushed to main during the window),
-the run aborts before publishing.
+These edits live only in the CI worktree. See §13.5 for how the tag is
+created without pushing a synthetic bump commit.
 
 ---
 
@@ -1031,7 +1015,7 @@ Handled in the same `publish` job after tags push.
 ### 16.1 OIDC trusted publishing (preferred)
 
 - **PyPI:** configure trusted publisher in PyPI project settings pointing at
-  this repo + workflow file. Pilot's PyPI plugin detects OIDC availability
+  this repo + workflow file. Pilot's PyPI handler detects OIDC availability
   (`ACTIONS_ID_TOKEN_REQUEST_TOKEN` env) and uses it. Falls back on token.
 - **npm:** `npm publish --provenance` requires `id-token: write` and no
   token at all when `NODE_AUTH_TOKEN` is unset but OIDC is configured.
@@ -1128,21 +1112,21 @@ Running `pilot plan --dry-run` in PR mode (where HEAD is the merge-preview
 commit):
 
 1. `pilot.toml` parses and conforms to the schema.
-2. Every `[[package]]` has a resolvable plugin.
-3. Every declared plugin's `validate()` passes.
+2. Every `[[package]]`'s `kind` maps to a known handler.
+3. Every package passes its handler's Zod schema.
 4. The PR description or the tip commit has a well-formed `release:` trailer
    if `require_trailer = true`.
 5. Path-filter cascade produces a non-empty set when the trailer is
    non-skip, and vice versa.
 6. Computed next version for each cascaded package does not collide with an
    existing tag.
-7. Plugin-specific pre-publish checks (e.g., crates.io verifies `package.name`
-   is available or owned by the author via `cargo owner --list`).
+7. Handler-specific pre-publish checks (e.g., crates handler verifies the
+   crate name is available or owned by the author via `cargo owner --list`).
 
 ### 18.3 Exit codes
 
 - `0` — clean. Check passes.
-- `1` — config or plugin error. Fix before merging.
+- `1` — config or handler error. Fix before merging.
 - `2` — trailer missing or malformed. Add it to the PR.
 - `3` — no cascade despite non-skip trailer. Likely forgot to include paths.
 
@@ -1199,7 +1183,7 @@ but can't be installed, imported, or initialized.
 
 ### 20.2 Mechanism
 
-After a successful publish, each plugin may implement `smokeTest()`. The
+After a successful publish, each handler may implement `smokeTest()`. The
 default implementation is shell-in-container:
 
 ```
@@ -1209,13 +1193,13 @@ docker run --rm <base_image> sh -c "
 "
 ```
 
-Where `base_image` and `install_cmd` are plugin-supplied defaults:
+Where `base_image` and `install_cmd` are handler-supplied defaults:
 
-| Plugin               | Base image          | Install command                       |
-|----------------------|---------------------|---------------------------------------|
-| `@pilot/pilot-crates`| `rust:slim`          | `cargo install {crate} --version {v}` |
-| `@pilot/pilot-pypi`  | `python:3.12-slim`   | `pip install {pypi}=={v}`             |
-| `@pilot/pilot-npm`   | `node:20-alpine`     | `npm i {name}@{v}`                    |
+| Handler | Base image         | Install command                       |
+|---------|--------------------|---------------------------------------|
+| crates  | `rust:slim`        | `cargo install {crate} --version {v}` |
+| pypi    | `python:3.12-slim` | `pip install {pypi}=={v}`             |
+| npm     | `node:20-alpine`   | `npm i {name}@{v}`                    |
 
 The user's `package.smoke` runs after install. Examples:
 
@@ -1261,7 +1245,7 @@ pilot plan --dry-run            Explicit dry-run (no side effects)
 pilot plan --json               JSON output for CI
 pilot publish                   Execute the plan (CI-intended)
 pilot status                    Show last released version per package
-pilot doctor                    Validate config + plugins + auth
+pilot doctor                    Validate config + handlers + auth
 pilot version                   Print CLI version
 ```
 
@@ -1281,7 +1265,7 @@ pilot version                   Print CLI version
 |------|--------------------------------------------|
 | 0    | Success                                    |
 | 1    | User error (bad config, missing trailer)   |
-| 2    | Plugin error (auth, registry 4xx)          |
+| 2    | Handler error (auth, registry 4xx)         |
 | 3    | Transient error exhausted retries (5xx)    |
 | 4    | Environment error (git unavailable, etc.)  |
 | 10+  | Reserved for future use                    |
@@ -1321,8 +1305,8 @@ In `--log-format=text` (default for interactive terms), these render as:
 ### 22.3 Artifacts saved by the workflow
 
 The `publish` job uploads a `pilot-release-log.json` artifact with the full
-run record — plan, computed versions, plugin outputs, timings. Useful for
-debugging failed runs without re-running them.
+run record — plan, computed versions, handler outputs, timings. Useful
+for debugging failed runs without re-running them.
 
 ---
 
@@ -1332,17 +1316,18 @@ debugging failed runs without re-running them.
 
 1. **Unit tests (vitest)** — cover every pure function: trailer parser,
    version bumper, cascade calculator, tag resolver, glob matcher, retry
-   policy. Target: 100% coverage for `pilot-core/src/` excluding plugin
-   adapters.
+   policy. Target: 100% coverage for `src/` excluding handler bodies that
+   shell out to external tools.
 
-2. **Plugin contract tests** — each plugin must pass a shared test suite
-   (`@pilot/pilot-plugin-testkit`) that asserts the interface contract
-   independent of the real registry.
+2. **Handler tests (mocked registries)** — each handler has its own test
+   suite. `verdaccio` for npm, `pypiserver` for PyPI, `msw`-stubbed HTTP
+   for crates.io. Verifies idempotency check, publish path, and retry on
+   5xx/transient. No shared testkit — handlers are internal and tested
+   directly.
 
-3. **Integration tests (mocked registries)** — spin up `verdaccio`
-   (for npm), `pypiserver` (for PyPI), and stub crates.io HTTP with
-   `msw`. Full publish cycles end-to-end, verifying idempotency, retry,
-   and tag creation.
+3. **End-to-end tests** — full publish cycles against the mocked
+   registries driven through the `pilot` CLI. Asserts correct dispatch,
+   tag creation, and GitHub Release API calls (stubbed).
 
 4. **Workflow tests (`act`)** — run the GHA action locally via `act` on
    fixture repos. Catches action.yml misconfig and wrapper bugs.
@@ -1376,18 +1361,10 @@ change.
 
 ## 24. Distribution
 
-### 24.1 npm packages
+### 24.1 npm package
 
-All published under the `@pilot/` scope:
-
-| Package                      | Purpose                                    |
-|------------------------------|--------------------------------------------|
-| `@pilot/pilot-core`          | Shared core; plugin API                    |
-| `@pilot/pilot` (CLI)         | Binary entry; `pilot` command              |
-| `@pilot/pilot-crates`        | Built-in Rust plugin                       |
-| `@pilot/pilot-pypi`          | Built-in Python plugin                     |
-| `@pilot/pilot-npm`           | Built-in npm plugin                        |
-| `@pilot/pilot-plugin-testkit`| Test harness for plugin authors            |
+One published package: `@pilot/pilot`. Contains the CLI, the handler
+modules, and everything else. Single version, single release cadence.
 
 ### 24.2 The action
 
@@ -1431,9 +1408,8 @@ reference `examples/rust-python-ts/` repo:
 
 - [x] `pilot.toml` parsing and schema validation
 - [x] Trailer parsing (`release: patch|minor|major|skip [packages]`)
-- [x] Path-filter cascade
-- [x] Three built-in plugins (crates, pypi, npm)
-- [x] Plugin loader (built-in + user-installed)
+- [x] Cascade: paths + `depends_on` (two-pass fixed-point)
+- [x] Three built-in handlers (crates, pypi, npm) dispatched internally
 - [x] OIDC and token auth for each registry
 - [x] Idempotency check + retry per registry
 - [x] Version-file updates (Cargo.toml, pyproject.toml, package.json)
@@ -1465,8 +1441,9 @@ v0 is "done" when:
    three registries on a real cadence — this is the polyglot validation
    path, since the pilot repo itself only exercises npm.
 3. Full publish cycle runs in under 5 minutes on the reference repo.
-4. Adding a new plugin (e.g., `@pilot/pilot-ruby`) takes under a day for
-   someone familiar with Ruby gem publishing.
+4. Adding a new handler (e.g., for Ruby gems) takes under a day for
+   someone familiar with the target registry — one file under
+   `src/handlers/`, one switch case, tests.
 5. README walkthrough is reproducible by someone who has never seen pilot
    in under 30 minutes.
 
@@ -1490,7 +1467,6 @@ etc. based on dogfooding outcomes.
   bump command: `release: prerelease`.
 - `pilot status` — dashboard command showing last-released version,
   pending cascade, outstanding failures.
-- Plugin auto-update check (warn if installed plugin is behind latest).
 
 ### 26.3 v0.3+
 
@@ -1498,7 +1474,7 @@ etc. based on dogfooding outcomes.
   GitHub Packages for npm).
 - Hotfix branches with back-port tooling.
 - Scheduled/batched release mode (opposite of v0's immediate mode).
-- Additional built-in plugins: Ruby gems, Go modules (if/when Go moves
+- Additional built-in handlers: Ruby gems, Go modules (if/when Go moves
   to a first-class registry), Docker images, Homebrew taps.
 - Multi-repo orchestration (one `pilot.toml` pointing at multiple repos).
 
@@ -1679,34 +1655,34 @@ language-specific setup actions). Pilot currently has no opinion on this
 we'll document recommended cache patterns but **not** implement caching
 inside pilot itself.
 
-### 28.3 Signed commits / tags
+### 28.3 Signed tags
 
-The version-bump commit is unsigned by default. `pilot.commit_sign = true`
-enables signing via the GHA action's built-in GPG key setup (see
-`crazy-max/ghaction-import-gpg`). Unclear whether users want the same for
-tags. Deferred until asked.
+`pilot.tag_sign = true` (config not yet added) would enable GPG-signed
+tags via the GHA action's GPG import step. Deferred until asked. Signed
+commits are moot — pilot doesn't create commits in the no-push model
+(§13.5).
 
-### 28.4 How opinionated should plugin defaults be?
+### 28.4 How opinionated should handler defaults be?
 
-Example: `@pilot/pilot-pypi` could auto-detect the build backend from
+Example: the pypi handler could auto-detect the build backend from
 `pyproject.toml` (`tool.maturin`, `tool.setuptools`, `tool.hatch`) and
 pick sensible defaults. v0 requires explicit `build = "maturin"` in the
 package config. Might relax later.
 
-### 28.5 What happens when two PRs merge in quick succession?
+### 28.5 Two PRs merging in quick succession
 
-Both trigger `release.yml`. The first wins the tag; the second may see a
-non-fast-forward on its version-bump push (§14.6) and abort. The user
-re-runs. This is the correct behavior — but it's friction. Open question:
-is the UX good enough, or does pilot need a queue/lock? v0 ships without
-one.
+Both trigger `release.yml`. In the no-push model (§13.5) there is no
+synthetic commit and no push race — each run tags its own merge commit
+independently, and the tags are unique per commit SHA. GHA's
+`concurrency: release` group is still recommended purely for UX
+(serialized logs), not for correctness.
 
 ### 28.6 Multi-registry dual-publishing
 
 Some packages want to ship to both npm and GitHub Packages, or crates.io
-and a private mirror. Not in v0. Likely a plugin-layer concern
-(`@pilot/pilot-npm-plus-gh-packages` or similar) rather than a core
-feature.
+and a private mirror. Not in v0. Would be handled by adding a dual-target
+handler or extending the existing npm handler with a config option —
+either way a code change in this repo, not an external package.
 
 ---
 
@@ -1717,9 +1693,9 @@ feature.
 **Likelihood:** Medium (crates.io/PyPI/npm all actively evolving).
 **Impact:** High (release workflow broken).
 **Mitigation:**
-- Plugin layer absorbs the change; core is untouched.
+- Handler modules localize registry-specific code; fix is a one-file PR.
 - Weekly canary publish (§23.4) catches drift before users hit it.
-- Plugins publish patches independently; users upgrade via `npm i -D`.
+- Patch release of `@pilot/pilot` rolls the fix out to everyone.
 
 ### 29.2 "OIDC configuration is fiddly and scares users off."
 
@@ -1743,25 +1719,16 @@ feature.
 - Dry-run PR check surfaces "this will auto-release" before merge so
   surprises are caught early.
 
-### 29.4 "Plugin ecosystem fragments."
+### 29.4 "Handlers accumulate `if ecosystem ==` forks."
 
-**Likelihood:** Low (starts with only built-ins; solo maintainer for now).
-**Impact:** Low initially, grows if external plugins proliferate.
+**Likelihood:** Medium as handlers grow.
+**Impact:** Low (internal code quality issue).
 **Mitigation:**
-- Maintain a curated `awesome-pilot-plugins` list in-repo.
-- Plugin testkit (`@pilot/pilot-plugin-testkit`) enforces the contract;
-  any plugin passing it should be swap-in compatible.
+- Keep handlers small; shared primitives (OIDC token fetch, retry, docker
+  smoke-test) live in `src/` utils, not duplicated.
+- If a handler crosses ~500 lines, that's a signal to split or refactor.
 
-### 29.5 "The version-bump commit push race (§28.5)."
-
-**Likelihood:** Low for solo maintainers; rises with team size.
-**Impact:** Medium (run fails, needs manual re-trigger).
-**Mitigation:**
-- v0 accepts the race and fails loud.
-- v0.2 may add an advisory lock via a GitHub Actions concurrency group,
-  which GHA supports natively (`concurrency: release`).
-
-### 29.6 "Registry outage mid-cascade publishes half the packages."
+### 29.5 "Registry outage mid-cascade publishes half the packages."
 
 **Likelihood:** Medium (crates.io and PyPI both have ~hours/year outages).
 **Impact:** Medium (inconsistent state across registries).
@@ -1772,7 +1739,7 @@ feature.
   left off.
 - Log includes "N of M published" summary for debugging.
 
-### 29.7 "Rust+Python PyO3 wheel builds are slow and platform-matrixed."
+### 29.6 "Rust+Python PyO3 wheel builds are slow and platform-matrixed."
 
 **Likelihood:** Guaranteed for any Rust-backed Python package.
 **Impact:** Medium (release takes 20-30 minutes instead of 5).
@@ -1781,12 +1748,12 @@ feature.
 - Reference example shows `maturin-action` with cross-compile.
 - Not pilot's problem to solve the build-speed question.
 
-### 29.8 "npm provenance / OIDC requires repo metadata in package.json."
+### 29.7 "npm provenance / OIDC requires repo metadata in package.json."
 
 **Likelihood:** High the first time.
 **Impact:** Low (clear error message).
 **Mitigation:**
-- `@pilot/pilot-npm` validates `repository` field in `package.json`
+- The npm handler validates the `repository` field in `package.json`
   pre-publish and fails loudly if missing with a fix-it hint.
 
 ---
