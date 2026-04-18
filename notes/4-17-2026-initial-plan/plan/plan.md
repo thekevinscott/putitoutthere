@@ -9,7 +9,7 @@
 >
 > **Repo:** https://github.com/thekevinscott/put-it-out-there
 > **CLI:** `pilot`
-> **npm scope:** `@pilot/`
+> **npm package:** `pilot`
 > **Date:** 2026-04-17
 
 ---
@@ -282,8 +282,8 @@ At runtime:
 3. `run` loads `pilot.toml`, computes the cascade, dispatches each package
    to its handler by `kind`.
 
-For local use, the `pilot` CLI (`npm i -g @pilot/pilot` or
-`npx @pilot/pilot`) calls the same `run` function. `pilot plan` in CI and
+For local use, the `pilot` CLI (`npm i -g pilot` or
+`npx pilot`) calls the same `run` function. `pilot plan` in CI and
 locally produce the same output.
 
 ### 5.3 Why the action wrapper is thin
@@ -1237,7 +1237,7 @@ disable by omitting `smoke`.
 
 ## 21. Command Surface (`pilot` CLI)
 
-All commands also runnable via `npx @pilot/pilot <cmd>` if not installed
+All commands also runnable via `npx pilot <cmd>` if not installed
 globally.
 
 ### 21.1 Commands
@@ -1357,7 +1357,7 @@ diff fail the build.
 ### 23.4 Publish on real registries (gated)
 
 A separate workflow (`.github/workflows/real-publish-test.yml`) runs
-weekly against real registries using a canary package (`@pilot-canary/*`).
+weekly against real registries using a canary package (`pilot-canary`).
 Verifies OIDC remains configured correctly after any registry policy
 change.
 
@@ -1367,7 +1367,7 @@ change.
 
 ### 24.1 npm package
 
-One published package: `@pilot/pilot`. Contains the CLI, the handler
+One published package: `pilot`. Contains the CLI, the handler
 modules, and everything else. Single version, single release cadence.
 
 ### 24.2 The action
@@ -1379,16 +1379,16 @@ A release workflow on this repo tags `v0`, `v0.1.x`, etc.
 ### 24.3 Global install
 
 ```
-npm i -g @pilot/pilot
+npm i -g pilot
 ```
 
-Or `npx @pilot/pilot <cmd>` for one-off use.
+Or `npx pilot <cmd>` for one-off use.
 
 ### 24.4 First-run for new users
 
 ```
 cd my-monorepo
-npx @pilot/pilot init
+npx pilot init
 # edit pilot.toml
 git add . && git commit -m "chore: add pilot
 
@@ -1699,7 +1699,7 @@ either way a code change in this repo, not an external package.
 **Mitigation:**
 - Handler modules localize registry-specific code; fix is a one-file PR.
 - Weekly canary publish (§23.4) catches drift before users hit it.
-- Patch release of `@pilot/pilot` rolls the fix out to everyone.
+- Patch release of `pilot` rolls the fix out to everyone.
 
 ### 29.2 "OIDC configuration is fiddly and scares users off."
 

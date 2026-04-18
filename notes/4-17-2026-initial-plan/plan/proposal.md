@@ -13,7 +13,7 @@ monorepo, one `pilot.toml`, one flow.
 
 ## Shape
 
-- **One npm package:** `@pilot/pilot`. Contains the CLI, the GHA wrapper,
+- **One npm package:** `pilot`. Contains the CLI, the GHA wrapper,
   and three internal registry handlers (crates, pypi, npm). Not pluggable.
 - **One GHA action:** `thekevinscott/put-it-out-there@v0`. Thin JS
   wrapper (~100ms cold start) that invokes the same code the CLI runs.
@@ -135,7 +135,7 @@ Non-negotiable. Three layers:
   msw-stubbed HTTP (crates.io).
 - End-to-end: full publish cycles via the CLI against mocked registries.
 
-Optional weekly real-registry canary using a dedicated `@pilot-canary/*`
+Optional weekly real-registry canary using a dedicated `pilot-canary`
 package to catch registry API drift.
 
 ## Open decisions for review
