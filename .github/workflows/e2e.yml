@@ -1,6 +1,6 @@
 name: E2E
 
-# E2E tests hit real registries (TestPyPI, pilot-canary on npm/crates.io)
+# E2E tests hit real registries (TestPyPI, putitoutthere-canary on npm/crates.io)
 # and are deliberately NOT run on every push -- per plan.md §23.4 they
 # exist to be run by the agent during development. This workflow is
 # workflow_dispatch-only so the runner is available but won't flake CI.

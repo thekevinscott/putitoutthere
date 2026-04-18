@@ -1,7 +1,7 @@
-# Migrating dirsql to pilot
+# Migrating dirsql to putitoutthere
 
 Practical guide for replacing dirsql's hand-rolled release tooling with
-`pilot`. Derived from an audit of dirsql's current workflows
+`putitoutthere`. Derived from an audit of dirsql's current workflows
 (`release.yml`, `publish.yml`, `patch-release.yml`, `publish-npm.yml`)
 and release scripts (`scripts/release/*.py`) at the time of writing.
 
@@ -13,17 +13,17 @@ continue to move forward, release cadence is preserved.
 
 ## TL;DR
 
-| Before (dirsql) | After (pilot) |
+| Before (dirsql) | After (putitoutthere) |
 |---|---|
 | 5 workflows, ~1000 lines of YAML | 2 workflows, ~60 lines |
-| 3 Python release scripts + their tests | Deleted; logic is internal to pilot |
+| 3 Python release scripts + their tests | Deleted; logic is internal to putitoutthere |
 | Shared `v{version}` tag | Per-package `{name}-v{version}` tags |
 | `[no-release]` commit marker | `release: skip` git trailer |
-| `RELEASE_STRATEGY` repo var | `[pilot] cadence` in `pilot.toml` |
+| `RELEASE_STRATEGY` repo var | `[putitoutthere] cadence` in `putitoutthere.toml` |
 | Conditional tag rollback on failure | No rollback; artifact completeness prevents partial ship |
 | cargo-dist binaries + custom npm synth | Same pattern via `build = "bundled-cli"` |
 | Matrix hole silently ships sdist | Matrix hole aborts the package's release |
-| `publish-pypi` gate bug class | Structurally impossible (pilot enforces completeness) |
+| `publish-pypi` gate bug class | Structurally impossible (putitoutthere enforces completeness) |
 
 ---
 
@@ -35,16 +35,16 @@ continue to move forward, release cadence is preserved.
    `dirsql-cli-v0.2.0`. Consumers reading git tags for version info
    (unusual — nobody should be doing this) would need to update.
 
-   Pilot uses `[[package]].name` from `pilot.toml` as the tag prefix,
-   which is internal to pilot — the published registry names stay
+   Putitoutthere uses `[[package]].name` from `putitoutthere.toml` as the tag prefix,
+   which is internal to putitoutthere — the published registry names stay
    `dirsql` on all three registries regardless of the tag-prefix
-   choice. The target `pilot.toml` in this doc uses
+   choice. The target `putitoutthere.toml` in this doc uses
    `dirsql-rust` / `dirsql-python` / `dirsql-cli` as the internal
    names, which falls out naturally into unambiguous tags.
 
-2. **No automatic tag rollback.** Pilot does not delete tags on partial
+2. **No automatic tag rollback.** Putitoutthere does not delete tags on partial
    failure. The artifact completeness check prevents the class of bug
-   that made rollback necessary in the first place: pilot refuses to
+   that made rollback necessary in the first place: putitoutthere refuses to
    publish any package whose matrix is incomplete. Partial publishes
    don't happen, so there's nothing to roll back.
 
@@ -64,30 +64,30 @@ continue to move forward, release cadence is preserved.
    trailer.
 
 4. **Cadence config location.** Move from a repo-level `RELEASE_STRATEGY`
-   env var to `[pilot] cadence = "immediate"` (or `"scheduled"`) in
-   `pilot.toml`. Pilot supports both modes natively (§9).
+   env var to `[putitoutthere] cadence = "immediate"` (or `"scheduled"`) in
+   `putitoutthere.toml`. Putitoutthere supports both modes natively (§9).
 
 5. **Python release scripts go away.** `compute_version.py`,
    `resolve_publish_targets.py`, `check_published.py`, and their tests
-   are deleted. Pilot owns that logic internally and tests it as part
+   are deleted. Putitoutthere owns that logic internally and tests it as part
    of its own suite.
 
-6. **cargo-dist `release.yml` goes away.** Pilot's publish flow
+6. **cargo-dist `release.yml` goes away.** Putitoutthere's publish flow
    creates the GitHub Release itself (§15), with binary assets
    attached if `bundled-cli` handlers publish per-platform packages.
    If dirsql wants standalone archive assets on the GH Release
    (e.g., `.tar.xz` for curl-installable binaries), keep cargo-dist
-   alongside pilot — but dogfood the simpler path first.
+   alongside putitoutthere — but dogfood the simpler path first.
 
 ---
 
-## Target `pilot.toml` for dirsql
+## Target `putitoutthere.toml` for dirsql
 
 ```toml
-[pilot]
+[putitoutthere]
 version     = 1
 cadence     = "scheduled"          # matches RELEASE_STRATEGY=nightly
-agents_path = "pilot/AGENTS.md"
+agents_path = "putitoutthere/AGENTS.md"
 
 [[package]]
 name          = "dirsql-rust"      # internal name; crate on crates.io stays "dirsql"
@@ -134,7 +134,7 @@ depends_on    = ["dirsql-rust"]    # wraps the CLI binary from the crate
 first_version = "0.1.0"
 ```
 
-**Platform-package naming for npm.** Pilot publishes the per-platform
+**Platform-package naming for npm.** Putitoutthere publishes the per-platform
 packages as `dirsql-{target}` (e.g., `dirsql-linux-x64-gnu`). If you
 want to preserve the current `@dirsql/cli-{target}` scoped layout for
 backward compatibility with existing installs, you'd need a per-package
@@ -262,13 +262,13 @@ jobs:
           NODE_AUTH_TOKEN:      ${{ secrets.NPM_TOKEN }}
 ```
 
-**PR check** — `.github/workflows/pilot-check.yml`:
+**PR check** — `.github/workflows/putitoutthere-check.yml`:
 
 ```yaml
 on: pull_request
 
 jobs:
-  pilot-check:
+  putitoutthere-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -296,11 +296,11 @@ tools/syncVersion.ts
 ```
 
 Keep:
-- `Cargo.toml` workspace version field (pilot bumps it at publish time).
+- `Cargo.toml` workspace version field (putitoutthere bumps it at publish time).
 - `pyproject.toml` version field (same).
 - `packages/ts/package.json` version field (same).
 - The `_binary/` staging pattern in `packages/python/python/dirsql/` —
-  pilot doesn't replace this. The `release.yml` build step above does
+  putitoutthere doesn't replace this. The `release.yml` build step above does
   the same staging.
 
 ---
@@ -310,9 +310,9 @@ Keep:
 Done sequentially to minimize risk. Each step is independently
 verifiable before moving on.
 
-### Step 1: land pilot v0
+### Step 1: land putitoutthere v0
 
-Wait until pilot ships v0 on npm as `pilot` and the GHA action is
+Wait until putitoutthere ships v0 on npm as `putitoutthere` and the GHA action is
 tagged `thekevinscott/put-it-out-there@v0`. Don't start migration
 against a moving target.
 
@@ -330,19 +330,19 @@ registries. See `plan/plan.md` §16.4 for step-by-step. Critical:
 
 Keep existing tokens as fallback during migration.
 
-### Step 3: create `pilot.toml`
+### Step 3: create `putitoutthere.toml`
 
-Copy the config from this document into `pilot.toml` at the repo root.
+Copy the config from this document into `putitoutthere.toml` at the repo root.
 Adjust `targets` lists if you want to drop/add platforms.
 
-### Step 4: run `pilot doctor` locally
+### Step 4: run `putitoutthere doctor` locally
 
 ```bash
-npx pilot doctor
+npx putitoutthere doctor
 ```
 
 Should report:
-- `pilot.toml` parses.
+- `putitoutthere.toml` parses.
 - All three handlers resolve (`crates`, `pypi` w/ maturin,
   `npm` w/ bundled-cli).
 - `targets` lists are sane.
@@ -351,7 +351,7 @@ Should report:
 
 Fix any errors before proceeding.
 
-### Step 5: create `release.yml` and `pilot-check.yml` (disabled)
+### Step 5: create `release.yml` and `putitoutthere-check.yml` (disabled)
 
 Add the two workflows from this document. To keep them inert during
 the transition, either:
@@ -381,7 +381,7 @@ In a single commit:
    rename the file back).
 2. Delete the files listed under "Files to delete."
 3. Update `CLAUDE.md` / `AGENTS.md` to teach the agent the
-   `release: skip` trailer convention (runs `pilot init` to do this
+   `release: skip` trailer convention (runs `putitoutthere init` to do this
    idempotently).
 4. Commit with `release: skip` in the trailer so the cutover itself
    doesn't trigger a release.
@@ -427,7 +427,7 @@ Post-migration, confirm:
 - [ ] No `scripts/release/` directory in the repo.
 - [ ] No `tools/buildPlatforms.ts` or `tools/syncVersion.ts`.
 - [ ] `.github/workflows/` contains exactly `release.yml`,
-      `pilot-check.yml`, plus dirsql's non-release workflows
+      `putitoutthere-check.yml`, plus dirsql's non-release workflows
       (`docs.yml`, `python-test.yml`, `ts-test.yml`, `rust-test.yml`,
       etc.).
 - [ ] Scheduled release fires at the next cron window; no-op if no
@@ -435,15 +435,15 @@ Post-migration, confirm:
 
 ---
 
-## Rollback plan (in case pilot misbehaves)
+## Rollback plan (in case putitoutthere misbehaves)
 
-If a release under pilot goes badly, the rollback is to restore the
-old workflows. Because pilot's no-push model doesn't modify `main`,
+If a release under putitoutthere goes badly, the rollback is to restore the
+old workflows. Because putitoutthere's no-push model doesn't modify `main`,
 the git state is clean:
 
 1. Revert the commit from step 7 (cutover).
 2. Re-enable the old workflows.
-3. Any versions that shipped under pilot remain published (that's fine
+3. Any versions that shipped under putitoutthere remain published (that's fine
    — they're real releases).
 4. The next release goes through the old path.
 
@@ -469,7 +469,7 @@ today.
 unscoped `dirsql-{target}` is simpler but breaks existing installations
 that pin those names (unlikely — the main `dirsql` package's
 `optionalDependencies` handles platform resolution transparently).
-Cheapest path: let pilot generate the unscoped convention for new
+Cheapest path: let putitoutthere generate the unscoped convention for new
 releases; consumers who had `@dirsql/cli-linux-x64-gnu` explicitly
 pinned would need to move to `dirsql-linux-x64-gnu`. Probably nobody
 is pinned that way.
