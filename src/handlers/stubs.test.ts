@@ -1,15 +1,14 @@
 /**
- * Each handler in the scaffold throws "not implemented yet" on every
- * method. These tests pin the stub behavior so we notice if the contract
- * shape drifts, and they keep coverage >= 90% until #16–#19 land real
- * implementations.
+ * Tracks which handlers are still scaffold stubs. As #16–#19 land,
+ * each handler graduates out of this file into its own test suite
+ * (e.g., crates.test.ts). Stubs throw a "not implemented" error
+ * pointing at the follow-up issue.
  */
 
 import { describe, expect, it } from 'vitest';
-import { crates } from './crates.js';
 import { npm } from './npm.js';
 import { pypi } from './pypi.js';
-import type { Ctx, PackageConfig } from '../types.js';
+import type { Ctx, Handler, PackageConfig } from '../types.js';
 
 const PKG: PackageConfig = {
   name: 'fixture',
@@ -35,10 +34,9 @@ const CTX: Ctx = {
 };
 
 describe.each([
-  ['crates', crates, /#16/],
   ['pypi', pypi, /#17/],
   ['npm', npm, /#18 \/ #19/],
-] as const)('%s stub', (_name, handler, expectedIssue) => {
+] as const)('%s stub', (_name, handler: Handler, expectedIssue) => {
   it('isPublished throws a not-implemented error pointing at the follow-up issue', () => {
     expect(() => handler.isPublished(PKG, '0.1.0', CTX)).toThrow(expectedIssue);
   });
