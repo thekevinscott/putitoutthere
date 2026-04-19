@@ -1,0 +1,110 @@
+name: Release (dogfood)
+
+# putitoutthere releases itself using itself.
+#
+# On push to main OR manual dispatch:
+#   1. Build the dist bundle.
+#   2. `putitoutthere plan` against the committed putitoutthere.toml
+#      + the current HEAD trailer, emit matrix JSON to GITHUB_OUTPUT.
+#   3. If the plan is non-empty, `putitoutthere publish` does the
+#      npm publish, writeVersion, and tagging.
+#
+# Replaces release-npm.yml's manual `npm publish` with the dogfood
+# path once wave-4 + CLI land.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run: compute plan, skip publish + tag'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm run build
+
+      - name: Rebuild action bundle
+        run: pnpm run build:action
+
+      - id: plan
+        name: putitoutthere plan
+        run: node dist/cli.js plan --json > plan.json
+      - name: expose matrix
+        env:
+          GHO: ${{ github.output }}
+        run: |
+          printf 'matrix=%s\n' "$(cat plan.json)" >> "$GITHUB_OUTPUT"
+          echo "Plan:"
+          cat plan.json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log(m.length? m.map(r=>' - '+r.name+'@'+r.version+' ('+r.target+')').join('\n') : '(nothing to release)');})"
+
+  publish:
+    needs: plan
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm run build
+
+      - name: Rebuild action bundle
+        run: pnpm run build:action
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: putitoutthere publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          node dist/cli.js publish $DRY_RUN_FLAG

@@ -1,0 +1,26 @@
+# Self-release config for putitoutthere itself.
+#
+# Dogfood: putitoutthere's own CI uses `putitoutthere publish` to ship
+# itself, same tool every other consumer uses.
+
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "putitoutthere"
+kind  = "npm"
+path  = "."
+paths = [
+  "src/**/*.ts",
+  "src/**/*.json",
+  "package.json",
+  "pnpm-lock.yaml",
+  "tsconfig.json",
+  "tsconfig.build.json",
+  "action.yml",
+  "dist-action/**",
+  # Docs changes ship a patch too -- they end up in the tarball via
+  # README, and consumers sometimes pin documentation-driven behavior.
+  "README.md",
+]
+access = "public"
