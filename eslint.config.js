@@ -24,6 +24,11 @@ export default tseslint.config(
     files: ['**/*.test.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      // Tests routinely reference method references (e.g.
+      // `expect(handler.publish).toHaveBeenCalled()`) without calling
+      // them; the `this`-binding concern this rule guards against
+      // doesn't apply to vitest mocks.
+      '@typescript-eslint/unbound-method': 'off',
     },
   },
 );

@@ -1,0 +1,10 @@
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "piot-fixture-zzz-python"
+kind = "pypi"
+path = "."
+paths = ["src/**", "pyproject.toml"]
+build = "setuptools"
+first_version = "__VERSION__"

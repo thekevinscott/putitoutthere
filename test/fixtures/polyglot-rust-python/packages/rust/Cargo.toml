@@ -1,0 +1,4 @@
+[package]
+name = "piot-fixture-zzz-rust"
+version = "__VERSION__"
+edition = "2021"
