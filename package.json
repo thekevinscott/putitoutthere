@@ -51,6 +51,8 @@
   },
   "packageManager": "pnpm@9.12.0",
   "dependencies": {
-    "minimatch": "^10.2.5"
+    "minimatch": "^10.2.5",
+    "smol-toml": "^1.6.1",
+    "zod": "^4.3.6"
   }
 }
