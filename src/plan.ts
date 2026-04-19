@@ -13,9 +13,9 @@ import { join } from 'node:path';
 
 import { computeCascade } from './cascade.js';
 import { loadConfig, type Package } from './config.js';
-import { commitBody, diffNames, headCommit, lastTag } from './git.js';
+import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
 import type { Bump, Kind } from './types.js';
-import { parseTrailer } from './trailer.js';
+import { parseTrailer, type Trailer } from './trailer.js';
 import { bump as bumpVersion, firstVersion } from './version.js';
 
 export interface MatrixRow {
@@ -42,7 +42,7 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
 
   // What changed since the last release per package?
   const head = headCommit({ cwd });
-  const trailer = parseTrailer(commitBody(head, { cwd }));
+  const trailer = resolveTrailer(head, cwd);
 
   if (trailer?.bump === 'skip') {
     return Promise.resolve([]);
@@ -233,4 +233,24 @@ function defaultRunsOn(target: string): string {
     return 'ubuntu-24.04-arm';
   }
   return 'ubuntu-latest';
+}
+
+/**
+ * Read the release trailer starting from `head`. If `head` carries no
+ * trailer but is a merge commit, fall back to the non-first-parent — by
+ * GitHub convention that's the feature branch tip whose commit message
+ * the operator actually wrote the trailer into. Without this fallback,
+ * merge-commit merges silently strand every release.
+ */
+function resolveTrailer(head: string, cwd: string): Trailer | null {
+  const direct = parseTrailer(commitBody(head, { cwd }));
+  if (direct) return direct;
+  const parents = commitParents(head, { cwd });
+  if (parents.length < 2) return null;
+  for (let i = 1; i < parents.length; i++) {
+    const parentSha = parents[i]!;
+    const t = parseTrailer(commitBody(parentSha, { cwd }));
+    if (t) return t;
+  }
+  return null;
 }

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   commitBody,
+  commitParents,
   createTag,
   diffNames,
   headCommit,
@@ -72,6 +73,32 @@ describe('commitBody', () => {
 
   it('throws on an unknown sha', () => {
     expect(() => commitBody('abc0123', { cwd: repo })).toThrow();
+  });
+});
+
+describe('commitParents', () => {
+  it('returns one parent for a plain commit', () => {
+    commit('first');
+    const second = commit('second');
+    const parents = commitParents(second, { cwd: repo });
+    expect(parents).toHaveLength(1);
+  });
+
+  it('returns zero parents for the root commit', () => {
+    const root = commit('root');
+    expect(commitParents(root, { cwd: repo })).toEqual([]);
+  });
+
+  it('returns two parents for a merge commit', () => {
+    commit('base');
+    git(['checkout', '-b', 'feat']);
+    const featSha = commit('feature work');
+    git(['checkout', 'main']);
+    git(['merge', '--no-ff', 'feat', '-m', 'Merge feat']);
+    const mergeSha = git(['rev-parse', 'HEAD']);
+    const parents = commitParents(mergeSha, { cwd: repo });
+    expect(parents).toHaveLength(2);
+    expect(parents[1]).toBe(featSha);
   });
 });
 
