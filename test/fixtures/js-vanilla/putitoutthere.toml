@@ -1,0 +1,9 @@
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "piot-fixture-zzz-js-vanilla"
+kind = "npm"
+path = "."
+paths = ["src/**", "package.json"]
+first_version = "__VERSION__"

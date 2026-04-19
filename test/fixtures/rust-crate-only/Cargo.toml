@@ -1,0 +1,7 @@
+[package]
+name = "piot-fixture-zzz-rust"
+version = "__VERSION__"
+edition = "2021"
+license = "MIT"
+description = "Put It Out There canary fixture. Safe to ignore."
+repository = "https://github.com/thekevinscott/put-it-out-there"
