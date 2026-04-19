@@ -10,7 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { plan } from './plan.js';
@@ -22,7 +22,7 @@ function git(args: string[]): string {
 function commit(msg: string, files: Record<string, string> = {}): string {
   for (const [p, c] of Object.entries(files)) {
     const full = join(repo, p);
-    mkdirSync(full.substring(0, full.lastIndexOf('/')), { recursive: true });
+    mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, c, 'utf8');
   }
   git(['add', '-A']);
