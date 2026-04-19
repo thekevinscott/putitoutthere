@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "piot-fixture-zzz-python-sdist"
+version = "__VERSION__"
+description = "Put It Out There canary fixture. Safe to ignore."
+license = { text = "MIT" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

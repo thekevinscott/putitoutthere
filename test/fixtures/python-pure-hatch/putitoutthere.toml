@@ -1,0 +1,10 @@
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "piot-fixture-zzz-python-hatch"
+kind = "pypi"
+path = "."
+paths = ["src/**", "pyproject.toml"]
+build = "hatch"
+first_version = "__VERSION__"
