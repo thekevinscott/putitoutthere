@@ -1,0 +1,19 @@
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "piot-fixture-zzz-rust-napi"
+kind = "crates"
+path = "packages/rust"
+paths = ["packages/rust/**"]
+first_version = "__VERSION__"
+
+[[package]]
+name = "piot-fixture-zzz-napi"
+kind = "npm"
+path = "packages/js"
+paths = ["packages/js/**"]
+build = "napi"
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+depends_on = ["piot-fixture-zzz-rust-napi"]
+first_version = "__VERSION__"

@@ -1,0 +1,8 @@
+[package]
+name = "piot-fixture-zzz-js-bundled"
+version = "__VERSION__"
+edition = "2021"
+
+[[bin]]
+name = "piot-fixture-zzz"
+path = "src/main.rs"

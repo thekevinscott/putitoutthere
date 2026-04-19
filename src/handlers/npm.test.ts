@@ -216,6 +216,39 @@ describe('npm.publish', () => {
     expect(publishCall[1]).toContain('publish');
   });
 
+  it('napi: publishes platform packages before main', async () => {
+    // Set up artifactsRoot with a platform artifact.
+    const artifactsRoot = join(dir, 'artifacts');
+    mkdirSync(join(artifactsRoot, 'demo-js-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-js-linux-x64-gnu', 'demo.node'), Buffer.from('x'));
+
+    const viewCalls: string[] = [];
+    const publishCwds: string[] = [];
+    execMock.mockImplementation((_cmd, args, opts) => {
+      const a = args as string[];
+      const cwd = (opts as { cwd?: string } | undefined)?.cwd ?? '';
+      if (a[0] === 'view') {
+        viewCalls.push(String(a[1]));
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      }
+      if (a[0] === 'publish') publishCwds.push(cwd);
+      return Buffer.from('');
+    });
+
+    const result = await npm.publish(
+      { ...basePkg(), path: dir, build: 'napi', targets: ['linux-x64-gnu'] },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot }),
+    );
+    expect(result.status).toBe('published');
+    // Both platform + main should have been viewed.
+    expect(viewCalls).toContain('demo-npm@0.1.0');
+    expect(viewCalls.some((v) => v.startsWith('demo-npm-linux-x64-gnu'))).toBe(true);
+    // Two publishes: one platform (staging dir) + one main (dir).
+    expect(publishCwds).toHaveLength(2);
+    expect(publishCwds[1]).toBe(dir);
+  });
+
   it('dry-run: does not call npm publish', async () => {
     execMock.mockImplementationOnce(() => {
       throw Object.assign(new Error('404'), { status: 1 });

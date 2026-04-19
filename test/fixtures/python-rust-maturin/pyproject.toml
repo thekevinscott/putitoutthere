@@ -1,0 +1,9 @@
+[build-system]
+requires = ["maturin>=1"]
+build-backend = "maturin"
+
+[project]
+name = "piot-fixture-zzz-py-maturin"
+version = "__VERSION__"
+description = "Put It Out There canary fixture. Safe to ignore."
+license = { text = "MIT" }
