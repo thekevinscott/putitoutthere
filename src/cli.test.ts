@@ -50,11 +50,56 @@ describe('cli', () => {
     expect(stderrChunks.join('')).toMatch(/unknown command/);
   });
 
-  it('exits 2 for commands still unimplemented (init, doctor)', async () => {
-    for (const cmd of ['init', 'doctor']) {
-      const code = await run(['node', 'putitoutthere', cmd]);
-      expect(code).toBe(2);
-      expect(stderrChunks.join('')).toMatch(/not implemented/);
+  it('exits 2 for init (still unimplemented)', async () => {
+    const code = await run(['node', 'putitoutthere', 'init']);
+    expect(code).toBe(2);
+    expect(stderrChunks.join('')).toMatch(/not implemented/);
+  });
+
+  it('runs doctor and exits 1 without config', async () => {
+    const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', tmpdir()]);
+    expect(code).toBe(1);
+  });
+
+  it('doctor: --json emits machine-readable', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', tmpdir(), '--json']);
+    expect(code).toBe(1);
+    const report = JSON.parse(stdoutChunks.join('').trim()) as { ok: boolean };
+    expect(report.ok).toBe(false);
+  });
+
+  it('doctor: exits 0 + prints "All checks passed" with a valid config + auth', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-cli-'));
+    try {
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "a"
+kind  = "crates"
+path  = "a"
+paths = ["**"]
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const stdoutChunks: string[] = [];
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+        stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', dir]);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/All checks passed|✓/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
     }
   });
 });

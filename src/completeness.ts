@@ -82,6 +82,13 @@ export function requireCompleteness(
  * otherwise a human-readable reason.
  */
 function verifyRow(row: MatrixRow, artifactsRoot: string): string | null {
+  // Vanilla npm publishes from the source tree directly; the build
+  // step never produced a separate artifact for this kind, so there's
+  // nothing to check here. Same goes for a missing artifactsRoot --
+  // local `putitoutthere publish` runs (no CI download step) don't
+  // have one.
+  if (row.kind === 'npm' && row.target === 'noarch') return null;
+
   const dir = join(artifactsRoot, row.artifact_name);
   if (!existsSync(dir)) {
     return `missing artifact directory ${row.artifact_name}/`;

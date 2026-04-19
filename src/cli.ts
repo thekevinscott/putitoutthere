@@ -15,6 +15,7 @@
  */
 
 import pkg from '../package.json' with { type: 'json' };
+import { doctor } from './doctor.js';
 import { plan } from './plan.js';
 import { publish } from './publish.js';
 
@@ -144,10 +145,33 @@ export async function run(argv: readonly string[]): Promise<number> {
         /* v8 ignore stop */
         return 0;
       }
+      case 'doctor': {
+        const report = await doctor({
+          cwd: flags.cwd,
+          /* v8 ignore next -- --config test covered via plan arm */
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+        });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(report) + '\n');
+        } else {
+          for (const p of report.packages) {
+            const badge = p.auth === 'missing' ? '✗' : '✓';
+            process.stdout.write(`  ${badge} ${p.name} (${p.kind}) — auth: ${p.auth}\n`);
+          }
+          if (report.issues.length > 0) {
+            process.stdout.write('\nIssues:\n');
+            for (const i of report.issues) {
+              process.stdout.write(`  - ${i}\n`);
+            }
+          } else {
+            process.stdout.write('\nAll checks passed.\n');
+          }
+        }
+        return report.ok ? 0 : 1;
+      }
       case 'init':
-      case 'doctor':
         process.stderr.write(
-          `putitoutthere: '${cmd}' is not implemented yet. See the v0 epic: https://github.com/thekevinscott/put-it-out-there/issues/2\n`,
+          `putitoutthere: 'init' is not implemented yet. See #20.\n`,
         );
         return 2;
       /* v8 ignore next 3 -- exhaustive; 'version' handled above */
