@@ -25,6 +25,7 @@ import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { requireAuth } from './preflight.js';
+import { createGitHubRelease, generateReleaseNotes } from './release.js';
 import type { Ctx, Handler, PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
 
@@ -127,6 +128,24 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
           /* v8 ignore next -- local tests use a throwaway repo without a remote */
           log.warn(`publish: failed to push tag ${tagName}: ${err instanceof Error ? err.message : String(err)}`);
         }
+
+        // Best-effort GitHub Release. Silent no-op when GITHUB_TOKEN or
+        // GITHUB_REPOSITORY aren't set (local / non-Actions runs).
+        try {
+          const body = generateReleaseNotes(name, tagName, { cwd });
+          const release = await createGitHubRelease({
+            tag: tagName,
+            title: `${name} ${version}`,
+            body,
+          });
+          if (release) log.info(`publish: GitHub Release created at ${release.url}`);
+          /* v8 ignore start -- tests don't exercise real GitHub API */
+        } catch (err) {
+          log.warn(
+            `publish: GitHub Release creation failed (tag still published): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        /* v8 ignore stop */
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));

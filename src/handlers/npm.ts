@@ -13,6 +13,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
+import { publishPlatforms, type PlatformPkg } from './npm-platform.js';
 
 type NpmPkg = {
   name: string;
@@ -20,6 +21,8 @@ type NpmPkg = {
   npm?: string;
   access?: 'public' | 'restricted';
   tag?: string;
+  build?: 'napi' | 'bundled-cli';
+  targets?: readonly string[];
 };
 
 function npmNameFor(pkg: NpmPkg): string {
@@ -72,6 +75,26 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   }
   if (ctx.dryRun) {
     return { status: 'skipped' };
+  }
+
+  // napi / bundled-cli: publish platform packages first, then rewrite
+  // the main package.json to add optionalDependencies, then fall through
+  // to the normal main-package publish path below. §13.7.
+  if (
+    (pkg.build === 'napi' || pkg.build === 'bundled-cli') &&
+    pkg.targets !== undefined &&
+    pkg.targets.length > 0
+  ) {
+    const platformPkg: PlatformPkg = {
+      name: pkg.name,
+      path: pkg.path,
+      npm: pkg.npm,
+      access: pkg.access,
+      tag: pkg.tag,
+      build: pkg.build,
+      targets: pkg.targets,
+    };
+    await publishPlatforms(platformPkg, version, ctx);
   }
 
   const hasOidc = Boolean(

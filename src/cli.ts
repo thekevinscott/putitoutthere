@@ -16,6 +16,7 @@
 
 import pkg from '../package.json' with { type: 'json' };
 import { doctor } from './doctor.js';
+import { init } from './init.js';
 import { plan } from './plan.js';
 import { publish } from './publish.js';
 
@@ -45,6 +46,8 @@ function printUsage(): void {
       '  --config <path>   path to putitoutthere.toml',
       '  --dry-run         publish without side effects',
       '  --json            emit machine-readable output (plan only)',
+      '  --force           overwrite putitoutthere.toml on init',
+      '  --cadence <mode>  init: immediate (default) or scheduled',
       '',
       'See https://github.com/thekevinscott/put-it-out-there for docs.',
       '',
@@ -57,10 +60,12 @@ interface ParsedFlags {
   config?: string | undefined;
   dryRun: boolean;
   json: boolean;
+  force: boolean;
+  cadence?: 'immediate' | 'scheduled';
 }
 
 function parseFlags(argv: readonly string[]): ParsedFlags {
-  const out: ParsedFlags = { cwd: process.cwd(), dryRun: false, json: false };
+  const out: ParsedFlags = { cwd: process.cwd(), dryRun: false, json: false, force: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     /* v8 ignore next -- ?? fallback is for malformed argv; tests always pass the value */
@@ -68,6 +73,12 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--config') out.config = argv[++i];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--json') out.json = true;
+    else if (a === '--force') out.force = true;
+    else if (a === '--cadence') {
+      const v = argv[++i];
+      /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
+      if (v === 'immediate' || v === 'scheduled') out.cadence = v;
+    }
   }
   return out;
 }
@@ -169,11 +180,21 @@ export async function run(argv: readonly string[]): Promise<number> {
         }
         return report.ok ? 0 : 1;
       }
-      case 'init':
-        process.stderr.write(
-          `putitoutthere: 'init' is not implemented yet. See #20.\n`,
-        );
-        return 2;
+      case 'init': {
+        const r = init({
+          cwd: flags.cwd,
+          force: flags.force,
+          ...(flags.cadence !== undefined ? { cadence: flags.cadence } : {}),
+        });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(r) + '\n');
+        } else {
+          for (const f of r.wrote) process.stdout.write(`  wrote    ${f}\n`);
+          for (const f of r.backedUp) process.stdout.write(`  backed up ${f} -> ${f}.bak\n`);
+          for (const f of r.skipped) process.stdout.write(`  skipped  ${f} (exists; use --force)\n`);
+        }
+        return 0;
+      }
       /* v8 ignore next 3 -- exhaustive; 'version' handled above */
       case 'version':
         return 0;

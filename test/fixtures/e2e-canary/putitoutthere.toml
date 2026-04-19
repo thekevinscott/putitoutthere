@@ -1,0 +1,12 @@
+# Canary fixture for E2E runs. Publishes to the piot-fixture-zzz-* family.
+# See test/e2e/README.md.
+
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "piot-fixture-zzz-cli"
+kind = "npm"
+path = "."
+paths = ["**"]
+first_version = "__VERSION__"
