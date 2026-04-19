@@ -18,14 +18,14 @@ Per-repo audits of thekevinscott's projects that might adopt `putitoutthere`. Ea
 
 ## Status
 
-| Repo          | Status  | Doc                               |
-|---------------|---------|-----------------------------------|
-| dirsql        | Done    | `notes/4-17-2026-initial-plan/migrations/dirsql.md` (reference) |
-| UpscalerJS    | Draft   | [`UpscalerJS.md`](./UpscalerJS.md) |
-| curtaincall   | Draft   | [`curtaincall.md`](./curtaincall.md) |
-| karat         | Draft   | [`karat.md`](./karat.md)          |
-| skillet       | Draft   | [`skillet.md`](./skillet.md)      |
-| cachetta      | Draft   | [`cachetta.md`](./cachetta.md)    |
-| gbnf          | Draft   | [`gbnf.md`](./gbnf.md)            |
+| Repo          | Status   | Doc                               |
+|---------------|----------|-----------------------------------|
+| dirsql        | Done     | `notes/4-17-2026-initial-plan/migrations/dirsql.md` (reference) |
+| UpscalerJS    | Audited  | [`UpscalerJS.md`](./UpscalerJS.md) |
+| curtaincall   | Audited  | [`curtaincall.md`](./curtaincall.md) |
+| karat         | Audited  | [`karat.md`](./karat.md)          |
+| skillet       | Audited  | [`skillet.md`](./skillet.md)      |
+| cachetta      | Audited  | [`cachetta.md`](./cachetta.md)    |
+| gbnf          | Audited  | [`gbnf.md`](./gbnf.md)            |
 
-"Draft" = skeleton in place with TODO markers. Each section needs a first-pass from cloning the repo and reading `.github/workflows/` + release tooling.
+"Audited" = workflows, manifests, and repo structure have been read via public GitHub; the doc captures the observed shape and the target `putitoutthere.toml`. A small number of TODOs remain — all are details the repo owner resolves at cutover (e.g. "is this package really scoped `@thekevinscott/...` on npm today?"), not audit blockers.
