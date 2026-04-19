@@ -1,0 +1,36 @@
+name: Actionlint
+
+# Lints every workflow file under .github/workflows/. Catches:
+#   - Bad action references
+#   - Expression syntax errors
+#   - Job/step dependency typos
+#   - Shell script issues inside `run:` blocks (via shellcheck)
+#
+# Workflow YAML drift is expensive to debug -- the feedback loop is
+# push → wait for runner → wait for step. Lint locally first.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+
+concurrency:
+  group: actionlint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        run: |
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color

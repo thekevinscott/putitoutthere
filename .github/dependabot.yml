@@ -1,0 +1,39 @@
+# Keeps our deps + actions fresh. PRs are grouped so we don't drown in
+# single-dep bumps every week; security updates go out as separate PRs
+# immediately.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      runtime-dependencies:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: deps
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      gha:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: ci
+      include: scope
