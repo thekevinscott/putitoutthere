@@ -345,3 +345,69 @@ describe('plan: matrix row shape', () => {
     expect(mac.runs_on).toBe('macos-latest');
   });
 });
+
+describe('plan: merge-commit trailer resolution', () => {
+  it('reads the trailer from the feature parent when HEAD is a merge commit', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    // Seed main + tag so the cascade has something to diff against.
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+    git(['tag', 'lib-rust-v0.1.0']);
+    git(['tag', 'lib-python-v0.1.0']);
+
+    // Feature branch: change + trailer on the feature tip.
+    git(['checkout', '-b', 'feat']);
+    commit('change rust\n\nrelease: minor', {
+      'packages/rust/lib.rs': '// rust v2',
+    });
+
+    // Back to main, merge with --no-ff so a merge commit is created.
+    // The merge commit body has no trailer; the trailer lives on the
+    // second parent. parseTrailer on HEAD would return null.
+    git(['checkout', 'main']);
+    git(['merge', '--no-ff', 'feat', '-m', 'Merge pull request #1 from feat']);
+
+    const matrix = await plan({ cwd: repo });
+    // Without the fallback this would be empty (cascade runs, but the
+    // bump defaults to patch → 0.1.1). With the fallback we see 0.2.0.
+    const rust = matrix.find((r) => r.name === 'lib-rust');
+    expect(rust?.version).toBe('0.2.0');
+  });
+
+  it('still prefers the HEAD trailer when present (non-merge commits)', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+    git(['tag', 'lib-rust-v0.1.0']);
+    git(['tag', 'lib-python-v0.1.0']);
+    commit('change\n\nrelease: major', { 'packages/rust/lib.rs': '// rust v2' });
+
+    const matrix = await plan({ cwd: repo });
+    const rust = matrix.find((r) => r.name === 'lib-rust');
+    expect(rust?.version).toBe('1.0.0');
+  });
+
+  it('returns null when neither HEAD nor merge parents carry a trailer', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+    git(['tag', 'lib-rust-v0.1.0']);
+    git(['tag', 'lib-python-v0.1.0']);
+
+    git(['checkout', '-b', 'feat']);
+    commit('change rust (no trailer)', { 'packages/rust/lib.rs': '// rust v2' });
+    git(['checkout', 'main']);
+    git(['merge', '--no-ff', 'feat', '-m', 'Merge feat']);
+
+    const matrix = await plan({ cwd: repo });
+    // Default bump = patch.
+    const rust = matrix.find((r) => r.name === 'lib-rust');
+    expect(rust?.version).toBe('0.1.1');
+  });
+});

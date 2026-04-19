@@ -52,6 +52,14 @@ export function commitBody(sha: string, opts: GitOptions = {}): string {
   return run(['log', '-1', '--format=%B', sha], opts);
 }
 
+export function commitParents(sha: string, opts: GitOptions = {}): string[] {
+  // %P = parent SHAs, space-separated. Merge commits have ≥2;
+  // plain commits have 1; root commits have 0.
+  const out = run(['log', '-1', '--format=%P', sha], opts);
+  if (out === '') return [];
+  return out.split(' ').filter((s) => s.length > 0);
+}
+
 export function diffNames(
   from: string,
   to: string,
