@@ -63,8 +63,10 @@ jobs:
         env:
           GHO: ${{ github.output }}
         run: |
+          # shellcheck disable=SC2002
           printf 'matrix=%s\n' "$(cat plan.json)" >> "$GITHUB_OUTPUT"
           echo "Plan:"
+          # shellcheck disable=SC2002
           cat plan.json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log(m.length? m.map(r=>' - '+r.name+'@'+r.version+' ('+r.target+')').join('\n') : '(nothing to release)');})"
 
   publish:
