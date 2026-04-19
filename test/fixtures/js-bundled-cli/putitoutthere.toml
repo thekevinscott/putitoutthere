@@ -1,0 +1,17 @@
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "piot-fixture-zzz-js-bundled"
+kind = "npm"
+path = "."
+paths = ["src/**", "Cargo.toml", "package.json"]
+build = "bundled-cli"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+first_version = "__VERSION__"

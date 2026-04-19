@@ -33,8 +33,10 @@ export interface LoggerOptions {
 }
 
 export function createLogger(opts: LoggerOptions = {}): Logger {
+  // Default to stderr so stdout stays clean for machine-readable
+  // output from `plan --json` and `publish --json`.
   /* v8 ignore next -- tests always pass an explicit stream */
-  const stream: Writable = opts.stream ?? process.stdout;
+  const stream: Writable = opts.stream ?? process.stderr;
   const pretty = opts.pretty ?? isTty(stream);
   /* v8 ignore next -- 'info' default vs explicit level both exercised; the ?? branch is one of those */
   const minLevel = LEVEL_ORDER[opts.level ?? 'info'];

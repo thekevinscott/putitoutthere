@@ -1,24 +1,38 @@
 name: E2E
 
-# E2E tests hit real registries (TestPyPI, putitoutthere-canary on npm/crates.io)
-# and are deliberately NOT run on every push -- per plan.md §23.4 they
-# exist to be run by the agent during development. This workflow is
-# workflow_dispatch-only so the runner is available but won't flake CI.
+# E2E tests publish to the piot-fixture-zzz-* canary family on
+# real registries (npm, PyPI, crates.io). Gated to workflow_dispatch
+# only: they cost real API calls, produce real artifacts, and are meant
+# to be run manually when we want to verify end-to-end.
 #
-# Full harness + canary account setup: #28.
+# Default dispatch: dry-run only (no actual publishing).
+# Set `publish=true` in the dispatch UI to flip PIOT_E2E_PUBLISH=1 and
+# publish for real. See test/e2e/README.md.
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Actually publish canary versions to real registries"
+        type: boolean
+        default: false
 
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: e2e
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install pnpm
         run: npm install -g pnpm@9
@@ -27,4 +41,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run e2e suite
+        env:
+          PIOT_E2E_PUBLISH: ${{ inputs.publish && '1' || '0' }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: pnpm run test:e2e

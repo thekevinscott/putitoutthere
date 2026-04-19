@@ -5,43 +5,15 @@
  * pointing at the follow-up issue.
  */
 
-import { describe, expect, it } from 'vitest';
-import { npm } from './npm.js';
-import type { Ctx, Handler, PackageConfig } from '../types.js';
+/**
+ * Every handler now has its own test file; no stubs remain. This
+ * placeholder keeps the file present (referenced in docs) but empty.
+ */
 
-const PKG: PackageConfig = {
-  name: 'fixture',
-  kind: 'crates',
-  path: '.',
-  paths: ['**/*'],
-};
+import { describe, it } from 'vitest';
 
-const CTX: Ctx = {
-  cwd: '.',
-  dryRun: true,
-  log: {
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-  },
-  env: {},
-  artifacts: {
-    get: () => '',
-    has: () => false,
-  },
-};
-
-describe.each([
-  ['npm', npm, /#18 \/ #19/],
-] as const)('%s stub', (_name, handler: Handler, expectedIssue) => {
-  it('isPublished throws a not-implemented error pointing at the follow-up issue', () => {
-    expect(() => handler.isPublished(PKG, '0.1.0', CTX)).toThrow(expectedIssue);
-  });
-  it('writeVersion throws a not-implemented error pointing at the follow-up issue', () => {
-    expect(() => handler.writeVersion(PKG, '0.1.0', CTX)).toThrow(expectedIssue);
-  });
-  it('publish throws a not-implemented error pointing at the follow-up issue', () => {
-    expect(() => handler.publish(PKG, '0.1.0', CTX)).toThrow(expectedIssue);
+describe('handler stubs', () => {
+  it('all handlers are implemented', () => {
+    // Intentional placeholder.
   });
 });
