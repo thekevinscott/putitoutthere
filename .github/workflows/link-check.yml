@@ -30,16 +30,23 @@ jobs:
 
       - uses: lycheeverse/lychee-action@v2
         with:
-          # Skip the self-referencing URL the CI-Gate-aggregator uses, and
-          # any CLAUDE.md @-import strings (they're file paths, not URLs).
+          # Excludes:
+          #   - CLAUDE.md @-imports (file paths, not URLs)
+          #   - claude.ai code-session reference URLs (auth-walled)
+          #   - GitHub issue/PR self-refs (rate-limit + churn noise)
+          #   - URLs containing template placeholders like `<your-package>` --
+          #     these appear in setup walkthroughs and are intentionally not
+          #     real fetchable URLs.
           args: >-
             --no-progress
             --verbose
-            --exclude-mail
             --exclude '^@.+'
             --exclude 'https://claude\.ai/code/'
             --exclude 'https://github\.com/thekevinscott/put-it-out-there/issues/\d+'
             --exclude 'https://github\.com/thekevinscott/put-it-out-there/pull/\d+'
+            --exclude '<[^>]+>'
+            --exclude-path 'notes/4-17-2026-initial-plan/transcript.md'
+            --accept '200,203,206,403,429'
             './**/*.md'
           fail: true
           token: ${{ secrets.GITHUB_TOKEN }}

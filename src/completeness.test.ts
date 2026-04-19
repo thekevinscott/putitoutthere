@@ -8,7 +8,7 @@
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -29,7 +29,7 @@ afterEach(() => {
 
 function write(relative: string, contents = 'x'): void {
   const full = join(root, relative);
-  mkdirSync(full.substring(0, full.lastIndexOf('/')), { recursive: true });
+  mkdirSync(dirname(full), { recursive: true });
   writeFileSync(full, contents, 'utf8');
 }
 
@@ -145,6 +145,24 @@ describe('checkCompleteness: single package, issues', () => {
       root,
     );
     expect(out.get('demo')?.missing[0]?.reason).toMatch(/shape|whl/i);
+  });
+
+  it('reports a pypi sdist artifact with no .tar.gz as wrong-shape', () => {
+    write('demo-sdist/junk.txt');
+    const out = checkCompleteness(
+      [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
+      root,
+    );
+    expect(out.get('demo')?.missing[0]?.reason).toMatch(/sdist|tar\.gz/i);
+  });
+
+  it('reports an npm main artifact with no package.json as wrong-shape', () => {
+    write('demo-npm-main/junk.txt');
+    const out = checkCompleteness(
+      [row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' })],
+      root,
+    );
+    expect(out.get('demo')?.missing[0]?.reason).toMatch(/package\.json/i);
   });
 });
 

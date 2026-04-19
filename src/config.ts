@@ -112,9 +112,11 @@ export function parseConfig(toml: string): Config {
   let raw: unknown;
   try {
     raw = parseToml(toml);
+    /* v8 ignore start -- smol-toml always throws Error; non-Error rethrow path is defensive */
   } catch (err) {
     throw new Error(`putitoutthere.toml: invalid TOML: ${err instanceof Error ? err.message : String(err)}`);
   }
+  /* v8 ignore stop */
   const result = FILE.safeParse(raw);
   if (!result.success) {
     throw new Error(`putitoutthere.toml: ${formatZodError(result.error)}`);
@@ -131,11 +133,13 @@ export function loadConfig(path: string): Config {
   let text: string;
   try {
     text = readFileSync(path, 'utf8');
+    /* v8 ignore start -- node's fs throws Error; non-Error rethrow is defensive */
   } catch (err) {
     throw new Error(
       `putitoutthere.toml: cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+  /* v8 ignore stop */
   return parseConfig(text);
 }
 
@@ -154,6 +158,7 @@ function assertUniqueNames(packages: readonly Package[]): void {
 function formatZodError(error: ZodError): string {
   return error.issues
     .map((issue) => {
+      /* v8 ignore next -- TOML always parses to an object root; '<root>' label can't fire */
       const path = issue.path.length > 0 ? issue.path.join('.') : '<root>';
       return `${path}: ${issue.message}`;
     })

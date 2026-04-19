@@ -45,6 +45,7 @@ export function computeCascade(
     changed = false;
     for (const p of packages) {
       if (cascaded.has(p.name)) continue;
+      /* v8 ignore next -- depends_on default is always [] from the Zod schema */
       const deps = p.depends_on ?? [];
       if (deps.some((d) => cascaded.has(d))) {
         cascaded.add(p.name);
@@ -85,6 +86,7 @@ export function assertNoCycles(packages: readonly Package[]): void {
     // byName, so this branch is unreachable under normal use. Defensive.
     /* v8 ignore next */
     if (!node) return;
+    /* v8 ignore next -- depends_on default is always [] from the Zod schema */
     for (const dep of node.depends_on ?? []) {
       if (!byName.has(dep)) {
         throw new Error(

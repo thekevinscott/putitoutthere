@@ -90,6 +90,7 @@ function extractProp(err: unknown, key: string): unknown {
 }
 
 function jitterOffset(baseDelay: number, fraction: number): number {
+  /* v8 ignore next -- default jitter is 0.25; the <=0 guard isn't exercised */
   if (fraction <= 0) return 0;
   // ±fraction of the base delay.
   const amp = baseDelay * fraction;

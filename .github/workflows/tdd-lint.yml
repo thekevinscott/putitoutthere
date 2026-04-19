@@ -36,6 +36,7 @@ jobs:
           if [ -n "$non_test_changed" ] && [ -z "$tests_changed" ]; then
             echo "::error::src/ changes detected without matching *.test.ts changes."
             echo "PR modifies:"
+            # shellcheck disable=SC2001
             echo "$non_test_changed" | sed 's/^/  /'
             echo ""
             echo "Write a failing test first (red) then implement it (green)."
