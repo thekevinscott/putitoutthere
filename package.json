@@ -37,7 +37,7 @@
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config test/integration/vitest.integration.config.ts",
-    "test:e2e": "echo 'e2e suite lands in tests/e2e/ via #28' && exit 0"
+    "test:e2e": "pnpm run build && vitest run --config test/e2e/vitest.e2e.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.12.0",

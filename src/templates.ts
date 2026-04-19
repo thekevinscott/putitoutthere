@@ -17,7 +17,10 @@ export type Cadence = 'immediate' | 'scheduled';
 
 export const TOML_SKELETON = `# Put It Out There — release orchestration config.
 # Docs: https://github.com/thekevinscott/put-it-out-there
-#
+
+[putitoutthere]
+version = 1
+
 # Declare one [[package]] block per releasable artifact. Example:
 #
 # [[package]]
@@ -26,8 +29,6 @@ export const TOML_SKELETON = `# Put It Out There — release orchestration confi
 # path = "crates/my-crate"
 # paths = ["crates/my-crate/**", "Cargo.toml", "Cargo.lock"]
 # first_version = "0.1.0"
-
-version = 1
 `;
 
 export const AGENTS_MD = `# Release signaling for Put It Out There
