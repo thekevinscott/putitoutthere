@@ -176,7 +176,7 @@ function authCheckFor(
       kind: pkg.kind,
       check: 'auth',
       status: 'fail',
-      detail: `needs ${row.envVar} or OIDC`,
+      detail: `needs ${row.acceptedEnvVars.join(' or ')} or OIDC`,
     };
   }
   return { package: pkg.name, kind: pkg.kind, check: 'auth', status: 'ok', detail: row.via };
