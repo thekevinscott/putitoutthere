@@ -7,7 +7,7 @@
 [extend]
 useDefault = true
 
-[[allowlists]]
+[allowlist]
 description = "Synthetic test fixtures — tokens are Buffer.from() constructs, not real secrets"
 paths = [
   '''(^|/)src/.*\.test\.ts$''',
