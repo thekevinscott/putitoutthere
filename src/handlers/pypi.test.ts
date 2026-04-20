@@ -319,18 +319,18 @@ describe('pypi.publish', () => {
 
   it('mints a short-lived token via OIDC when PYPI_API_TOKEN is unset', async () => {
     stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
-    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.endsWith('/pypi/demo-pkg/0.1.0/json')) {
-        return new Response('{}', { status: 404 });
+        return Promise.resolve(new Response('{}', { status: 404 }));
       }
       if (url.includes('/oidc/request-token') && url.includes('audience=pypi')) {
-        return new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 });
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
       }
       if (url.endsWith('/_/oidc/mint-token')) {
-        return new Response(JSON.stringify({ token: 'pypi-short-lived' }), { status: 200 });
+        return Promise.resolve(new Response(JSON.stringify({ token: 'pypi-short-lived' }), { status: 200 }));
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
     });
     execMock.mockReturnValueOnce(Buffer.from(''));
 
