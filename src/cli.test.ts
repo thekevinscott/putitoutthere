@@ -167,6 +167,43 @@ paths = ["**"]
       delete process.env.CARGO_REGISTRY_TOKEN;
     }
   });
+
+  // #89: `--artifacts` walks the plan and prints a present-vs-missing table.
+  it('doctor: --artifacts prints a table with expected layout for missing rows', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-cli-artifacts-'));
+    try {
+      mkdirSync(join(dir, 'rust'), { recursive: true });
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-rs"
+kind  = "crates"
+path  = "rust"
+paths = ["rust/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', dir, '--artifacts']);
+      expect(code).toBe(1);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/Artifacts:/);
+      expect(out).toMatch(/✗ lib-rs-crate.*expected: artifacts\/lib-rs-crate\/lib-rs-0\.1\.0\.crate/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
+    }
+  });
 });
 
 describe('cli: plan', () => {
