@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   checkCompleteness,
+  expectedLayout,
   requireCompleteness,
   type MatrixRow,
 } from './completeness.js';
@@ -242,6 +243,73 @@ describe('requireCompleteness', () => {
     const err = captureError(() => requireCompleteness(matrix, root));
     expect(err).toMatch(/x86_64-unknown-linux-gnu/);
     expect(err).toMatch(/aarch64-unknown-linux-gnu/);
+  });
+
+  // #89: users hit the completeness check with no hint about where the
+  // artifact directory should live. Surface the naming contract inline.
+  it('error message includes the expected artifact layout for each missing row', () => {
+    const matrix: MatrixRow[] = [
+      row({
+        name: 'demo',
+        kind: 'pypi',
+        target: 'x86_64-unknown-linux-gnu',
+        version: '0.1.0',
+        artifact_name: 'demo-wheel-x86_64-unknown-linux-gnu',
+      }),
+    ];
+    const err = captureError(() => requireCompleteness(matrix, root));
+    expect(err).toMatch(/expected: artifacts\/demo-wheel-x86_64-unknown-linux-gnu\/demo-0\.1\.0-/);
+    expect(err).toMatch(/plan\.md §12\.4/);
+  });
+});
+
+describe('expectedLayout', () => {
+  it('crates → {dir}/{name}-{version}.crate', () => {
+    expect(
+      expectedLayout(row({ name: 'foo', kind: 'crates', version: '1.2.3', artifact_name: 'foo-crate' })),
+    ).toBe('artifacts/foo-crate/foo-1.2.3.crate');
+  });
+
+  it('pypi sdist → {dir}/{name}-{version}.tar.gz', () => {
+    expect(
+      expectedLayout(
+        row({ name: 'foo', kind: 'pypi', target: 'sdist', version: '1.2.3', artifact_name: 'foo-sdist' }),
+      ),
+    ).toBe('artifacts/foo-sdist/foo-1.2.3.tar.gz');
+  });
+
+  it('pypi wheel → {dir}/{name}-{version}-<python-tags>.whl', () => {
+    expect(
+      expectedLayout(
+        row({
+          name: 'foo',
+          kind: 'pypi',
+          target: 'x86_64-unknown-linux-gnu',
+          version: '1.2.3',
+          artifact_name: 'foo-wheel-linux',
+        }),
+      ),
+    ).toBe('artifacts/foo-wheel-linux/foo-1.2.3-<python-tags>.whl');
+  });
+
+  it('npm main → {dir}/package.json', () => {
+    expect(
+      expectedLayout(row({ name: 'foo', kind: 'npm', target: 'main', artifact_name: 'foo-main' })),
+    ).toBe('artifacts/foo-main/package.json');
+  });
+
+  it('npm noarch → {dir}/package.json', () => {
+    expect(
+      expectedLayout(row({ name: 'foo', kind: 'npm', target: 'noarch', artifact_name: 'foo-pkg' })),
+    ).toBe('artifacts/foo-pkg/package.json');
+  });
+
+  it('npm platform → {dir}/<binary-or-bundle>', () => {
+    expect(
+      expectedLayout(
+        row({ name: 'foo', kind: 'npm', target: 'linux-x64-gnu', artifact_name: 'foo-linux-x64' }),
+      ),
+    ).toBe('artifacts/foo-linux-x64/<binary-or-bundle>');
   });
 });
 

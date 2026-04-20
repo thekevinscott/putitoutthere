@@ -47,6 +47,7 @@ function printUsage(): void {
       '  --dry-run         publish without side effects',
       '  --json            emit machine-readable output (plan only)',
       '  --force           overwrite putitoutthere.toml on init',
+      '  --artifacts       doctor: also check artifact completeness',
       '  --cadence <mode>  init: immediate (default) or scheduled',
       '',
       'See https://github.com/thekevinscott/put-it-out-there for docs.',
@@ -61,11 +62,18 @@ interface ParsedFlags {
   dryRun: boolean;
   json: boolean;
   force: boolean;
+  artifacts: boolean;
   cadence?: 'immediate' | 'scheduled';
 }
 
 function parseFlags(argv: readonly string[]): ParsedFlags {
-  const out: ParsedFlags = { cwd: process.cwd(), dryRun: false, json: false, force: false };
+  const out: ParsedFlags = {
+    cwd: process.cwd(),
+    dryRun: false,
+    json: false,
+    force: false,
+    artifacts: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     /* v8 ignore next -- ?? fallback is for malformed argv; tests always pass the value */
@@ -74,6 +82,7 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--json') out.json = true;
     else if (a === '--force') out.force = true;
+    else if (a === '--artifacts') out.artifacts = true;
     else if (a === '--cadence') {
       const v = argv[++i];
       /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
@@ -161,6 +170,7 @@ export async function run(argv: readonly string[]): Promise<number> {
           cwd: flags.cwd,
           /* v8 ignore next -- --config test covered via plan arm */
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+          checkArtifacts: flags.artifacts,
         });
         if (flags.json) {
           process.stdout.write(JSON.stringify(report) + '\n');
@@ -168,6 +178,14 @@ export async function run(argv: readonly string[]): Promise<number> {
           for (const p of report.packages) {
             const badge = p.auth === 'missing' ? '✗' : '✓';
             process.stdout.write(`  ${badge} ${p.name} (${p.kind}) — auth: ${p.auth}\n`);
+          }
+          if (report.artifacts && report.artifacts.length > 0) {
+            process.stdout.write('\nArtifacts:\n');
+            for (const a of report.artifacts) {
+              const badge = a.present ? '✓' : '✗';
+              const suffix = a.present ? '' : `  (expected: ${a.expected})`;
+              process.stdout.write(`  ${badge} ${a.artifact_name} (${a.target})${suffix}\n`);
+            }
           }
           if (report.issues.length > 0) {
             process.stdout.write('\nIssues:\n');
