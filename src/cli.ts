@@ -18,11 +18,12 @@ import pkg from '../package.json' with { type: 'json' };
 import { doctor } from './doctor.js';
 import { init } from './init.js';
 import { plan } from './plan.js';
+import { runPreflight } from './preflight-run.js';
 import { publish } from './publish.js';
 
 const VERSION = pkg.version;
 
-const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'version'] as const;
+const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'preflight', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
 
 function isCommand(value: string): value is Command {
@@ -39,6 +40,7 @@ function printUsage(): void {
       '  plan       Compute and emit the release plan',
       '  publish    Execute the plan',
       '  doctor     Validate config + handlers + auth (#23)',
+      '  preflight  Run every pre-publish check without side effects (#93)',
       '  version    Print CLI version',
       '',
       'Options:',
@@ -48,6 +50,7 @@ function printUsage(): void {
       '  --json            emit machine-readable output (plan only)',
       '  --force           overwrite putitoutthere.toml on init',
       '  --artifacts       doctor: also check artifact completeness',
+      '  --all             preflight: include non-cascaded packages too',
       '  --cadence <mode>  init: immediate (default) or scheduled',
       '',
       'See https://github.com/thekevinscott/put-it-out-there for docs.',
@@ -63,6 +66,7 @@ interface ParsedFlags {
   json: boolean;
   force: boolean;
   artifacts: boolean;
+  all: boolean;
   cadence?: 'immediate' | 'scheduled';
 }
 
@@ -73,6 +77,7 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     json: false,
     force: false,
     artifacts: false,
+    all: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -83,6 +88,7 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--json') out.json = true;
     else if (a === '--force') out.force = true;
     else if (a === '--artifacts') out.artifacts = true;
+    else if (a === '--all') out.all = true;
     else if (a === '--cadence') {
       const v = argv[++i];
       /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
@@ -195,6 +201,35 @@ export async function run(argv: readonly string[]): Promise<number> {
           } else {
             process.stdout.write('\nAll checks passed.\n');
           }
+        }
+        return report.ok ? 0 : 1;
+      }
+      case 'preflight': {
+        const report = await runPreflight({
+          cwd: flags.cwd,
+          /* v8 ignore next -- --config already covered via plan arm */
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+          all: flags.all,
+        });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(report) + '\n');
+        } else {
+          if (report.checks.length === 0) {
+            process.stdout.write('preflight: no packages in scope\n');
+          } else {
+            for (const c of report.checks) {
+              const badge = c.status === 'ok' ? '✓' : c.status === 'skip' ? '·' : '✗';
+              const detail = c.detail ? `  — ${c.detail}` : '';
+              process.stdout.write(`  ${badge} ${c.package} (${c.kind}) ${c.check}${detail}\n`);
+            }
+          }
+          if (report.issues.length > 0) {
+            process.stdout.write('\nIssues:\n');
+            for (const i of report.issues) {
+              process.stdout.write(`  - ${i}\n`);
+            }
+          }
+          process.stdout.write(report.ok ? '\npreflight: ok\n' : '\npreflight: fail\n');
         }
         return report.ok ? 0 : 1;
       }

@@ -168,6 +168,139 @@ paths = ["**"]
     }
   });
 
+  // #93: `preflight` runs every pre-publish check against plan packages.
+  it('preflight: runs every check and exits 1 when any fail', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-cli-'));
+    try {
+      mkdirSync(join(dir, 'rust'), { recursive: true });
+      writeFileSync(
+        join(dir, 'rust/Cargo.toml'),
+        '[package]\nname = "lib-rs"\nversion = "0.0.0"\n',
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-rs"
+kind  = "crates"
+path  = "rust"
+paths = ["rust/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', dir]);
+      // Artifact dir is not staged → fails.
+      expect(code).toBe(1);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/✗ lib-rs.*artifact/);
+      expect(out).toMatch(/preflight: fail/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
+    }
+  });
+
+  it('preflight: --json emits machine-readable + exit 0 when all checks pass', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-cli-json-'));
+    try {
+      mkdirSync(join(dir, 'js'), { recursive: true });
+      writeFileSync(
+        join(dir, 'js/package.json'),
+        JSON.stringify({ name: 'lib-js', version: '0.0.0', repository: 'x' }),
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-js"
+kind  = "npm"
+path  = "js"
+paths = ["js/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.NODE_AUTH_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', dir, '--json']);
+      expect(code).toBe(0);
+      const report = JSON.parse(stdoutChunks.join('').trim()) as { ok: boolean };
+      expect(report.ok).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.NODE_AUTH_TOKEN;
+    }
+  });
+
+  it('preflight: prints Issues section when top-level issues exist', async () => {
+    // No putitoutthere.toml → config issue → non-empty issues array.
+    const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', tmpdir()]);
+    expect(code).toBe(1);
+    const out = stdoutChunks.join('');
+    expect(out).toMatch(/Issues:/);
+    expect(out).toMatch(/config:/);
+  });
+
+  it('preflight: no packages in scope prints a notice', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-cli-empty-'));
+    try {
+      mkdirSync(join(dir, 'rust'), { recursive: true });
+      writeFileSync(
+        join(dir, 'rust/Cargo.toml'),
+        '[package]\nname = "lib-rs"\nversion = "0.0.0"\n',
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-rs"
+kind  = "crates"
+path  = "rust"
+paths = ["rust/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+      // Tag to make plan empty.
+      execFileSync('git', ['tag', 'lib-rs-v0.1.0'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', dir]);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/preflight: no packages in scope/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
+    }
+  });
+
   // #89: `--artifacts` walks the plan and prints a present-vs-missing table.
   it('doctor: --artifacts prints a table with expected layout for missing rows', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'doctor-cli-artifacts-'));
