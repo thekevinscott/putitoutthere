@@ -486,6 +486,143 @@ paths = ["packages/ts/**"]
     expect(json.ok).toBe(true);
   });
 
+  it('token inspect: decodes a PyPI-format token from --token', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-1' };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+      '--json',
+    ]);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+      registry: string;
+      identifier: Record<string, unknown>;
+    };
+    expect(parsed.registry).toBe('pypi');
+    expect(parsed.identifier.user).toBe('u-1');
+  });
+
+  it('token inspect: prints human output by default', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-1' };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+    ]);
+    expect(code).toBe(0);
+    const out = stdoutChunks.join('');
+    expect(out).toMatch(/registry: pypi/);
+    expect(out).toMatch(/restrictions: \(none/);
+  });
+
+  it('token inspect: exits 1 and complains when no token is provided', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    // Ensure env has no recognizable token values leaking from a prior test.
+    const prev = {
+      TWINE_PASSWORD: process.env.TWINE_PASSWORD,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      PYPI_API_TOKEN: process.env.PYPI_API_TOKEN,
+    };
+    delete process.env.TWINE_PASSWORD;
+    delete process.env.NPM_TOKEN;
+    delete process.env.PYPI_API_TOKEN;
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'inspect']);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/no token provided/);
+    } finally {
+      if (prev.TWINE_PASSWORD !== undefined) process.env.TWINE_PASSWORD = prev.TWINE_PASSWORD;
+      if (prev.NPM_TOKEN !== undefined) process.env.NPM_TOKEN = prev.NPM_TOKEN;
+      if (prev.PYPI_API_TOKEN !== undefined) process.env.PYPI_API_TOKEN = prev.PYPI_API_TOKEN;
+    }
+  });
+
+  it('token inspect: rejects unknown subcommand', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'token', 'wat']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/unknown subcommand/);
+  });
+
+  it('token inspect: missing subcommand is rejected', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'token']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/missing subcommand/);
+  });
+
+  it('token inspect: auto-reads the sole pypi token from env when --token omitted', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-env' };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+    const prev = process.env.TWINE_PASSWORD;
+    process.env.TWINE_PASSWORD = token;
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'inspect', '--json']);
+      expect(code).toBe(0);
+      const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+        identifier: Record<string, unknown>;
+      };
+      expect(parsed.identifier.user).toBe('u-env');
+    } finally {
+      if (prev === undefined) delete process.env.TWINE_PASSWORD;
+      else process.env.TWINE_PASSWORD = prev;
+    }
+  });
+
   it('surfaces errors with a non-zero exit and a friendly message', async () => {
     const stderrChunks: string[] = [];
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
