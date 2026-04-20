@@ -249,3 +249,26 @@ describe('publish: handler failure', () => {
     expect(git(['tag', '-l'])).toBe('');
   });
 });
+
+describe('publish: pkg.path resolution', () => {
+  it('passes absolute pkg.path to handlers regardless of process.cwd()', async () => {
+    // Handlers do `readFileSync(join(pkg.path, 'Cargo.toml'))` which resolves
+    // against process.cwd(). Anchoring pkg.path to opts.cwd at the top of
+    // publish() ensures e2e harnesses / monorepo orchestrators that invoke
+    // the CLI with `--cwd /elsewhere` get the right path.
+    const seen: { writeVersion?: string; publish?: string } = {};
+    const handler = makeHandler({
+      writeVersion: vi.fn().mockImplementation(async (pkg: { path: string }) => {
+        seen.writeVersion = pkg.path;
+        return Promise.resolve([]);
+      }),
+      publish: vi.fn().mockImplementation(async (pkg: { path: string }) => {
+        seen.publish = pkg.path;
+        return Promise.resolve({ status: 'published' as const });
+      }),
+    });
+    await publish({ cwd: repo, handlerFor: () => handler });
+    expect(seen.writeVersion).toBe(join(repo, 'packages/ts'));
+    expect(seen.publish).toBe(join(repo, 'packages/ts'));
+  });
+});
