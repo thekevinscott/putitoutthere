@@ -13,7 +13,14 @@
 import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { canaryVersion, makeE2ERepo, runPiot, shouldActuallyPublish, type E2ERepo } from './harness.js';
+import {
+  canaryVersion,
+  makeE2ERepo,
+  runPiot,
+  shouldActuallyPublish,
+  stageArtifacts,
+  type E2ERepo,
+} from './harness.js';
 
 let repo: E2ERepo;
 
@@ -71,6 +78,9 @@ describe('e2e: publish (live registry)', () => {
   it.skipIf(!shouldActuallyPublish())(
     'publishes to all three registries and creates tags (requires PIOT_E2E_PUBLISH=1)',
     () => {
+      // Build real artifacts so the completeness check (§13.2) passes.
+      // See harness.stageArtifacts for the per-kind details.
+      stageArtifacts(repo);
       const out = runPiot(['publish', '--json'], repo.cwd, {
         NODE_AUTH_TOKEN: process.env.NPM_TOKEN ?? '',
         PYPI_API_TOKEN: process.env.PYPI_API_TOKEN ?? '',

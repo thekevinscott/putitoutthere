@@ -9,7 +9,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,6 +90,55 @@ export function runPiot(args: readonly string[], cwd: string, env: NodeJS.Proces
 /** True when the opt-in env var is set. Gates destructive registry ops. */
 export function shouldActuallyPublish(): boolean {
   return process.env.PIOT_E2E_PUBLISH === '1';
+}
+
+/**
+ * Build real artifacts for the canary packages and stage them under
+ * `{repo.cwd}/artifacts/{artifact_name}/`, matching the shape that
+ * `src/completeness.ts` expects in the matrix-CI publish flow (§13.2).
+ *
+ * - crates: `cargo package` emits `.crate` into `target/package/`.
+ * - pypi sdist: `python -m build --sdist` emits `.tar.gz` into `dist/`.
+ * - npm (vanilla/noarch): exempt from the completeness check; publishes
+ *   straight from the source tree, so no staging needed.
+ *
+ * Runs on demand (not from makeE2ERepo) because the build tools aren't
+ * needed for plan/dry-run paths and we don't want to slow those down.
+ */
+export function stageArtifacts(repo: E2ERepo): void {
+  const artifactsRoot = join(repo.cwd, 'artifacts');
+  mkdirSync(artifactsRoot, { recursive: true });
+
+  // crates: cargo package produces a .crate in target/package/.
+  const rustDir = join(repo.cwd, 'rust');
+  execFileSync(
+    'cargo',
+    ['package', '--allow-dirty', '--no-verify', '--manifest-path', join(rustDir, 'Cargo.toml')],
+    { cwd: repo.cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  const crateStage = join(artifactsRoot, 'piot-fixture-zzz-rust-crate');
+  mkdirSync(crateStage, { recursive: true });
+  const cratePackageDir = join(rustDir, 'target', 'package');
+  for (const entry of readdirSync(cratePackageDir)) {
+    if (entry.endsWith('.crate')) {
+      cpSync(join(cratePackageDir, entry), join(crateStage, entry));
+    }
+  }
+
+  // pypi sdist: `python -m build --sdist` drops .tar.gz into dist/.
+  const pyDir = join(repo.cwd, 'python');
+  execFileSync('python', ['-m', 'build', '--sdist', '--outdir', 'dist'], {
+    cwd: pyDir,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const sdistStage = join(artifactsRoot, 'piot-fixture-zzz-python-sdist');
+  mkdirSync(sdistStage, { recursive: true });
+  const pyDist = join(pyDir, 'dist');
+  for (const entry of readdirSync(pyDist)) {
+    if (entry.endsWith('.tar.gz')) {
+      cpSync(join(pyDist, entry), join(sdistStage, entry));
+    }
+  }
 }
 
 /* ---------------------------- internals ---------------------------- */

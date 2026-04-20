@@ -42,11 +42,22 @@ jobs:
           node-version: "24"
           registry-url: 'https://registry.npmjs.org'
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install pnpm
         run: npm install -g pnpm@9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The canary fixture stages a pypi sdist via `python -m build` and
+      # uploads it via `twine` (see handlers/pypi.ts). Rust toolchain is
+      # pre-installed on ubuntu-latest; we only need the Python toolchain
+      # + build/twine on PATH.
+      - name: Install pypi build tools
+        run: python -m pip install --upgrade build twine
 
       # Trusted Publishing / OIDC:
       # - npm: putitoutthere's npm handler auto-detects OIDC via
