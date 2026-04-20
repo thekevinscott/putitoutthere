@@ -3,7 +3,7 @@
 **Date**: 2026-04-20
 **Incoming agent**: you
 **Outgoing agent**: Claude (session `019gAtCifLd7xCCCfGRpNPZ9`)
-**Companion audit**: [`docs/audits/2026-04-20-canary-e2e-audit.md`](../audits/2026-04-20-canary-e2e-audit.md) (also see the PR that adds this handoff)
+**Companion audit**: [`notes/audits/2026-04-20-canary-e2e-audit.md`](../audits/2026-04-20-canary-e2e-audit.md) (also see the PR that adds this handoff)
 
 ## The final goal
 
