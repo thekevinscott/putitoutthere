@@ -16,7 +16,7 @@
  * Issue #22.
  */
 
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type Package } from './config.js';
 import { checkCompleteness, type MatrixRow as CompletenessRow } from './completeness.js';
@@ -47,6 +47,14 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   /* v8 ignore next -- tests always set explicit paths */
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
   const config = loadConfig(cfgPath);
+  // Handlers do `readFileSync(join(pkg.path, 'Cargo.toml'))` etc, which
+  // resolves against process.cwd(). For self-publish that matches the
+  // repo root, but tools that invoke the CLI with `--cwd` (e2e harness,
+  // monorepo orchestrators) live elsewhere. Anchor pkg.path to opts.cwd
+  // up front so every downstream fs op points at the right tree.
+  for (const p of config.packages) {
+    if (!isAbsolute(p.path)) p.path = resolve(cwd, p.path);
+  }
   /* v8 ignore next -- tests always inject handlerFor */
   const handlerFor = opts.handlerFor ?? defaultHandlerFor;
   const log = createLogger();
