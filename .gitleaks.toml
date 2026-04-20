@@ -1,0 +1,15 @@
+# Extends the bundled gitleaks default ruleset.
+# Only addition: an allowlist for synthetic tokens used in unit tests. Every
+# `pypi-<base64>` / `npm_<chars>` fixture in `src/token.test.ts` and
+# `src/cli.test.ts` is constructed inline from `Buffer.from(...)` — there is
+# no real credential material in these files, but the default PyPI and npm
+# detectors fire on the prefix shape.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test fixtures — tokens are Buffer.from() constructs, not real secrets"
+paths = [
+  '''(^|/)src/.*\.test\.ts$''',
+  '''(^|/)test/.*\.ts$''',
+]

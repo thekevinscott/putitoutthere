@@ -20,11 +20,17 @@ import { init } from './init.js';
 import { plan } from './plan.js';
 import { runPreflight } from './preflight-run.js';
 import { publish } from './publish.js';
+import { inspect, type Registry } from './token.js';
 
 const VERSION = pkg.version;
 
-const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'preflight', 'version'] as const;
+const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'preflight', 'token', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
+
+const REGISTRIES = ['crates', 'npm', 'pypi'] as const satisfies readonly Registry[];
+function isRegistry(v: string): v is Registry {
+  return (REGISTRIES as readonly string[]).includes(v);
+}
 
 function isCommand(value: string): value is Command {
   return (COMMANDS as readonly string[]).includes(value);
@@ -41,6 +47,7 @@ function printUsage(): void {
       '  publish    Execute the plan',
       '  doctor     Validate config + handlers + auth (#23)',
       '  preflight  Run every pre-publish check without side effects (#93)',
+      '  token      Inspect registry tokens (pypi/npm/crates)',
       '  version    Print CLI version',
       '',
       'Options:',
@@ -52,6 +59,8 @@ function printUsage(): void {
       '  --artifacts       doctor: also check artifact completeness',
       '  --all             preflight: include non-cascaded packages too',
       '  --cadence <mode>  init: immediate (default) or scheduled',
+      '  --token <value>   token inspect: token value (else read from env)',
+      '  --registry <r>    token inspect: crates|npm|pypi',
       '',
       'See https://github.com/thekevinscott/put-it-out-there for docs.',
       '',
@@ -68,6 +77,8 @@ interface ParsedFlags {
   artifacts: boolean;
   all: boolean;
   cadence?: 'immediate' | 'scheduled';
+  token?: string;
+  registry?: Registry;
 }
 
 function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -93,6 +104,12 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
       const v = argv[++i];
       /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
       if (v === 'immediate' || v === 'scheduled') out.cadence = v;
+    } else if (a === '--token') {
+      const v = argv[++i];
+      if (v !== undefined) out.token = v;
+    } else if (a === '--registry') {
+      const v = argv[++i];
+      if (v !== undefined && isRegistry(v)) out.registry = v;
     }
   }
   return out;
@@ -233,6 +250,35 @@ export async function run(argv: readonly string[]): Promise<number> {
         }
         return report.ok ? 0 : 1;
       }
+      case 'token': {
+        const [sub, ...subRest] = rest;
+        if (sub !== 'inspect') {
+          process.stderr.write(
+            sub === undefined
+              ? 'putitoutthere token: missing subcommand (expected "inspect")\n'
+              : `putitoutthere token: unknown subcommand: ${sub}\n`,
+          );
+          return 1;
+        }
+        const subFlags = parseFlags(subRest);
+        const tokenValue = subFlags.token ?? envTokenFor(subFlags.registry);
+        if (tokenValue === undefined) {
+          process.stderr.write(
+            'putitoutthere token inspect: no token provided. Pass --token or set a registry env var.\n',
+          );
+          return 1;
+        }
+        const result = inspect({
+          token: tokenValue,
+          ...(subFlags.registry !== undefined ? { registry: subFlags.registry } : {}),
+        });
+        if (subFlags.json) {
+          process.stdout.write(JSON.stringify(result) + '\n');
+        } else {
+          printInspectHuman(result);
+        }
+        return 'error' in result ? 1 : 0;
+      }
       case 'init': {
         const r = init({
           cwd: flags.cwd,
@@ -258,6 +304,59 @@ export async function run(argv: readonly string[]): Promise<number> {
     );
     return 1;
   }
+}
+
+/**
+ * Pick a token from the environment by matching value format, not by
+ * name. `pypi-` prefix → pypi; `npm_` prefix → npm. crates.io tokens
+ * have no identifying prefix, so we refuse to guess and require the
+ * caller to pass `--token` in that case.
+ *
+ * If `registry` is specified, return the first matching value (or
+ * `undefined` if none). If it is not specified, accept exactly one
+ * prefix-identifiable match across the environment.
+ */
+function envTokenFor(registry: Registry | undefined): string | undefined {
+  const env = process.env;
+  const matches: Array<{ registry: Registry; value: string }> = [];
+  for (const v of Object.values(env)) {
+    if (typeof v !== 'string') continue;
+    if (v.startsWith('pypi-')) matches.push({ registry: 'pypi', value: v });
+    else if (v.startsWith('npm_')) matches.push({ registry: 'npm', value: v });
+  }
+  if (registry === undefined) {
+    if (matches.length === 1) return matches[0]!.value;
+    return undefined;
+  }
+  const filtered = matches.filter((m) => m.registry === registry);
+  return filtered[0]?.value;
+}
+
+function printInspectHuman(result: ReturnType<typeof inspect>): void {
+  if ('error' in result) {
+    process.stderr.write(
+      `inspect failed (${result.registry}, digest=${result.source_digest}): ${result.error}\n`,
+    );
+    return;
+  }
+  const lines = [`registry: ${result.registry}`, `digest:   ${result.source_digest}`];
+  if (result.registry === 'pypi') {
+    lines.push(`format:   ${result.format}`);
+    lines.push(`identifier: ${JSON.stringify(result.identifier)}`);
+    if (result.restrictions.length === 0) {
+      lines.push('restrictions: (none — full-scope token)');
+    } else {
+      lines.push('restrictions:');
+      for (const r of result.restrictions) {
+        lines.push(`  - ${JSON.stringify(r)}`);
+      }
+    }
+    lines.push(`expired:  ${String(result.expired)}`);
+  } else {
+    lines.push(`status:   ${result.status}`);
+    lines.push(`note:     ${result.note}`);
+  }
+  process.stdout.write(lines.join('\n') + '\n');
 }
 
 // Entry point when invoked as `putitoutthere` or `node dist/cli.js`.
