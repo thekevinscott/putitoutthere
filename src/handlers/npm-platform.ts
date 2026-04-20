@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Ctx } from '../types.js';
+import { nonEmpty } from '../env.js';
 
 export interface PlatformPkg {
   name: string;
@@ -160,7 +161,8 @@ function synthesizePlatformPackage(
 
 function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
   const hasOidc = Boolean(
-    ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN ?? process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
+      nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
   );
   const access = pkg.access ?? 'public';
   const args: string[] = ['publish', `--access=${access}`];

@@ -22,6 +22,7 @@ import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
+import { nonEmpty } from '../env.js';
 
 const REGISTRY = 'https://pypi.org';
 
@@ -99,7 +100,12 @@ async function publishImpl(
   const token = explicitToken ?? (await mintOidcToken(ctx));
   if (!token) {
     throw new Error(
-      'pypi: PYPI_API_TOKEN not set and OIDC trusted publishing is not configured; see plan.md §16.4.2',
+      [
+        'pypi: no auth available. Either:',
+        '  - set PYPI_API_TOKEN (classic API token), or',
+        '  - enable trusted publishing: add `permissions.id-token: write` to the job and register a pending publisher on pypi.org.',
+        'See plan.md §16.4.2 for setup.',
+      ].join('\n'),
     );
   }
 
@@ -130,10 +136,6 @@ async function publishImpl(
 
 function pypiNameFor(pkg: { name: string; pypi?: string }): string {
   return pkg.pypi ?? pkg.name;
-}
-
-function nonEmpty(v: string | undefined): string | undefined {
-  return v && v.length > 0 ? v : undefined;
 }
 
 /**

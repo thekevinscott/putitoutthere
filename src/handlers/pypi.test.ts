@@ -367,4 +367,19 @@ describe('pypi.publish', () => {
     ).rejects.toThrow(/PYPI_API_TOKEN|OIDC/i);
     fetchSpy.mockRestore();
   });
+
+  it('auth-missing error mentions both the token path and trusted publishing', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/PYPI_API_TOKEN[\s\S]+id-token: write/);
+    fetchSpy.mockRestore();
+  });
 });

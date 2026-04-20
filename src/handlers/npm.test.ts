@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { npm } from './npm.js';
+import { isBootstrapPublish, npm } from './npm.js';
 import type { Ctx } from '../types.js';
 
 vi.mock('node:child_process', async (orig) => {
@@ -359,5 +359,171 @@ describe('npm.publish', () => {
         makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
       ),
     ).rejects.toThrow(/EAUTH|npm publish/i);
+  });
+
+  it('treats empty ACTIONS_ID_TOKEN_REQUEST_TOKEN as unset (falls through to process.env)', async () => {
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockReturnValueOnce(Buffer.from(''));
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-real';
+    await npm.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({
+        cwd: dir,
+        env: {
+          NODE_AUTH_TOKEN: 'tok',
+          // Empty string must not shadow the populated process.env value.
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: '',
+        },
+      }),
+    );
+    expect(execMock.mock.calls[1]![1]).toContain('--provenance');
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  });
+
+  it('on auth-failure with OIDC + package-not-on-registry, surfaces the bootstrap-paradox hint', async () => {
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('npm exit 1'), {
+          stderr: Buffer.from('npm error code E401\nnpm error need auth'),
+        });
+      });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/does not exist on registry.npmjs.org|Bootstrap/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
+  it('bootstrap-paradox check: unscoped names hit /<name> on the registry', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    expect(await isBootstrapPublish('demo-npm')).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://registry.npmjs.org/demo-npm',
+      expect.any(Object) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('bootstrap-paradox check: scoped names keep `@`, encode `/`', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await isBootstrapPublish('@scope/name');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://registry.npmjs.org/@scope%2Fname',
+      expect.any(Object) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('bootstrap-paradox check: 200 means package exists, not a bootstrap case', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{"name":"demo-npm"}', { status: 200 }),
+    );
+    expect(await isBootstrapPublish('demo-npm')).toBe(false);
+    fetchSpy.mockRestore();
+  });
+
+  it('on auth-failure without OIDC, does not emit bootstrap hint (normal EAUTH path)', async () => {
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('npm exit 1'), {
+          stderr: Buffer.from('npm error code E401\nnpm error need auth'),
+        });
+      });
+    process.env.NODE_AUTH_TOKEN = 'tok';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
+      ),
+    ).rejects.toThrow(/npm publish failed/);
+  });
+
+  it('on non-auth publish failure with OIDC on, does not emit bootstrap hint (non-auth fall-through)', async () => {
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('npm exit 1'), {
+          stderr: Buffer.from('ENETUNREACH: registry unreachable'),
+        });
+      });
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/ENETUNREACH|npm publish/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  });
+
+  it('on publish failure with empty stderr, does not emit bootstrap hint', async () => {
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockImplementationOnce(() => {
+        // No stderr attached at all — looksLikeAuthFailure should bail early.
+        throw new Error('opaque exit');
+      });
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/npm publish failed/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  });
+
+  it('on auth-failure with OIDC but package already exists on registry, does not emit bootstrap hint', async () => {
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('npm exit 1'), {
+          stderr: Buffer.from('npm error code E403'),
+        });
+      });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{"name":"demo-npm"}', { status: 200 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/npm publish failed/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
   });
 });
