@@ -63,6 +63,12 @@ jobs:
       #   crate).
       - name: Decide publish mode
         id: mode
+        # push to main      → publish=1 (live canary).
+        # pull_request      → publish=0 (dry-run; no registry side effects).
+        # workflow_dispatch → publish=inputs.publish (default false).
+        # "Re-run failed jobs" preserves the original event, so a re-run of a
+        # push-triggered failure stays publish=1. A fresh UI dispatch with
+        # defaults does NOT publish — toggle the input to true for that.
         run: |
           if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
             echo "publish=1" >> "$GITHUB_OUTPUT"
