@@ -188,8 +188,13 @@ function looksLikeAuthFailure(stderr: string | undefined): boolean {
  */
 export async function isBootstrapPublish(name: string): Promise<boolean> {
   try {
+    // The npm registry expects scoped packages as `@scope%2Fname`: the
+    // `@` prefix stays literal, `/` stays percent-encoded. Unscoped
+    // names have no `@` at all. `replaceAll` keeps the transform safe
+    // against pathological input even though encodeURIComponent can
+    // only produce `%40` at the start of a valid npm name.
     const res = await fetch(
-      `https://registry.npmjs.org/${encodeURIComponent(name).replace('%40', '@')}`,
+      `https://registry.npmjs.org/${encodeURIComponent(name).replaceAll('%40', '@')}`,
       { method: 'GET', headers: { 'user-agent': 'putitoutthere/0.0.1' } },
     );
     return res.status === 404;

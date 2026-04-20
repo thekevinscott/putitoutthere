@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { npm } from './npm.js';
+import { isBootstrapPublish, npm } from './npm.js';
 import type { Ctx } from '../types.js';
 
 vi.mock('node:child_process', async (orig) => {
@@ -406,6 +406,38 @@ describe('npm.publish', () => {
       ),
     ).rejects.toThrow(/does not exist on registry.npmjs.org|Bootstrap/);
     delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
+  it('bootstrap-paradox check: unscoped names hit /<name> on the registry', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    expect(await isBootstrapPublish('demo-npm')).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://registry.npmjs.org/demo-npm',
+      expect.any(Object) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('bootstrap-paradox check: scoped names keep `@`, encode `/`', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await isBootstrapPublish('@scope/name');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://registry.npmjs.org/@scope%2Fname',
+      expect.any(Object) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('bootstrap-paradox check: 200 means package exists, not a bootstrap case', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{"name":"demo-npm"}', { status: 200 }),
+    );
+    expect(await isBootstrapPublish('demo-npm')).toBe(false);
     fetchSpy.mockRestore();
   });
 
