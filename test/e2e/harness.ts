@@ -63,16 +63,28 @@ export function canaryVersion(): string {
 }
 
 /**
- * Run the CLI against `cwd` and return stdout. stderr is piped
- * through so test failures print context.
+ * Run the CLI against `cwd` and return stdout. On non-zero exit,
+ * throw with stderr folded into the message so vitest's failure
+ * report actually shows the CLI's error (handler stderr, etc.)
+ * instead of a bare "Command failed".
  */
 export function runPiot(args: readonly string[], cwd: string, env: NodeJS.ProcessEnv = {}): string {
-  const out = execFileSync('node', [CLI, ...args, '--cwd', cwd], {
-    env: { ...process.env, ...env },
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  return out;
+  try {
+    return execFileSync('node', [CLI, ...args, '--cwd', cwd], {
+      env: { ...process.env, ...env },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number | null };
+    const stdout = Buffer.isBuffer(e.stdout) ? e.stdout.toString('utf8') : (e.stdout ?? '');
+    const stderr = Buffer.isBuffer(e.stderr) ? e.stderr.toString('utf8') : (e.stderr ?? '');
+    const base = err instanceof Error ? err.message : String(err);
+    const parts = [base];
+    if (stderr.trim()) parts.push(`--- stderr ---\n${stderr.trim()}`);
+    if (stdout.trim()) parts.push(`--- stdout ---\n${stdout.trim()}`);
+    throw new Error(parts.join('\n'));
+  }
 }
 
 /** True when the opt-in env var is set. Gates destructive registry ops. */
