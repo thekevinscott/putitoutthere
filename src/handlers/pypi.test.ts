@@ -316,4 +316,70 @@ describe('pypi.publish', () => {
     ).rejects.toThrow(/unauthorized|twine/i);
     fetchSpy.mockRestore();
   });
+
+  it('mints a short-lived token via OIDC when PYPI_API_TOKEN is unset', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.endsWith('/pypi/demo-pkg/0.1.0/json')) {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      if (url.includes('/oidc/request-token') && url.includes('audience=pypi')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ token: 'pypi-short-lived' }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    execMock.mockReturnValueOnce(Buffer.from(''));
+
+    const result = await pypi.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({
+        cwd: dir,
+        artifactsRoot,
+        env: {
+          ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+        },
+      }),
+    );
+
+    expect(result.status).toBe('published');
+    const env = (execMock.mock.calls[0]![2] as { env: Record<string, string> }).env;
+    expect(env.TWINE_PASSWORD).toBe('pypi-short-lived');
+    fetchSpy.mockRestore();
+  });
+
+  it('treats empty PYPI_API_TOKEN as unset (falls through to OIDC, then errors when OIDC unavailable)', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot, env: { PYPI_API_TOKEN: '' } }),
+      ),
+    ).rejects.toThrow(/PYPI_API_TOKEN|OIDC/i);
+    fetchSpy.mockRestore();
+  });
+
+  it('auth-missing error mentions both the token path and trusted publishing', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/PYPI_API_TOKEN[\s\S]+id-token: write/);
+    fetchSpy.mockRestore();
+  });
 });

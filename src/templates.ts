@@ -135,6 +135,11 @@ const PUBLISH_JOB = `  publish:
           command: publish
           dry_run: \${{ inputs.dry_run || 'false' }}
         env:
+          # NODE_AUTH_TOKEN (not NPM_TOKEN) matches the .npmrc template that
+          # actions/setup-node writes when registry-url is set. putitoutthere's
+          # preflight also accepts NPM_TOKEN as a fallback, but npm itself
+          # reads this name. Store your npm secret under any name — we map it
+          # here.
           NODE_AUTH_TOKEN: \${{ secrets.NPM_TOKEN }}
           CARGO_REGISTRY_TOKEN: \${{ secrets.CARGO_TOKEN }}
           PYPI_API_TOKEN: \${{ secrets.PYPI_API_TOKEN }}

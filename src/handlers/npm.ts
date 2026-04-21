@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { publishPlatforms, type PlatformPkg } from './npm-platform.js';
+import { nonEmpty } from '../env.js';
 
 type NpmPkg = {
   name: string;
@@ -104,7 +105,8 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   }
 
   const hasOidc = Boolean(
-    ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN ?? process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
+      nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
   );
 
   // npm provenance requires a `repository` field in package.json
@@ -131,6 +133,23 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   } catch (err) {
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
+    const name = npmNameFor(pkg);
+    // npm trusted publishing (OIDC) requires the package to already
+    // exist on the registry; the first-ever publish must go through a
+    // token. Detect that exact shape — auth failure + OIDC in play +
+    // package not on the registry — and surface a bootstrap hint
+    // before the generic stderr dump.
+    if (hasOidc && looksLikeAuthFailure(stderr)) {
+      if (await isBootstrapPublish(name)) {
+        throw new Error(
+          [
+            `npm publish: package "${name}" does not exist on registry.npmjs.org yet.`,
+            'npm trusted publishing requires the package to exist first.',
+            'Bootstrap by setting NODE_AUTH_TOKEN for the first publish; you can migrate to trusted publishing afterwards.',
+          ].join('\n'),
+        );
+      }
+    }
     throw new Error(`npm publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`);
   }
 
@@ -151,6 +170,39 @@ function assertRepositoryField(path: string): void {
       'npm publish --provenance requires a `repository` field in package.json',
     );
   }
+}
+
+/** Heuristic match on npm's auth-related stderr shapes. */
+function looksLikeAuthFailure(stderr: string | undefined): boolean {
+  if (!stderr) return false;
+  return /\b(E401|E403|ENEEDAUTH|EAUTH|need auth|not authori[sz]ed|unauthorized|forbidden)\b/i.test(
+    stderr,
+  );
+}
+
+/**
+ * Returns true when the package does not yet exist on the registry
+ * (any 404-equivalent from the packument endpoint). Non-404 responses
+ * — including network failures — return false so we don't misclassify
+ * transient errors as the bootstrap case.
+ */
+export async function isBootstrapPublish(name: string): Promise<boolean> {
+  try {
+    // The npm registry expects scoped packages as `@scope%2Fname`: the
+    // `@` prefix stays literal, `/` stays percent-encoded. Unscoped
+    // names have no `@` at all. `replaceAll` keeps the transform safe
+    // against pathological input even though encodeURIComponent can
+    // only produce `%40` at the start of a valid npm name.
+    const res = await fetch(
+      `https://registry.npmjs.org/${encodeURIComponent(name).replaceAll('%40', '@')}`,
+      { method: 'GET', headers: { 'user-agent': 'putitoutthere/0.0.1' } },
+    );
+    return res.status === 404;
+    /* v8 ignore start -- network failure is tested separately; returning false keeps us from misclassifying */
+  } catch {
+    return false;
+  }
+  /* v8 ignore stop */
 }
 
 /** 2 / 4 / tab. Defaults to 2 when undetectable. */

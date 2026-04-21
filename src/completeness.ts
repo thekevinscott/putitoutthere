@@ -26,6 +26,29 @@ export interface MatrixRow {
   artifact_name: string; // deterministic, emitted by `pilot plan`
 }
 
+/**
+ * Human-facing hint for where a row's artifact is expected to live.
+ * Lives alongside error messages so users don't have to cross-reference
+ * plan.md §12.4 to figure out the naming contract.
+ */
+export function expectedLayout(row: MatrixRow): string {
+  const dir = `artifacts/${row.artifact_name}`;
+  switch (row.kind) {
+    case 'crates':
+      return `${dir}/${row.name}-${row.version}.crate`;
+    case 'pypi':
+      if (row.target === 'sdist') {
+        return `${dir}/${row.name}-${row.version}.tar.gz`;
+      }
+      return `${dir}/${row.name}-${row.version}-<python-tags>.whl`;
+    case 'npm':
+      if (row.target === 'main' || row.target === 'noarch') {
+        return `${dir}/package.json`;
+      }
+      return `${dir}/<binary-or-bundle>`;
+  }
+}
+
 export interface MissingArtifact {
   row: MatrixRow;
   reason: string;
@@ -68,9 +91,11 @@ export function requireCompleteness(
     lines.push(`  ${pkg}:`);
     for (const m of result.missing) {
       lines.push(`    - target=${m.row.target} artifact=${m.row.artifact_name}: ${m.reason}`);
+      lines.push(`      expected: ${expectedLayout(m.row)}`);
     }
   }
   lines.push('');
+  lines.push('Naming contract: plan.md §12.4 (artifacts/{artifact_name}/).');
   lines.push('No side effects performed. Fix the build and re-run.');
   throw new Error(lines.join('\n'));
 }

@@ -5,6 +5,7 @@
  * Issue #23. Plan: §21.1, §16.4.7.
  */
 
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -118,5 +119,187 @@ paths = ["**"]
     const result = await doctor({ cwd: repo });
     expect(result.ok).toBe(true);
     expect(result.packages).toHaveLength(2);
+  });
+});
+
+/* --------------------- #89: artifact completeness --------------------- */
+
+function initGit(at: string): void {
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: at });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: at });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: at });
+  execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: at });
+  execFileSync('git', ['add', '-A'], { cwd: at });
+  execFileSync('git', ['commit', '-q', '-m', 'initial'], { cwd: at });
+}
+
+describe('doctor: checkArtifacts', () => {
+  const CFG = `
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-rs"
+kind  = "crates"
+path  = "rust"
+paths = ["rust/**"]
+first_version = "0.1.0"
+`;
+
+  it('reports a missing artifact directory with the expected layout', async () => {
+    mkdirSync(join(repo, 'rust'), { recursive: true });
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    initGit(repo);
+
+    const result = await doctor({ cwd: repo, checkArtifacts: true });
+    expect(result.ok).toBe(false);
+    expect(result.artifacts).toEqual([
+      {
+        package: 'lib-rs',
+        target: 'noarch',
+        artifact_name: 'lib-rs-crate',
+        present: false,
+        expected: 'artifacts/lib-rs-crate/lib-rs-0.1.0.crate',
+      },
+    ]);
+    expect(result.issues.join('\n')).toMatch(
+      /artifacts: lib-rs.*expected artifacts\/lib-rs-crate\/lib-rs-0\.1\.0\.crate/,
+    );
+  });
+
+  it('reports ok when every expected artifact dir is staged', async () => {
+    mkdirSync(join(repo, 'rust'), { recursive: true });
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    initGit(repo);
+    mkdirSync(join(repo, 'artifacts', 'lib-rs-crate'), { recursive: true });
+
+    const result = await doctor({ cwd: repo, checkArtifacts: true });
+    expect(result.ok).toBe(true);
+    expect(result.artifacts?.[0]?.present).toBe(true);
+  });
+
+  it('reports a soft issue when plan cannot run (no git state)', async () => {
+    mkdirSync(join(repo, 'rust'), { recursive: true });
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    // no git init → plan throws on headCommit
+
+    const result = await doctor({ cwd: repo, checkArtifacts: true });
+    expect(result.ok).toBe(false);
+    expect(result.issues.join('\n')).toMatch(/artifacts: cannot walk plan/);
+  });
+
+  it('skips npm-vanilla rows (publishes from source tree, no artifact dir)', async () => {
+    mkdirSync(join(repo, 'js'), { recursive: true });
+    writeFileSync(join(repo, 'js/package.json'), '{}', 'utf8');
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-js"
+kind  = "npm"
+path  = "js"
+paths = ["js/**"]
+first_version = "0.1.0"
+`);
+    process.env.NODE_AUTH_TOKEN = 'tok';
+    initGit(repo);
+
+    const result = await doctor({ cwd: repo, checkArtifacts: true });
+    expect(result.ok).toBe(true);
+    expect(result.artifacts).toEqual([]);
+  });
+
+  it('checkArtifacts off → artifacts field is undefined', async () => {
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    const result = await doctor({ cwd: repo });
+    expect(result.artifacts).toBeUndefined();
+  });
+});
+
+describe('doctor --deep', () => {
+  it('flags a PyPI scope mismatch as an issue', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`);
+    process.env.PYPI_API_TOKEN = 'pypi-fake';
+    mkdirSync(join(repo, 'packages/py'), { recursive: true });
+
+    const result = await doctor({
+      cwd: repo,
+      deep: true,
+      inspectFn: () => Promise.resolve({
+        registry: 'pypi',
+        source_digest: 'abc',
+        format: 'macaroon',
+        identifier: { user: 'u-1' },
+        restrictions: [{ type: 'ProjectNames', names: ['other-pkg'] }],
+        expired: false,
+      }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => /scope:.+ship-me/.test(i))).toBe(true);
+    const entry = result.packages.find((p) => p.name === 'ship-me');
+    expect(entry?.scope_match).toBe('mismatch');
+    expect(entry?.scope).toContain('other-pkg');
+  });
+
+  it('passes when scope matches the config', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`);
+    process.env.PYPI_API_TOKEN = 'pypi-fake';
+    mkdirSync(join(repo, 'packages/py'), { recursive: true });
+
+    const result = await doctor({
+      cwd: repo,
+      deep: true,
+      inspectFn: () => Promise.resolve({
+        registry: 'pypi',
+        source_digest: 'abc',
+        format: 'macaroon',
+        identifier: { user: 'u-1' },
+        restrictions: [{ type: 'ProjectNames', names: ['ship-me'] }],
+        expired: false,
+      }),
+    });
+    expect(result.ok).toBe(true);
+    const entry = result.packages.find((p) => p.name === 'ship-me');
+    expect(entry?.scope_match).toBe('ok');
+  });
+
+  it('skips packages without a resolvable token (auth=missing)', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`);
+    // No PYPI_API_TOKEN set. `--deep` should not call inspect at all, and
+    // scope should not be populated.
+    const result = await doctor({
+      cwd: repo,
+      deep: true,
+      inspectFn: () => Promise.reject(new Error('inspect should not be called when auth is missing')),
+    });
+    const entry = result.packages.find((p) => p.name === 'ship-me');
+    expect(entry?.scope).toBeUndefined();
   });
 });

@@ -27,6 +27,7 @@ const AUTH_VARS = [
   'CARGO_REGISTRY_TOKEN',
   'PYPI_API_TOKEN',
   'NODE_AUTH_TOKEN',
+  'NPM_TOKEN',
 ];
 
 beforeEach(() => {
@@ -91,13 +92,47 @@ describe('checkAuth: per-handler requirements (§16.3 table)', () => {
 
   it('npm: passes with NODE_AUTH_TOKEN', () => {
     process.env.NODE_AUTH_TOKEN = 'tok';
-    expect(checkAuth([pkg('npm')]).ok).toBe(true);
+    const status = checkAuth([pkg('npm')]);
+    expect(status.ok).toBe(true);
+    expect(status.results[0]).toMatchObject({
+      via: 'token',
+      envVar: 'NODE_AUTH_TOKEN',
+    });
+  });
+
+  it('npm: passes with NPM_TOKEN fallback', () => {
+    process.env.NPM_TOKEN = 'tok';
+    const status = checkAuth([pkg('npm')]);
+    expect(status.ok).toBe(true);
+    expect(status.results[0]).toMatchObject({
+      via: 'token',
+      envVar: 'NPM_TOKEN',
+    });
+  });
+
+  it('npm: prefers NODE_AUTH_TOKEN when both are set', () => {
+    process.env.NODE_AUTH_TOKEN = 'primary';
+    process.env.NPM_TOKEN = 'fallback';
+    const status = checkAuth([pkg('npm')]);
+    expect(status.results[0]!.envVar).toBe('NODE_AUTH_TOKEN');
+  });
+
+  it('npm: falls through empty NODE_AUTH_TOKEN to NPM_TOKEN', () => {
+    process.env.NODE_AUTH_TOKEN = '';
+    process.env.NPM_TOKEN = 'tok';
+    const status = checkAuth([pkg('npm')]);
+    expect(status.ok).toBe(true);
+    expect(status.results[0]!.envVar).toBe('NPM_TOKEN');
   });
 
   it('npm: fails with neither', () => {
     const status = checkAuth([pkg('npm')]);
     expect(status.ok).toBe(false);
-    expect(status.results[0]!.envVar).toBe('NODE_AUTH_TOKEN');
+    expect(status.results[0]).toMatchObject({
+      via: 'missing',
+      envVar: 'NODE_AUTH_TOKEN',
+      acceptedEnvVars: ['NODE_AUTH_TOKEN', 'NPM_TOKEN'],
+    });
   });
 });
 
@@ -153,6 +188,10 @@ describe('requireAuth', () => {
     expect(() =>
       requireAuth([pkg('crates'), pkg('pypi'), pkg('npm')]),
     ).toThrow(/CARGO_REGISTRY_TOKEN.*PYPI_API_TOKEN.*NODE_AUTH_TOKEN|PYPI_API_TOKEN/);
+  });
+
+  it('lists both npm env var names when npm auth is missing', () => {
+    expect(() => requireAuth([pkg('npm')])).toThrow(/NODE_AUTH_TOKEN or NPM_TOKEN/);
   });
 
   it('throws with a pointer to §16.4 setup docs', () => {

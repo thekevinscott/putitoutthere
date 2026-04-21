@@ -42,11 +42,22 @@ jobs:
           node-version: "24"
           registry-url: 'https://registry.npmjs.org'
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install pnpm
         run: npm install -g pnpm@9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The canary fixture stages a pypi sdist via `python -m build` and
+      # uploads it via `twine` (see handlers/pypi.ts). Rust toolchain is
+      # pre-installed on ubuntu-latest; we only need the Python toolchain
+      # + build/twine on PATH.
+      - name: Install pypi build tools
+        run: python -m pip install --upgrade build twine
 
       # Trusted Publishing / OIDC:
       # - npm: putitoutthere's npm handler auto-detects OIDC via
@@ -63,6 +74,12 @@ jobs:
       #   crate).
       - name: Decide publish mode
         id: mode
+        # push to main      → publish=1 (live canary).
+        # pull_request      → publish=0 (dry-run; no registry side effects).
+        # workflow_dispatch → publish=inputs.publish (default false).
+        # "Re-run failed jobs" preserves the original event, so a re-run of a
+        # push-triggered failure stays publish=1. A fresh UI dispatch with
+        # defaults does NOT publish — toggle the input to true for that.
         run: |
           if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
             echo "publish=1" >> "$GITHUB_OUTPUT"
@@ -83,6 +100,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # PyPI: via pending publisher; token fallback if needed.
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-          # crates: prefer OIDC short-lived token; fall back to long-lived.
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+          # crates: prefer OIDC short-lived token; fall back to long-lived
+          # when the OIDC step didn't succeed (pre-bootstrap: no trusted
+          # publishing config on the crate yet → step errors → fall back).
+          CARGO_REGISTRY_TOKEN: ${{ (steps.crates-auth.outcome == 'success' && steps.crates-auth.outputs.token) || secrets.CARGO_REGISTRY_TOKEN }}
         run: pnpm run test:e2e

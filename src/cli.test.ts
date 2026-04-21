@@ -167,6 +167,176 @@ paths = ["**"]
       delete process.env.CARGO_REGISTRY_TOKEN;
     }
   });
+
+  // #93: `preflight` runs every pre-publish check against plan packages.
+  it('preflight: runs every check and exits 1 when any fail', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-cli-'));
+    try {
+      mkdirSync(join(dir, 'rust'), { recursive: true });
+      writeFileSync(
+        join(dir, 'rust/Cargo.toml'),
+        '[package]\nname = "lib-rs"\nversion = "0.0.0"\n',
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-rs"
+kind  = "crates"
+path  = "rust"
+paths = ["rust/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', dir]);
+      // Artifact dir is not staged → fails.
+      expect(code).toBe(1);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/✗ lib-rs.*artifact/);
+      expect(out).toMatch(/preflight: fail/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
+    }
+  });
+
+  it('preflight: --json emits machine-readable + exit 0 when all checks pass', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-cli-json-'));
+    try {
+      mkdirSync(join(dir, 'js'), { recursive: true });
+      writeFileSync(
+        join(dir, 'js/package.json'),
+        JSON.stringify({ name: 'lib-js', version: '0.0.0', repository: 'x' }),
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-js"
+kind  = "npm"
+path  = "js"
+paths = ["js/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.NODE_AUTH_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', dir, '--json']);
+      expect(code).toBe(0);
+      const report = JSON.parse(stdoutChunks.join('').trim()) as { ok: boolean };
+      expect(report.ok).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.NODE_AUTH_TOKEN;
+    }
+  });
+
+  it('preflight: prints Issues section when top-level issues exist', async () => {
+    // No putitoutthere.toml → config issue → non-empty issues array.
+    const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', tmpdir()]);
+    expect(code).toBe(1);
+    const out = stdoutChunks.join('');
+    expect(out).toMatch(/Issues:/);
+    expect(out).toMatch(/config:/);
+  });
+
+  it('preflight: no packages in scope prints a notice', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-cli-empty-'));
+    try {
+      mkdirSync(join(dir, 'rust'), { recursive: true });
+      writeFileSync(
+        join(dir, 'rust/Cargo.toml'),
+        '[package]\nname = "lib-rs"\nversion = "0.0.0"\n',
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-rs"
+kind  = "crates"
+path  = "rust"
+paths = ["rust/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+      // Tag to make plan empty.
+      execFileSync('git', ['tag', 'lib-rs-v0.1.0'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'preflight', '--cwd', dir]);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/preflight: no packages in scope/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
+    }
+  });
+
+  // #89: `--artifacts` walks the plan and prints a present-vs-missing table.
+  it('doctor: --artifacts prints a table with expected layout for missing rows', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-cli-artifacts-'));
+    try {
+      mkdirSync(join(dir, 'rust'), { recursive: true });
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib-rs"
+kind  = "crates"
+path  = "rust"
+paths = ["rust/**"]
+first_version = "0.1.0"
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+
+      const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', dir, '--artifacts']);
+      expect(code).toBe(1);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/Artifacts:/);
+      expect(out).toMatch(/✗ lib-rs-crate.*expected: artifacts\/lib-rs-crate\/lib-rs-0\.1\.0\.crate/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
+    }
+  });
 });
 
 describe('cli: plan', () => {
@@ -314,6 +484,399 @@ paths = ["packages/ts/**"]
     expect(code).toBe(0);
     const json = JSON.parse(stdoutChunks.join('').trim()) as { ok: boolean };
     expect(json.ok).toBe(true);
+  });
+
+  it('token inspect: decodes a PyPI-format token from --token', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-1' };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+      '--json',
+    ]);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+      registry: string;
+      identifier: Record<string, unknown>;
+    };
+    expect(parsed.registry).toBe('pypi');
+    expect(parsed.identifier.user).toBe('u-1');
+  });
+
+  it('token inspect: prints human output by default', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-1' };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+    ]);
+    expect(code).toBe(0);
+    const out = stdoutChunks.join('');
+    expect(out).toMatch(/registry: pypi/);
+    expect(out).toMatch(/restrictions: \(none/);
+  });
+
+  it('token inspect: exits 1 and complains when no token is provided', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    // Ensure env has no recognizable token values leaking from a prior test.
+    const prev = {
+      TWINE_PASSWORD: process.env.TWINE_PASSWORD,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      PYPI_API_TOKEN: process.env.PYPI_API_TOKEN,
+    };
+    delete process.env.TWINE_PASSWORD;
+    delete process.env.NPM_TOKEN;
+    delete process.env.PYPI_API_TOKEN;
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'inspect']);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/no token provided/);
+    } finally {
+      if (prev.TWINE_PASSWORD !== undefined) process.env.TWINE_PASSWORD = prev.TWINE_PASSWORD;
+      if (prev.NPM_TOKEN !== undefined) process.env.NPM_TOKEN = prev.NPM_TOKEN;
+      if (prev.PYPI_API_TOKEN !== undefined) process.env.PYPI_API_TOKEN = prev.PYPI_API_TOKEN;
+    }
+  });
+
+  it('token inspect: rejects unknown subcommand', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'token', 'wat']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/unknown subcommand/);
+  });
+
+  it('token inspect: missing subcommand is rejected', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'token']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/missing subcommand/);
+  });
+
+  it('token inspect: --registry override + restrictions render in human output', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-2' };
+    const caveat = { version: 1, projects: ['pkg-a'] };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+      Buffer.from([0x00, 0x01]),
+      Buffer.from(JSON.stringify(caveat), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+      '--registry',
+      'pypi',
+    ]);
+    expect(code).toBe(0);
+    const out = stdoutChunks.join('');
+    expect(out).toMatch(/restrictions:/);
+    expect(out).toMatch(/ProjectNames/);
+    expect(out).toMatch(/pkg-a/);
+  });
+
+  it('token inspect: surfaces a decode error on stderr and exits 1', async () => {
+    const stderrChunks: string[] = [];
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    // Base64 that decodes to non-macaroon bytes with no JSON blobs.
+    const token = 'pypi-' + Buffer.from('no json here').toString('base64');
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+    ]);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/inspect failed/);
+  });
+
+  it('token inspect: auto-reads the sole pypi token from env when --token omitted', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-env' };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+    const prev = process.env.TWINE_PASSWORD;
+    process.env.TWINE_PASSWORD = token;
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'inspect', '--json']);
+      expect(code).toBe(0);
+      const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+        identifier: Record<string, unknown>;
+      };
+      expect(parsed.identifier.user).toBe('u-env');
+    } finally {
+      if (prev === undefined) delete process.env.TWINE_PASSWORD;
+      else process.env.TWINE_PASSWORD = prev;
+    }
+  });
+
+  it('doctor --deep: renders scope suffix and scope_match badge in the human table', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const dir = mkdtempSync(join(tmpdir(), 'cli-doctor-deep-'));
+    mkdirSync(join(dir, 'packages/py'), { recursive: true });
+    writeFileSync(
+      join(dir, 'putitoutthere.toml'),
+      `[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`,
+      'utf8',
+    );
+    const prev = process.env.PYPI_API_TOKEN;
+    // Synthetic token whose pypi-base64 payload carries a ProjectNames
+    // caveat scoped to "other-pkg" (not "ship-me"). The doctor arm
+    // resolves via env, calls the *real* inspect (offline, pure decode),
+    // and surfaces a scope mismatch in the rendered table.
+    const identifier = { version: 1, permissions: 'user', user: 'u-1' };
+    const caveat = { version: 1, projects: ['other-pkg'] };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+      Buffer.from([0x00, 0x01]),
+      Buffer.from(JSON.stringify(caveat), 'utf8'),
+    ]);
+    process.env.PYPI_API_TOKEN = 'pypi-' + bytes.toString('base64');
+
+    try {
+      const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', dir, '--deep']);
+      expect(code).toBe(1); // mismatch → issues → ok:false
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/ship-me.+scope:.+other-pkg.+\[mismatch\]/);
+    } finally {
+      if (prev === undefined) delete process.env.PYPI_API_TOKEN;
+      else process.env.PYPI_API_TOKEN = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('token list: prints a human table of env-discovered tokens', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const prev = {
+      TWINE_PASSWORD: process.env.TWINE_PASSWORD,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      PYPI_API_TOKEN: process.env.PYPI_API_TOKEN,
+      CARGO_REGISTRY_TOKEN: process.env.CARGO_REGISTRY_TOKEN,
+    };
+    process.env.TWINE_PASSWORD = 'pypi-AgEIcHlwaS5vcmc=';
+    process.env.NPM_TOKEN = 'npm_0000000000000000000000000000000000';
+    delete process.env.PYPI_API_TOKEN;
+    delete process.env.CARGO_REGISTRY_TOKEN;
+
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list']);
+      expect(code).toBe(0);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/REGISTRY.+SOURCE.+ENV\/NAME.+DETAILS/);
+      expect(out).toMatch(/pypi.+env.+TWINE_PASSWORD/);
+      expect(out).toMatch(/npm.+env.+NPM_TOKEN/);
+      // Token values MUST NOT appear in output.
+      expect(out).not.toContain('pypi-AgEIcHlwaS5vcmc=');
+      expect(out).not.toContain('npm_0000000000000000000000000000000000');
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('token list: emits JSON under --json', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const prev = process.env.TWINE_PASSWORD;
+    process.env.TWINE_PASSWORD = 'pypi-AgEIcHlwaS5vcmc=';
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list', '--json']);
+      expect(code).toBe(0);
+      const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+        tokens: Array<{ registry: string; source: string; name: string }>;
+      };
+      expect(parsed.tokens.some((t) => t.registry === 'pypi' && t.name === 'TWINE_PASSWORD')).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.TWINE_PASSWORD;
+      else process.env.TWINE_PASSWORD = prev;
+    }
+  });
+
+  it('token list: prints a notice when no tokens are found', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const prev = {
+      TWINE_PASSWORD: process.env.TWINE_PASSWORD,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      PYPI_API_TOKEN: process.env.PYPI_API_TOKEN,
+      CARGO_REGISTRY_TOKEN: process.env.CARGO_REGISTRY_TOKEN,
+    };
+    delete process.env.TWINE_PASSWORD;
+    delete process.env.NPM_TOKEN;
+    delete process.env.PYPI_API_TOKEN;
+    delete process.env.CARGO_REGISTRY_TOKEN;
+
+    // Use a scratch cwd so tokenList's config load returns empty.
+    const dir = mkdtempSync(join(tmpdir(), 'cli-token-list-'));
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list', '--cwd', dir]);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/no registry tokens found/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('auth: missing subcommand is rejected', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'auth']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/missing subcommand/);
+  });
+
+  it('auth: unknown subcommand is rejected', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'auth', 'wat']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/unknown subcommand/);
+  });
+
+  it('auth status: exits 1 with a "not logged in" message when no token stored', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const xdg = mkdtempSync(join(tmpdir(), 'cli-auth-'));
+    const prev = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = xdg;
+    try {
+      const code = await run(['node', 'putitoutthere', 'auth', 'status']);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/Not logged in/);
+    } finally {
+      if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prev;
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
+  it('auth logout: is a no-op when no token stored, exits 0', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const xdg = mkdtempSync(join(tmpdir(), 'cli-auth-'));
+    const prev = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = xdg;
+    try {
+      const code = await run(['node', 'putitoutthere', 'auth', 'logout']);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/Not logged in/);
+    } finally {
+      if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prev;
+      rmSync(xdg, { recursive: true, force: true });
+    }
   });
 
   it('surfaces errors with a non-zero exit and a friendly message', async () => {

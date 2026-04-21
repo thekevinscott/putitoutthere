@@ -22,6 +22,7 @@ import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
+import { nonEmpty } from '../env.js';
 
 const REGISTRY = 'https://pypi.org';
 
@@ -91,9 +92,21 @@ async function publishImpl(
     );
   }
 
-  const token = ctx.env.PYPI_API_TOKEN ?? process.env.PYPI_API_TOKEN;
+  // Prefer an explicit PYPI_API_TOKEN; fall through to OIDC trusted
+  // publishing when the workflow exposes the GHA OIDC env. The
+  // pypa/gh-action-pypi-publish reference implementation does the
+  // same audience=pypi exchange against /_/oidc/mint-token.
+  const explicitToken = nonEmpty(ctx.env.PYPI_API_TOKEN) ?? nonEmpty(process.env.PYPI_API_TOKEN);
+  const token = explicitToken ?? (await mintOidcToken(ctx));
   if (!token) {
-    throw new Error('pypi: PYPI_API_TOKEN not set; see plan.md §16.4.2');
+    throw new Error(
+      [
+        'pypi: no auth available. Either:',
+        '  - set PYPI_API_TOKEN (classic API token), or',
+        '  - enable trusted publishing: add `permissions.id-token: write` to the job and register a pending publisher on pypi.org.',
+        'See plan.md §16.4.2 for setup.',
+      ].join('\n'),
+    );
   }
 
   try {
@@ -123,6 +136,49 @@ async function publishImpl(
 
 function pypiNameFor(pkg: { name: string; pypi?: string }): string {
   return pkg.pypi ?? pkg.name;
+}
+
+/**
+ * Trusted-publishing OIDC exchange. Returns a short-lived API token
+ * from PyPI when the workflow exposes ACTIONS_ID_TOKEN_REQUEST_*; null
+ * when the env isn't there or the exchange fails (caller decides
+ * whether to error).
+ */
+async function mintOidcToken(ctx: Ctx): Promise<string | null> {
+  const reqUrl =
+    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_URL) ??
+    nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+  const reqToken =
+    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
+    nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
+  if (!reqUrl || !reqToken) return null;
+
+  const idTokenRes = await fetch(`${reqUrl}&audience=pypi`, {
+    headers: { authorization: `bearer ${reqToken}` },
+  });
+  if (!idTokenRes.ok) {
+    ctx.log.warn(`pypi: OIDC id-token request failed: ${idTokenRes.status}`);
+    return null;
+  }
+  const idTokenJson = (await idTokenRes.json()) as { value?: string };
+  const idToken = idTokenJson.value;
+  if (!idToken) {
+    ctx.log.warn('pypi: OIDC id-token response missing `value`');
+    return null;
+  }
+
+  const mintRes = await fetch(`${REGISTRY}/_/oidc/mint-token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: idToken }),
+  });
+  if (!mintRes.ok) {
+    const body = await mintRes.text();
+    ctx.log.warn(`pypi: OIDC mint-token failed (${mintRes.status}): ${body.slice(0, 200)}`);
+    return null;
+  }
+  const mintJson = (await mintRes.json()) as { token?: string };
+  return mintJson.token ?? null;
 }
 
 /**
