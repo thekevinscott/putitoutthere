@@ -3,11 +3,15 @@
  * the last release, returns the packages that will release.
  *
  * Two passes (plan.md §11.1):
- *   1. Direct match: every package whose `paths` globs intersect
- *      changedFiles is cascaded.
+ *   1. Direct match: every package whose `paths` globs intersect the
+ *      files changed since *its own* last tag is cascaded.
  *   2. Transitive match: repeat until stable — any package whose
  *      `depends_on` list contains an already-cascaded package gets
  *      added.
+ *
+ * Seed detection is strictly per-package: using the union of every
+ * package's diff lets commits that were already shipped under one
+ * package's prior tag spuriously re-trigger another package. See #126.
  *
  * Cycle detection per §11.3: cycles in depends_on are a config error
  * and throw loudly before cascade runs. Dangling depends_on names also
@@ -22,20 +26,34 @@
 import type { Package } from './config.js';
 import { matchesAny } from './glob.js';
 
+/**
+ * Per-package changed files keyed by package name. Each value is the
+ * set of files that changed between that package's last tag and HEAD.
+ * Packages without an entry are skipped in seed detection (e.g.
+ * first-release packages the caller force-cascades separately, or
+ * untagged packages).
+ */
+export type ChangedFilesByPackage = ReadonlyMap<string, ReadonlySet<string>>;
+
 export function computeCascade(
   packages: readonly Package[],
-  changedFiles: readonly string[],
+  changedFilesByPackage: ChangedFilesByPackage,
 ): Package[] {
   assertNoCycles(packages);
 
   const byName = new Map<string, Package>();
   for (const p of packages) byName.set(p.name, p);
 
-  // Pass 1: direct glob matches.
+  // Pass 1: direct glob matches against this package's own diff.
   const cascaded = new Set<string>();
   for (const p of packages) {
-    if (changedFiles.some((f) => matchesAny(p.paths, f))) {
-      cascaded.add(p.name);
+    const files = changedFilesByPackage.get(p.name);
+    if (!files) continue;
+    for (const f of files) {
+      if (matchesAny(p.paths, f)) {
+        cascaded.add(p.name);
+        break;
+      }
     }
   }
 

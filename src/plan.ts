@@ -51,9 +51,12 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   // Compute cascade. For each package with a last tag, diff against
   // that tag. Packages without a last tag are first-release: force-
   // cascade without globbing (avoids walking the working tree).
-  const { changes, firstRelease } = collectChanges(config.packages, cwd);
+  //
+  // Seed detection is per-package: a package only cascades on its own
+  // diff, never on another package's pre-tag history. See #126.
+  const { changesByPackage, firstRelease } = collectChanges(config.packages, cwd);
   const cascaded = new Set(
-    computeCascade(config.packages, changes).map((p) => p.name),
+    computeCascade(config.packages, changesByPackage).map((p) => p.name),
   );
   for (const name of firstRelease) cascaded.add(name);
 
@@ -77,18 +80,21 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
 function collectChanges(
   packages: readonly Package[],
   cwd: string,
-): { changes: string[]; firstRelease: ReadonlySet<string> } {
-  const changes = new Set<string>();
+): {
+  changesByPackage: ReadonlyMap<string, ReadonlySet<string>>;
+  firstRelease: ReadonlySet<string>;
+} {
+  const changesByPackage = new Map<string, ReadonlySet<string>>();
   const firstRelease = new Set<string>();
   for (const p of packages) {
     const tag = lastTag(p.name, { cwd });
     if (tag === null) {
       firstRelease.add(p.name);
-    } else {
-      for (const f of diffNames(tag, 'HEAD', { cwd })) changes.add(f);
+      continue;
     }
+    changesByPackage.set(p.name, new Set(diffNames(tag, 'HEAD', { cwd })));
   }
-  return { changes: [...changes], firstRelease };
+  return { changesByPackage, firstRelease };
 }
 
 function nextVersion(
