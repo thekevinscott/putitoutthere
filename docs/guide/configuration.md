@@ -29,7 +29,10 @@ Shared fields across every `kind`:
 |------------|----------|-----------------------------------------|
 | `crate`    | string   | Override `name` → crates.io name.       |
 | `features` | string[] | Pass through to `cargo publish`.        |
-| `target`   | string[] | Build matrix (empty = host only).       |
+
+Crates are always built on the runner host. There is no cross-target build
+matrix — `cargo publish` uploads source to crates.io, which compiles on the
+consumer's machine.
 
 ### `kind = "pypi"`
 

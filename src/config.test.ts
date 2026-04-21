@@ -394,7 +394,7 @@ paths = ["**"]
 });
 
 describe('parseConfig: handler-specific fields (§6.4)', () => {
-  it('accepts crates fields: crate, features, target', () => {
+  it('accepts crates fields: crate, features', () => {
     const cfg = parseConfig(`
 [putitoutthere]
 version = 1
@@ -405,12 +405,26 @@ path     = "."
 paths    = ["**"]
 crate    = "actual-name"
 features = ["a", "b"]
-target   = ["x86_64-unknown-linux-gnu"]
 `);
     const pkg = cfg.packages[0]!;
     expect(pkg.kind).toBe('crates');
     // Handler-specific fields are preserved for the handler to consume.
     expect((pkg as { crate?: string }).crate).toBe('actual-name');
+  });
+
+  it('rejects `target` on crates packages (#127)', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name   = "x"
+kind   = "crates"
+path   = "."
+paths  = ["**"]
+target = ["x86_64-unknown-linux-gnu"]
+`),
+    ).toThrow(/target/i);
   });
 
   it('accepts pypi fields: pypi, build, wheels_artifact', () => {
