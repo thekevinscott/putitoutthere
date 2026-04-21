@@ -12,6 +12,15 @@
  *   captured for the failure dump. Short-circuits on
  *   already-published (idempotent). Honors ctx.dryRun.
  *
+ * --allow-dirty is required for our writeVersion-then-publish model
+ * (#135), but cargo's default dirty-check is exactly the safety net
+ * that catches shipping uncommitted stray edits. We restore a
+ * narrower version of that check: before invoking cargo, scan the
+ * working tree via `git status --porcelain` and refuse to publish
+ * if anything is dirty outside the Cargo.toml we just wrote. If we
+ * can't scan (e.g. no git repo), we fall back to cargo's own
+ * --allow-dirty behavior.
+ *
  * OIDC: the crates-io-auth-action GHA step exchanges the OIDC JWT for
  * a short-lived CARGO_REGISTRY_TOKEN in the env. The handler doesn't
  * drive the exchange -- it just reads the env var the workflow wired
@@ -20,7 +29,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
@@ -86,6 +95,21 @@ async function publishImpl(
     return { status: 'skipped' };
   }
 
+  // #135: --allow-dirty disarms cargo's own "is the tree clean?" guard.
+  // Reinstate a narrower check: only the Cargo.toml we just wrote may
+  // be dirty. Anything else = a bug or a stray edit that would end up
+  // in the crate tarball. Published crates can't be unpublished.
+  const unexpected = scanDirtyOutsideManifest(ctx.cwd, pkg.path);
+  if (unexpected !== null && unexpected.length > 0) {
+    throw new Error(
+      [
+        `cargo publish: refusing to proceed; unexpected dirty files in the working tree outside ${relativeOrSelf(ctx.cwd, join(pkg.path, 'Cargo.toml'))}:`,
+        ...unexpected.map((p) => `  - ${p}`),
+        'Commit or stash these before publishing (putitoutthere passes --allow-dirty to cargo only to permit the managed version bump).',
+      ].join('\n'),
+    );
+  }
+
   try {
     execFileSync('cargo', ['publish', '--allow-dirty', '--verbose', '--manifest-path', join(pkg.path, 'Cargo.toml')], {
       cwd: ctx.cwd,
@@ -135,6 +159,63 @@ export function replaceCargoVersion(source: string, version: string): string {
   const start = m.index + pre.length;
   const end = start + prefix.length + old.length + suffix.length;
   return source.slice(0, start) + prefix + version + suffix + source.slice(end);
+}
+
+/**
+ * Return paths of dirty working-tree files that are NOT the package's
+ * managed Cargo.toml. Returns null if we can't determine (not inside
+ * a git work tree, git command missing, etc) — callers treat null as
+ * "can't verify, fall through to cargo's own --allow-dirty behavior."
+ */
+export function scanDirtyOutsideManifest(
+  cwd: string,
+  pkgPath: string,
+): string[] | null {
+  let toplevel: string;
+  try {
+    toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+  let porcelain: string;
+  try {
+    porcelain = execFileSync('git', ['status', '--porcelain'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    /* v8 ignore start -- rev-parse succeeded above, status shouldn't fail */
+  } catch {
+    return null;
+  }
+  /* v8 ignore stop */
+  const managed = toPosix(relative(toplevel, join(pkgPath, 'Cargo.toml')));
+  const unexpected: string[] = [];
+  for (const raw of porcelain.split('\n')) {
+    if (raw.length < 4) continue;
+    // Porcelain v1: "XY path" or "XY old -> new" for renames. Index 3+
+    // is the path; strip quoting if git applied any.
+    const rest = raw.slice(3);
+    const path = rest.includes(' -> ') ? rest.split(' -> ').pop()! : rest;
+    const normalized = toPosix(path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path);
+    if (normalized === managed) continue;
+    unexpected.push(normalized);
+  }
+  return unexpected;
+}
+
+function toPosix(p: string): string {
+  return p.split('\\').join('/');
+}
+
+function relativeOrSelf(base: string, target: string): string {
+  const r = relative(base, target);
+  /* v8 ignore next -- relative() only returns '' when base === target */
+  return r === '' ? target : r;
 }
 
 export const crates: Handler = {

@@ -37,3 +37,11 @@ Inside a single release, packages publish in **topological order** of their `dep
 ## Idempotency
 
 Every handler's first move is `isPublished` — check the registry for the target version. Already there? Skip cleanly. Lets you re-run failed releases without fighting the registry's immutable-publish semantics.
+
+## Dirty working tree
+
+`putitoutthere` rewrites the version field in each package's manifest (`Cargo.toml`, `pyproject.toml`, `package.json`) right before publishing. That edit is intentional and not committed — the release tag points at the unmodified merge commit (see [cascade](/guide/cascade)).
+
+For the crates handler, that means `cargo publish --allow-dirty` is required. Before invoking cargo, `putitoutthere` scans the working tree and refuses to proceed if anything is dirty outside the managed `Cargo.toml` — that narrow scope restores cargo's default safety net without blocking the managed bump.
+
+If you run `putitoutthere publish` locally outside a git work tree (e.g. in a snapshot directory), this guard falls through silently and cargo's own `--allow-dirty` semantics take over. Prefer running publishes from inside a checked-out repo.

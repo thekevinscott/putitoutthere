@@ -7,13 +7,13 @@
  * temp files for writeVersion.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { crates } from './crates.js';
+import { crates, scanDirtyOutsideManifest } from './crates.js';
 import type { Ctx } from '../types.js';
 
 import type * as ChildProcess from 'node:child_process';
@@ -269,6 +269,112 @@ describe('crates.publish', () => {
         makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
       ),
     ).rejects.toThrow(/cargo publish|exit 1|permission denied/i);
+    fetchSpy.mockRestore();
+  });
+});
+
+describe('scanDirtyOutsideManifest (#135)', () => {
+  // spawnSync is NOT mocked (only execFileSync is), so use it for real
+  // git setup without fighting the execMock.
+  function git(args: string[], cwd: string): void {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    if (r.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+    }
+  }
+
+  let repo: string;
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'crates-scan-'));
+    git(['init', '-q', '-b', 'main'], repo);
+    git(['config', 'user.email', 't@e'], repo);
+    git(['config', 'user.name', 'T'], repo);
+    git(['config', 'commit.gpgsign', 'false'], repo);
+    // Route execFileSync('git', ...) back to the real binary. mockReset
+    // in the parent beforeEach stripped the implementation.
+    const realGit = (file: string, args: readonly string[] = [], options: { cwd?: string; encoding?: string } = {}): Buffer | string => {
+      if (file !== 'git') throw new Error(`unexpected exec: ${file}`);
+      const r = spawnSync('git', args as string[], {
+        cwd: options.cwd,
+        encoding: (options.encoding as BufferEncoding | undefined) ?? 'utf8',
+      });
+      if (r.status !== 0) {
+        throw Object.assign(new Error(`git exit ${r.status ?? -1}`), {
+          stderr: Buffer.from(r.stderr ?? ''),
+          status: r.status,
+        });
+      }
+      return options.encoding ? r.stdout : Buffer.from(r.stdout);
+    };
+    execMock.mockImplementation(realGit as unknown as typeof execFileSync);
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('returns an empty list when only the managed Cargo.toml is dirty', () => {
+    writeFileSync(join(repo, 'Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    writeFileSync(join(repo, 'Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
+    expect(scanDirtyOutsideManifest(repo, repo)).toEqual([]);
+  });
+
+  it('flags a stray dirty file outside the package dir', () => {
+    mkdirSync(join(repo, 'crate'), { recursive: true });
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
+    writeFileSync(join(repo, 'README.md'), 'before\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
+    writeFileSync(join(repo, 'README.md'), 'stray edit\n', 'utf8');
+    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'));
+    expect(result).toContain('README.md');
+    expect(result).not.toContain('crate/Cargo.toml');
+  });
+
+  it('flags a dirty sibling file inside the package dir that is not Cargo.toml', () => {
+    mkdirSync(join(repo, 'crate/src'), { recursive: true });
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
+    writeFileSync(join(repo, 'crate/src/lib.rs'), 'fn a(){}\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    // Only src/lib.rs dirty -- the managed Cargo.toml is unchanged. Still
+    // a surprise: our writeVersion didn't produce this edit.
+    writeFileSync(join(repo, 'crate/src/lib.rs'), 'fn b(){}\n', 'utf8');
+    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'));
+    expect(result).toContain('crate/src/lib.rs');
+  });
+
+  it('returns null when cwd is not inside a git worktree', () => {
+    const plain = mkdtempSync(join(tmpdir(), 'crates-scan-nogit-'));
+    try {
+      expect(scanDirtyOutsideManifest(plain, plain)).toBeNull();
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  it('crates.publish rejects with a clear error when an unrelated file is dirty', async () => {
+    mkdirSync(join(repo, 'crate'), { recursive: true });
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
+    writeFileSync(join(repo, 'README.md'), 'init\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    writeFileSync(join(repo, 'README.md'), 'stray edit\n', 'utf8');
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    await expect(
+      crates.publish(
+        { ...basePkg(), path: join(repo, 'crate') },
+        '0.2.0',
+        makeCtx({ cwd: repo, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+      ),
+    ).rejects.toThrow(/unexpected dirty|README\.md/);
     fetchSpy.mockRestore();
   });
 });
