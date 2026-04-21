@@ -78,6 +78,22 @@ describe('cli', () => {
     }
   });
 
+  it('init prints "up-to-date" lines for already-present files (#131)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-init-uptodate-'));
+    try {
+      mkdirSync(join(dir, 'putitoutthere'), { recursive: true });
+      writeFileSync(join(dir, 'putitoutthere', 'AGENTS.md'), '# custom\n');
+      writeFileSync(join(dir, 'CLAUDE.md'), '@putitoutthere/AGENTS.md\n');
+      const code = await run(['node', 'putitoutthere', 'init', '--cwd', dir]);
+      expect(code).toBe(0);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/up-to-date .+putitoutthere\/AGENTS\.md/);
+      expect(out).toMatch(/up-to-date .+CLAUDE\.md/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('init --cadence=scheduled emits the cron release.yml', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cli-init-sched-'));
     try {

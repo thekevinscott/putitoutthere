@@ -43,6 +43,7 @@ describe('init', () => {
     expect(r.wrote).toContain('.github/workflows/release.yml');
     expect(r.wrote).toContain('.github/workflows/putitoutthere-check.yml');
     expect(r.skipped).toEqual([]);
+    expect(r.alreadyPresent).toEqual([]);
     expect(r.backedUp).toEqual([]);
   });
 
@@ -85,10 +86,11 @@ describe('init', () => {
     expect(c).toBe('no trailing newline\n@putitoutthere/AGENTS.md\n');
   });
 
-  it('skips CLAUDE.md append when import is already present', () => {
+  it('marks CLAUDE.md as already-present when import is already there (#131)', () => {
     writeFileSync(join(repo, 'CLAUDE.md'), '# stuff\n@putitoutthere/AGENTS.md\n');
     const r = init({ cwd: repo });
-    expect(r.skipped).toContain('CLAUDE.md');
+    expect(r.alreadyPresent).toContain('CLAUDE.md');
+    expect(r.skipped).not.toContain('CLAUDE.md');
     const c = readFileSync(join(repo, 'CLAUDE.md'), 'utf8');
     expect(c.match(/@putitoutthere\/AGENTS\.md/g)).toHaveLength(1);
   });
@@ -124,12 +126,28 @@ describe('init', () => {
     expect(fresh).toContain('name: Release');
   });
 
-  it('skips re-writing AGENTS.md if it already exists', () => {
+  it('marks AGENTS.md as already-present when it already exists (#131)', () => {
     const agentsPath = join(repo, 'putitoutthere', 'AGENTS.md');
     mkdirSync(join(repo, 'putitoutthere'), { recursive: true });
     writeFileSync(agentsPath, '# custom agents doc\n');
     const r = init({ cwd: repo });
-    expect(r.skipped).toContain('putitoutthere/AGENTS.md');
+    expect(r.alreadyPresent).toContain('putitoutthere/AGENTS.md');
+    expect(r.skipped).not.toContain('putitoutthere/AGENTS.md');
     expect(readFileSync(agentsPath, 'utf8')).toBe('# custom agents doc\n');
+  });
+
+  it('only `putitoutthere.toml` lands in `skipped` — the --force-gated set (#131)', () => {
+    // Pre-populate everything so every step takes its "already" branch.
+    writeFileSync(join(repo, 'putitoutthere.toml'), '# user-edited\nversion = 1\n');
+    mkdirSync(join(repo, 'putitoutthere'), { recursive: true });
+    writeFileSync(join(repo, 'putitoutthere', 'AGENTS.md'), 'custom\n');
+    writeFileSync(join(repo, 'CLAUDE.md'), '@putitoutthere/AGENTS.md\n');
+
+    const r = init({ cwd: repo });
+
+    // Only `putitoutthere.toml` is `--force`-gated, so only it goes into
+    // `skipped`. Everything else is already-present.
+    expect(r.skipped).toEqual(['putitoutthere.toml']);
+    expect(r.alreadyPresent.sort()).toEqual(['CLAUDE.md', 'putitoutthere/AGENTS.md']);
   });
 });
