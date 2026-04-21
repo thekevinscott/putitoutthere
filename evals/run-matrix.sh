@@ -29,7 +29,14 @@ for fixture in "${FIXTURES[@]}"; do
     echo "  variant: ${fixture}__${scope}"
     echo "=============================================="
     # Capture the newest grade file after each run.
-    "$EVAL_ROOT/spike.sh" "$fixture" "$scope" || echo "  (cell exited non-zero — continuing)"
+    "$EVAL_ROOT/spike.sh" "$fixture" "$scope"
+    rc=$?
+    if [[ $rc -eq 2 ]]; then
+      echo "  ABORT: probe returned empty output (likely API rate-limit). Stopping matrix."
+      break 2
+    elif [[ $rc -ne 0 ]]; then
+      echo "  (cell exited $rc — continuing)"
+    fi
     latest="$(ls -1t "$SNAP_DIR/${fixture}__${scope}"-*-grade.json 2>/dev/null | head -1 || true)"
     if [[ -n "$latest" ]]; then
       GRADE_FILES+=("$latest")

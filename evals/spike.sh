@@ -76,6 +76,14 @@ claude -p \
 
 echo "    raw output: $RAW ($(wc -l < "$RAW") lines)"
 
+# Probe failed to produce real output — typically an API rate-limit or
+# permission denial. Bail before burning the extractor on garbage.
+if ! [[ -s "$RAW" ]] || [[ "$(wc -c < "$RAW")" -lt 200 ]]; then
+  echo "ERROR: probe output is empty or suspiciously short. Contents:" >&2
+  cat "$RAW" >&2
+  exit 2
+fi
+
 echo "==> extract: Haiku reads the prose and emits structured claims"
 EXTRACTION_PROMPT=$(cat <<'EOF'
 You are an extractor. Read the evaluation below and determine, for each
