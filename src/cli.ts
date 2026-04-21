@@ -378,9 +378,10 @@ export async function run(argv: readonly string[]): Promise<number> {
         if (flags.json) {
           process.stdout.write(JSON.stringify(r) + '\n');
         } else {
-          for (const f of r.wrote) process.stdout.write(`  wrote    ${f}\n`);
-          for (const f of r.backedUp) process.stdout.write(`  backed up ${f} -> ${f}.bak\n`);
-          for (const f of r.skipped) process.stdout.write(`  skipped  ${f} (exists; use --force)\n`);
+          for (const f of r.wrote) process.stdout.write(`  wrote        ${f}\n`);
+          for (const f of r.backedUp) process.stdout.write(`  backed up    ${f} -> ${f}.bak\n`);
+          for (const f of r.skipped) process.stdout.write(`  skipped      ${f} (exists; use --force)\n`);
+          for (const f of r.alreadyPresent) process.stdout.write(`  up-to-date   ${f}\n`);
         }
         return 0;
       }

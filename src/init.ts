@@ -32,7 +32,17 @@ export interface InitOptions {
 
 export interface InitResult {
   wrote: string[];
+  /**
+   * Files skipped because they already exist and `--force` would
+   * overwrite them. Just `putitoutthere.toml` today.
+   */
   skipped: string[];
+  /**
+   * Files already in a correct state (AGENTS.md exists untouched,
+   * CLAUDE.md already imports the trailer doc, etc.). `--force`
+   * would not change these, so the CLI shouldn't suggest it.
+   */
+  alreadyPresent: string[];
   backedUp: string[];
 }
 
@@ -41,9 +51,9 @@ export function init(opts: InitOptions): InitResult {
   const force = Boolean(opts.force);
   const agent = opts.agent ?? 'claude';
   const cadence: Cadence = opts.cadence ?? 'immediate';
-  const result: InitResult = { wrote: [], skipped: [], backedUp: [] };
+  const result: InitResult = { wrote: [], skipped: [], alreadyPresent: [], backedUp: [] };
 
-  // 1. putitoutthere.toml
+  // 1. putitoutthere.toml  -- `--force`-gated.
   const tomlPath = join(cwd, 'putitoutthere.toml');
   if (existsSync(tomlPath) && !force) {
     result.skipped.push('putitoutthere.toml');
@@ -52,22 +62,22 @@ export function init(opts: InitOptions): InitResult {
     result.wrote.push('putitoutthere.toml');
   }
 
-  // 2. putitoutthere/AGENTS.md
+  // 2. putitoutthere/AGENTS.md  -- not `--force`-gated; users edit this.
   const agentsPath = join(cwd, 'putitoutthere', 'AGENTS.md');
   if (existsSync(agentsPath)) {
-    result.skipped.push('putitoutthere/AGENTS.md');
+    result.alreadyPresent.push('putitoutthere/AGENTS.md');
   } else {
     writeAtomic(agentsPath, AGENTS_MD);
     result.wrote.push('putitoutthere/AGENTS.md');
   }
 
-  // 3. CLAUDE.md / .cursorrules
+  // 3. CLAUDE.md / .cursorrules  -- append-only; skip if already imported.
   if (agent === 'claude') {
     const claudePath = join(cwd, 'CLAUDE.md');
     const importLine = '@putitoutthere/AGENTS.md';
     const existing = existsSync(claudePath) ? readFileSync(claudePath, 'utf8') : '';
     if (existing.includes(importLine)) {
-      result.skipped.push('CLAUDE.md');
+      result.alreadyPresent.push('CLAUDE.md');
     } else {
       const sep = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
       writeAtomic(claudePath, `${existing}${sep}${importLine}\n`);
@@ -78,7 +88,7 @@ export function init(opts: InitOptions): InitResult {
     const cursorPath = join(cwd, '.cursorrules');
     const existing = existsSync(cursorPath) ? readFileSync(cursorPath, 'utf8') : '';
     if (existing.includes('Release signaling for Put It Out There')) {
-      result.skipped.push('.cursorrules');
+      result.alreadyPresent.push('.cursorrules');
     } else {
       writeAtomic(cursorPath, `${existing}${existing.length > 0 ? '\n' : ''}${AGENTS_MD}`);
       result.wrote.push('.cursorrules');
