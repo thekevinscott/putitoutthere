@@ -7,3 +7,12 @@ coverage/
 .env.local
 *.tsbuildinfo
 .claude/
+
+# Eval harness output — snapshots accumulate per run; a representative
+# snapshot triple is checked in explicitly via `git add -f`. All other
+# runs stay local (each probe call costs API budget; we don't want the
+# repo to grow unbounded).
+evals/snapshots/*-raw.md
+evals/snapshots/*-extracted.json
+evals/snapshots/*-extracted.json.raw
+evals/snapshots/*-grade.json
