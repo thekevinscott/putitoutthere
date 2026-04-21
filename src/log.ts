@@ -3,9 +3,10 @@
  *
  * JSON-per-line output in CI; human-readable text in TTYs. Every emitted
  * line is passed through a redactor that replaces any occurrence of a
- * known-secret env value (keys matching *TOKEN* / *SECRET* / *PASSWORD*
- * / *KEY*, case-insensitive) with `[REDACTED:<digest>]`, where `<digest>`
- * is a stable 8-hex-char SHA-256 prefix (#134). Operators can correlate
+ * known-secret env value (keys matching whole-word TOKEN/SECRET/PASSWORD or
+ * a trailing `_KEY`, case-insensitive; value length at least
+ * MIN_SECRET_LENGTH) with `[REDACTED:<digest>]`, where `<digest>` is a
+ * stable 8-hex-char SHA-256 prefix (#134). Operators can correlate
  * rotated tokens across log lines without ever seeing the value.
  *
  * Substring redaction (rather than Pino-style field-path redaction) is
@@ -82,21 +83,31 @@ function formatScalar(v: unknown): string {
 
 /* ----------------------------- redaction ----------------------------- */
 
-const SECRET_KEY = /TOKEN|SECRET|PASSWORD|KEY/i;
+// Only treat envs as secret-bearing when the name is clearly credential-shaped:
+// a whole-word TOKEN/SECRET/PASSWORD token, or a trailing _KEY. This avoids
+// sweeping in `KEYCLOAK_URL`, `PUBLIC_KEY_PATH`, `SEARCH_API_KEY_LENGTH`, etc.,
+// whose values are not actually secret (#137).
+const SECRET_KEY = /(^|_)(TOKEN|SECRET|PASSWORD)(_|$)|_KEY$/i;
+
+// Below this length a match is almost certainly a false positive against an
+// identifier or short literal that happens to equal the env value. Real
+// bearer tokens are all well above this (shortest observed: 20 chars).
+const MIN_SECRET_LENGTH = 12;
 
 /**
  * Replace every occurrence of a known-secret env value with
  * `[REDACTED:<digest>]` where `<digest>` is a stable 8-hex-char
  * SHA-256 prefix of the token. Operators can correlate rotated
  * tokens across log lines without ever seeing the value itself.
- * Empty / single-char values are skipped to avoid mangling unrelated
- * characters. Called on every log write.
+ * Values shorter than MIN_SECRET_LENGTH are skipped so short
+ * identifiers in *_KEY-named envs don't mangle unrelated log text
+ * (#137). Called on every log write.
  */
 export function redact(s: string): string {
   let out = s;
   for (const [k, v] of Object.entries(process.env)) {
     if (!SECRET_KEY.test(k)) continue;
-    if (typeof v !== 'string' || v.length < 2) continue;
+    if (typeof v !== 'string' || v.length < MIN_SECRET_LENGTH) continue;
     if (!out.includes(v)) continue;
     // String.replaceAll expects a literal or a RegExp; use split/join to
     // avoid regex escaping every secret value.

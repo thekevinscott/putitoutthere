@@ -125,16 +125,16 @@ describe('dumpFailure: structured log', () => {
 
 describe('dumpFailure: redaction', () => {
   it('redacts env-matched secrets from stderr before writing', () => {
-    process.env.CARGO_REGISTRY_TOKEN = 'tok-abc-123';
+    process.env.CARGO_REGISTRY_TOKEN = 'long-tok-abc-123';
     const logDest = new BufStream();
     const log = createLogger({ stream: logDest, pretty: false });
     dumpFailure(
       new Error('auth'),
-      baseCtx({ stderr: 'sent token tok-abc-123 in header' }),
+      baseCtx({ stderr: 'sent token long-tok-abc-123 in header' }),
       { log },
     );
     const md = readFileSync(summaryPath, 'utf8');
-    expect(md).not.toContain('tok-abc-123');
+    expect(md).not.toContain('long-tok-abc-123');
     expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
   });
 

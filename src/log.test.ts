@@ -91,16 +91,23 @@ describe('createLogger: redaction (§22.5)', () => {
     expect(markers[0]).not.toBe(markers[1]);
   });
 
-  it('redacts values from keys matching *TOKEN*, *SECRET*, *PASSWORD*, *KEY*', () => {
-    process.env.CARGO_REGISTRY_TOKEN = 'AAA';
-    process.env.MY_SECRET = 'BBB';
-    process.env.DATABASE_PASSWORD = 'CCC';
-    process.env.ENCRYPTION_KEY = 'DDD';
+  it('redacts values from keys matching TOKEN, SECRET, PASSWORD, *_KEY', () => {
+    process.env.CARGO_REGISTRY_TOKEN = 'credential-AAAAAAAA';
+    process.env.MY_SECRET = 'credential-BBBBBBBB';
+    process.env.DATABASE_PASSWORD = 'credential-CCCCCCCC';
+    process.env.ENCRYPTION_KEY = 'credential-DDDDDDDD';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('dump: AAA BBB CCC DDD');
+    log.info(
+      'dump: credential-AAAAAAAA credential-BBBBBBBB credential-CCCCCCCC credential-DDDDDDDD',
+    );
     const line = dest.text;
-    for (const v of ['AAA', 'BBB', 'CCC', 'DDD']) {
+    for (const v of [
+      'credential-AAAAAAAA',
+      'credential-BBBBBBBB',
+      'credential-CCCCCCCC',
+      'credential-DDDDDDDD',
+    ]) {
       expect(line).not.toContain(v);
     }
   });
@@ -114,12 +121,12 @@ describe('createLogger: redaction (§22.5)', () => {
   });
 
   it('redacts secrets inside structured fields, not just msg', () => {
-    process.env.CARGO_REGISTRY_TOKEN = 'abc-123';
+    process.env.CARGO_REGISTRY_TOKEN = 'credential-abc-123';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('publishing', { tokenEcho: 'abc-123', package: 'x' });
+    log.info('publishing', { tokenEcho: 'credential-abc-123', package: 'x' });
     const line = dest.text;
-    expect(line).not.toContain('abc-123');
+    expect(line).not.toContain('credential-abc-123');
     expect(line).toContain('"package":"x"');
   });
 
@@ -132,11 +139,45 @@ describe('createLogger: redaction (§22.5)', () => {
   });
 
   it('case-insensitive on the env key pattern', () => {
-    process.env.my_token = 'lowercased';
+    process.env.my_token = 'lowercased-credential';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('payload: lowercased');
-    expect(dest.text).not.toContain('lowercased');
+    log.info('payload: lowercased-credential');
+    expect(dest.text).not.toContain('lowercased-credential');
+  });
+
+  it('does NOT redact short env values that could mangle unrelated text (#137)', () => {
+    // A 2-char `*_KEY` value must not turn every occurrence of its
+    // substring in logs into `[REDACTED]`. Floor is MIN_SECRET_LENGTH.
+    process.env.ACCESS_KEY = 'v2';
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('release v2 shipped on v2.0.1');
+    expect(dest.text).toContain('v2');
+  });
+
+  it('does NOT redact from envs whose names merely contain TOKEN/KEY as substrings (#137)', () => {
+    // KEYCLOAK_URL is not a secret — the regex must require a
+    // whole-word match or a trailing `_KEY`. Value is long enough to
+    // pass the length floor, so only the name gate keeps it safe.
+    process.env.KEYCLOAK_URL = 'https://auth.example.com/realms/prod';
+    process.env.TOKENIZER_MODEL = 'distilbert-base-uncased-finetuned';
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('auth=https://auth.example.com/realms/prod model=distilbert-base-uncased-finetuned');
+    expect(dest.text).toContain('https://auth.example.com/realms/prod');
+    expect(dest.text).toContain('distilbert-base-uncased-finetuned');
+  });
+
+  it('still redacts *_KEY env values at or above the length floor (#137)', () => {
+    // A genuinely credential-shaped ENCRYPTION_KEY should still be
+    // caught: name matches `_KEY$`, value is long enough.
+    process.env.ENCRYPTION_KEY = 'very-secret-encryption-key-xyz';
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('loaded key: very-secret-encryption-key-xyz');
+    expect(dest.text).not.toContain('very-secret-encryption-key-xyz');
+    expect(dest.text).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
   });
 });
 
