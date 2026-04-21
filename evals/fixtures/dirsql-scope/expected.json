@@ -1,0 +1,35 @@
+{
+  "description": "Ground truth for dirsql-scope fixture. Derived from code audit of src/ on main (src/handlers/npm-platform.ts:46-80, src/publish.ts:140,256-277, src/handlers/{npm,crates,pypi}.ts, src/plan.ts:224-236, src/doctor.ts:82-92).",
+  "primitives": {
+    "npm_platform_family": {
+      "truth": "shipped",
+      "evidence": "src/handlers/npm-platform.ts synthesizes @org/pkg-<target> packages and rewrites top-level's optionalDependencies; config: build = 'napi' | 'bundled-cli' + targets = [...]",
+      "failure_mode_if_claimed_missing": "false-negative — agent proposes adding a primitive that exists"
+    },
+    "depends_on_serialization": {
+      "truth": "shipped",
+      "evidence": "src/publish.ts:140,256-277 — toposort by depends_on before publishing",
+      "failure_mode_if_claimed_missing": "false-negative — agent asks to 'verify' ordering that is already guaranteed"
+    },
+    "idempotent_precheck": {
+      "truth": "shipped",
+      "evidence": "All three handlers (src/handlers/{npm,crates,pypi}.ts) GET the registry before publishing; publish.ts:160-163 skips already-published",
+      "failure_mode_if_claimed_missing": "false-negative — agent proposes adding check_published logic that exists"
+    },
+    "bundled_cli_understood": {
+      "truth": "shipped",
+      "evidence": "bundled-cli is a builder for npm handler that packages a CLI binary across a target matrix; see src/config.ts:68-85 and src/handlers/npm-platform.ts",
+      "failure_mode_if_not_understood": "false-negative — agent infers meaning from name only"
+    },
+    "per_target_runner_override": {
+      "truth": "missing",
+      "evidence": "src/plan.ts:224-236 hardcodes triple → runner mapping; no config syntax for per-target runner",
+      "failure_mode_if_claimed_shipped": "false-positive — agent claims support that doesn't exist"
+    },
+    "doctor_oidc_trust_policy_check": {
+      "truth": "missing",
+      "evidence": "src/doctor.ts:82-92 validates auth availability only; no workflow filename / environment / permissions validation against trust policies",
+      "failure_mode_if_claimed_shipped": "false-positive — agent claims support that doesn't exist"
+    }
+  }
+}
