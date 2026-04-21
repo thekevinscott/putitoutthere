@@ -21,13 +21,27 @@ export const TOML_SKELETON = `# Put It Out There — release orchestration confi
 [putitoutthere]
 version = 1
 
-# Declare one [[package]] block per releasable artifact. Example:
+# Declare one [[package]] block per releasable artifact. Examples:
 #
 # [[package]]
 # name = "my-crate"
 # kind = "crates"
-# path = "crates/my-crate"
+# path = "crates/my-crate"                 # dir containing Cargo.toml
 # paths = ["crates/my-crate/**", "Cargo.toml", "Cargo.lock"]
+# first_version = "0.1.0"
+#
+# [[package]]
+# name = "my-py"
+# kind = "pypi"
+# path = "py/my-py"                        # dir containing pyproject.toml
+# paths = ["py/my-py/**"]
+# first_version = "0.1.0"
+#
+# [[package]]
+# name = "my-pkg"
+# kind = "npm"
+# path = "packages/my-pkg"                 # dir containing package.json
+# paths = ["packages/my-pkg/**"]
 # first_version = "0.1.0"
 `;
 

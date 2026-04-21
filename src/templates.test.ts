@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { init } from './init.js';
-import { CHECK_YML, RELEASE_YML_IMMEDIATE, RELEASE_YML_SCHEDULED, releaseYml } from './templates.js';
+import { CHECK_YML, RELEASE_YML_IMMEDIATE, RELEASE_YML_SCHEDULED, releaseYml, TOML_SKELETON } from './templates.js';
 
 describe('release.yml.immediate', () => {
   it('has the three jobs plan / build / publish in order', () => {
@@ -135,5 +135,22 @@ describe('init round-trip', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('TOML_SKELETON polyglot examples (#132)', () => {
+  it('includes a crates example', () => {
+    expect(TOML_SKELETON).toContain('kind = "crates"');
+    expect(TOML_SKELETON).toMatch(/# path = "crates\/[^"]+"/);
+  });
+
+  it('includes a pypi example with a pyproject.toml path hint', () => {
+    expect(TOML_SKELETON).toContain('kind = "pypi"');
+    expect(TOML_SKELETON).toMatch(/# path = "py\/[^"]+"/);
+  });
+
+  it('includes an npm example with a package.json path hint', () => {
+    expect(TOML_SKELETON).toContain('kind = "npm"');
+    expect(TOML_SKELETON).toMatch(/# path = "packages\/[^"]+"/);
   });
 });
