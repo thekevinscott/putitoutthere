@@ -15,8 +15,10 @@
  */
 
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 import { loadConfig, type Package } from './config.js';
+import { defaultKeyring, type Keyring } from './keyring.js';
 
 export type Registry = 'pypi' | 'npm' | 'crates';
 
@@ -576,9 +578,11 @@ function normalizeCratesRow(row: Record<string, unknown>): CratesTokenRow {
 
 export interface TokenListRow {
   registry: Registry;
-  source: 'env';
+  source: 'env' | 'repo-secret' | 'environment-secret';
   name: string;
   details: string;
+  /** Populated only when source = 'environment-secret'. */
+  environment?: string;
 }
 
 export interface TokenListOptions {
@@ -647,4 +651,235 @@ function resolvePackages(opts: TokenListOptions): readonly Package[] {
     // still works. Crates opaque-tokens are skipped (no config to key on).
     return [];
   }
+}
+
+// ---- token list --secrets ---------------------------------------------
+
+/**
+ * Classify a GitHub Actions secret *by name* to a registry. The API never
+ * exposes secret values, so prefix-by-value classification (the env-var
+ * path) is unavailable here. Conservative: unrecognized names return
+ * `null` and are omitted from the listing rather than dumping every
+ * secret on the repo.
+ *
+ * Exact matches line up with `src/preflight.ts#TOKEN_ENV`, plus the
+ * common `TWINE_PASSWORD` / `PYPI_TOKEN` aliases used in the wild.
+ * Prefixed names (`NPM_FOO`, `PYPI_BAR`, `CARGO_FOO`, `TWINE_FOO`)
+ * are treated as likely-registry.
+ */
+export function classifySecretName(name: string): Registry | null {
+  if (name === 'CARGO_REGISTRY_TOKEN') return 'crates';
+  if (name === 'NPM_TOKEN' || name === 'NODE_AUTH_TOKEN') return 'npm';
+  if (name === 'PYPI_API_TOKEN' || name === 'PYPI_TOKEN' || name === 'TWINE_PASSWORD') return 'pypi';
+  if (name.startsWith('CARGO_')) return 'crates';
+  if (name.startsWith('NPM_')) return 'npm';
+  if (name.startsWith('PYPI_') || name.startsWith('TWINE_')) return 'pypi';
+  return null;
+}
+
+export interface SecretListOptions {
+  /** Working dir used to resolve the git remote when `repo` is omitted. */
+  cwd?: string;
+  /** Repo as "owner/name". Defaults to $GITHUB_REPOSITORY or parsed from `git remote get-url origin`. */
+  repo?: string;
+  keyring?: Keyring;
+  fetchFn?: typeof fetch;
+  /** Override GitHub API base URL. Tests only. */
+  apiBase?: string;
+  /** Per-request timeout. Defaults to 5000ms. */
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+}
+
+export type SecretListOutcome =
+  | { kind: 'not_logged_in'; message: string }
+  | { kind: 'no_repo'; message: string }
+  | { kind: 'error'; message: string; rows: TokenListRow[] }
+  | { kind: 'ok'; rows: TokenListRow[] };
+
+const GITHUB_API = 'https://api.github.com';
+
+/**
+ * List GitHub Actions secrets (repo + environment) whose names look like
+ * registry credentials. Uses the stored user access token from the
+ * `Keyring` (populated by `auth login`).
+ *
+ * Secret *values* are never returned — the GitHub API doesn't expose
+ * them. Classification is by name (see `classifySecretName`).
+ *
+ * Degrades gracefully: missing keyring, unresolvable repo, 401/403 from
+ * GitHub, and network errors all become outcome kinds rather than
+ * thrown errors. The caller decides whether to surface them.
+ */
+export async function tokenListSecrets(opts: SecretListOptions = {}): Promise<SecretListOutcome> {
+  const keyring = opts.keyring ?? defaultKeyring();
+  const fetchFn = opts.fetchFn ?? fetch;
+  const apiBase = opts.apiBase ?? GITHUB_API;
+  const timeoutMs = opts.timeoutMs ?? 5000;
+  const env = opts.env ?? process.env;
+
+  const stored = await keyring.get();
+  if (!stored) {
+    return {
+      kind: 'not_logged_in',
+      message: '--secrets: not logged in. Run `putitoutthere auth login` to list repo secrets.',
+    };
+  }
+
+  const repo = opts.repo ?? resolveRepo(env, opts.cwd ?? process.cwd());
+  if (repo === null) {
+    return {
+      kind: 'no_repo',
+      message: '--secrets: could not resolve owner/repo from $GITHUB_REPOSITORY or git remote "origin".',
+    };
+  }
+
+  const auth = `Bearer ${stored.access_token}`;
+  const rows: TokenListRow[] = [];
+
+  const repoSecrets = await ghGetJson(fetchFn, `${apiBase}/repos/${repo}/actions/secrets`, auth, timeoutMs);
+  if (repoSecrets.kind === 'error') {
+    return {
+      kind: 'error',
+      message: `--secrets: listing repo secrets failed: ${repoSecrets.message}`,
+      rows,
+    };
+  }
+  for (const s of extractSecretNames(repoSecrets.body)) {
+    const reg = classifySecretName(s);
+    if (reg !== null) {
+      rows.push({ registry: reg, source: 'repo-secret', name: s, details: `repo secret (${repo})` });
+    }
+  }
+
+  const envsRes = await ghGetJson(fetchFn, `${apiBase}/repos/${repo}/environments`, auth, timeoutMs);
+  if (envsRes.kind === 'ok') {
+    const envNames = extractEnvironmentNames(envsRes.body);
+    for (const envName of envNames) {
+      const encoded = encodeURIComponent(envName);
+      const envSecrets = await ghGetJson(
+        fetchFn,
+        `${apiBase}/repos/${repo}/environments/${encoded}/secrets`,
+        auth,
+        timeoutMs,
+      );
+      /* v8 ignore next -- per-environment failure is rare; covered by repo-secrets error path above */
+      if (envSecrets.kind !== 'ok') continue;
+      for (const s of extractSecretNames(envSecrets.body)) {
+        const reg = classifySecretName(s);
+        if (reg !== null) {
+          rows.push({
+            registry: reg,
+            source: 'environment-secret',
+            name: s,
+            details: `environment secret (${envName})`,
+            environment: envName,
+          });
+        }
+      }
+    }
+  }
+  // envs endpoint 404 on repos without environments configured; treat as no envs, keep repo rows.
+
+  rows.sort((a, b) => {
+    if (a.registry !== b.registry) return a.registry.localeCompare(b.registry);
+    if (a.source !== b.source) return a.source.localeCompare(b.source);
+    return a.name.localeCompare(b.name);
+  });
+
+  return { kind: 'ok', rows };
+}
+
+type GhResult =
+  | { kind: 'ok'; body: unknown }
+  | { kind: 'error'; message: string };
+
+async function ghGetJson(
+  fetchFn: typeof fetch,
+  url: string,
+  authorization: string,
+  timeoutMs: number,
+): Promise<GhResult> {
+  try {
+    const res = await fetchFn(url, {
+      method: 'GET',
+      headers: {
+        authorization,
+        accept: 'application/vnd.github+json',
+        'user-agent': 'putitoutthere',
+        'x-github-api-version': '2022-11-28',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.status === 404) {
+      return { kind: 'ok', body: { not_found: true } };
+    }
+    if (!res.ok) {
+      return { kind: 'error', message: `HTTP ${res.status}` };
+    }
+    const body: unknown = await res.json();
+    return { kind: 'ok', body };
+  /* v8 ignore next 3 -- network/timeout path; msw covers HTTP error paths, real throws aren't reachable in tests */
+  } catch (err) {
+    return { kind: 'error', message: err instanceof Error ? err.message : 'unknown network error' };
+  }
+}
+
+function extractSecretNames(body: unknown): string[] {
+  if (!isPlainObject(body) || !Array.isArray(body.secrets)) return [];
+  const out: string[] = [];
+  for (const s of body.secrets) {
+    if (isPlainObject(s) && typeof s.name === 'string') out.push(s.name);
+  }
+  return out;
+}
+
+function extractEnvironmentNames(body: unknown): string[] {
+  if (!isPlainObject(body)) return [];
+  if (body.not_found === true) return [];
+  if (!Array.isArray(body.environments)) return [];
+  const out: string[] = [];
+  for (const e of body.environments) {
+    if (isPlainObject(e) && typeof e.name === 'string') out.push(e.name);
+  }
+  return out;
+}
+
+/**
+ * Resolve "owner/repo" from, in order:
+ *   1. `GITHUB_REPOSITORY` env var (CI case)
+ *   2. `git remote get-url origin`, parsing common GitHub URL shapes:
+ *      - `https://github.com/owner/repo(.git)?`
+ *      - `git@github.com:owner/repo(.git)?`
+ *      - `ssh://git@github.com/owner/repo(.git)?`
+ */
+export function resolveRepo(env: NodeJS.ProcessEnv, cwd: string): string | null {
+  const fromEnv = env.GITHUB_REPOSITORY;
+  if (typeof fromEnv === 'string' && /^[^/\s]+\/[^/\s]+$/.test(fromEnv)) {
+    return fromEnv;
+  }
+  let url: string;
+  try {
+    url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+  return parseGithubRemote(url);
+}
+
+export function parseGithubRemote(url: string): string | null {
+  // https://github.com/<owner>/<repo>(.git)?
+  const https = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url);
+  if (https) return `${https[1]}/${https[2]}`;
+  // git@github.com:<owner>/<repo>(.git)?
+  const ssh = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url);
+  if (ssh) return `${ssh[1]}/${ssh[2]}`;
+  // ssh://git@github.com/<owner>/<repo>(.git)?
+  const sshProto = /^ssh:\/\/git@github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url);
+  if (sshProto) return `${sshProto[1]}/${sshProto[2]}`;
+  return null;
 }

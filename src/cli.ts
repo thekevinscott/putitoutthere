@@ -21,7 +21,13 @@ import { init } from './init.js';
 import { plan } from './plan.js';
 import { runPreflight } from './preflight-run.js';
 import { publish } from './publish.js';
-import { inspect, tokenList, type Registry, type TokenListRow } from './token.js';
+import {
+  inspect,
+  tokenList,
+  tokenListSecrets,
+  type Registry,
+  type TokenListRow,
+} from './token.js';
 
 const VERSION = pkg.version;
 
@@ -62,6 +68,7 @@ function printUsage(): void {
       '  --deep            doctor: also inspect each token\'s publish scope',
       '  --preflight-check publish: refuse on token scope mismatch (pypi/npm)',
       '  --all             preflight: include non-cascaded packages too',
+      '  --secrets         token list: also list GitHub repo/environment secrets (requires auth login)',
       '  --cadence <mode>  init: immediate (default) or scheduled',
       '  --token <value>   token inspect: token value (else read from env)',
       '  --registry <r>    token inspect: crates|npm|pypi',
@@ -82,6 +89,7 @@ interface ParsedFlags {
   all: boolean;
   deep: boolean;
   preflightCheck: boolean;
+  secrets: boolean;
   cadence?: 'immediate' | 'scheduled';
   token?: string;
   registry?: Registry;
@@ -97,6 +105,7 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     all: false,
     deep: false,
     preflightCheck: false,
+    secrets: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -110,6 +119,7 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--all') out.all = true;
     else if (a === '--deep') out.deep = true;
     else if (a === '--preflight-check') out.preflightCheck = true;
+    else if (a === '--secrets') out.secrets = true;
     else if (a === '--cadence') {
       const v = argv[++i];
       /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
@@ -273,10 +283,23 @@ export async function run(argv: readonly string[]): Promise<number> {
             cwd: subFlags.cwd,
             ...(subFlags.config !== undefined ? { configPath: subFlags.config } : {}),
           });
+          let secretsNote: string | null = null;
+          if (subFlags.secrets) {
+            const outcome = await tokenListSecrets({ cwd: subFlags.cwd });
+            if (outcome.kind === 'ok' || outcome.kind === 'error') {
+              rows.push(...outcome.rows);
+            }
+            if (outcome.kind !== 'ok') {
+              secretsNote = outcome.message;
+            }
+          }
           if (subFlags.json) {
-            process.stdout.write(JSON.stringify({ tokens: rows }) + '\n');
+            const payload: { tokens: TokenListRow[]; note?: string } = { tokens: rows };
+            if (secretsNote !== null) payload.note = secretsNote;
+            process.stdout.write(JSON.stringify(payload) + '\n');
           } else {
             printTokenList(rows);
+            if (secretsNote !== null) process.stderr.write(`${secretsNote}\n`);
           }
           return 0;
         }

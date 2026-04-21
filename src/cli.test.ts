@@ -785,6 +785,55 @@ paths = ["packages/py/**"]
     }
   });
 
+  it('token list --secrets: prints a graceful note when the keyring is empty', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    // Point XDG_CONFIG_HOME to an empty tmp dir so defaultKeyring().get() returns null.
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    const xdg = mkdtempSync(join(tmpdir(), 'cli-secrets-xdg-'));
+    process.env.XDG_CONFIG_HOME = xdg;
+    const cwd = mkdtempSync(join(tmpdir(), 'cli-secrets-cwd-'));
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list', '--secrets', '--cwd', cwd]);
+      expect(code).toBe(0);
+      expect(stderrChunks.join('')).toMatch(/not logged in/);
+    } finally {
+      if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prevXdg;
+      rmSync(xdg, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('token list --secrets --json: emits the note in the JSON payload', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    const xdg = mkdtempSync(join(tmpdir(), 'cli-secrets-xdg2-'));
+    process.env.XDG_CONFIG_HOME = xdg;
+    const cwd = mkdtempSync(join(tmpdir(), 'cli-secrets-cwd2-'));
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list', '--secrets', '--json', '--cwd', cwd]);
+      expect(code).toBe(0);
+      const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+        tokens: unknown[];
+        note?: string;
+      };
+      expect(parsed.note).toMatch(/not logged in/);
+    } finally {
+      if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prevXdg;
+      rmSync(xdg, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('token list: prints a notice when no tokens are found', async () => {
     const stdoutChunks: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
