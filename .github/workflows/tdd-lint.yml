@@ -32,10 +32,12 @@ jobs:
           set -euo pipefail
           reason=$(git log --format=%B "$BASE_SHA..$HEAD_SHA" | grep -E '^Skip-Gates:[[:space:]]*.+' | head -1 || true)
           if [ -n "$reason" ]; then
-            echo "skip=1" >> "$GITHUB_OUTPUT"
-            echo "reason<<EOF" >> "$GITHUB_OUTPUT"
-            echo "$reason" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            {
+              echo "skip=1"
+              echo "reason<<EOF"
+              echo "$reason"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "skip=0" >> "$GITHUB_OUTPUT"
           fi
