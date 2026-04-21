@@ -28,7 +28,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
@@ -193,7 +193,18 @@ export function scanDirtyOutsideManifest(
     return null;
   }
   /* v8 ignore stop */
-  const managed = toPosix(relative(toplevel, join(pkgPath, 'Cargo.toml')));
+  // Cross-platform path matching. Sources of pain:
+  //   - macOS symlinks /var/folders → /private/var/folders; git
+  //     `--show-toplevel` canonicalizes but Node's mkdtemp output
+  //     does not.
+  //   - Windows tmp dirs may surface as 8.3 short names
+  //     (C:\Users\RUNNER~1\...) while git reports the long form with
+  //     forward slashes; file systems are also case-insensitive.
+  // Rather than compute a relative path and string-compare, we compare
+  // realpath-canonicalized absolute paths with a POSIX + case-insensitive
+  // normalization on Windows.
+  const managedAbs = canonicalKey(join(safeRealpath(pkgPath), 'Cargo.toml'));
+  const canonicalToplevel = safeRealpath(toplevel);
   const unexpected: string[] = [];
   for (const raw of porcelain.split('\n')) {
     if (raw.length < 4) continue;
@@ -202,7 +213,8 @@ export function scanDirtyOutsideManifest(
     const rest = raw.slice(3);
     const path = rest.includes(' -> ') ? rest.split(' -> ').pop()! : rest;
     const normalized = toPosix(path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path);
-    if (normalized === managed) continue;
+    const absKey = canonicalKey(join(canonicalToplevel, normalized));
+    if (absKey === managedAbs) continue;
     unexpected.push(normalized);
   }
   return unexpected;
@@ -210,6 +222,24 @@ export function scanDirtyOutsideManifest(
 
 function toPosix(p: string): string {
   return p.split('\\').join('/');
+}
+
+function safeRealpath(p: string): string {
+  try {
+    return realpathSync(p);
+    /* v8 ignore next 2 -- pkgPath is always a real dir at publish time */
+  } catch {
+    return p;
+  }
+}
+
+/** Absolute-path key used to compare file identities across git's
+ * forward-slash output and Node's platform-native paths. Case-folded
+ * on Windows because its file systems are case-insensitive. */
+function canonicalKey(p: string): string {
+  const posix = toPosix(p);
+  /* v8 ignore next -- win32 branch only exercised on Windows CI */
+  return process.platform === 'win32' ? posix.toLowerCase() : posix;
 }
 
 function relativeOrSelf(base: string, target: string): string {
