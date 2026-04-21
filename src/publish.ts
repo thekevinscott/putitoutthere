@@ -26,6 +26,7 @@ import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { checkAuth, requireAuth } from './preflight.js';
 import { createGitHubRelease, generateReleaseNotes } from './release.js';
+import { withRetry } from './retry.js';
 import { deepCheck, type InspectFn } from './token-scope.js';
 import type { Ctx, Handler, PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
@@ -157,7 +158,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
     };
 
     try {
-      if (await handler.isPublished(pkg, version, ctx)) {
+      if (await withRetry(() => handler.isPublished(pkg, version, ctx))) {
         log.info(`publish: ${name}@${version} already published; skipping`);
         continue;
       }
@@ -170,7 +171,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         continue;
       }
       await handler.writeVersion(pkg, version, ctx);
-      const result = await handler.publish(pkg, version, ctx);
+      const result = await withRetry(() => handler.publish(pkg, version, ctx));
       published.push({ package: name, version, result });
 
       if (result.status === 'published') {

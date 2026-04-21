@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { publish } from './publish.js';
-import type { Handler } from './types.js';
+import { TransientError, type Handler } from './types.js';
 
 let repo: string;
 function git(args: string[]): string {
@@ -118,6 +118,17 @@ describe('publish: happy path', () => {
     // Still tag -- re-runs with already-published don't re-tag.
     expect(result.ok).toBe(true);
   });
+
+  it('retries handler.publish on TransientError (#133)', async () => {
+    const publishFn = vi
+      .fn()
+      .mockRejectedValueOnce(new TransientError('registry 503'))
+      .mockResolvedValue({ status: 'published', url: 'https://npm/lib-js/0.1.0' });
+    const handler = makeHandler({ publish: publishFn });
+    const result = await publish({ cwd: repo, handlerFor: () => handler });
+    expect(publishFn).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(true);
+  }, 10_000);
 });
 
 describe('publish: pre-flight and completeness', () => {
