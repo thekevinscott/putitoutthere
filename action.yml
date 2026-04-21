@@ -5,7 +5,8 @@ author: 'Kevin Scott'
 inputs:
   command:
     description: 'Which putitoutthere command to run: plan | publish'
-    required: true
+    required: false
+    default: 'plan'
   dry_run:
     description: 'If true, resolve the plan but skip all destructive operations.'
     required: false
