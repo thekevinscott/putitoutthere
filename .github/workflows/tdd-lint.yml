@@ -3,6 +3,10 @@ name: TDD Lint
 # Enforces the red/green TDD discipline from plan.md §23.7: PRs that
 # modify src/ must also touch at least one *.test.ts file. CI rejects
 # non-test-bearing PRs.
+#
+# Escape hatch: a commit in the PR range with a `Skip-Gates: <reason>`
+# trailer bypasses this check. The trailer is visible in the PR commit
+# list, so reviewers can push back if it's abused. See notes/gates.md.
 
 on:
   pull_request:
@@ -19,7 +23,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for Skip-Gates trailer
+        id: skip
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          reason=$(git log --format=%B "$BASE_SHA..$HEAD_SHA" | grep -E '^Skip-Gates:[[:space:]]*.+' | head -1 || true)
+          if [ -n "$reason" ]; then
+            {
+              echo "skip=1"
+              echo "reason<<EOF"
+              echo "$reason"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Annotate skip
+        if: steps.skip.outputs.skip == '1'
+        run: echo "::notice title=TDD lint bypassed::${{ steps.skip.outputs.reason }}"
+
       - name: Check src/ changes are accompanied by tests
+        if: steps.skip.outputs.skip != '1'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -40,7 +68,7 @@ jobs:
             echo "$non_test_changed" | sed 's/^/  /'
             echo ""
             echo "Write a failing test first (red) then implement it (green)."
-            echo "See plan.md §23.7."
+            echo "See plan.md §23.7. Or add a \`Skip-Gates: <reason>\` trailer to any commit in this PR to bypass (notes/gates.md)."
             exit 1
           fi
           echo "OK: src/ changes include *.test.ts updates."

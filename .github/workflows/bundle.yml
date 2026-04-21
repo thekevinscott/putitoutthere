@@ -1,5 +1,9 @@
 name: Bundle
 
+# Verifies dist-action/ is up to date with src/. On push to main this is
+# an unconditional gate; on PRs a commit with a `Skip-Gates: <reason>`
+# trailer bypasses it. See notes/gates.md.
+
 on:
   pull_request:
   push:
@@ -15,23 +19,54 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for Skip-Gates trailer (PR only)
+        id: skip
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          reason=$(git log --format=%B "$BASE_SHA..$HEAD_SHA" | grep -E '^Skip-Gates:[[:space:]]*.+' | head -1 || true)
+          if [ -n "$reason" ]; then
+            {
+              echo "skip=1"
+              echo "reason<<EOF"
+              echo "$reason"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Annotate skip
+        if: steps.skip.outputs.skip == '1'
+        run: echo "::notice title=Bundle gate bypassed::${{ steps.skip.outputs.reason }}"
 
       - uses: actions/setup-node@v6
+        if: steps.skip.outputs.skip != '1'
         with:
           node-version: "24"
 
       - name: Install pnpm
+        if: steps.skip.outputs.skip != '1'
         run: npm install -g pnpm@9
 
       - name: Install dependencies
+        if: steps.skip.outputs.skip != '1'
         run: pnpm install --frozen-lockfile
 
       - name: Rebuild dist-action/
+        if: steps.skip.outputs.skip != '1'
         run: pnpm run build:action
 
       - name: Check dist-action/ matches source
+        if: steps.skip.outputs.skip != '1'
         run: |
           if ! git diff --exit-code dist-action/; then
-            echo "::error::dist-action/ is out of date. Run 'pnpm run build:action' locally and commit the result."
+            echo "::error::dist-action/ is out of date. Run 'pnpm run build:action' locally and commit the result. Or add a 'Skip-Gates: <reason>' trailer to any commit in this PR to bypass (notes/gates.md)."
             exit 1
           fi
