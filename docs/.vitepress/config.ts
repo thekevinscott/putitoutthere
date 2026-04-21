@@ -22,6 +22,7 @@ export default defineConfig({
           items: [
             { text: 'Concepts', link: '/guide/concepts' },
             { text: 'Configuration', link: '/guide/configuration' },
+            { text: 'Authentication', link: '/guide/auth' },
             { text: 'Release trailer', link: '/guide/trailer' },
             { text: 'Cascade', link: '/guide/cascade' },
           ],
