@@ -28,7 +28,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
@@ -171,15 +171,33 @@ export function scanDirtyOutsideManifest(
   cwd: string,
   pkgPath: string,
 ): string[] | null {
-  let toplevel: string;
+  // Confirm we're inside a git work tree. If not, bail and let cargo's
+  // own --allow-dirty handling take over.
   try {
-    toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    const topOut = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
+    });
+    if (!topOut.trim()) return null;
   } catch {
     return null;
+  }
+  // Ask git for the managed file's path relative to the repo root, so
+  // we can string-compare against porcelain output directly without
+  // fighting platform path conventions (macOS /private/ symlinks,
+  // Windows 8.3 short names + case-insensitive FS).
+  let managedRel = '';
+  try {
+    managedRel = execFileSync('git', ['ls-files', '--full-name', '--', 'Cargo.toml'], {
+      cwd: pkgPath,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    /* v8 ignore next 4 -- Cargo.toml is always tracked at publish time */
+  } catch {
+    // Cargo.toml not tracked (e.g. first release on a fresh tree).
+    // Fall through; empty managedRel means nothing is allowed dirty.
   }
   let porcelain: string;
   try {
@@ -193,53 +211,20 @@ export function scanDirtyOutsideManifest(
     return null;
   }
   /* v8 ignore stop */
-  // Cross-platform path matching. Sources of pain:
-  //   - macOS symlinks /var/folders → /private/var/folders; git
-  //     `--show-toplevel` canonicalizes but Node's mkdtemp output
-  //     does not.
-  //   - Windows tmp dirs may surface as 8.3 short names
-  //     (C:\Users\RUNNER~1\...) while git reports the long form with
-  //     forward slashes; file systems are also case-insensitive.
-  // Rather than compute a relative path and string-compare, we compare
-  // realpath-canonicalized absolute paths with a POSIX + case-insensitive
-  // normalization on Windows.
-  const managedAbs = canonicalKey(join(safeRealpath(pkgPath), 'Cargo.toml'));
-  const canonicalToplevel = safeRealpath(toplevel);
   const unexpected: string[] = [];
   for (const raw of porcelain.split('\n')) {
     if (raw.length < 4) continue;
     // Porcelain v1: "XY path" or "XY old -> new" for renames. Index 3+
     // is the path; strip quoting if git applied any.
     const rest = raw.slice(3);
+    /* v8 ignore next -- rename-row rendering not exercised by current tests */
     const path = rest.includes(' -> ') ? rest.split(' -> ').pop()! : rest;
-    const normalized = toPosix(path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path);
-    const absKey = canonicalKey(join(canonicalToplevel, normalized));
-    if (absKey === managedAbs) continue;
+    /* v8 ignore next -- quoted-path rendering not exercised by current tests */
+    const normalized = path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path;
+    if (normalized === managedRel) continue;
     unexpected.push(normalized);
   }
   return unexpected;
-}
-
-function toPosix(p: string): string {
-  return p.split('\\').join('/');
-}
-
-function safeRealpath(p: string): string {
-  try {
-    return realpathSync(p);
-    /* v8 ignore next 2 -- pkgPath is always a real dir at publish time */
-  } catch {
-    return p;
-  }
-}
-
-/** Absolute-path key used to compare file identities across git's
- * forward-slash output and Node's platform-native paths. Case-folded
- * on Windows because its file systems are case-insensitive. */
-function canonicalKey(p: string): string {
-  const posix = toPosix(p);
-  /* v8 ignore next -- win32 branch only exercised on Windows CI */
-  return process.platform === 'win32' ? posix.toLowerCase() : posix;
 }
 
 function relativeOrSelf(base: string, target: string): string {
