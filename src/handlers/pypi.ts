@@ -92,12 +92,14 @@ async function publishImpl(
     );
   }
 
-  // Prefer an explicit PYPI_API_TOKEN; fall through to OIDC trusted
-  // publishing when the workflow exposes the GHA OIDC env. The
-  // pypa/gh-action-pypi-publish reference implementation does the
-  // same audience=pypi exchange against /_/oidc/mint-token.
+  // Prefer OIDC trusted publishing; fall back to an explicit
+  // PYPI_API_TOKEN when the GHA OIDC env is absent or the mint
+  // exchange fails. Docs (docs/guide/auth.md) promise OIDC wins over
+  // PYPI_API_TOKEN so a stale repo secret can't shadow the
+  // short-lived path.
+  const oidcToken = await mintOidcToken(ctx);
   const explicitToken = nonEmpty(ctx.env.PYPI_API_TOKEN) ?? nonEmpty(process.env.PYPI_API_TOKEN);
-  const token = explicitToken ?? (await mintOidcToken(ctx));
+  const token = oidcToken ?? explicitToken;
   if (!token) {
     throw new Error(
       [
@@ -108,6 +110,9 @@ async function publishImpl(
       ].join('\n'),
     );
   }
+  ctx.log.info(
+    oidcToken ? 'pypi: authenticating via OIDC trusted publishing' : 'pypi: authenticating via PYPI_API_TOKEN',
+  );
 
   try {
     execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', ...files], {

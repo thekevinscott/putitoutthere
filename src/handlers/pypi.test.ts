@@ -353,6 +353,78 @@ describe('pypi.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('OIDC wins when both PYPI_API_TOKEN and OIDC env are present', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.endsWith('/pypi/demo-pkg/0.1.0/json')) {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      if (url.includes('/oidc/request-token') && url.includes('audience=pypi')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ token: 'pypi-oidc' }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    execMock.mockReturnValueOnce(Buffer.from(''));
+
+    const result = await pypi.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({
+        cwd: dir,
+        artifactsRoot,
+        env: {
+          PYPI_API_TOKEN: 'stale-classic-token',
+          ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+        },
+      }),
+    );
+
+    expect(result.status).toBe('published');
+    const env = (execMock.mock.calls[0]![2] as { env: Record<string, string> }).env;
+    expect(env.TWINE_PASSWORD).toBe('pypi-oidc');
+    expect(env.TWINE_PASSWORD).not.toBe('stale-classic-token');
+    fetchSpy.mockRestore();
+  });
+
+  it('falls back to PYPI_API_TOKEN when OIDC mint fails but token is set', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.endsWith('/pypi/demo-pkg/0.1.0/json')) {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      if (url.includes('/oidc/request-token')) {
+        return Promise.resolve(new Response('', { status: 500 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    execMock.mockReturnValueOnce(Buffer.from(''));
+
+    const result = await pypi.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({
+        cwd: dir,
+        artifactsRoot,
+        env: {
+          PYPI_API_TOKEN: 'classic-token',
+          ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+        },
+      }),
+    );
+
+    expect(result.status).toBe('published');
+    const env = (execMock.mock.calls[0]![2] as { env: Record<string, string> }).env;
+    expect(env.TWINE_PASSWORD).toBe('classic-token');
+    fetchSpy.mockRestore();
+  });
+
   it('treats empty PYPI_API_TOKEN as unset (falls through to OIDC, then errors when OIDC unavailable)', async () => {
     stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
