@@ -18,7 +18,7 @@ Shared fields across every `kind`:
 |-----------------|----------|----------|---------------------------------------------------|
 | `name`          | string   | yes      | Must be unique across the config.                 |
 | `kind`          | enum     | yes      | `crates` \| `pypi` \| `npm`.                      |
-| `path`          | string   | yes      | Manifest directory (where `Cargo.toml` lives).    |
+| `path`          | string   | yes      | Package working dir: `Cargo.toml` (crates), `pyproject.toml` (pypi), or `package.json` (npm). |
 | `paths`         | string[] | yes      | Globs that cascade this package.                  |
 | `depends_on`    | string[] | no       | Package names this one depends on.                |
 | `first_version` | string   | no       | Default `0.1.0`.                                  |
