@@ -15,6 +15,7 @@
  */
 
 import pkg from '../package.json' with { type: 'json' };
+import { login, logout, status, type DevicePrompt, type StatusResult } from './auth.js';
 import { doctor } from './doctor.js';
 import { init } from './init.js';
 import { plan } from './plan.js';
@@ -24,7 +25,7 @@ import { inspect, tokenList, type Registry, type TokenListRow } from './token.js
 
 const VERSION = pkg.version;
 
-const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'preflight', 'token', 'version'] as const;
+const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'preflight', 'token', 'auth', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
 
 const REGISTRIES = ['crates', 'npm', 'pypi'] as const satisfies readonly Registry[];
@@ -48,6 +49,7 @@ function printUsage(): void {
       '  doctor     Validate config + handlers + auth (#23)',
       '  preflight  Run every pre-publish check without side effects (#93)',
       '  token      Inspect or list registry tokens (pypi/npm/crates)',
+      '  auth       Optional: sign in to GitHub for `token list --secrets`',
       '  version    Print CLI version',
       '',
       'Options:',
@@ -305,6 +307,47 @@ export async function run(argv: readonly string[]): Promise<number> {
         }
         return 'error' in result ? 1 : 0;
       }
+      case 'auth': {
+        const [sub, ...subRest] = rest;
+        const subFlags = parseFlags(subRest);
+        if (sub === 'login') {
+          const result = await login({
+            onPrompt: (p) => printDevicePrompt(p),
+          });
+          if (subFlags.json) {
+            process.stdout.write(JSON.stringify(result) + '\n');
+          } else {
+            process.stdout.write(
+              `Logged in as ${result.account} (access token expires ${new Date(result.expiresAt * 1000).toISOString()}).\n`,
+            );
+          }
+          return 0;
+        }
+        if (sub === 'logout') {
+          const result = await logout();
+          if (subFlags.json) {
+            process.stdout.write(JSON.stringify(result) + '\n');
+          } else {
+            process.stdout.write(result.wiped ? 'Logged out.\n' : 'Not logged in.\n');
+          }
+          return 0;
+        }
+        if (sub === 'status') {
+          const result = await status();
+          if (subFlags.json) {
+            process.stdout.write(JSON.stringify(result) + '\n');
+          } else {
+            printAuthStatus(result);
+          }
+          return result.authenticated ? 0 : 1;
+        }
+        process.stderr.write(
+          sub === undefined
+            ? 'putitoutthere auth: missing subcommand (expected "login", "logout", or "status")\n'
+            : `putitoutthere auth: unknown subcommand: ${sub}\n`,
+        );
+        return 1;
+      }
       case 'init': {
         const r = init({
           cwd: flags.cwd,
@@ -426,6 +469,23 @@ function printInspectHuman(result: Awaited<ReturnType<typeof inspect>>): void {
     lines.push(`note:     ${result.note}`);
   }
   process.stdout.write(lines.join('\n') + '\n');
+}
+
+function printDevicePrompt(p: DevicePrompt): void {
+  process.stderr.write(
+    `Visit ${p.verificationUri} and enter code: ${p.userCode}\n` +
+      `(code expires in ${Math.round(p.expiresInSeconds / 60)} min)\n`,
+  );
+}
+
+function printAuthStatus(r: StatusResult): void {
+  if (r.authenticated) {
+    process.stdout.write(
+      `Logged in as ${r.account} (access token expires ${new Date(r.expiresAt * 1000).toISOString()}).\n`,
+    );
+  } else {
+    process.stderr.write(`${r.message}\n`);
+  }
 }
 
 // Entry point when invoked as `putitoutthere` or `node dist/cli.js`.

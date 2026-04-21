@@ -817,6 +817,68 @@ paths = ["packages/py/**"]
     }
   });
 
+  it('auth: missing subcommand is rejected', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'auth']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/missing subcommand/);
+  });
+
+  it('auth: unknown subcommand is rejected', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'auth', 'wat']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/unknown subcommand/);
+  });
+
+  it('auth status: exits 1 with a "not logged in" message when no token stored', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const xdg = mkdtempSync(join(tmpdir(), 'cli-auth-'));
+    const prev = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = xdg;
+    try {
+      const code = await run(['node', 'putitoutthere', 'auth', 'status']);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/Not logged in/);
+    } finally {
+      if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prev;
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
+  it('auth logout: is a no-op when no token stored, exits 0', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const xdg = mkdtempSync(join(tmpdir(), 'cli-auth-'));
+    const prev = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = xdg;
+    try {
+      const code = await run(['node', 'putitoutthere', 'auth', 'logout']);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/Not logged in/);
+    } finally {
+      if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prev;
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
   it('surfaces errors with a non-zero exit and a friendly message', async () => {
     const stderrChunks: string[] = [];
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
