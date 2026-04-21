@@ -1,6 +1,9 @@
 # CLI reference
 
-`putitoutthere` is the CLI shipped with the npm package.
+`putitoutthere` is the CLI shipped with the npm package. It is the supported
+surface, alongside the [GitHub Action](./action.md). The npm package does not
+expose a programmatic SDK — `import 'putitoutthere'` only provides shared
+types and the `AuthError` / `TransientError` classes.
 
 ## Commands
 

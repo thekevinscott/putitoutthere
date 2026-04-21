@@ -34,7 +34,6 @@ export default defineConfig({
           items: [
             { text: 'CLI', link: '/api/cli' },
             { text: 'GitHub Action', link: '/api/action' },
-            { text: 'SDK', link: '/api/sdk' },
           ],
         },
       ],
