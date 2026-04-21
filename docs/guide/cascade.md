@@ -19,7 +19,7 @@ No prior tag matching `{name}-v*.*.*`? The package is treated as "changed since 
 ## Glob rules
 
 - `**` matches across directory separators.
-- Leading `**/` is implicit — `src/**/*.rs` matches `src/a/b/c.rs`.
+- Patterns are anchored at the repo root. `src/**/*.rs` matches `src/a/b/c.rs` but not `crates/foo/src/bar.rs`. Use `**/Cargo.toml` if you want to catch nested manifests at any depth.
 - Dotfiles match (minimatch `dot: true`).
 - `.gitignore`-style negation is **not** supported. Keep globs inclusive.
 
