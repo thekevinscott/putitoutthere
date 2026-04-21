@@ -7,18 +7,33 @@
  */
 
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 
-import { detectRegistry, inspect, isError, tokenList } from './token.js';
+import {
+  classifySecretName,
+  detectRegistry,
+  inspect,
+  isError,
+  parseGithubRemote,
+  resolveRepo,
+  tokenList,
+  tokenListSecrets,
+} from './token.js';
 import type {
   CratesInspectResult,
   NpmInspectResult,
   PypiInspectResult,
   InspectResult,
+  SecretListOutcome,
 } from './token.js';
 import type { Package } from './config.js';
+import type { Keyring, StoredAuth } from './keyring.js';
 
 const NPM_BASE = 'https://npm.test';
 const CRATES_BASE = 'https://crates.test';
@@ -690,5 +705,239 @@ describe('tokenList', () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.registry).toBe('pypi');
+  });
+});
+
+describe('classifySecretName', () => {
+  it('classifies exact canonical registry names', () => {
+    expect(classifySecretName('CARGO_REGISTRY_TOKEN')).toBe('crates');
+    expect(classifySecretName('NPM_TOKEN')).toBe('npm');
+    expect(classifySecretName('NODE_AUTH_TOKEN')).toBe('npm');
+    expect(classifySecretName('PYPI_API_TOKEN')).toBe('pypi');
+    expect(classifySecretName('PYPI_TOKEN')).toBe('pypi');
+    expect(classifySecretName('TWINE_PASSWORD')).toBe('pypi');
+  });
+
+  it('classifies prefixed names', () => {
+    expect(classifySecretName('PYPI_PROD_TOKEN')).toBe('pypi');
+    expect(classifySecretName('TWINE_USER_X')).toBe('pypi');
+    expect(classifySecretName('NPM_PUBLISH_TOKEN')).toBe('npm');
+    expect(classifySecretName('CARGO_RELEASE_TOKEN')).toBe('crates');
+  });
+
+  it('returns null for unrelated names', () => {
+    expect(classifySecretName('SLACK_WEBHOOK_URL')).toBeNull();
+    expect(classifySecretName('DATABASE_URL')).toBeNull();
+    expect(classifySecretName('AWS_ACCESS_KEY_ID')).toBeNull();
+    expect(classifySecretName('')).toBeNull();
+  });
+});
+
+describe('parseGithubRemote', () => {
+  it('parses https URLs with and without .git', () => {
+    expect(parseGithubRemote('https://github.com/owner/repo.git')).toBe('owner/repo');
+    expect(parseGithubRemote('https://github.com/owner/repo')).toBe('owner/repo');
+    expect(parseGithubRemote('https://github.com/owner/repo/')).toBe('owner/repo');
+  });
+
+  it('parses scp-style ssh URLs', () => {
+    expect(parseGithubRemote('git@github.com:owner/repo.git')).toBe('owner/repo');
+    expect(parseGithubRemote('git@github.com:owner/repo')).toBe('owner/repo');
+  });
+
+  it('parses ssh:// URLs', () => {
+    expect(parseGithubRemote('ssh://git@github.com/owner/repo.git')).toBe('owner/repo');
+  });
+
+  it('rejects non-github hosts', () => {
+    expect(parseGithubRemote('https://gitlab.com/owner/repo.git')).toBeNull();
+    expect(parseGithubRemote('not a url')).toBeNull();
+    expect(parseGithubRemote('')).toBeNull();
+  });
+});
+
+describe('resolveRepo', () => {
+  it('prefers $GITHUB_REPOSITORY when set', () => {
+    expect(resolveRepo({ GITHUB_REPOSITORY: 'octo/hello' }, '/tmp')).toBe('octo/hello');
+  });
+
+  it('ignores malformed $GITHUB_REPOSITORY', () => {
+    // Falls through to `git remote`; in a directory with no git repo
+    // (/ on linux), execFileSync will throw and resolveRepo returns null.
+    // Use /proc which exists but isn't a git repo.
+    expect(resolveRepo({ GITHUB_REPOSITORY: 'no-slash' }, '/proc')).toBeNull();
+  });
+
+  it('returns null when neither source yields a repo', () => {
+    expect(resolveRepo({}, '/proc')).toBeNull();
+  });
+
+  it('falls back to `git remote get-url origin` when no env var is set', () => {
+    // Stand up a tiny git repo with a fake github.com origin so the
+    // execFileSync path is exercised in a way that's independent of the
+    // host checkout's remotes (CI may run in shallow/no-remote clones).
+    const dir = mkdtempSync(join(tmpdir(), 'pot-resolverepo-'));
+    try {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+      execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/octo/hello.git'], { cwd: dir });
+      expect(resolveRepo({}, dir)).toBe('octo/hello');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+function memoryKeyring(initial: StoredAuth | null = null): Keyring {
+  let current = initial;
+  return {
+    get: () => Promise.resolve(current),
+    set: (a: StoredAuth) => { current = a; return Promise.resolve(); },
+    delete: () => { current = null; return Promise.resolve(); },
+  };
+}
+
+function mkAuth(): StoredAuth {
+  return {
+    account: 'octocat',
+    access_token: 'ghu_test_secrets',
+    refresh_token: 'ghr_test',
+    access_token_expires_at: 9_999_999_999,
+    refresh_token_expires_at: 9_999_999_999,
+  };
+}
+
+const GH_BASE = 'https://api.github.test';
+
+describe('tokenListSecrets', () => {
+  it('returns not_logged_in when the keyring is empty', async () => {
+    const outcome = await tokenListSecrets({
+      keyring: memoryKeyring(null),
+      repo: 'octo/hello',
+      apiBase: GH_BASE,
+    });
+    expect(outcome.kind).toBe('not_logged_in');
+  });
+
+  it('returns no_repo when neither env var nor git remote yields owner/name', async () => {
+    const outcome = await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      apiBase: GH_BASE,
+      cwd: '/proc',
+      env: {},
+    });
+    expect(outcome.kind).toBe('no_repo');
+  });
+
+  it('lists repo + environment secrets, filtering to registry-shaped names', async () => {
+    server.use(
+      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, () =>
+        HttpResponse.json({
+          total_count: 5,
+          secrets: [
+            { name: 'NPM_TOKEN' },
+            { name: 'NPM_ALT_TOKEN' }, // same source+registry → name tiebreak sort
+            { name: 'PYPI_API_TOKEN' },
+            { name: 'SLACK_WEBHOOK' }, // excluded
+            { name: 'CARGO_REGISTRY_TOKEN' },
+          ],
+        }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments`, () =>
+        HttpResponse.json({
+          total_count: 2,
+          environments: [{ name: 'production' }, { name: 'staging' }],
+        }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments/production/secrets`, () =>
+        HttpResponse.json({
+          total_count: 1,
+          secrets: [{ name: 'PYPI_PROD_TOKEN' }],
+        }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments/staging/secrets`, () =>
+        HttpResponse.json({
+          total_count: 1,
+          secrets: [{ name: 'DATABASE_URL' }], // excluded
+        }),
+      ),
+    );
+
+    const outcome = await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      repo: 'octo/hello',
+      apiBase: GH_BASE,
+    });
+
+    expect(outcome.kind).toBe('ok');
+    if (outcome.kind !== 'ok') return;
+    expect(outcome.rows.map((r) => ({ r: r.registry, s: r.source, n: r.name }))).toEqual([
+      { r: 'crates', s: 'repo-secret', n: 'CARGO_REGISTRY_TOKEN' },
+      { r: 'npm', s: 'repo-secret', n: 'NPM_ALT_TOKEN' },
+      { r: 'npm', s: 'repo-secret', n: 'NPM_TOKEN' },
+      { r: 'pypi', s: 'environment-secret', n: 'PYPI_PROD_TOKEN' },
+      { r: 'pypi', s: 'repo-secret', n: 'PYPI_API_TOKEN' },
+    ]);
+    const prod = outcome.rows.find((r) => r.source === 'environment-secret');
+    expect(prod?.environment).toBe('production');
+  });
+
+  it('degrades to error outcome when repo-secrets endpoint rejects the token', async () => {
+    server.use(
+      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, () =>
+        HttpResponse.json({ message: 'Bad credentials' }, { status: 401 }),
+      ),
+    );
+    const outcome = await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      repo: 'octo/hello',
+      apiBase: GH_BASE,
+    });
+    expect(outcome.kind).toBe('error');
+    if (outcome.kind !== 'error') return;
+    expect(outcome.message).toMatch(/HTTP 401/);
+    expect(outcome.rows).toEqual([]);
+  });
+
+  it('treats 404 on environments endpoint as "no environments"', async () => {
+    server.use(
+      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, () =>
+        HttpResponse.json({
+          total_count: 1,
+          secrets: [{ name: 'NPM_TOKEN' }],
+        }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments`, () =>
+        HttpResponse.json({ message: 'Not Found' }, { status: 404 }),
+      ),
+    );
+    const outcome = await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      repo: 'octo/hello',
+      apiBase: GH_BASE,
+    });
+    expect(outcome.kind).toBe('ok');
+    if (outcome.kind !== 'ok') return;
+    expect(outcome.rows).toHaveLength(1);
+    expect(outcome.rows[0]!.source).toBe('repo-secret');
+  });
+
+  it('sends the stored access token as a Bearer header', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, ({ request }) => {
+        seen.push(request.headers.get('authorization') ?? '');
+        return HttpResponse.json({ total_count: 0, secrets: [] });
+      }),
+      http.get(`${GH_BASE}/repos/octo/hello/environments`, () =>
+        HttpResponse.json({ total_count: 0, environments: [] }),
+      ),
+    );
+    const outcome: SecretListOutcome = await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      repo: 'octo/hello',
+      apiBase: GH_BASE,
+    });
+    expect(outcome.kind).toBe('ok');
+    expect(seen[0]).toBe('Bearer ghu_test_secrets');
   });
 });
