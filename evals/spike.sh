@@ -186,7 +186,7 @@ EOF
       export AGENT_BROWSER_EXECUTABLE_PATH='$CHROME_BIN'
       exec claude -p \
         --model claude-opus-4-7 \
-        --max-budget-usd 3 \
+        --max-budget-usd 5 \
         --output-format text \
         \"\$(cat '$WORK/_prompt.txt')\"
     " > "$RAW" 2>&1
@@ -194,7 +194,7 @@ EOF
     cd "$WORK"
     HOME="$WORK" claude -p \
       --model claude-opus-4-7 \
-      --max-budget-usd 3 \
+      --max-budget-usd 5 \
       --output-format text \
       "$PROMPT_TEXT" \
       > "$RAW"
