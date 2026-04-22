@@ -84,7 +84,7 @@ function writeVersionImpl(
 }
 
 async function publishImpl(
-  pkg: { name: string; path: string; crate?: string },
+  pkg: { name: string; path: string; crate?: string; features?: string[] },
   version: string,
   ctx: Ctx,
 ): Promise<PublishResult> {
@@ -110,8 +110,16 @@ async function publishImpl(
     );
   }
 
+  // #169: thread configured features through so cargo's publish-time
+  // verification build exercises the same gates users will pull in.
+  // Without this, a crate with a broken `cli` feature ships regardless.
+  const args = ['publish', '--allow-dirty', '--verbose', '--manifest-path', join(pkg.path, 'Cargo.toml')];
+  if (pkg.features && pkg.features.length > 0) {
+    args.push('--features', pkg.features.join(','));
+  }
+
   try {
-    execFileSync('cargo', ['publish', '--allow-dirty', '--verbose', '--manifest-path', join(pkg.path, 'Cargo.toml')], {
+    execFileSync('cargo', args, {
       cwd: ctx.cwd,
       env: {
         ...process.env,
