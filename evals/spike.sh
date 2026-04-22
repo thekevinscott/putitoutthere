@@ -12,32 +12,34 @@
 #      docs-regression harness, not a reproduction of the motivating
 #      session's failure mode. Kept for coverage.
 #
-#   2. "isolated" fixtures (dirsql-isolated, …) — probe runs in a
-#      cloned copy of the target consumer repo (e.g. dirsql) with
-#      piot's `docs/` markdown tree copied in alongside as
-#      `./piot-docs/`. Path-scoped Read/Grep/Glob and a strict
-#      permissions file keep the probe from reaching piot's source
-#      on the host — the probe's only view of piot is what its
-#      published docs say. `settings.local.json` in the workdir
-#      denies Bash entirely (to close `cat /abs/path` escapes) and
-#      denies reads under `/home` / `/root` / `/etc`.
-#      (VitePress served over localhost was considered and dropped
-#      because Claude Code's WebFetch refuses `http://localhost`
-#      URLs as invalid.)
+#   2. "isolated" fixtures (dirsql-isolated, …) — the canonical shape.
+#      Probe runs inside a cloned copy of the target consumer repo
+#      (dirsql) with piot's docs served live from `vitepress dev` on
+#      a local port. The probe uses `agent-browser` (Vercel Labs CLI +
+#      local Chromium) to navigate the docs site exactly the way a
+#      real external agent would use WebFetch against the deployed
+#      site. Piot's source tree on the host is hidden from the probe
+#      via a mount namespace (tmpfs masks /home/user/put-it-out-there),
+#      so the only view of piot is whatever the local docs site
+#      exposes — the variable under iteration.
 #
 # Which shape a fixture uses is inferred from the presence of
-# `fixtures/<name>/setup.sh`; the docs-copy opt-in is inferred from
-# `fixtures/<name>/docs_server` (retained name, now triggers a docs
-# tree copy rather than a live server).
+# `fixtures/<name>/setup.sh`; the docs-server opt-in is inferred from
+# `fixtures/<name>/docs_server` (marker file, contents ignored).
 #
 # Usage:
 #   ./evals/spike.sh [fixture] [scope]
 #   ./evals/spike.sh dirsql-isolated
 #   ./evals/spike.sh dirsql-scope-blinder websearch
 #
-# Requires: `claude` CLI on $PATH; Anthropic API access; `git` for
-# isolated fixtures that clone a consumer repo; `pnpm` + docs deps
-# installed (`pnpm install --dir docs`) for docs-server fixtures.
+# Requires:
+#   - `claude` CLI on $PATH; Anthropic API access
+#   - `git` (for fixtures that clone a consumer repo)
+#   - `pnpm` + `docs/` deps installed (`pnpm install --dir docs`)
+#   - `agent-browser` globally installed (`npm i -g agent-browser`)
+#   - Chromium at $PIOT_CHROME (default: /opt/chrome-linux/chrome)
+#   - `unshare` with unprivileged user+mount namespace support
+#
 # Not wired into CI yet; see issue #164.
 
 set -euo pipefail
@@ -49,6 +51,7 @@ REPO_ROOT="$(cd "$EVAL_ROOT/.." && pwd)"
 FIXTURE_DIR="$EVAL_ROOT/fixtures/$FIXTURE"
 SNAP_DIR="$EVAL_ROOT/snapshots"
 TS="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+CHROME_BIN="${PIOT_CHROME:-/opt/chrome-linux/chrome}"
 
 mkdir -p "$SNAP_DIR"
 
@@ -61,7 +64,6 @@ if [[ ! -f "$FIXTURE_DIR/expected.json" ]]; then
   exit 1
 fi
 
-# Shape is inferred from setup.sh; docs-server opt-in from docs_server marker.
 SHAPE="scope"
 DOCS_SERVER="no"
 if [[ -x "$FIXTURE_DIR/setup.sh" ]]; then
@@ -75,10 +77,7 @@ else
   case "$SCOPE" in
     webfetch)   ALLOWED_TOOLS="WebSearch WebFetch" ;;
     websearch)  ALLOWED_TOOLS="WebSearch" ;;
-    *)
-      echo "ERROR: unknown scope '$SCOPE'. Expected: webfetch | websearch" >&2
-      exit 1
-      ;;
+    *) echo "ERROR: unknown scope '$SCOPE'." >&2; exit 1 ;;
   esac
 fi
 
@@ -87,75 +86,113 @@ EXTRACT="$SNAP_DIR/${VARIANT}-${TS}-extracted.json"
 GRADE="$SNAP_DIR/${VARIANT}-${TS}-grade.json"
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+DOCS_PID=""
+DOCS_PORT=""
+DOCS_URL=""
 
-# Substitute {{DOCS_PATH}} in prompt if the fixture opted into docs copy.
+cleanup() {
+  local rc=$?
+  if [[ -n "$DOCS_PID" ]] && kill -0 "$DOCS_PID" 2>/dev/null; then
+    kill "$DOCS_PID" 2>/dev/null || true
+    wait "$DOCS_PID" 2>/dev/null || true
+  fi
+  # agent-browser daemon may persist across runs — close it for hygiene.
+  agent-browser close --all >/dev/null 2>&1 || true
+  rm -rf "$WORK"
+  exit $rc
+}
+trap cleanup EXIT INT TERM
+
+# --- Pre-flight for isolated+docs-server fixtures ---
+if [[ "$SHAPE" == "isolated" && "$DOCS_SERVER" == "yes" ]]; then
+  command -v agent-browser >/dev/null || { echo "ERROR: agent-browser not on PATH (npm i -g agent-browser)" >&2; exit 4; }
+  [[ -x "$CHROME_BIN" ]] || { echo "ERROR: Chromium not found at $CHROME_BIN (set PIOT_CHROME)" >&2; exit 4; }
+  [[ -d "$REPO_ROOT/docs/node_modules" ]] || { echo "ERROR: docs deps missing (pnpm install --dir docs)" >&2; exit 4; }
+  command -v unshare >/dev/null || { echo "ERROR: unshare not on PATH" >&2; exit 4; }
+
+  DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+  DOCS_LOG="$SNAP_DIR/${VARIANT}-${TS}-docs.log"
+  DOCS_URL="http://localhost:${DOCS_PORT}/put-it-out-there/"
+  echo "==> docs: booting vitepress on port $DOCS_PORT (log: $DOCS_LOG)"
+  ( cd "$REPO_ROOT/docs" && pnpm dev --port "$DOCS_PORT" ) > "$DOCS_LOG" 2>&1 &
+  DOCS_PID=$!
+  for _ in $(seq 1 40); do
+    curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null && { echo "    ready at $DOCS_URL"; break; }
+    sleep 0.5
+  done
+  curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null || { echo "ERROR: docs server not ready"; tail -20 "$DOCS_LOG" >&2; exit 3; }
+fi
+
 PROMPT_TEXT="$(cat "$FIXTURE_DIR/prompt.md")"
-DOCS_PATH=""
 if [[ "$DOCS_SERVER" == "yes" ]]; then
-  DOCS_PATH="./piot-docs"
-  PROMPT_TEXT="${PROMPT_TEXT//\{\{DOCS_PATH\}\}/$DOCS_PATH}"
+  PROMPT_TEXT="${PROMPT_TEXT//\{\{DOCS_URL\}\}/$DOCS_URL}"
 fi
 
 if [[ "$SHAPE" == "isolated" ]]; then
-  echo "==> setup: running $FIXTURE_DIR/setup.sh $WORK"
+  echo "==> setup: $FIXTURE_DIR/setup.sh $WORK"
   "$FIXTURE_DIR/setup.sh" "$WORK"
-  if [[ "$DOCS_SERVER" == "yes" ]]; then
-    echo "==> docs: copying piot's docs/ into $WORK/piot-docs (a run-time snapshot)"
-    cp -r "$REPO_ROOT/docs" "$WORK/piot-docs"
-    # Strip the local node_modules and build output; the agent should
-    # see markdown sources only, not rendered HTML or vendored deps.
-    rm -rf "$WORK/piot-docs/node_modules" "$WORK/piot-docs/.vitepress/dist" \
-           "$WORK/piot-docs/.vitepress/cache" 2>/dev/null || true
-  fi
-  cd "$WORK"
-  if [[ "$DOCS_SERVER" == "yes" ]]; then
-    # Lock the probe: reads/grep/glob allowed anywhere except /home, /root,
-    # /etc (hides piot's canonical source tree on the host); WebFetch and
-    # WebSearch denied (agent must use the docs copied into ./piot-docs/);
-    # Bash denied entirely (closes `cat /abs/path`, `git --git-dir=…`
-    # escapes). The agent's only view of piot is the docs snapshot in
-    # ./piot-docs/.
-    mkdir -p "$WORK/.claude"
-    cat > "$WORK/.claude/settings.local.json" <<'EOF'
+
+  # Settings file: pre-approves the tools the foreign agent had,
+  # denies piot-source paths as belt-and-suspenders on top of the
+  # mount-namespace mask.
+  mkdir -p "$WORK/.claude"
+  cat > "$WORK/.claude/settings.local.json" <<EOF
 {
   "permissions": {
     "allow": [
       "Read",
       "Grep",
-      "Glob"
+      "Glob",
+      "Bash(agent-browser:*)",
+      "Bash(git:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(pwd)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)"
     ],
     "deny": [
-      "Read(/home/**)",
-      "Read(/root/**)",
-      "Read(/etc/**)",
-      "Grep(/home/**)",
-      "Grep(/root/**)",
-      "Grep(/etc/**)",
-      "Glob(/home/**)",
-      "Glob(/root/**)",
-      "Glob(/etc/**)",
-      "Bash",
+      "Read(/home/user/put-it-out-there/**)",
+      "Grep(/home/user/put-it-out-there/**)",
+      "Glob(/home/user/put-it-out-there/**)",
       "WebFetch",
       "WebSearch"
     ]
   }
 }
 EOF
-    echo "==> probe: variant=$VARIANT (Opus 4.7, scoped reads, no Bash/web, docs → ./piot-docs/)"
-    # HOME=$WORK isolates the probe from the host's ~/.claude (notably a
-    # global Stop hook that otherwise fires in the probe's context and
-    # derails the eval with git-status prompts). Probe reads only the
-    # settings.local.json we wrote above.
-    HOME="$WORK" claude -p \
-      --model claude-opus-4-7 \
-      --max-budget-usd 3 \
-      --output-format text \
-      "$PROMPT_TEXT" \
-      > "$RAW"
+
+  if [[ "$DOCS_SERVER" == "yes" ]]; then
+    echo "==> probe: variant=$VARIANT (Opus 4.7, via agent-browser → $DOCS_URL)"
+    # Run the probe inside a user+mount namespace that masks
+    # /home/user/put-it-out-there with an empty tmpfs. This makes piot
+    # source unreachable even via Bash (cat /abs/path, git --git-dir=,
+    # etc.) — the probe can only see piot through the live docs site.
+    # PUPPETEER_EXECUTABLE_PATH / CHROME_PATH tell agent-browser which
+    # chromium to drive (since `agent-browser install` can't reach the
+    # Chrome CDN from this env).
+    printf '%s' "$PROMPT_TEXT" > "$WORK/_prompt.txt"
+    # Pre-write agent-browser's user config so it finds Chromium without
+    # the probe having to pass --executable-path on every invocation.
+    mkdir -p "$WORK/.agent-browser"
+    printf '{"executable_path": "%s"}\n' "$CHROME_BIN" > "$WORK/.agent-browser/config.json"
+    unshare --user --mount --map-root-user bash -c "
+      mount -t tmpfs tmpfs /home/user/put-it-out-there || exit 5
+      cd '$WORK'
+      export HOME='$WORK'
+      export AGENT_BROWSER_EXECUTABLE_PATH='$CHROME_BIN'
+      exec claude -p \
+        --model claude-opus-4-7 \
+        --max-budget-usd 3 \
+        --output-format text \
+        \"\$(cat '$WORK/_prompt.txt')\"
+    " > "$RAW" 2>&1
   else
-    echo "==> probe: variant=$VARIANT (Opus 4.7, unrestricted tools, cwd=$WORK)"
-    claude -p \
+    cd "$WORK"
+    HOME="$WORK" claude -p \
       --model claude-opus-4-7 \
       --max-budget-usd 3 \
       --output-format text \
@@ -163,7 +200,6 @@ EOF
       > "$RAW"
   fi
 else
-  echo "==> probe: variant=$VARIANT (Opus 4.7, tools: $ALLOWED_TOOLS)"
   cd "$WORK"
   claude -p \
     --model claude-opus-4-7 \
@@ -177,10 +213,8 @@ fi
 
 echo "    raw output: $RAW ($(wc -l < "$RAW") lines)"
 
-# Probe failed to produce real output — typically an API rate-limit or
-# permission denial. Bail before burning the extractor on garbage.
 if ! [[ -s "$RAW" ]] || [[ "$(wc -c < "$RAW")" -lt 200 ]]; then
-  echo "ERROR: probe output is empty or suspiciously short. Contents:" >&2
+  echo "ERROR: probe output is empty or suspiciously short:" >&2
   cat "$RAW" >&2
   exit 2
 fi
@@ -207,8 +241,8 @@ Rules:
 - "missing" means the evaluator concludes piot lacks it or recommends
   adding it.
 - "not_mentioned" means the evaluator does not address this primitive.
-- If the evaluator hedges ("worth verifying", "unclear"), treat as
-  "not_mentioned" unless the overall conclusion is clear.
+- If the evaluator hedges, treat as "not_mentioned" unless the overall
+  conclusion is clear.
 - Match by meaning, not keyword. For "bundled_cli_understood": does the
   evaluator demonstrate understanding of what bundled-cli does, or
   merely note the name exists?
@@ -218,10 +252,6 @@ Evaluation follows.
 EOF
 )
 
-# Extractor also needs HOME isolation — otherwise the host's global Stop
-# hook fires (cwd is $WORK, which has an uncommitted dirsql clone + the
-# piot-docs copy), and Haiku returns a reply to the hook instead of the
-# JSON object we asked for.
 HOME="$WORK" claude -p \
   --model claude-haiku-4-5-20251001 \
   --tools "" \
@@ -232,7 +262,6 @@ HOME="$WORK" claude -p \
 $(cat "$RAW")" \
   > "$EXTRACT.raw"
 
-# The model sometimes wraps JSON in fences; strip them.
 python3 -c "
 import json, re, sys
 raw = open('$EXTRACT.raw').read()
@@ -271,7 +300,7 @@ grade = {
     'timestamp': '$TS',
     'model': 'claude-opus-4-7',
     'docs_server': '$DOCS_SERVER',
-    'docs_path': '$DOCS_PATH',
+    'docs_url': '$DOCS_URL',
     'pass': len(fails) == 0,
     'score': f'{len(expected) - len(fails)}/{len(expected)}',
     'results': results,
