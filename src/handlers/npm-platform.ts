@@ -218,33 +218,66 @@ interface OsCpu {
 }
 
 /**
- * Maps a napi-rs-style target triple to npm `os`/`cpu` fields.
- * Unknown triples fall through to a permissive shape — the caller's
- * build step is presumed to have produced something valid.
+ * Explicit mapping from target triple to npm `os`/`cpu`/`libc`.
+ *
+ * Covers both napi-rs short-form triples (`linux-x64-gnu`) and Rust
+ * triples (`x86_64-unknown-linux-gnu`). Unmapped triples throw — see
+ * `targetToOsCpu` — so broken platform packages never reach npm with
+ * empty `os`/`cpu` filters (which would install them everywhere).
+ *
+ * Issue #170.
+ */
+const TRIPLE_MAP: Record<string, { os: string[]; cpu: string[]; libc?: string[] }> = {
+  // napi-rs short form: linux
+  'linux-x64-gnu': { os: ['linux'], cpu: ['x64'], libc: ['glibc'] },
+  'linux-x64-musl': { os: ['linux'], cpu: ['x64'], libc: ['musl'] },
+  'linux-arm64-gnu': { os: ['linux'], cpu: ['arm64'], libc: ['glibc'] },
+  'linux-arm64-musl': { os: ['linux'], cpu: ['arm64'], libc: ['musl'] },
+  'linux-arm-gnueabihf': { os: ['linux'], cpu: ['arm'], libc: ['glibc'] },
+  'linux-arm-musleabihf': { os: ['linux'], cpu: ['arm'], libc: ['musl'] },
+
+  // napi-rs short form: darwin
+  'darwin-x64': { os: ['darwin'], cpu: ['x64'] },
+  'darwin-arm64': { os: ['darwin'], cpu: ['arm64'] },
+
+  // napi-rs short form: windows
+  'win32-x64-msvc': { os: ['win32'], cpu: ['x64'] },
+  'win32-arm64-msvc': { os: ['win32'], cpu: ['arm64'] },
+
+  // Rust target triples: linux
+  'x86_64-unknown-linux-gnu': { os: ['linux'], cpu: ['x64'], libc: ['glibc'] },
+  'x86_64-unknown-linux-musl': { os: ['linux'], cpu: ['x64'], libc: ['musl'] },
+  'aarch64-unknown-linux-gnu': { os: ['linux'], cpu: ['arm64'], libc: ['glibc'] },
+  'aarch64-unknown-linux-musl': { os: ['linux'], cpu: ['arm64'], libc: ['musl'] },
+  'armv7-unknown-linux-gnueabihf': { os: ['linux'], cpu: ['arm'], libc: ['glibc'] },
+  'armv7-unknown-linux-musleabihf': { os: ['linux'], cpu: ['arm'], libc: ['musl'] },
+
+  // Rust target triples: darwin
+  'x86_64-apple-darwin': { os: ['darwin'], cpu: ['x64'] },
+  'aarch64-apple-darwin': { os: ['darwin'], cpu: ['arm64'] },
+
+  // Rust target triples: windows
+  'x86_64-pc-windows-msvc': { os: ['win32'], cpu: ['x64'] },
+  'aarch64-pc-windows-msvc': { os: ['win32'], cpu: ['arm64'] },
+};
+
+/**
+ * Maps a napi-rs or Rust target triple to npm `os`/`cpu`/`libc` fields.
+ *
+ * Lookup is exact (case-insensitive). Unmapped triples throw so broken
+ * platform packages — which would otherwise publish with empty `os`/
+ * `cpu` filters and install everywhere — never reach the registry.
  */
 export function targetToOsCpu(target: string): OsCpu {
-  const t = target.toLowerCase();
-  const os: string[] = [];
-  const cpu: string[] = [];
-  let libc: string[] | undefined;
-
-  if (/linux/.test(t)) {
-    os.push('linux');
-    if (/musl/.test(t)) libc = ['musl'];
-    else if (/gnu/.test(t)) libc = ['glibc'];
-  } else if (/darwin|apple/.test(t)) {
-    os.push('darwin');
-    /* v8 ignore next -- win32 branch exercised in target-map test */
-  } else if (/win32|windows|msvc/.test(t)) {
-    os.push('win32');
+  const entry = TRIPLE_MAP[target.toLowerCase()];
+  if (!entry) {
+    throw new Error(
+      `Target triple "${target}" is not mapped to npm os/cpu. Add it to TRIPLE_MAP in src/handlers/npm-platform.ts.`,
+    );
   }
-
-  if (/aarch64|arm64/.test(t)) cpu.push('arm64');
-  /* v8 ignore next -- ia32 / armv7 rare; fallthrough lets npm accept without a cpu filter */
-  else if (/x86_64|x64/.test(t)) cpu.push('x64');
-  else if (/armv7/.test(t)) cpu.push('arm');
-
-  return libc !== undefined ? { os, cpu, libc } : { os, cpu };
+  return entry.libc !== undefined
+    ? { os: entry.os, cpu: entry.cpu, libc: entry.libc }
+    : { os: entry.os, cpu: entry.cpu };
 }
 
 function pickMainFile(files: readonly string[], build: 'napi' | 'bundled-cli'): string {
