@@ -155,12 +155,16 @@ describe('pypi.writeVersion', () => {
     ).rejects.toThrow(/pyproject\.toml/);
   });
 
-  it('throws when [project].version field is absent', async () => {
+  it('throws when neither static version nor dynamic version is declared (issue #171)', async () => {
     const p = join(dir, 'pyproject.toml');
-    writeFileSync(p, `[build-system]\nrequires = ["hatchling"]\n`, 'utf8');
+    writeFileSync(
+      p,
+      `[project]\nname = "demo"\nrequires-python = ">=3.10"\n\n[build-system]\nrequires = ["hatchling"]\n`,
+      'utf8',
+    );
     await expect(
       pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
-    ).rejects.toThrow(/version/i);
+    ).rejects.toThrow(/neither a static \[project\]\.version nor a dynamic version declaration/);
   });
 
   it('preserves comments', async () => {
@@ -179,6 +183,66 @@ describe('pypi.writeVersion', () => {
     expect(out).toContain('# keep');
     expect(out).toContain('# trailing');
     expect(out).toContain('version = "0.2.0"');
+  });
+
+  // --- issue #171: dynamic-version projects --------------------------------
+
+  it('skips the rewrite when [project].dynamic contains "version" (hatch-vcs / setuptools-scm)', async () => {
+    const p = join(dir, 'pyproject.toml');
+    const src =
+      `[project]\nname = "demo"\ndynamic = ["version"]\nrequires-python = ">=3.10"\n` +
+      `\n[build-system]\nrequires = ["hatchling", "hatch-vcs"]\nbuild-backend = "hatchling.build"\n` +
+      `\n[tool.hatch.version]\nsource = "vcs"\n`;
+    writeFileSync(p, src, 'utf8');
+    const infoSpy = vi.fn();
+    const paths = await pypi.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({
+        cwd: dir,
+        log: { debug: () => {}, info: infoSpy, warn: () => {}, error: () => {} },
+      }),
+    );
+    expect(paths).toEqual([]);
+    // File is untouched -- no literal version line was synthesised.
+    expect(readFileSync(p, 'utf8')).toBe(src);
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0]![0]).toMatch(/skipping.*version rewrite/i);
+    expect(infoSpy.mock.calls[0]![0]).toMatch(/dynamic/i);
+  });
+
+  it('skips the rewrite when "version" is one of several entries in dynamic', async () => {
+    const p = join(dir, 'pyproject.toml');
+    const src = `[project]\nname = "demo"\ndynamic = ["readme", "version", "dependencies"]\n`;
+    writeFileSync(p, src, 'utf8');
+    const infoSpy = vi.fn();
+    const paths = await pypi.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({
+        cwd: dir,
+        log: { debug: () => {}, info: infoSpy, warn: () => {}, error: () => {} },
+      }),
+    );
+    expect(paths).toEqual([]);
+    expect(readFileSync(p, 'utf8')).toBe(src);
+    expect(infoSpy).toHaveBeenCalled();
+  });
+
+  it('rewrites normally when dynamic array is present but does not include "version"', async () => {
+    const p = join(dir, 'pyproject.toml');
+    writeFileSync(
+      p,
+      `[project]\nname = "demo"\nversion = "0.1.0"\ndynamic = ["readme", "dependencies"]\n`,
+      'utf8',
+    );
+    const paths = await pypi.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ cwd: dir }),
+    );
+    expect(paths).toContain(p);
+    expect(readFileSync(p, 'utf8')).toContain('version = "0.2.0"');
   });
 });
 
