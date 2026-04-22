@@ -38,7 +38,7 @@ otherwise conflate the two.
 | `RELEASE_STRATEGY` repo-variable toggle                                         | Supported (maps to `[putitoutthere] cadence`) | — |
 | Sibling monorepo packages with common parent glob (`models/**`, `packages/*/{javascript,python}`) | Supported (each `[[package]].paths` narrows with its own prefix) | Ensure cascade tests cover "sibling under common parent" explicitly |
 | Auto-patch on every push unless `[skip-version]` marker (gbnf)                  | Supported (`cadence = "immediate"` + trailer-or-default-bump) | — |
-| Slash-separated tag prefixes (`js/pkg-v*`, `py/pkg-v*`)                         | **Gap** (putitoutthere enforces `{name}-v*` with dash separator) | Low priority — only matters if an operator wants to preserve the exact historical prefix; document as a migration change-of-behavior |
+| Slash-separated tag prefixes (`js/pkg-v*`, `py/pkg-v*`)                         | **Out of scope** — putitoutthere enforces `{name}-v*`; tag format is non-negotiable | Consumers on slash-separated prefixes must migrate their tag format; documented as a required migration change |
 | Auto tag-rollback on publish failure (uv / pnpm publish retry-and-delete-tag)   | Intentionally not supported | Completeness-check (plan.md §13.2) prevents the partial-publish class that made rollback necessary |
 | Manual-only releases (no CI at all — UpscalerJS)                                | Supported (first automated release) | — |
 | Repo-local `prepublishOnly` build/lint/test guards                              | Supported (moved into `release.yml` build step) | Safe to leave redundant hook in place |
