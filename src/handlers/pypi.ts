@@ -241,12 +241,9 @@ export function hasDynamicVersion(source: string): boolean {
     /* v8 ignore next -- malformed TOML is reported by the regex path */
     return false;
   }
-  if (!parsed || typeof parsed !== 'object') return false;
-  const project = (parsed as Record<string, unknown>).project;
-  if (!project || typeof project !== 'object') return false;
-  const dynamic = (project as Record<string, unknown>).dynamic;
-  if (!Array.isArray(dynamic)) return false;
-  return dynamic.includes('version');
+  const project = (parsed as { project?: { dynamic?: unknown } })?.project;
+  const dynamic = project?.dynamic;
+  return Array.isArray(dynamic) && dynamic.includes('version');
 }
 
 /**

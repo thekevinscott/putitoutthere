@@ -244,6 +244,18 @@ describe('pypi.writeVersion', () => {
     expect(paths).toContain(p);
     expect(readFileSync(p, 'utf8')).toContain('version = "0.2.0"');
   });
+
+  it('throws when [project] table is absent entirely', async () => {
+    const p = join(dir, 'pyproject.toml');
+    writeFileSync(
+      p,
+      `[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n`,
+      'utf8',
+    );
+    await expect(
+      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
+    ).rejects.toThrow(/neither a static \[project\]\.version nor a dynamic version declaration/);
+  });
 });
 
 describe('pypi.publish', () => {
