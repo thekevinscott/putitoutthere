@@ -1,95 +1,96 @@
 # Agent-behavior evals
 
-Spike harness for testing how external agents perceive `putitoutthere`'s
-docs and code. See issue #164 for motivation.
+Harness for testing whether an external agent, reading only piot's
+published docs, can reach correct conclusions about piot's feature
+surface. See issue #164.
 
 ## Running
 
 ```sh
-./evals/spike.sh [fixture] [scope]
+./evals/spike.sh dirsql-isolated
 ```
 
-Defaults: `dirsql-scope webfetch`.
+Exits 0 on full pass, non-zero on any graded primitive miss. Each run
+produces three files in `evals/snapshots/`: `*-raw.md` (probe output),
+`*-extracted.json` (Haiku-extracted structured claims), `*-grade.json`
+(pass/fail per primitive vs. `expected.json`).
 
-Requires the `claude` CLI on `$PATH` and Anthropic API access. Isolated
-fixtures additionally require `git` (they clone a consumer repo).
+## Prerequisites (one-time)
+
+- `claude` CLI on `$PATH`.
+- `pnpm install --dir docs`
+- `npm i -g agent-browser`
+- Chromium at `$PIOT_CHROME` (default `/opt/chrome-linux/chrome`).
+  Download from `storage.googleapis.com/chromium-browser-snapshots/Linux_x64/<rev>/chrome-linux.zip`
+  — `googlechromelabs.github.io` (agent-browser's default source) is
+  not in this environment's egress allow-list.
+- `unshare` with unprivileged user+mount namespaces
+  (`unshare --user --mount --map-root-user` must succeed).
 
 ## Fixture shapes
 
-Two shapes exist, inferred from the presence of `setup.sh` in the
-fixture dir.
+### `dirsql-isolated` — the canonical reproduction
 
-### Isolated fixtures — faithful reproduction
+- Clones `thekevinscott/dirsql` into a scratch dir (`$WORK`).
+- Boots `vitepress dev` against this repo's `docs/` on a free port;
+  the probe's only view of piot is that live rendered site.
+- Runs the probe inside `unshare --user --mount` with a tmpfs masking
+  `/home/user/put-it-out-there` — piot's source tree on the host is
+  invisible from inside the namespace even through `cat /abs/path` or
+  `git --git-dir=…` escapes.
+- The probe invokes `agent-browser open / snapshot -i / click / close`
+  to navigate the local docs through a real browser — not raw markdown
+  reads. This matches what the foreign dirsql session did, modulo the
+  docs URL (public → localhost).
+- Tool surface mirrors the foreign agent's: Read / Grep / Glob inside
+  `$WORK`, scoped Bash (`agent-browser`, `git`, `ls`, `cat`, `grep`,
+  `find`, `pwd`, `wc`, `head`, `tail`), no WebFetch / WebSearch.
 
-**`dirsql-isolated`** — probe runs inside a fresh clone of
-`thekevinscott/dirsql` with default Claude Code tools (Read / Grep /
-Glob / Bash / WebSearch / WebFetch). Piot is strictly off-disk; the
-agent must reach it through the public web, exactly like the session
-that motivated this eval.
+### `dirsql-scope`, `dirsql-scope-blinder` — docs-regression harness
 
-The `scope` arg is ignored for isolated fixtures — the invariant is
-"no tool restrictions" to match the original session.
+Older fixtures that test "how does the docs site hold up to direct
+evaluator framing without a consumer repo in context?" These don't
+reproduce the dirsql failure mode — they ask a different question.
+Kept because they catch a different class of regression. Invoked as
+`./evals/spike.sh dirsql-scope[-blinder] [webfetch|websearch]`.
 
-**This is the shape that reproduces (or fails to reproduce) the
-failure mode #164 is tracking.** Scored primitives live in
-`expected.json`; the prompt replays the session's turn that first
-asked "what do you think of this scope of work?" plus the follow-up
-that reframes the question as "what blocks dirsql from adopting piot?"
+## Current red baseline (2026-04-22, 3 runs)
 
-### Scope fixtures — docs-regression harness
+Consistent 4/6 across three runs. Signals:
 
-| Fixture                 | Prompt shape                                                                                   |
-|-------------------------|------------------------------------------------------------------------------------------------|
-| `dirsql-scope`          | Leading: names specific pain points in the prompt itself. Evaluator-framing, no filesystem.    |
-| `dirsql-scope-blinder`  | Structural only: no pain points pre-specified. Evaluator-framing, no filesystem.               |
+| Primitive                       | 3-run pattern                                           |
+|---------------------------------|----------------------------------------------------------|
+| `npm_platform_family`           | shipped (correct) × 3                                    |
+| `depends_on_serialization`      | shipped (correct) × 3                                    |
+| `idempotent_precheck`           | shipped (correct) × 3                                    |
+| `bundled_cli_understood`        | shipped × 2, **false-negative "missing"** × 1            |
+| `per_target_runner_override`    | **silent** × 3 (truth: missing — no doc surfaces this)   |
+| `doctor_oidc_trust_policy_check`| silent × 2, correctly-missing × 1                        |
 
-Scope arg picks tool access:
+Baseline snapshots checked in at
+`evals/snapshots/dirsql-isolated-2026-04-22T19-*` as the reference to
+diff against during docs iteration.
 
-| Scope        | Allowed tools         |
-|--------------|-----------------------|
-| `webfetch`   | WebSearch + WebFetch  |
-| `websearch`  | WebSearch only        |
+## Iterating on docs
 
-These fixtures test "how does the piot docs site hold up to external
-evaluation?" — a related but different question from the isolated
-shape. Kept because they catch a different class of regression.
-
-## What the harness does
-
-1. **Setup** (isolated fixtures only) — runs `setup.sh` to populate the
-   probe's working directory (e.g. `git clone dirsql`).
-2. **Probe** — invokes `claude -p` (Opus 4.7) with the fixture's
-   `prompt.md` as a single-turn input. Captures prose output to
-   `snapshots/<variant>-<ts>-raw.md`.
-3. **Extract** — a Haiku call reads the prose and emits a structured
-   JSON claim per primitive. Saved to `snapshots/<variant>-<ts>-extracted.json`.
-4. **Grade** — compares extracted claims to
-   `fixtures/<name>/expected.json`. Exits non-zero on any mismatch.
-   Saved to `snapshots/<variant>-<ts>-grade.json`.
-
-Variant name is `<fixture>` for isolated shapes, `<fixture>__<scope>`
-for scope shapes.
-
-## Fixture layout
-
-```
-fixtures/<name>/
-  prompt.md       # single-turn task given to the probe
-  expected.json   # ground truth: what each primitive actually is
-  setup.sh        # (optional) populates the probe's working dir;
-                  #           presence marks the fixture as "isolated"
-```
+The loop: edit `docs/`, `./evals/spike.sh dirsql-isolated`, diff the
+new raw output against the baseline. For each primitive, the probe's
+prose is very specific about which doc page it relied on — that's the
+best signal for which page a change has to land on.
 
 ## Known limitations
 
-- **Single-turn, not multi-turn.** The motivating dirsql session was 8
-  turns of evolving context. Even the isolated fixture condenses the
-  opening and pivot turns into one prompt. Faithful multi-turn replay
-  is future work.
-- **Clone is a moving target.** `dirsql-isolated` clones `main` at run
-  time, so the exact source the agent sees drifts as dirsql evolves.
-  For stable grading, pin a SHA in `setup.sh` when cutover matters.
-- **Extractor is itself an LLM.** Treat a single run as a sample, not
-  a verdict. Repeat 3× before concluding.
-
-See #164 for the roadmap beyond this spike.
+- **Single-turn.** The motivating session was 8 turns of accumulating
+  context. The harness condenses to one. Multi-turn replay is future
+  work.
+- **Extractor is an LLM.** Per-run noise is real (run 1 had 2
+  silents + 0 false-negatives; run 3 had 1 silent + 1 false-negative,
+  on the same underlying text). Treat 3 runs as a baseline sample
+  before declaring a primitive fixed.
+- **Clone is a moving target.** `setup.sh` clones dirsql's `main` at
+  run time. Pin a SHA in `setup.sh` if dirsql drift starts showing up
+  in scores.
+- **WebFetch cannot reach localhost.** `web_fetch` is server-executed
+  and has no network path to this container. That's why the probe
+  uses agent-browser + local chromium instead of WebFetch against
+  localhost.
