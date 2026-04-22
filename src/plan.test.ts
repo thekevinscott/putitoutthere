@@ -236,6 +236,54 @@ describe('plan: subsequent release with last_tag', () => {
     const matrix = await plan({ cwd: repo });
     expect(matrix).toEqual([]);
   });
+
+  it('cascades correctly when multiple packages share a tag (diff memoization, #140)', async () => {
+    // All three packages tag together at the same SHA. The memoized
+    // diff cache must yield a single set that all three can iterate
+    // against without one corrupting the others — this asserts the
+    // correctness invariant of the #140 perf fix (shared Set is
+    // read-only in the consumer chain).
+    const sharedTomlStructure = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "pkg-a"
+kind  = "crates"
+path  = "packages/a"
+paths = ["packages/a/**"]
+
+[[package]]
+name  = "pkg-b"
+kind  = "crates"
+path  = "packages/b"
+paths = ["packages/b/**"]
+
+[[package]]
+name  = "pkg-c"
+kind  = "crates"
+path  = "packages/c"
+paths = ["packages/c/**"]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), sharedTomlStructure, 'utf8');
+    commit('feat: initial', {
+      'packages/a/Cargo.toml': '[package]\nname="a"',
+      'packages/b/Cargo.toml': '[package]\nname="b"',
+      'packages/c/Cargo.toml': '[package]\nname="c"',
+    });
+    // All three tag at the same commit — this is the cache-hit scenario.
+    git(['tag', '-a', 'pkg-a-v0.1.0', '-m', 'a']);
+    git(['tag', '-a', 'pkg-b-v0.1.0', '-m', 'b']);
+    git(['tag', '-a', 'pkg-c-v0.1.0', '-m', 'c']);
+
+    // Change only pkg-b. Only pkg-b should cascade; pkg-a/pkg-c must
+    // see the same diff set via the cache but correctly decide they
+    // don't match their own path globs.
+    commit('fix: only b', { 'packages/b/src.rs': '// b' });
+
+    const matrix = await plan({ cwd: repo });
+    expect(matrix.map((r) => r.name).sort()).toEqual(['pkg-b']);
+  });
 });
 
 const NPM_TOML = `

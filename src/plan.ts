@@ -86,13 +86,23 @@ function collectChanges(
 } {
   const changesByPackage = new Map<string, ReadonlySet<string>>();
   const firstRelease = new Set<string>();
+  // Packages in a polyglot repo typically tag together, so many of them
+  // point at the same `last_tag-v*` SHA. Memoize `git diff --name-only
+  // <tag>..HEAD` by tag so we spawn one `git diff` per unique tag
+  // instead of one per package (#140).
+  const diffCache = new Map<string, ReadonlySet<string>>();
   for (const p of packages) {
     const tag = lastTag(p.name, { cwd });
     if (tag === null) {
       firstRelease.add(p.name);
       continue;
     }
-    changesByPackage.set(p.name, new Set(diffNames(tag, 'HEAD', { cwd })));
+    let diff = diffCache.get(tag);
+    if (diff === undefined) {
+      diff = new Set(diffNames(tag, 'HEAD', { cwd }));
+      diffCache.set(tag, diff);
+    }
+    changesByPackage.set(p.name, diff);
   }
   return { changesByPackage, firstRelease };
 }
