@@ -84,7 +84,7 @@ function writeVersionImpl(
 }
 
 async function publishImpl(
-  pkg: { name: string; path: string; crate?: string; features?: string[] },
+  pkg: { name: string; path: string; crate?: string; features?: string[]; no_default_features?: boolean },
   version: string,
   ctx: Ctx,
 ): Promise<PublishResult> {
@@ -116,6 +116,9 @@ async function publishImpl(
   const args = ['publish', '--allow-dirty', '--verbose', '--manifest-path', join(pkg.path, 'Cargo.toml')];
   if (pkg.features && pkg.features.length > 0) {
     args.push('--features', pkg.features.join(','));
+  }
+  if (pkg.no_default_features === true) {
+    args.push('--no-default-features');
   }
 
   try {

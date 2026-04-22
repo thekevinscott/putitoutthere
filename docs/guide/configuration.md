@@ -25,10 +25,11 @@ Shared fields across every `kind`:
 
 ### `kind = "crates"`
 
-| Field      | Type     | Notes                                   |
-|------------|----------|-----------------------------------------|
-| `crate`    | string   | Override `name` → crates.io name.       |
-| `features` | string[] | Pass through to `cargo publish`.        |
+| Field                 | Type     | Notes                                                      |
+|-----------------------|----------|------------------------------------------------------------|
+| `crate`               | string   | Override `name` → crates.io name.                          |
+| `features`            | string[] | Pass through to `cargo publish --features`.                |
+| `no_default_features` | bool     | Pass `--no-default-features` to `cargo publish` when true. |
 
 Crates are always built on the runner host. There is no cross-target build
 matrix — `cargo publish` uploads source to crates.io, which compiles on the

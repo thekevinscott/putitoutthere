@@ -43,6 +43,7 @@ const CRATES_PKG = z
     kind: z.literal('crates'),
     crate: z.string().optional(),
     features: z.array(z.string()).optional(),
+    no_default_features: z.boolean().optional(),
   })
   .strict();
 

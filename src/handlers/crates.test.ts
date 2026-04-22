@@ -311,6 +311,98 @@ describe('crates.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('omits --no-default-features when the flag is undefined (#169 follow-up)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockImplementation((file: string) => {
+      if (file === 'git') throw new Error('not a git repo');
+      return Buffer.from('ok');
+    });
+    process.env.CARGO_REGISTRY_TOKEN = 'secret';
+
+    await crates.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
+    );
+    const cargoCall = execMock.mock.calls.find((c) => c[0] === 'cargo');
+    expect(cargoCall).toBeDefined();
+    const args = cargoCall![1] as string[];
+    expect(args).not.toContain('--no-default-features');
+    fetchSpy.mockRestore();
+  });
+
+  it('omits --no-default-features when the flag is false (#169 follow-up)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockImplementation((file: string) => {
+      if (file === 'git') throw new Error('not a git repo');
+      return Buffer.from('ok');
+    });
+    process.env.CARGO_REGISTRY_TOKEN = 'secret';
+
+    await crates.publish(
+      { ...basePkg(), path: dir, no_default_features: false } as Parameters<typeof crates.publish>[0],
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
+    );
+    const cargoCall = execMock.mock.calls.find((c) => c[0] === 'cargo');
+    expect(cargoCall).toBeDefined();
+    const args = cargoCall![1] as string[];
+    expect(args).not.toContain('--no-default-features');
+    fetchSpy.mockRestore();
+  });
+
+  it('includes --no-default-features when the flag is true (#169 follow-up)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockImplementation((file: string) => {
+      if (file === 'git') throw new Error('not a git repo');
+      return Buffer.from('ok');
+    });
+    process.env.CARGO_REGISTRY_TOKEN = 'secret';
+
+    await crates.publish(
+      { ...basePkg(), path: dir, no_default_features: true } as Parameters<typeof crates.publish>[0],
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
+    );
+    const cargoCall = execMock.mock.calls.find((c) => c[0] === 'cargo');
+    expect(cargoCall).toBeDefined();
+    const args = cargoCall![1] as string[];
+    expect(args).toContain('--no-default-features');
+    fetchSpy.mockRestore();
+  });
+
+  it('combines --features and --no-default-features in the right order (#169 follow-up)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockImplementation((file: string) => {
+      if (file === 'git') throw new Error('not a git repo');
+      return Buffer.from('ok');
+    });
+    process.env.CARGO_REGISTRY_TOKEN = 'secret';
+
+    await crates.publish(
+      { ...basePkg(), path: dir, features: ['cli', 'serde'], no_default_features: true } as Parameters<typeof crates.publish>[0],
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
+    );
+    const cargoCall = execMock.mock.calls.find((c) => c[0] === 'cargo');
+    expect(cargoCall).toBeDefined();
+    const args = cargoCall![1] as string[];
+    const featuresIdx = args.indexOf('--features');
+    const noDefaultIdx = args.indexOf('--no-default-features');
+    expect(featuresIdx).toBeGreaterThanOrEqual(0);
+    expect(args[featuresIdx + 1]).toBe('cli,serde');
+    expect(noDefaultIdx).toBeGreaterThan(featuresIdx);
+    fetchSpy.mockRestore();
+  });
+
   it('skips the network when ctx.dryRun is set', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
