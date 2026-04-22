@@ -1,18 +1,35 @@
 # Plan gaps surfaced by migration audits
 
-Findings from the per-repo migration audits. Each row is either:
+Findings from the per-repo migration audits. This table is read alongside
+[`notes/design-commitments.md`](../notes/design-commitments.md), which is the
+normative reference for what is and isn't in scope. Rows marked **Out of
+scope** are intentional non-goals, not missing features — they are recorded
+here so the decision trail stays visible to anyone comparing putitoutthere
+against other release tooling. Each row is one of:
+
 - **Supported** — existing putitoutthere mode covers the pattern; the audit just confirms we don't need to change anything.
 - **Gap** — feature putitoutthere needs to add; links to the follow-up issue.
+- **Out of scope** — belongs to a compositional layer (release-please, cargo-dist, the consumer's workflow); see `notes/design-commitments.md`.
+
+For rows that touch cross-language artefact production, the Status column is
+split into two axes:
+
+- **Publish-side** — will putitoutthere correctly publish the artefact if it is handed one?
+- **Build-side** — does putitoutthere generate the cross-compile matrix that produces the artefact?
+
+Publish-side and build-side are evaluated independently because handler names
+include the builder (`build = "napi"`, `build = "maturin"`) and readers
+otherwise conflate the two.
 
 | Pattern observed                                                                 | Status     | Follow-up              |
 |----------------------------------------------------------------------------------|------------|------------------------|
 | Per-package tags instead of shared `v{version}`                                 | Supported  | —                      |
 | `release: <bump>` trailer instead of `[no-release]` / `[skip-version]` markers  | Supported  | —                      |
 | Cross-language `depends_on` cascade                                             | Supported  | —                      |
-| Rust → Python wheels via maturin, 5-target matrix                               | Supported  | —                      |
-| Rust → npm via napi-rs / bundled-cli                                            | Supported  | —                      |
-| Pre-built binary archives (cargo-dist style)                                    | Supported (`bundled-cli`) | —       |
-| Standalone `.tar.xz` asset on GitHub Release (curl-installable)                 | **Gap**    | TODO: file issue       |
+| Rust → Python wheels via maturin, 5-target matrix                               | Publish-side: Supported / Build-side: Out of scope (see notes/design-commitments.md non-goal #3) | — |
+| Rust → npm via napi-rs / bundled-cli                                            | Publish-side: Supported / Build-side: Out of scope (see notes/design-commitments.md non-goal #3) | — |
+| Pre-built binary archives (cargo-dist style)                                    | Publish-side: Supported (`bundled-cli`) / Build-side: Out of scope (see notes/design-commitments.md non-goal #3) | — |
+| Standalone `.tar.xz` asset on GitHub Release (curl-installable)                 | Out of scope (see notes/design-commitments.md non-goal #3) | — |
 | npm model / weight packages with custom cadence                                 | Supported  | —                      |
 | `.changeset/`-driven versioning                                                 | Not supported; replaced by trailer | Intentional |
 | Scoped npm names (`@scope/pkg`)                                                 | Supported  | —                      |
@@ -37,14 +54,13 @@ Findings from the per-repo migration audits. Each row is either:
 
 (none yet)
 
-## Gap issues to file
+## Gap issues
 
-These get one `audit-gap` issue each:
+Gaps are now tracked as GitHub issues: #169, #170, #171, #172.
 
-1. **Standalone `.tar.xz` binary asset on GitHub Release.** Some consumers want a curl-installable tarball (cargo-dist style) in addition to registry publishes. Putitoutthere creates GitHub Releases (plan.md §15) but doesn't attach standalone archive assets for non-`bundled-cli` handlers. Link: dirsql migration doc, §6 "Decisions confirmed at migration time" already deferred this.
-
-2. **Explicit target-triple mapping test.** `targetToOsCpu` in `src/handlers/npm-platform.ts` falls through for unusual triples (`i686-*`, `armv7-*`). Add a test matrix covering every triple putitoutthere might emit, including the long-tail cases, and a clear error message for triples it doesn't handle.
-
-3. **Dynamic-version interop with hatch-vcs / setuptools-scm.** When `pyproject.toml` declares `version` as dynamic, putitoutthere's pypi handler must not overwrite the field. Verify + add a fixture at `test/fixtures/python-pure-hatch-vcs/` if not already covered.
-
-4. **(Low priority) Per-package `tag_prefix` override.** If an operator wants to preserve a historical `js/pkg-v*` shape instead of the uniform `{name}-v*`, we'd need a config knob. Cachetta + gbnf both change prefix shapes at migration — defer unless users push back.
+The per-package `tag_prefix` override idea previously listed here is **Out of
+scope** (see `notes/design-commitments.md` non-goal #2): tag creation and
+trigger orchestration live in the consumer's workflow, not in putitoutthere's
+config. Likewise, the standalone `.tar.xz` GitHub Release asset previously
+listed here is **Out of scope** per non-goal #3 (cargo-dist / goreleaser
+occupy that lane).
