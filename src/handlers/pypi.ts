@@ -20,6 +20,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { parse as parseToml } from 'smol-toml';
+
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
 import { nonEmpty } from '../env.js';
@@ -47,9 +49,9 @@ async function isPublishedImpl(
 }
 
 function writeVersionImpl(
-  pkg: { path: string },
+  pkg: { name?: string; path: string },
   version: string,
-  _ctx: Ctx,
+  ctx: Ctx,
 ): Promise<string[]> {
   const pyProjectPath = join(pkg.path, 'pyproject.toml');
   let original: string;
@@ -61,6 +63,18 @@ function writeVersionImpl(
     }
     /* v8 ignore next -- non-ENOENT read errors surface as-is */
     return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+  }
+  // Dynamic-version projects (hatch-vcs, setuptools-scm, maturin reading
+  // Cargo.toml, etc) have `dynamic = [..., "version", ...]` under [project]
+  // and no literal version line to rewrite. The build backend derives the
+  // version itself. Per design-commitment #1 (no version computation),
+  // skip the rewrite -- the consumer's build system handles propagation.
+  if (hasDynamicVersion(original)) {
+    const who = pkg.name ? `pypi: ${pkg.name}` : 'pypi';
+    ctx.log.info(
+      `${who}: skipping pyproject.toml version rewrite; [project].dynamic includes "version" (build backend derives it)`,
+    );
+    return Promise.resolve([]);
   }
   let updated: string;
   try {
@@ -188,18 +202,48 @@ async function mintOidcToken(ctx: Ctx): Promise<string | null> {
 
 /**
  * Rewrites the first `version = "x.y.z"` inside the `[project]` table.
+ *
+ * Callers should check `hasDynamicVersion(source)` first and skip
+ * rewriting when it returns true -- dynamic-version projects (hatch-vcs,
+ * setuptools-scm, maturin, etc.) have no literal version line and should
+ * not be forced to grow one.
  */
 export function replacePyProjectVersion(source: string, version: string): string {
   const re = /(\[project\][\s\S]*?)(^\s*version\s*=\s*")([^"]*)(")/m;
   const m = re.exec(source);
   if (!m) {
-    throw new Error('pyproject.toml: no [project].version field found');
+    throw new Error(
+      'pyproject.toml: neither a static [project].version nor a dynamic version declaration was found',
+    );
   }
   const [, pre, prefix, old, suffix] = m as unknown as [string, string, string, string, string];
   if (old === version) return source;
   const start = m.index + pre.length;
   const end = start + prefix.length + old.length + suffix.length;
   return source.slice(0, start) + prefix + version + suffix + source.slice(end);
+}
+
+/**
+ * Returns true when `[project].dynamic` is an array containing `"version"`.
+ * Used to detect hatch-vcs / setuptools-scm / maturin setups where the
+ * build backend computes the version and no literal `version = "..."` line
+ * exists to rewrite.
+ *
+ * Uses smol-toml so multi-line arrays and mixed whitespace parse correctly.
+ * Falls back silently (returns false) when TOML is unparseable -- in that
+ * case `replacePyProjectVersion` will surface the real error.
+ */
+export function hasDynamicVersion(source: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = parseToml(source);
+  } catch {
+    /* v8 ignore next -- malformed TOML is reported by the regex path */
+    return false;
+  }
+  const project = (parsed as { project?: { dynamic?: unknown } })?.project;
+  const dynamic = project?.dynamic;
+  return Array.isArray(dynamic) && dynamic.includes('version');
 }
 
 /**
