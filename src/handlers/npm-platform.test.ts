@@ -121,6 +121,12 @@ describe('targetToOsCpu', () => {
   it('maps x86_64-pc-windows-msvc → os:win32 cpu:x64', () => {
     expect(targetToOsCpu('x86_64-pc-windows-msvc')).toEqual({ os: ['win32'], cpu: ['x64'] });
   });
+
+  it('throws a descriptive error for unknown triples (#170)', () => {
+    expect(() => targetToOsCpu('riscv64-unknown-linux-gnu')).toThrow(
+      /riscv64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
+    );
+  });
 });
 
 describe('publishPlatforms (napi)', () => {
