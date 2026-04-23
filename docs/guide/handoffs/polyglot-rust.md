@@ -132,7 +132,8 @@ targets = [
 ```
 
 The emitted matrix rows carry a `runner` field the workflow reads
-via `runs-on: ${{ matrix.runner }}`.
+as `runs-on` (see the build job above, or let the scaffolded
+`release.yml` wire it for you).
 
 ## One-time prerequisites before your first release
 

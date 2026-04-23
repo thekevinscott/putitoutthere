@@ -14,7 +14,6 @@
  */
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 
 const [,, rootArg, portArg, basePathArg = ''] = process.argv;
@@ -114,15 +113,23 @@ const server = createServer(async (req, res) => {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('Not Found\n');
     }
-    status = 404;
   }
 
   log(req, res.statusCode, Date.now() - started);
 });
 
+// Sanitise the request URL before logging — CRLF in it would inject
+// fake log entries, and ANSI escapes could poison a tail'd log.
+function sanitiseForLog(s) {
+  // eslint-disable-next-line no-control-regex
+  return String(s).replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 512);
+}
+
 function log(req, status, ms) {
   const ts = new Date().toISOString();
-  console.log(`${ts} ${req.method} ${req.url} → ${status} (${ms}ms)`);
+  const method = sanitiseForLog(req.method);
+  const url = sanitiseForLog(req.url);
+  console.log(`${ts} ${method} ${url} → ${status} (${ms}ms)`);
 }
 
 server.listen(port, '127.0.0.1', () => {
