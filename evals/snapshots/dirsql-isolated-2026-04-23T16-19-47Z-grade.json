@@ -1,0 +1,45 @@
+{
+  "fixture": "dirsql-isolated",
+  "shape": "isolated",
+  "scope": "webfetch",
+  "variant": "dirsql-isolated",
+  "timestamp": "2026-04-23T16-19-47Z",
+  "model": "claude-opus-4-7",
+  "docs_server": "yes",
+  "docs_url": "http://localhost:42997/put-it-out-there/",
+  "pass": true,
+  "score": "6/6",
+  "results": {
+    "npm_platform_family": {
+      "truth": "shipped",
+      "claim": "shipped",
+      "pass": true
+    },
+    "depends_on_serialization": {
+      "truth": "shipped",
+      "claim": "shipped",
+      "pass": true
+    },
+    "idempotent_precheck": {
+      "truth": "shipped",
+      "claim": "shipped",
+      "pass": true
+    },
+    "bundled_cli_understood": {
+      "truth": "shipped",
+      "claim": "shipped",
+      "pass": true
+    },
+    "per_target_runner_override": {
+      "truth": "missing",
+      "claim": "missing",
+      "pass": true
+    },
+    "doctor_oidc_trust_policy_check": {
+      "truth": "missing",
+      "claim": "missing",
+      "pass": true
+    }
+  },
+  "fails": []
+}

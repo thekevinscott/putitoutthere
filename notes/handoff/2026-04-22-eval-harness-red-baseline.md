@@ -1,172 +1,155 @@
-# Handoff: agent-behavior eval — red baseline (v2)
+# Handoff: agent-behavior eval — green
 
-**Date:** 2026-04-22
-**Branch:** `claude/evals-spike` (pushed)
-**Tracking:** #164
-**Status:** Red baseline reproduced with full fidelity. Ready for docs iteration.
+**Date:** 2026-04-23
+**Branch:** `claude/evals-spike`
+**Tracking:** #163, #164
+**Status:** 6/6 × 5 runs. No false negatives, no silents. Ready to merge.
 
 ## What this measures
 
-An external agent, reading only piot's **published, rendered docs
-site**, tries to evaluate piot against dirsql's release machinery.
-Six primitives are graded: does the agent correctly conclude each one
-is `shipped` or `missing` per the ground truth in
-`evals/fixtures/dirsql-isolated/expected.json`?
+An external AI agent, reading only piot's published docs, tries to
+evaluate piot against dirsql's release machinery. Six primitives are
+graded: does the agent correctly conclude each is `shipped` or
+`missing` per `evals/fixtures/dirsql-isolated/expected.json`?
 
-The motivating session (external dirsql agent, 2026-04) got several
-primitives wrong — specifically, claimed piot *lacked* features it
-ships. This harness reproduces that class of mistake so we can tell
-whether a docs change fixes it.
+## Final state
 
-## Red baseline (3 runs, 2026-04-22)
-
-Consistent **4/6** across three runs. Snapshots:
-`evals/snapshots/dirsql-isolated-2026-04-22T19-{22-37Z,28-56Z,37-40Z}-*`.
-
-| Primitive                       | Pattern across 3 runs                              |
-|---------------------------------|-----------------------------------------------------|
-| `npm_platform_family`           | ✓ shipped × 3                                       |
-| `depends_on_serialization`      | ✓ shipped × 3                                       |
-| `idempotent_precheck`           | ✓ shipped × 3                                       |
-| `bundled_cli_understood`        | ✓ × 2, **FN "missing"** × 1                         |
-| `per_target_runner_override`    | ✗ silent × 3 (truth: missing)                       |
-| `doctor_oidc_trust_policy_check`| ✗ silent × 2, correctly-missing × 1                 |
-
-Two distinct failure classes:
-
-1. **Flickering false negative** on `bundled_cli_understood`. The
-   docs describe `build = "bundled-cli"` as a config value but don't
-   explain the *behavior* — what actually happens at publish time,
-   what packages get emitted, what ends up on the registry. When the
-   probe doesn't build that mental model, it hedges into "missing."
-2. **Persistent silence** on `per_target_runner_override` and
-   (less so) `doctor_oidc_trust_policy_check`. Truth for both is
-   `missing` — these are real doc gaps rather than
-   agent-misinterpreting-correct-docs. Either the docs need to
-   actively acknowledge the gap, or piot needs to fill it.
-
-## How the harness is built (short)
-
-`./evals/spike.sh dirsql-isolated` does:
-
-1. Boots `vitepress dev` against this repo's `docs/` on a free port.
-2. Clones `thekevinscott/dirsql` into `$WORK`.
-3. Drops `.claude/settings.local.json` into `$WORK` with scoped tool
-   permissions matching the foreign agent's surface (Read/Grep/Glob,
-   scoped Bash, no WebFetch/WebSearch).
-4. Runs `claude -p` (Opus 4.7) **inside `unshare --user --mount`
-   with a tmpfs mask on `/home/user/put-it-out-there`**, so piot's
-   source tree on the host is invisible — even through `cat /abs/path`
-   or `git --git-dir=…`.
-5. The probe uses `agent-browser` (Vercel Labs CLI + local Chromium)
-   to navigate the docs. `AGENT_BROWSER_EXECUTABLE_PATH` points at
-   a pre-downloaded Chromium because `agent-browser install` can't
-   reach Google's Chrome CDN from this environment.
-6. Haiku extracts structured claims; Python grader diffs vs.
-   `expected.json`.
-
-Full prerequisites and gotchas: `evals/README.md`.
-
-## Your job: iterate on docs until 6/6
-
-Best order of attack:
-
-### 1. `bundled_cli_understood` (flickering false-negative)
-
-This is the highest-value fix: same failure class as the foreign
-agent's miss, and the docs have the config but not the behavior. Add
-a worked example to `docs/guide/` (or a dedicated page) that shows:
-
-- Here is a `putitoutthere.toml` with `[[package]]` + `kind = "npm"`
-  + `build = "bundled-cli"` + `targets = [...]`.
-- Here are the packages that get published as a result
-  (`@scope/pkg-<slug>` per target).
-- Here is the top-level `package.json`'s `optionalDependencies`
-  after piot's rewrite.
-- Link from `guide/concepts.md` and from the `kind = "npm"` section
-  of `api/configuration.md`.
-
-Re-run; confirm 3/3 correct.
-
-### 2. `per_target_runner_override` (persistent silence)
-
-Truth is `missing` — piot doesn't support per-target runner overrides.
-The agent is silent because the docs don't mention runner selection
-at all. Two paths:
-
-- If this stays a non-goal (check `notes/design-commitments.md`),
-  add a line to `guide/configuration.md` or wherever the matrix
-  discussion lives: "piot does not expose per-target runner
-  configuration; the generated workflow uses `ubuntu-latest` for all
-  build jobs. Consumers who need ARM64 or macOS-specific runners
-  should…" — explicit non-support is what makes the agent able to
-  correctly call this missing.
-- If it's something that *should* ship (cross-reference #170 on
-  target triples), docs need to describe the expected config shape
-  and the agent will pick it up.
-
-### 3. `doctor_oidc_trust_policy_check` (mostly silent)
-
-Truth is `missing`. Same pattern: `guide/auth.md` and `api/cli.md`
-describe `doctor` but don't say what it validates — and specifically
-don't say it doesn't validate the trust policy's workflow-filename
-pin. A one-paragraph "what doctor checks / what it doesn't check"
-section lets the agent conclude this correctly.
-
-### 4. Don't regress the three that are green
-
-`npm_platform_family`, `depends_on_serialization`, `idempotent_precheck`
-all pass consistently. After each docs edit, confirm they still do.
-
-## Loop mechanics
-
-```sh
-# Edit docs
-$EDITOR docs/guide/bundled-cli.md
-
-# Re-run (picks up edits via vitepress hot reload — same run)
-./evals/spike.sh dirsql-isolated
-
-# Read the probe's reasoning, not just the score
-less evals/snapshots/dirsql-isolated-<ts>-raw.md
-
-# Diff against baseline to see what changed
-diff <(jq -S .results evals/snapshots/dirsql-isolated-2026-04-22T19-22-37Z-grade.json) \
-     <(jq -S .results evals/snapshots/dirsql-isolated-<new-ts>-grade.json)
+```
+primitive                        | r1 | r2 | r3 | r4 | r5 | truth
+-----------------------------------------------------------------
+npm_platform_family              | ✓s | ✓s | ✓s | ✓s | ✓s | shipped
+depends_on_serialization         | ✓s | ✓s | ✓s | ✓s | ✓s | shipped
+idempotent_precheck              | ✓s | ✓s | ✓s | ✓s | ✓s | shipped
+bundled_cli_understood           | ✓s | ✓s | ✓s | ✓s | ✓s | shipped
+per_target_runner_override       | ✓m | ✓m | ✓m | ✓m | ✓m | missing
+doctor_oidc_trust_policy_check   | ✓m | ✓m | ✓m | ✓m | ✓m | missing
 ```
 
-Run 3× per docs change before declaring a primitive fixed — extractor
-noise is real (run 3 flipped one primitive that runs 1 & 2 got right).
+All 5 runs graded 6/6. Reference snapshots at
+`evals/snapshots/dirsql-isolated-2026-04-23T16-*`.
 
-## Don't confuse this with the docs-site deploy
+## Trajectory
 
-The probe navigates a **local** vitepress dev server — not
-thekevinscott.github.io. That's because `web_fetch` can't reach
-localhost and the deployed docs URL isn't in this sandbox's egress
-allow-list. The content is the same (edits to `docs/*.md` land in
-the dev server's hot-reload); only the navigation is local.
+| Stage | Scores | Failure mode |
+|---|---|---|
+| Red baseline (pre-docs) | [4, 4, 4] | false-negative on bundled_cli, silent on missing pair |
+| Iter1 (gaps page, polyglot-rust handoff) | [6, 3, 4] | high variance, still silent |
+| Iter4b (static server, Sonnet extractor) | [5, 5, 3] | no false-negatives, still silent on missing pair |
+| Iter6 (cleanUrls fix, Opus extractor, budget↑) | [2, 5, 4, 5, 5] | one truncated run, silent on doctor 3/5 |
+| **Iter7 (eval-driven doctor promotion)** | **[6, 6, 6, 6, 6]** | **none** |
 
-## Previously filed issues (not your job)
+## What flipped the last two primitives
 
-- #169 — crates handler `features` passthrough
-- #170 — `targetToOsCpu` silent fallthrough
-- #171 — PyPI dynamic-version handling
-- #172 — reconcile `PLAN_GAPS.md` with `notes/design-commitments.md`
+iter6's access log showed `/guide/gaps` was visited 4/5 runs but
+`doctor_oidc_trust_policy_check` was silent 3/5. The content lived
+in gaps.md's Section 3 ("Documented behaviours that look like gaps")
+— too deep and mis-framed as clarification rather than a real gap.
 
-Another agent is handling these. The eval harness doesn't depend on
-them landing.
+Three eval-driven edits (not from #163's wishlist — from the log
+data):
 
-## Design commitments — don't get pressured
+1. **`/guide/gaps` — promote doctor's trust-policy to Section 1**
+   ("Out of scope, permanent non-goals"). It IS a non-goal, so it
+   belongs there. Previously it was in Section 3.
+2. **`/getting-started` — add "Migrating? Read this first" block.**
+   Names the caller-filename pin + doctor-doesn't-catch-it + the
+   tag-per-package change. Getting started is visited 5/5.
+3. **`/guide/auth` — add "What doctor won't catch" subsection.**
+   Probe reads auth.md when OIDC seems relevant; surfacing the
+   gotcha there puts it in context.
 
-If a docs change would imply piot absorbs something `notes/design-commitments.md`
-lists as a non-goal (version computation, tag orchestration, GH
-Release archives, shell hooks, monorepo discovery, changelog), **don't**
-make the change — add an explicit non-support callout instead.
+That was enough to flip both silent primitives to ✓m × 5.
 
-## Files worth knowing
+## What worked for the four "shipped" primitives earlier
 
-- `evals/spike.sh` — harness. ~260 lines.
-- `evals/README.md` — user-facing doc.
+Cumulative across iter1-iter6:
+
+- **`/guide/npm-platform-packages`** page — behavior (not just config)
+  for napi + bundled-cli. Flipped `bundled_cli_understood` from
+  flickering to rock-solid.
+- **`/guide/handoffs/polyglot-rust`** — dirsql-shape worked example
+  with a "what piot covers / what your workflow owns" table. Hit
+  2/5 runs; when hit, reliably catches npm_platform_family,
+  depends_on_serialization, idempotent_precheck.
+- **Concepts.md "What piot covers / out of scope" section at the top.**
+  Concepts is visited 3/5; when hit, the non-goal enumeration lands
+  per_target_runner_override correctly.
+- **Getting-started "Does piot fit?" checklist.** Up front,
+  5/5 visits.
+
+## Harness final shape
+
+- `evals/spike.sh` — single-run harness. vitepress build + custom
+  Node docs server (`evals/tools/docs-server.mjs`) with cleanUrls
+  and access logs. Probe (Opus 4.7, $8 budget) runs inside
+  `unshare --user --mount` with a tmpfs masking
+  `/home/user/put-it-out-there` from the probe's view. Probe uses
+  `agent-browser` + Chromium to navigate. Extractor is Opus with
+  explicit per-primitive phrasing examples.
+- `evals/run-n.sh` — sequential N-run driver. Prints per-run
+  summary and a cross-run primitive-stability table. Aborts the
+  loop on spike.sh exit 6 (rate-limit signal).
 - `evals/fixtures/dirsql-isolated/{prompt.md,expected.json,setup.sh,docs_server}`.
-- `evals/snapshots/dirsql-isolated-2026-04-22T19-*` — the red-baseline
-  trio (force-added; all other snapshots are gitignored).
+- `evals/snapshots/` — gitignored; reference trios force-added per
+  iteration (red baseline, intermediate, final green).
+
+Full methodology for applying this pattern to another library:
+`notes/docs-eval-methodology.md` (on separate branch
+`claude/docs-eval-methodology`).
+
+## What's left for another agent
+
+- **#163's specific wishlist items we didn't need.** The eval made
+  several of #163's suggestions redundant — handler-vs-builder
+  callout, index.md hero refresh, separate builders.md, capabilities
+  --json. None showed up as doc-quality issues in the eval's 5-run
+  green. Worth reading the issue's rationale before declaring them
+  dead; the eval may not be catching everything #163 is worried
+  about. If you do pick them up, eval-first: decide what primitive
+  they'd fix, check whether current eval catches that primitive,
+  and only do the work if there's a measurable miss.
+- **Extending the eval.** Six primitives is a minimum viable
+  rubric. Adding more from the original dirsql session's other
+  misreads would tighten coverage. See `expected.json` for the
+  current set; add new primitive keys and update the extractor's
+  prompt with per-primitive phrasings.
+- **Multi-turn replay.** Current harness is single-turn; the real
+  session was 8 turns. Multi-turn context accumulation is its own
+  failure mode.
+- **Other consumer shapes.** `dirsql-isolated` fixtures the
+  polyglot-Rust shape. Add fixtures for other shapes (single-npm,
+  monorepo of pure-JS packages, crates-only) so iteration on docs
+  for one shape doesn't silently regress another.
+
+## Files changed this session
+
+Docs:
+- `docs/guide/concepts.md` — scope section, pointer to /guide/gaps.
+- `docs/guide/configuration.md` — build-side responsibilities callout.
+- `docs/guide/auth.md` — "what doctor won't catch" subsection.
+- `docs/guide/gaps.md` — new page; doctor in Section 1.
+- `docs/guide/npm-platform-packages.md` — new page.
+- `docs/guide/handoffs/polyglot-rust.md` — new page.
+- `docs/getting-started.md` — "does piot fit" checklist + migration callout.
+- `docs/.vitepress/config.ts` — sidebar entries for gaps,
+  npm-platform-packages, handoffs.
+
+Evals:
+- `evals/spike.sh`, `evals/run-n.sh` — harness.
+- `evals/tools/docs-server.mjs` — static server with cleanUrls + logs.
+- `evals/fixtures/dirsql-isolated/*` — the fixture.
+- `evals/README.md` — user-facing doc.
+- Per-iteration snapshot trios in `evals/snapshots/` (force-added).
+
+Notes:
+- `notes/docs-eval-methodology.md` — reusable pattern (on its own
+  branch `claude/docs-eval-methodology`).
+- `notes/handoff/2026-04-22-eval-harness-red-baseline.md` (this file,
+  continuing to track state).
+- `notes/design-commitments.md` — existing; not modified.
+
+## Not-this-agent's-problem
+
+- #169–172 (code-side gaps) — another agent.
+- Docs-eval skill packaging — another agent (user confirmed).
+- #159, #162 per user — handled separately.
