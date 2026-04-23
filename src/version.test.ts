@@ -7,7 +7,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { bump, firstVersion, parseSemver } from './version.js';
+
+import pkg from '../package.json' with { type: 'json' };
+import { bump, firstVersion, parseSemver, USER_AGENT, VERSION } from './version.js';
 
 describe('parseSemver', () => {
   it('parses a plain semver', () => {
@@ -117,5 +119,16 @@ describe('firstVersion', () => {
 
   it('rejects an invalid first_version value', () => {
     expect(() => firstVersion({ first_version: 'not-a-semver' })).toThrow();
+  });
+});
+
+describe('VERSION + USER_AGENT (#147)', () => {
+  it('VERSION reflects package.json at build time', () => {
+    expect(VERSION).toBe(pkg.version);
+  });
+
+  it('USER_AGENT embeds the current version, not a hardcoded 0.0.1', () => {
+    expect(USER_AGENT).toBe(`putitoutthere/${pkg.version}`);
+    expect(USER_AGENT).toMatch(/^putitoutthere\/\d+\.\d+\.\d+$/);
   });
 });

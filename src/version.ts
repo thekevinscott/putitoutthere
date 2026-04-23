@@ -6,9 +6,21 @@
  * "breaking minor bumps" convention; 0.1.5 + minor is 0.2.0, not 1.0.0.
  *
  * Issue #8. Plan: §14.3 (bump semantics), §14.4 (first version).
+ *
+ * Also exports the canonical `USER_AGENT` string used for all outbound
+ * HTTP requests to registries (crates.io / npm / PyPI / GitHub).
+ * Sourced from `package.json` at build time so new releases don't ship
+ * a stale `putitoutthere/0.0.1` UA (#147).
  */
 
+import pkg from '../package.json' with { type: 'json' };
 import type { Bump } from './types.js';
+
+/** CLI version, read from package.json at build time. */
+export const VERSION: string = pkg.version;
+
+/** Canonical User-Agent for all outbound HTTP calls. */
+export const USER_AGENT: string = `putitoutthere/${VERSION}`;
 
 export interface Semver {
   major: number;

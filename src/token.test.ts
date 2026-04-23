@@ -940,4 +940,78 @@ describe('tokenListSecrets', () => {
     expect(outcome.kind).toBe('ok');
     expect(seen[0]).toBe('Bearer ghu_test_secrets');
   });
+
+  it('fans out per-environment secret fetches concurrently (#143)', async () => {
+    // Gate all three env-secret handlers on a single release; the probe
+    // only completes if Promise.allSettled dispatched them in parallel.
+    // A serial implementation would deadlock waiting on the first.
+    let inflight = 0;
+    let peak = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((res) => {
+      release = res;
+    });
+    server.use(
+      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, () =>
+        HttpResponse.json({ total_count: 0, secrets: [] }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments`, () =>
+        HttpResponse.json({
+          total_count: 3,
+          environments: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
+        }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments/:name/secrets`, async () => {
+        inflight += 1;
+        peak = Math.max(peak, inflight);
+        if (inflight >= 3) release?.();
+        await gate;
+        inflight -= 1;
+        return HttpResponse.json({ total_count: 0, secrets: [] });
+      }),
+    );
+
+    const outcome = await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      repo: 'octo/hello',
+      apiBase: GH_BASE,
+    });
+    expect(outcome.kind).toBe('ok');
+    // Concurrency: all three environment fetches must be inflight at
+    // the same moment. A serial `for…await` loop peaks at 1.
+    expect(peak).toBe(3);
+  });
+
+  it('preserves partial results when one environment fetch fails (#143)', async () => {
+    server.use(
+      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, () =>
+        HttpResponse.json({ total_count: 0, secrets: [] }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments`, () =>
+        HttpResponse.json({
+          total_count: 2,
+          environments: [{ name: 'ok-env' }, { name: 'broken-env' }],
+        }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments/ok-env/secrets`, () =>
+        HttpResponse.json({ total_count: 1, secrets: [{ name: 'PYPI_TOKEN' }] }),
+      ),
+      http.get(`${GH_BASE}/repos/octo/hello/environments/broken-env/secrets`, () =>
+        HttpResponse.json({ message: 'Bad credentials' }, { status: 401 }),
+      ),
+    );
+
+    const outcome = await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      repo: 'octo/hello',
+      apiBase: GH_BASE,
+    });
+    expect(outcome.kind).toBe('ok');
+    if (outcome.kind !== 'ok') return;
+    // The healthy environment's secret is still surfaced.
+    expect(outcome.rows.map((r) => r.name)).toContain('PYPI_TOKEN');
+    // The broken environment is reported alongside, not by throwing.
+    expect(outcome.envErrors).toBeDefined();
+    expect(outcome.envErrors!.map((e) => e.environment)).toContain('broken-env');
+  });
 });

@@ -14,8 +14,6 @@
  * a token is identified by the first 8 hex chars of its SHA-256.
  */
 
-import { createHash } from 'node:crypto';
-
 import { defaultKeyring, type Keyring, type StoredAuth } from './keyring.js';
 
 /** Public client ID of the `putitoutthere-cli` GitHub App (#104). */
@@ -390,9 +388,4 @@ function epochSeconds(): number {
 /* v8 ignore next 3 -- real timer; every test injects `sleep`. */
 function realSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
-}
-
-/** SHA-256 prefix for identifying a token in logs without leaking it. */
-export function tokenDigest(token: string): string {
-  return createHash('sha256').update(token).digest('hex').slice(0, 8);
 }

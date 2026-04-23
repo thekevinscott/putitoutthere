@@ -19,6 +19,7 @@ import { execFileSync } from 'node:child_process';
 
 import { loadConfig, type Package } from './config.js';
 import { defaultKeyring, type Keyring } from './keyring.js';
+import { USER_AGENT } from './version.js';
 
 export type Registry = 'pypi' | 'npm' | 'crates';
 
@@ -315,7 +316,7 @@ async function probe(
   try {
     const res = await fetch(url, {
       method: 'GET',
-      headers: { 'user-agent': 'putitoutthere/0.0.1', ...headers },
+      headers: { 'user-agent': USER_AGENT, ...headers },
       signal: AbortSignal.timeout(timeoutMs),
     });
     let body: unknown = null;
@@ -691,11 +692,16 @@ export interface SecretListOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+export interface EnvSecretError {
+  environment: string;
+  message: string;
+}
+
 export type SecretListOutcome =
   | { kind: 'not_logged_in'; message: string }
   | { kind: 'no_repo'; message: string }
   | { kind: 'error'; message: string; rows: TokenListRow[] }
-  | { kind: 'ok'; rows: TokenListRow[] };
+  | { kind: 'ok'; rows: TokenListRow[]; envErrors?: EnvSecretError[] };
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -753,25 +759,43 @@ export async function tokenListSecrets(opts: SecretListOptions = {}): Promise<Se
   }
 
   const envsRes = await ghGetJson(fetchFn, `${apiBase}/repos/${repo}/environments`, auth, timeoutMs);
+  const envErrors: EnvSecretError[] = [];
   if (envsRes.kind === 'ok') {
     const envNames = extractEnvironmentNames(envsRes.body);
-    for (const envName of envNames) {
-      const encoded = encodeURIComponent(envName);
-      const envSecrets = await ghGetJson(
-        fetchFn,
-        `${apiBase}/repos/${repo}/environments/${encoded}/secrets`,
-        auth,
-        timeoutMs,
-      );
-      /* v8 ignore next -- per-environment failure is rare; covered by repo-secrets error path above */
-      if (envSecrets.kind !== 'ok') continue;
-      for (const s of extractSecretNames(envSecrets.body)) {
-        const reg = classifySecretName(s);
+    // Fan out per-environment secret lookups concurrently (#143): GitHub
+    // rate-limits by req/h not concurrency, and a serial loop adds a
+    // full RTT per environment. allSettled preserves partial results —
+    // one flaky environment no longer nukes the whole list.
+    const settled = await Promise.allSettled(
+      envNames.map(async (envName) => {
+        const encoded = encodeURIComponent(envName);
+        const envSecrets = await ghGetJson(
+          fetchFn,
+          `${apiBase}/repos/${repo}/environments/${encoded}/secrets`,
+          auth,
+          timeoutMs,
+        );
+        return { envName, envSecrets };
+      }),
+    );
+    for (const s of settled) {
+      /* v8 ignore next 4 -- ghGetJson returns a tagged union and never rejects; defence-in-depth */
+      if (s.status === 'rejected') {
+        envErrors.push({ environment: '(unknown)', message: String(s.reason) });
+        continue;
+      }
+      const { envName, envSecrets } = s.value;
+      if (envSecrets.kind !== 'ok') {
+        envErrors.push({ environment: envName, message: envSecrets.message });
+        continue;
+      }
+      for (const sec of extractSecretNames(envSecrets.body)) {
+        const reg = classifySecretName(sec);
         if (reg !== null) {
           rows.push({
             registry: reg,
             source: 'environment-secret',
-            name: s,
+            name: sec,
             details: `environment secret (${envName})`,
             environment: envName,
           });
@@ -787,7 +811,7 @@ export async function tokenListSecrets(opts: SecretListOptions = {}): Promise<Se
     return a.name.localeCompare(b.name);
   });
 
-  return { kind: 'ok', rows };
+  return envErrors.length > 0 ? { kind: 'ok', rows, envErrors } : { kind: 'ok', rows };
 }
 
 type GhResult =

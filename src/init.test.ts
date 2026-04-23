@@ -126,6 +126,35 @@ describe('init', () => {
     expect(fresh).toContain('name: Release');
   });
 
+  it('skips .bak when an existing workflow is byte-identical (#148)', () => {
+    // First run creates the workflow files.
+    init({ cwd: repo });
+    const wfDir = join(repo, '.github', 'workflows');
+    const before = readFileSync(join(wfDir, 'release.yml'), 'utf8');
+
+    // Second run: the files on disk already match what init would
+    // write, so no .bak should be created and the file should be
+    // untouched.
+    const r = init({ cwd: repo });
+    expect(r.backedUp).not.toContain('.github/workflows/release.yml');
+    expect(r.alreadyPresent).toContain('.github/workflows/release.yml');
+    expect(existsSync(join(wfDir, 'release.yml.bak'))).toBe(false);
+    expect(readFileSync(join(wfDir, 'release.yml'), 'utf8')).toBe(before);
+  });
+
+  it('still writes .bak when the workflow differs (#148)', () => {
+    init({ cwd: repo });
+    const wfDir = join(repo, '.github', 'workflows');
+    writeFileSync(join(wfDir, 'release.yml'), '# user-edited workflow\n');
+
+    const r = init({ cwd: repo });
+    expect(r.backedUp).toContain('.github/workflows/release.yml');
+    expect(existsSync(join(wfDir, 'release.yml.bak'))).toBe(true);
+    expect(readFileSync(join(wfDir, 'release.yml.bak'), 'utf8')).toBe(
+      '# user-edited workflow\n',
+    );
+  });
+
   it('marks AGENTS.md as already-present when it already exists (#131)', () => {
     const agentsPath = join(repo, 'putitoutthere', 'AGENTS.md');
     mkdirSync(join(repo, 'putitoutthere'), { recursive: true });

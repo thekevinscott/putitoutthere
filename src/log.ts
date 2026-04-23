@@ -16,9 +16,9 @@
  * Issue #11. Plan: §22.2, §22.5.
  */
 
+import { createHash } from 'node:crypto';
 import type { Writable } from 'node:stream';
 
-import { tokenDigest } from './auth.js';
 import type { Logger } from './types.js';
 
 export type Level = 'debug' | 'info' | 'warn' | 'error';
@@ -100,7 +100,15 @@ export function redact(s: string): string {
     if (!out.includes(v)) continue;
     // String.replaceAll expects a literal or a RegExp; use split/join to
     // avoid regex escaping every secret value.
-    out = out.split(v).join(`[REDACTED:${tokenDigest(v)}]`);
+    out = out.split(v).join(`[REDACTED:${sha256Prefix(v)}]`);
   }
   return out;
+}
+
+/** SHA-256 prefix for identifying a token in logs without leaking it.
+ * Inlined here after removing `auth.ts#tokenDigest` (#134): the redactor
+ * was the only external consumer, and exposing the helper just for one
+ * call site is the kind of indirection we don't need. */
+function sha256Prefix(token: string): string {
+  return createHash('sha256').update(token).digest('hex').slice(0, 8);
 }

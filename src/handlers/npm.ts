@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { publishPlatforms, type PlatformPkg } from './npm-platform.js';
 import { nonEmpty } from '../env.js';
+import { USER_AGENT } from '../version.js';
 
 type NpmPkg = {
   name: string;
@@ -184,8 +185,12 @@ function looksLikeAuthFailure(stderr: string | undefined): boolean {
 /**
  * Returns true when the package does not yet exist on the registry
  * (any 404-equivalent from the packument endpoint). Non-404 responses
- * — including network failures — return false so we don't misclassify
- * transient errors as the bootstrap case.
+ * — including network failures and timeouts — return false so we
+ * don't misclassify transient errors as the bootstrap case.
+ *
+ * The fetch is bounded by a 5s AbortSignal.timeout (#142). The hint is
+ * advisory: a slow or unreachable registry should fall through to
+ * "not a bootstrap publish" rather than hanging the action.
  */
 export async function isBootstrapPublish(name: string): Promise<boolean> {
   try {
@@ -196,14 +201,19 @@ export async function isBootstrapPublish(name: string): Promise<boolean> {
     // only produce `%40` at the start of a valid npm name.
     const res = await fetch(
       `https://registry.npmjs.org/${encodeURIComponent(name).replaceAll('%40', '@')}`,
-      { method: 'GET', headers: { 'user-agent': 'putitoutthere/0.0.1' } },
+      {
+        method: 'GET',
+        headers: { 'user-agent': USER_AGENT },
+        signal: AbortSignal.timeout(5000),
+      },
     );
     return res.status === 404;
-    /* v8 ignore start -- network failure is tested separately; returning false keeps us from misclassifying */
   } catch {
+    // Network failure, timeout, DNS error — treat as "not a bootstrap"
+    // so the caller falls through to the generic auth-error message
+    // rather than hanging or surfacing a misleading hint.
     return false;
   }
-  /* v8 ignore stop */
 }
 
 /** 2 / 4 / tab. Defaults to 2 when undetectable. */
