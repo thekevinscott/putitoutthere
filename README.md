@@ -4,6 +4,8 @@ Polyglot release orchestrator for single-maintainer, LLM-authored projects
 that publish to crates.io, PyPI, and npm from one monorepo. One config file,
 one CLI, one trailer-driven signal — no per-package release plumbing.
 
+**[Documentation](https://thekevinscott.github.io/put-it-out-there/)**
+
 ## Install
 
 ```sh

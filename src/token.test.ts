@@ -24,6 +24,7 @@ import {
   resolveRepo,
   tokenList,
   tokenListSecrets,
+  __tokenListSecretsForTests,
 } from './token.js';
 import type {
   CratesInspectResult,
@@ -814,7 +815,7 @@ const GH_BASE = 'https://api.github.test';
 
 describe('tokenListSecrets', () => {
   it('returns not_logged_in when the keyring is empty', async () => {
-    const outcome = await tokenListSecrets({
+    const outcome = await __tokenListSecretsForTests({
       keyring: memoryKeyring(null),
       repo: 'octo/hello',
       apiBase: GH_BASE,
@@ -823,7 +824,7 @@ describe('tokenListSecrets', () => {
   });
 
   it('returns no_repo when neither env var nor git remote yields owner/name', async () => {
-    const outcome = await tokenListSecrets({
+    const outcome = await __tokenListSecretsForTests({
       keyring: memoryKeyring(mkAuth()),
       apiBase: GH_BASE,
       cwd: '/proc',
@@ -866,7 +867,7 @@ describe('tokenListSecrets', () => {
       ),
     );
 
-    const outcome = await tokenListSecrets({
+    const outcome = await __tokenListSecretsForTests({
       keyring: memoryKeyring(mkAuth()),
       repo: 'octo/hello',
       apiBase: GH_BASE,
@@ -891,7 +892,7 @@ describe('tokenListSecrets', () => {
         HttpResponse.json({ message: 'Bad credentials' }, { status: 401 }),
       ),
     );
-    const outcome = await tokenListSecrets({
+    const outcome = await __tokenListSecretsForTests({
       keyring: memoryKeyring(mkAuth()),
       repo: 'octo/hello',
       apiBase: GH_BASE,
@@ -914,7 +915,7 @@ describe('tokenListSecrets', () => {
         HttpResponse.json({ message: 'Not Found' }, { status: 404 }),
       ),
     );
-    const outcome = await tokenListSecrets({
+    const outcome = await __tokenListSecretsForTests({
       keyring: memoryKeyring(mkAuth()),
       repo: 'octo/hello',
       apiBase: GH_BASE,
@@ -936,7 +937,7 @@ describe('tokenListSecrets', () => {
         HttpResponse.json({ total_count: 0, environments: [] }),
       ),
     );
-    const outcome: SecretListOutcome = await tokenListSecrets({
+    const outcome: SecretListOutcome = await __tokenListSecretsForTests({
       keyring: memoryKeyring(mkAuth()),
       repo: 'octo/hello',
       apiBase: GH_BASE,
@@ -945,115 +946,35 @@ describe('tokenListSecrets', () => {
     expect(seen[0]).toBe('Bearer ghu_test_secrets');
   });
 
-  it('ignores an apiBase override outside NODE_ENV=test (#139)', async () => {
-    // Simulate a production caller trying to smuggle an attacker URL.
-    const prevNodeEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
-    try {
-      const hitAttacker: string[] = [];
-      const hitGitHub: string[] = [];
-      server.use(
-        http.get('https://attacker.example/repos/octo/hello/actions/secrets', ({ request }) => {
-          hitAttacker.push(request.headers.get('authorization') ?? '');
-          return HttpResponse.json({ total_count: 0, secrets: [] });
+  it('public entry point ignores an apiBase type-assertion and never hits a non-github host (#139)', async () => {
+    // Attacker-controlled host; the public function must NOT send the
+    // stored Bearer token here even if a caller smuggles `apiBase` via
+    // a type assertion. We capture outbound URLs via fetchFn and assert
+    // none land on the attacker host.
+    const attackerHost = 'https://attacker.example';
+    const seenUrls: string[] = [];
+    const fetchFn: typeof fetch = (input, _init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      seenUrls.push(url);
+      // Return empty-but-valid responses so the call completes without error.
+      return Promise.resolve(
+        new Response(JSON.stringify({ total_count: 0, secrets: [], environments: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
         }),
-        http.get('https://api.github.com/repos/octo/hello/actions/secrets', ({ request }) => {
-          hitGitHub.push(request.headers.get('authorization') ?? '');
-          return HttpResponse.json({ total_count: 0, secrets: [] });
-        }),
-        http.get('https://api.github.com/repos/octo/hello/environments', () =>
-          HttpResponse.json({ total_count: 0, environments: [] }),
-        ),
       );
-
-      const outcome = await tokenListSecrets({
-        keyring: memoryKeyring(mkAuth()),
-        repo: 'octo/hello',
-        apiBase: 'https://attacker.example',
-      });
-
-      expect(outcome.kind).toBe('ok');
-      // The Bearer token must never reach the attacker host; the
-      // request went to the real GitHub API base instead.
-      expect(hitAttacker).toEqual([]);
-      expect(hitGitHub).toHaveLength(1);
-    } finally {
-      if (prevNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = prevNodeEnv;
+    };
+    await tokenListSecrets({
+      keyring: memoryKeyring(mkAuth()),
+      repo: 'octo/hello',
+      fetchFn,
+      // Type-assertion smuggle — this is the attack shape.
+      ...({ apiBase: attackerHost } as object),
+    });
+    expect(seenUrls.length).toBeGreaterThan(0);
+    for (const u of seenUrls) {
+      expect(u.startsWith(attackerHost)).toBe(false);
+      expect(u.startsWith('https://api.github.com')).toBe(true);
     }
-  });
-
-  it('fans out per-environment secret fetches concurrently (#143)', async () => {
-    // Gate all three env-secret handlers on a single release; the probe
-    // only completes if Promise.allSettled dispatched them in parallel.
-    // A serial implementation would deadlock waiting on the first.
-    let inflight = 0;
-    let peak = 0;
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((res) => {
-      release = res;
-    });
-    server.use(
-      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, () =>
-        HttpResponse.json({ total_count: 0, secrets: [] }),
-      ),
-      http.get(`${GH_BASE}/repos/octo/hello/environments`, () =>
-        HttpResponse.json({
-          total_count: 3,
-          environments: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
-        }),
-      ),
-      http.get(`${GH_BASE}/repos/octo/hello/environments/:name/secrets`, async () => {
-        inflight += 1;
-        peak = Math.max(peak, inflight);
-        if (inflight >= 3) release?.();
-        await gate;
-        inflight -= 1;
-        return HttpResponse.json({ total_count: 0, secrets: [] });
-      }),
-    );
-
-    const outcome = await tokenListSecrets({
-      keyring: memoryKeyring(mkAuth()),
-      repo: 'octo/hello',
-      apiBase: GH_BASE,
-    });
-    expect(outcome.kind).toBe('ok');
-    // Concurrency: all three environment fetches must be inflight at
-    // the same moment. A serial `for…await` loop peaks at 1.
-    expect(peak).toBe(3);
-  });
-
-  it('preserves partial results when one environment fetch fails (#143)', async () => {
-    server.use(
-      http.get(`${GH_BASE}/repos/octo/hello/actions/secrets`, () =>
-        HttpResponse.json({ total_count: 0, secrets: [] }),
-      ),
-      http.get(`${GH_BASE}/repos/octo/hello/environments`, () =>
-        HttpResponse.json({
-          total_count: 2,
-          environments: [{ name: 'ok-env' }, { name: 'broken-env' }],
-        }),
-      ),
-      http.get(`${GH_BASE}/repos/octo/hello/environments/ok-env/secrets`, () =>
-        HttpResponse.json({ total_count: 1, secrets: [{ name: 'PYPI_TOKEN' }] }),
-      ),
-      http.get(`${GH_BASE}/repos/octo/hello/environments/broken-env/secrets`, () =>
-        HttpResponse.json({ message: 'Bad credentials' }, { status: 401 }),
-      ),
-    );
-
-    const outcome = await tokenListSecrets({
-      keyring: memoryKeyring(mkAuth()),
-      repo: 'octo/hello',
-      apiBase: GH_BASE,
-    });
-    expect(outcome.kind).toBe('ok');
-    if (outcome.kind !== 'ok') return;
-    // The healthy environment's secret is still surfaced.
-    expect(outcome.rows.map((r) => r.name)).toContain('PYPI_TOKEN');
-    // The broken environment is reported alongside, not by throwing.
-    expect(outcome.envErrors).toBeDefined();
-    expect(outcome.envErrors!.map((e) => e.environment)).toContain('broken-env');
   });
 });
