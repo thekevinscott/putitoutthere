@@ -118,18 +118,19 @@ const server = createServer(async (req, res) => {
   log(req, res.statusCode, Date.now() - started);
 });
 
-// Sanitise the request URL before logging — CRLF in it would inject
-// fake log entries, and ANSI escapes could poison a tail'd log.
-function sanitiseForLog(s) {
-  // eslint-disable-next-line no-control-regex
-  return String(s).replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 512);
-}
-
 function log(req, status, ms) {
-  const ts = new Date().toISOString();
-  const method = sanitiseForLog(req.method);
-  const url = sanitiseForLog(req.url);
-  console.log(`${ts} ${method} ${url} → ${status} (${ms}ms)`);
+  // JSON.stringify serialises the tainted request fields as quoted,
+  // control-char-escaped strings — prevents CRLF-injection and
+  // ANSI-escape log poisoning even if the incoming URL is crafted.
+  // CodeQL treats JSON.stringify as an accepted sanitiser.
+  const entry = {
+    ts: new Date().toISOString(),
+    method: String(req.method).slice(0, 16),
+    url: String(req.url).slice(0, 512),
+    status,
+    ms,
+  };
+  process.stdout.write(JSON.stringify(entry) + '\n');
 }
 
 server.listen(port, '127.0.0.1', () => {

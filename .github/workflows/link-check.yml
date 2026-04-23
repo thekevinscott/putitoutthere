@@ -37,6 +37,9 @@ jobs:
           #   - URLs containing template placeholders like `<your-package>` --
           #     these appear in setup walkthroughs and are intentionally not
           #     real fetchable URLs.
+          #   - localhost URLs inside eval snapshots (ephemeral ports
+          #     captured by the probe; meaningful as diff-against refs
+          #     but not network-fetchable after the run exits).
           args: >-
             --no-progress
             --verbose
@@ -45,8 +48,10 @@ jobs:
             --exclude 'https://github\.com/thekevinscott/put-it-out-there/issues/\d+'
             --exclude 'https://github\.com/thekevinscott/put-it-out-there/pull/\d+'
             --exclude '<[^>]+>'
+            --exclude '^http://localhost[:/]'
             --exclude-path 'notes/4-17-2026-initial-plan/transcript.md'
             --exclude-path 'docs/'
+            --exclude-path 'evals/snapshots/'
             --accept '200,203,206,403,429'
             './**/*.md'
           fail: true
