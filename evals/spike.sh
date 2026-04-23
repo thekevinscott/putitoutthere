@@ -98,7 +98,7 @@ cleanup() {
   fi
   # agent-browser daemon may persist across runs — close it for hygiene.
   agent-browser close --all >/dev/null 2>&1 || true
-  rm -rf "$WORK"
+  rm -rf "$WORK" "${WRAP:-}"
   exit $rc
 }
 trap cleanup EXIT INT TERM
@@ -123,8 +123,9 @@ if [[ "$SHAPE" == "isolated" && "$DOCS_SERVER" == "yes" ]]; then
 
   # Symlink dist/ under a `put-it-out-there/` subdir so requests to
   # the base path (which matches the deployed GH Pages layout) resolve.
-  WRAP="$WORK/_docs_wrap"
-  mkdir -p "$WRAP"
+  # Wrap dir lives outside $WORK so it doesn't collide with setup.sh's
+  # `git clone $WORK` (which refuses a non-empty target).
+  WRAP="$(mktemp -d)"
   ln -s "$REPO_ROOT/docs/.vitepress/dist" "$WRAP/put-it-out-there"
 
   DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
