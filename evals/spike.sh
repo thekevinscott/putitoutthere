@@ -268,6 +268,11 @@ Primitive definitions — grade strictly against these:
   runner selection lives in the consumer's workflow YAML. "Missing" if
   the evaluator notes this is absent or calls out runner selection as
   the consumer's responsibility.
+  Example phrasings that count as "missing":
+  * "piot doesn't support per-target runner config"
+  * "runner selection stays in the consumer's workflow"
+  * "piot doesn't emit a runner map; your `release.yml` picks runners"
+  * "cross-compilation, runner selection … stay in your workflow"
 
 - `doctor_oidc_trust_policy_check`: Does the `doctor` command validate
   that the registered OIDC trusted-publisher policy's caller workflow
@@ -276,16 +281,26 @@ Primitive definitions — grade strictly against these:
   not introspect each registry's trust policy. "Missing" if the
   evaluator notes doctor lacks this check or flags the
   filename-pin-vs-rename risk as a concern piot doesn't cover.
+  Example phrasings that count as "missing":
+  * "doctor doesn't check the trust policy's workflow filename"
+  * "piot doesn't validate the OIDC trust policy against your workflow"
+  * "the trust policy filename pin is a concrete migration gotcha piot misses"
 
 Rules:
 
 - "shipped" means the evaluator concludes piot has the feature.
 - "missing" means the evaluator concludes piot lacks the feature, or
-  explicitly flags it as a gap.
-- "not_mentioned" means the evaluator doesn't address the feature.
-- If the evaluator hedges, treat as "not_mentioned" unless the overall
-  conclusion is clear.
-- Match by meaning, not keyword.
+  explicitly flags it as a gap, or says the responsibility is the
+  consumer's (for primitives whose ground truth is "missing because
+  piot punts on it").
+- "not_mentioned" means the evaluator doesn't address the feature
+  at all — neither affirms nor denies, neither claims piot covers it
+  nor claims it's a gap.
+- If the evaluator hedges on an otherwise unmentioned feature, treat
+  as "not_mentioned". If the overall conclusion is clear, grade the
+  conclusion.
+- Match by meaning, not keyword. A table row, bullet point, or
+  aside that clearly takes a position counts as a mention.
 - Do NOT conflate "piot has feature X" with "piot's feature X fits my
   specific shape." Those are different.
 
@@ -295,7 +310,7 @@ EOF
 )
 
 HOME="$WORK" claude -p \
-  --model claude-haiku-4-5-20251001 \
+  --model claude-sonnet-4-6 \
   --tools "" \
   --max-budget-usd 1 \
   --output-format text \
