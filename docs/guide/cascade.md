@@ -19,7 +19,10 @@ No prior tag matching `{name}-v*.*.*`? The package is treated as "changed since 
 ## Glob rules
 
 - `**` matches across directory separators.
-- Leading `**/` is implicit — `src/**/*.rs` matches `src/a/b/c.rs`.
+- Patterns are anchored at the repo root (minimatch `matchBase: false`).
+  A leading `**/` is **not** implicit — write it explicitly when you want a
+  pattern to match at any depth. For example, `Cargo.lock` only matches the
+  top-level file; use `**/Cargo.lock` to cascade on nested lockfiles too.
 - Dotfiles match (minimatch `dot: true`).
 - `.gitignore`-style negation is **not** supported. Keep globs inclusive.
 

@@ -24,6 +24,10 @@ describe('matchesGlob (§11.4 table)', () => {
 
     ['Cargo.lock', 'Cargo.lock', true],
     ['Cargo.lock', 'packages/rust/Cargo.lock', false],
+    // Leading `**/` is NOT implicit (matchBase: false). Users must write
+    // it explicitly to cascade on nested files. Docs: guide/cascade.md.
+    ['**/Cargo.lock', 'Cargo.lock', true],
+    ['**/Cargo.lock', 'packages/rust/Cargo.lock', true],
   ])('glob %s against path %s → %s', (pattern, path, expected) => {
     expect(matchesGlob(pattern, path)).toBe(expected);
   });
