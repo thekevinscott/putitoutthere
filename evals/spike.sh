@@ -128,7 +128,7 @@ if [[ "$SHAPE" == "isolated" && "$DOCS_SERVER" == "yes" ]]; then
   DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
   DOCS_URL="http://localhost:${DOCS_PORT}/put-it-out-there/"
   echo "==> docs: vitepress preview on port $DOCS_PORT → $DOCS_URL"
-  ( cd "$REPO_ROOT/docs" && exec pnpm preview --port "$DOCS_PORT" --host 127.0.0.1 ) >> "$DOCS_LOG" 2>&1 &
+  ( cd "$REPO_ROOT/docs" && exec ./node_modules/.bin/vitepress preview --port "$DOCS_PORT" --host 127.0.0.1 ) >> "$DOCS_LOG" 2>&1 &
   DOCS_PID=$!
   for _ in $(seq 1 30); do
     curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null && { echo "    ready at $DOCS_URL"; break; }
