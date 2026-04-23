@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { computeCascade } from './cascade.js';
 import { loadConfig, type Package } from './config.js';
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
+import { assertTripleSupported } from './handlers/npm-platform.js';
 import type { Bump, Kind } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
 import { bump as bumpVersion, firstVersion } from './version.js';
@@ -186,6 +187,12 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
       const build = (pkg as { build?: string }).build;
       const targets = (pkg as { targets?: string[] }).targets ?? [];
       if (build === 'napi' || build === 'bundled-cli') {
+        // Plan-time guard: bail before a CI matrix runs on an unmapped
+        // triple. Handler-time validation remains as belt-and-suspenders.
+        // Issue #170 follow-up.
+        for (const t of targets) {
+          assertTripleSupported(t, pkg.name);
+        }
         const out: MatrixRow[] = [];
         for (const t of targets) {
           out.push({

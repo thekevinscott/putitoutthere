@@ -271,13 +271,32 @@ const TRIPLE_MAP: Record<string, { os: string[]; cpu: string[]; libc?: string[] 
 export function targetToOsCpu(target: string): OsCpu {
   const entry = TRIPLE_MAP[target.toLowerCase()];
   if (!entry) {
-    throw new Error(
-      `Target triple "${target}" is not mapped to npm os/cpu. Add it to TRIPLE_MAP in src/handlers/npm-platform.ts.`,
-    );
+    throw new Error(unmappedTripleMessage(target));
   }
   return entry.libc !== undefined
     ? { os: entry.os, cpu: entry.cpu, libc: entry.libc }
     : { os: entry.os, cpu: entry.cpu };
+}
+
+/**
+ * Plan-time guard: assert a napi target triple is mapped in `TRIPLE_MAP`
+ * before any CI matrix row is emitted for it. Throws with the same
+ * vocabulary as `targetToOsCpu`, plus the offending package name so the
+ * user knows which `[[package]]` entry to fix.
+ *
+ * Issue #170 follow-up: failing fast at plan time beats failing
+ * mid-publish after a matrix has already run.
+ */
+export function assertTripleSupported(triple: string, packageName: string): void {
+  if (TRIPLE_MAP[triple.toLowerCase()] === undefined) {
+    throw new Error(
+      `Package "${packageName}": ${unmappedTripleMessage(triple)}`,
+    );
+  }
+}
+
+function unmappedTripleMessage(target: string): string {
+  return `Target triple "${target}" is not mapped to npm os/cpu. Add it to TRIPLE_MAP in src/handlers/npm-platform.ts.`;
 }
 
 function pickMainFile(files: readonly string[], build: 'napi' | 'bundled-cli'): string {
