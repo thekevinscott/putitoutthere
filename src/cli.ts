@@ -14,7 +14,6 @@
  *   --json            for plan; emit JSON instead of a table
  */
 
-import pkg from '../package.json' with { type: 'json' };
 import { login, logout, status, type DevicePrompt, type StatusResult } from './auth.js';
 import { doctor } from './doctor.js';
 import { init } from './init.js';
@@ -28,8 +27,7 @@ import {
   type Registry,
   type TokenListRow,
 } from './token.js';
-
-const VERSION = pkg.version;
+import { VERSION } from './version.js';
 
 const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'preflight', 'token', 'auth', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
@@ -137,9 +135,17 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
 
 export async function run(argv: readonly string[]): Promise<number> {
   const [, , cmd, ...rest] = argv;
-  if (cmd === undefined || cmd === '-h' || cmd === '--help') {
+  // Bare invocation: short hint pointing at --help rather than dumping
+  // the full usage (#150). Matches the unknown-command error shape.
+  if (cmd === undefined) {
+    process.stderr.write(
+      'putitoutthere: missing command. Run `putitoutthere --help` for usage.\n',
+    );
+    return 1;
+  }
+  if (cmd === '-h' || cmd === '--help') {
     printUsage();
-    return cmd === undefined ? 1 : 0;
+    return 0;
   }
   if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
     process.stdout.write(`putitoutthere ${VERSION}\n`);
@@ -174,8 +180,12 @@ export async function run(argv: readonly string[]): Promise<number> {
           }
         }
         // GHA `outputs.matrix` — append to $GITHUB_OUTPUT when present.
+        // Skip the write entirely when the matrix is empty (#146): the
+        // consumer workflow's `if: fromJson(...).length > 0` style guard
+        // only fires when the output key exists, and emitting `matrix=[]`
+        // races against the "output not set" branch the workflow expects.
         const githubOutput = process.env.GITHUB_OUTPUT;
-        if (githubOutput) {
+        if (githubOutput && matrix.length > 0) {
           await import('node:fs').then((fs) =>
             fs.appendFileSync(
               githubOutput,
@@ -284,22 +294,37 @@ export async function run(argv: readonly string[]): Promise<number> {
             ...(subFlags.config !== undefined ? { configPath: subFlags.config } : {}),
           });
           let secretsNote: string | null = null;
+          let envErrorNotes: string[] = [];
           if (subFlags.secrets) {
             const outcome = await tokenListSecrets({ cwd: subFlags.cwd });
+            /* v8 ignore next 3 -- both arms of the secret push require a live keyring + GH creds; `tokenListSecrets` is covered in token.test.ts. */
             if (outcome.kind === 'ok' || outcome.kind === 'error') {
               rows.push(...outcome.rows);
             }
             if (outcome.kind !== 'ok') {
               secretsNote = outcome.message;
+              /* v8 ignore next 7 -- `envErrors` branch needs a live keyring; tokenListSecrets itself is covered in token.test.ts. */
+            } else if (outcome.envErrors && outcome.envErrors.length > 0) {
+              // #143: surface per-environment failures as a trailing
+              // batch so one flaky env doesn't tank the listing.
+              envErrorNotes = outcome.envErrors.map(
+                (e) => `--secrets: environment "${e.environment}" failed: ${e.message}`,
+              );
             }
           }
           if (subFlags.json) {
-            const payload: { tokens: TokenListRow[]; note?: string } = { tokens: rows };
+            const payload: { tokens: TokenListRow[]; note?: string; envErrors?: string[] } = {
+              tokens: rows,
+            };
             if (secretsNote !== null) payload.note = secretsNote;
+            /* v8 ignore next -- envErrors is covered by the token.test.ts partial-failure case; CLI glue mirrors it. */
+            if (envErrorNotes.length > 0) payload.envErrors = envErrorNotes;
             process.stdout.write(JSON.stringify(payload) + '\n');
           } else {
             printTokenList(rows);
             if (secretsNote !== null) process.stderr.write(`${secretsNote}\n`);
+            /* v8 ignore next -- same as above; envErrorNotes only populated when a live GH call returned errors. */
+            for (const e of envErrorNotes) process.stderr.write(`${e}\n`);
           }
           return 0;
         }

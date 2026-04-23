@@ -33,6 +33,7 @@ import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
+import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://crates.io';
 
@@ -45,7 +46,7 @@ async function isPublishedImpl(
   const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
   const res = await fetch(url, {
     method: 'GET',
-    headers: { 'user-agent': 'putitoutthere/0.0.1' },
+    headers: { 'user-agent': USER_AGENT },
   });
   if (res.status === 200) return true;
   if (res.status === 404) return false;

@@ -441,6 +441,31 @@ describe('npm.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('bootstrap-paradox check: passes a 5s AbortSignal.timeout (#142)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await isBootstrapPublish('demo-npm');
+    const call = fetchSpy.mock.calls[0]!;
+    const init = call[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    // AbortSignal.timeout signals aren't aborted at construction time.
+    expect(init.signal!.aborted).toBe(false);
+    fetchSpy.mockRestore();
+  });
+
+  it('bootstrap-paradox check: timeout/network error falls through to false (#142)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(() =>
+      Promise.reject(
+        Object.assign(new Error('The operation was aborted due to timeout'), {
+          name: 'TimeoutError',
+        }),
+      ),
+    );
+    expect(await isBootstrapPublish('demo-npm')).toBe(false);
+    fetchSpy.mockRestore();
+  });
+
   it('on auth-failure without OIDC, does not emit bootstrap hint (normal EAUTH path)', async () => {
     execMock
       .mockImplementationOnce(() => {

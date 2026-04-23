@@ -9,7 +9,8 @@
  *
  * Idempotency (plan.md §17.4):
  * - Existing `putitoutthere.toml` → skip unless `--force`.
- * - Existing workflow → rename to `.bak` before writing.
+ * - Existing workflow → if byte-identical, mark already-present (no .bak);
+ *   otherwise rename to `.bak` before writing (#148).
  * - Existing `CLAUDE.md` already containing the import line → skip the append.
  *
  * Issue #20 / #25. Plan: §9, §17.
@@ -107,13 +108,22 @@ export function init(opts: InitOptions): InitResult {
 
 function writeWorkflow(cwd: string, name: string, contents: string, result: InitResult): void {
   const target = join(cwd, '.github', 'workflows', name);
+  const rel = `.github/workflows/${name}`;
   if (existsSync(target)) {
+    // #148: skip the `.bak` dance when the existing file is already
+    // byte-identical to what init would write. Otherwise re-running init
+    // pollutes the working tree with a fresh .bak each time.
+    const existing = readFileSync(target, 'utf8');
+    if (existing === contents) {
+      result.alreadyPresent.push(rel);
+      return;
+    }
     const bak = `${target}.bak`;
     renameSync(target, bak);
-    result.backedUp.push(`.github/workflows/${name}`);
+    result.backedUp.push(rel);
   }
   writeAtomic(target, contents);
-  result.wrote.push(`.github/workflows/${name}`);
+  result.wrote.push(rel);
 }
 
 function writeAtomic(path: string, contents: string): void {

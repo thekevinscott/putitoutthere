@@ -25,6 +25,7 @@ import { parse as parseToml } from 'smol-toml';
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
 import { nonEmpty } from '../env.js';
+import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://pypi.org';
 
@@ -37,7 +38,7 @@ async function isPublishedImpl(
   const url = `${REGISTRY}/pypi/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`;
   const res = await fetch(url, {
     method: 'GET',
-    headers: { 'user-agent': 'putitoutthere/0.0.1' },
+    headers: { 'user-agent': USER_AGENT },
   });
   if (res.status === 200) return true;
   if (res.status === 404) return false;

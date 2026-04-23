@@ -26,10 +26,14 @@ describe('cli', () => {
     vi.restoreAllMocks();
   });
 
-  it('prints usage and exits 1 with no command', async () => {
+  it('prints a short --help hint and exits 1 with no command (#150)', async () => {
     const code = await run(['node', 'putitoutthere']);
     expect(code).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/Usage: putitoutthere/);
+    const err = stderrChunks.join('');
+    expect(err).toMatch(/missing command/);
+    expect(err).toMatch(/putitoutthere --help/);
+    // Must NOT dump the full usage table; that's what `--help` is for.
+    expect(err).not.toMatch(/Commands:/);
   });
 
   it('prints usage and exits 0 for --help', async () => {
@@ -426,6 +430,21 @@ paths = ["packages/ts/**"]
     expect(code).toBe(0);
     const out = readFileSync(outFile, 'utf8');
     expect(out).toMatch(/^matrix=/);
+
+    delete process.env.GITHUB_OUTPUT;
+  });
+
+  it('does NOT write matrix= to $GITHUB_OUTPUT when the plan is empty (#146)', async () => {
+    // Force an empty plan via a `release: skip` trailer.
+    git(['commit', '--allow-empty', '-m', 'nop\n\nrelease: skip']);
+    const outFile = join(repo, 'gha-output-empty.txt');
+    writeFileSync(outFile, '', 'utf8');
+    process.env.GITHUB_OUTPUT = outFile;
+
+    const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo, '--json']);
+    expect(code).toBe(0);
+    const out = readFileSync(outFile, 'utf8');
+    expect(out).toBe('');
 
     delete process.env.GITHUB_OUTPUT;
   });
