@@ -229,6 +229,12 @@ echo "    raw output: $RAW ($(wc -l < "$RAW") lines)"
 if ! [[ -s "$RAW" ]] || [[ "$(wc -c < "$RAW")" -lt 200 ]]; then
   echo "ERROR: probe output is empty or suspiciously short:" >&2
   cat "$RAW" >&2
+  # Rate-limit blurb (e.g. "You've hit your limit · resets 3:20pm (UTC)")
+  # gets its own exit code so the run-N driver can abort rather than burn
+  # more calls on certain-to-fail retries.
+  if grep -qi "hit your limit" "$RAW"; then
+    exit 6
+  fi
   exit 2
 fi
 
