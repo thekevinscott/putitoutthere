@@ -340,6 +340,33 @@ describe('plan: npm kinds', () => {
     expect(win.runs_on).toBe('windows-latest');
     expect(win.artifact_name).toBe('lib-napi-x86_64-pc-windows-msvc');
   });
+
+  it('throws at plan time when a napi target triple is unmapped (#170)', () => {
+    // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
+    // TRIPLE_MAP entry. Without this guard, the mistake surfaces only
+    // mid-publish, after the CI matrix has already burned compute.
+    const unmappedToml = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "lib-napi"
+kind    = "npm"
+path    = "packages/ts"
+paths   = ["packages/ts/**"]
+build   = "napi"
+targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), unmappedToml, 'utf8');
+    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+
+    // `plan()` throws synchronously from `rowsForPackage` before it
+    // can wrap the result in a Promise, so assert on the synchronous
+    // call rather than `.rejects`.
+    expect(() => plan({ cwd: repo })).toThrow(
+      /lib-napi.*mips64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
+    );
+  });
 });
 
 describe('plan: matrix row shape', () => {
