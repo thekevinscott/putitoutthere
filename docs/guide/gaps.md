@@ -17,6 +17,26 @@ Gaps come in three flavours:
 
 Reference: [`notes/design-commitments.md`](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md).
 
+### `doctor` does not validate your OIDC trust policy
+
+`putitoutthere doctor` validates config, manifest presence, and auth
+reachability. It does **not** query each registry to confirm a
+trusted publisher is registered for your repo + workflow, and it does
+**not** verify that the caller workflow filename matches what your
+registered trust policy pins.
+
+crates.io and npm embed the caller workflow filename in the OIDC JWT
+claim. A mismatch fails at publish with HTTP 400. If you rename
+`release.yml` (or you're migrating from a workflow named something
+else), re-register the policy on each registry first — `doctor` can't
+catch this, and the first publish will fail loudly if you don't.
+
+The trust-policy UI lives at:
+
+- crates.io: `https://crates.io/crates/<crate>/settings` → Trusted Publishing
+- PyPI: `https://pypi.org/manage/project/<name>/settings/publishing/`
+- npm: `https://www.npmjs.com/package/<name>/access`
+
 ### Per-target GitHub Actions runner selection
 
 piot does **not** expose a `runner = "ubuntu-24.04-arm"` config knob
@@ -104,26 +124,6 @@ Status of specific asks. Check the linked issues for current state.
   unambiguous.
 
 ## Documented behaviours that look like gaps
-
-### `doctor` doesn't check your registry trust policy
-
-`putitoutthere doctor` validates your config, manifest presence, and
-auth reachability. It does **not**:
-
-- Query crates.io / PyPI / npm to confirm a trusted publisher is
-  registered for your repo + workflow. That's one-time out-of-CI
-  setup; `doctor` can't introspect it.
-- Verify that the **caller workflow filename** matches the filename
-  your registered trust policy pins. crates.io and npm embed the
-  caller filename in the OIDC JWT claim; a mismatch fails at publish
-  with HTTP 400. If you rename `release.yml`, re-register the policy
-  on each registry first.
-- Check that a target triple is buildable on the runner your
-  workflow assigned. Build-matrix correctness is your workflow's
-  responsibility.
-
-If you're migrating onto piot and renaming your existing workflow, do
-the re-registration step **before** the first piot-driven publish.
 
 ### Per-package tags, not a single shared version
 

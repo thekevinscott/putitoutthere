@@ -1,0 +1,8 @@
+{
+  "npm_platform_family": "shipped",
+  "depends_on_serialization": "not_mentioned",
+  "idempotent_precheck": "not_mentioned",
+  "bundled_cli_understood": "shipped",
+  "per_target_runner_override": "not_mentioned",
+  "doctor_oidc_trust_policy_check": "not_mentioned"
+}

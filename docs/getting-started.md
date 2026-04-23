@@ -28,6 +28,24 @@ piot is probably **not** the right tool if:
 See [Known gaps](/guide/gaps) for the full enumeration of non-goals
 and limitations, or [Design commitments](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md) for the policy these are derived from.
 
+## Migrating? Read this first
+
+If you already publish to crates.io / PyPI / npm and you're switching
+to piot, two things trip up most migrations:
+
+- **The caller workflow filename is load-bearing for OIDC.** crates.io
+  and npm pin the caller workflow filename in the OIDC trust policy's
+  JWT claim. If your current trusted publisher is registered against
+  (say) `patch-release.yml` and `putitoutthere init` writes a new
+  `release.yml`, the first publish fails with HTTP 400. `putitoutthere
+  doctor` does **not** catch this — re-register the policy on each
+  registry before you cut over, or keep the old filename. See
+  [Known gaps → `doctor` does not validate your OIDC trust policy](/guide/gaps#doctor-does-not-validate-your-oidc-trust-policy).
+- **Tags are per package, not shared.** piot tags each package
+  independently as `{name}-v{version}`. Anything reading a single
+  shared `v{version}` tag today (install scripts, doc links, release
+  notes scripts) needs updating.
+
 ## Common library shapes
 
 Worked examples for the common shapes:
