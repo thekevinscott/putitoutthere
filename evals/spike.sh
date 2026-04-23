@@ -110,17 +110,33 @@ if [[ "$SHAPE" == "isolated" && "$DOCS_SERVER" == "yes" ]]; then
   [[ -d "$REPO_ROOT/docs/node_modules" ]] || { echo "ERROR: docs deps missing (pnpm install --dir docs)" >&2; exit 4; }
   command -v unshare >/dev/null || { echo "ERROR: unshare not on PATH" >&2; exit 4; }
 
-  DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+  # Build the docs once, then serve the built dist/ via a plain static
+  # HTTP server. Earlier attempts used `vitepress dev` (with HMR and
+  # file watching) and it crashed mid-probe under memory pressure from
+  # chromium's concurrent navigations (docs log ended with
+  # `ELIFECYCLE`). A pre-built static tree is cheaper and stable.
   DOCS_LOG="$SNAP_DIR/${VARIANT}-${TS}-docs.log"
+  echo "==> docs: vitepress build + static server (log: $DOCS_LOG)"
+  if ! ( cd "$REPO_ROOT/docs" && pnpm build ) > "$DOCS_LOG" 2>&1; then
+    echo "ERROR: vitepress build failed"; tail -20 "$DOCS_LOG" >&2; exit 3
+  fi
+
+  # Symlink dist/ under a `put-it-out-there/` subdir so requests to
+  # the base path (which matches the deployed GH Pages layout) resolve.
+  WRAP="$WORK/_docs_wrap"
+  mkdir -p "$WRAP"
+  ln -s "$REPO_ROOT/docs/.vitepress/dist" "$WRAP/put-it-out-there"
+
+  DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
   DOCS_URL="http://localhost:${DOCS_PORT}/put-it-out-there/"
-  echo "==> docs: booting vitepress on port $DOCS_PORT (log: $DOCS_LOG)"
-  ( cd "$REPO_ROOT/docs" && pnpm dev --port "$DOCS_PORT" ) > "$DOCS_LOG" 2>&1 &
+  echo "==> docs: static server on port $DOCS_PORT → $DOCS_URL"
+  ( cd "$WRAP" && exec python3 -m http.server --bind 0.0.0.0 "$DOCS_PORT" ) >> "$DOCS_LOG" 2>&1 &
   DOCS_PID=$!
-  for _ in $(seq 1 40); do
+  for _ in $(seq 1 20); do
     curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null && { echo "    ready at $DOCS_URL"; break; }
-    sleep 0.5
+    sleep 0.3
   done
-  curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null || { echo "ERROR: docs server not ready"; tail -20 "$DOCS_LOG" >&2; exit 3; }
+  curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null || { echo "ERROR: static server not ready"; tail -20 "$DOCS_LOG" >&2; exit 3; }
 fi
 
 PROMPT_TEXT="$(cat "$FIXTURE_DIR/prompt.md")"
