@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { publishPlatforms, type PlatformPkg } from './npm-platform.js';
-import { nonEmpty } from '../env.js';
+import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
 
 type NpmPkg = {
@@ -125,10 +125,9 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   try {
     execFileSync('npm', args, {
       cwd: pkg.path,
-      env: {
-        ...process.env,
-        ...ctx.env,
-      },
+      // #138: minimal env. Avoid leaking the whole parent process.env
+      // (and any unrelated step secrets) to npm.
+      env: buildSubprocessEnv(ctx.env),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {

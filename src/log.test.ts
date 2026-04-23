@@ -5,7 +5,7 @@
  * Issue #11. Plan: §22.2, §22.5.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Writable } from 'node:stream';
 import { createLogger } from './log.js';
 
@@ -92,17 +92,29 @@ describe('createLogger: redaction (§22.5)', () => {
   });
 
   it('redacts values from keys matching *TOKEN*, *SECRET*, *PASSWORD*, *KEY*', () => {
-    process.env.CARGO_REGISTRY_TOKEN = 'AAA';
-    process.env.MY_SECRET = 'BBB';
-    process.env.DATABASE_PASSWORD = 'CCC';
-    process.env.ENCRYPTION_KEY = 'DDD';
+    // Values must clear the length floor (#137) — 8+ chars.
+    process.env.CARGO_REGISTRY_TOKEN = 'AAAAAAAA1';
+    process.env.MY_SECRET = 'BBBBBBBB1';
+    process.env.DATABASE_PASSWORD = 'CCCCCCCC1';
+    process.env.ENCRYPTION_KEY = 'DDDDDDDD1';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('dump: AAA BBB CCC DDD');
+    log.info('dump: AAAAAAAA1 BBBBBBBB1 CCCCCCCC1 DDDDDDDD1');
     const line = dest.text;
-    for (const v of ['AAA', 'BBB', 'CCC', 'DDD']) {
+    for (const v of ['AAAAAAAA1', 'BBBBBBBB1', 'CCCCCCCC1', 'DDDDDDDD1']) {
       expect(line).not.toContain(v);
     }
+  });
+
+  it('also redacts values from *PASS* and *PAT* name patterns', () => {
+    process.env.MY_PASS_THING = 'passvalue-123';
+    process.env.GH_PAT_TOKEN = 'patvalue-456';
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('credentials: passvalue-123 patvalue-456');
+    const line = dest.text;
+    expect(line).not.toContain('passvalue-123');
+    expect(line).not.toContain('patvalue-456');
   });
 
   it('does not redact values from keys outside the secret patterns', () => {
@@ -114,13 +126,80 @@ describe('createLogger: redaction (§22.5)', () => {
   });
 
   it('redacts secrets inside structured fields, not just msg', () => {
-    process.env.CARGO_REGISTRY_TOKEN = 'abc-123';
+    process.env.CARGO_REGISTRY_TOKEN = 'abc-12345678';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('publishing', { tokenEcho: 'abc-123', package: 'x' });
+    log.info('publishing', { tokenEcho: 'abc-12345678', package: 'x' });
     const line = dest.text;
-    expect(line).not.toContain('abc-123');
+    expect(line).not.toContain('abc-12345678');
     expect(line).toContain('"package":"x"');
+  });
+
+  it('does not redact short env values that would mangle unrelated log text (#137)', () => {
+    process.env.CI = '1';
+    process.env.SHORT_TOKEN = 'abc'; // name matches but too short
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('status=1 count=3 abc things with 1 in text');
+    const line = dest.text;
+    // Neither the bare `1` nor the short `abc` should be touched.
+    expect(line).toContain('status=1');
+    expect(line).toContain('with 1 in text');
+    expect(line).toContain('abc');
+    expect(line).not.toMatch(/\[REDACTED:/);
+  });
+
+  it('redacts secrets from additional envSources, e.g. ctx.env (#136)', () => {
+    const ctxEnv: Record<string, string> = {
+      CARGO_REGISTRY_TOKEN: 'ctxenv-supersecret-value',
+    };
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false, envSources: [ctxEnv] });
+    log.info('publishing with ctxenv-supersecret-value in payload');
+    const line = dest.text;
+    expect(line).not.toContain('ctxenv-supersecret-value');
+    expect(line).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
+  });
+
+  it('caches the redaction set across back-to-back log calls (#141)', () => {
+    process.env.PERF_CHECK_TOKEN = 'perf-checksecret';
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+
+    // The full scan (regex match + length filter + sort) runs only on
+    // cache miss: a stable env across N log calls sorts the values
+    // exactly once. Spy on Array.prototype.sort to count those — our
+    // sort is the only place sort runs inside redact().
+    const sortSpy = vi.spyOn(Array.prototype, 'sort');
+    const before = sortSpy.mock.calls.length;
+
+    log.info('one perf-checksecret');
+    log.info('two perf-checksecret');
+    log.info('three perf-checksecret');
+
+    const scanSorts = sortSpy.mock.calls.length - before;
+    // Three log calls against a process.env that never changed; the
+    // scan (and its sort) should fire exactly once.
+    expect(scanSorts).toBe(1);
+    sortSpy.mockRestore();
+
+    // Sanity: redaction still works.
+    expect(dest.text).not.toContain('perf-checksecret');
+  });
+
+  it('refreshes the cache when the source env mutates (#141)', () => {
+    process.env.MUT_TOKEN = 'firstsecretvalue';
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('phase1: firstsecretvalue');
+
+    // Mutate process.env in place; the signature (key count + total
+    // length) changes, which forces a rescan.
+    process.env.MUT_TOKEN = 'differentsecrethere';
+    log.info('phase2: differentsecrethere');
+
+    expect(dest.text).not.toContain('firstsecretvalue');
+    expect(dest.text).not.toContain('differentsecrethere');
   });
 
   it('handles empty-string secret values without blowing up', () => {
@@ -131,12 +210,26 @@ describe('createLogger: redaction (§22.5)', () => {
     expect(dest.text).toContain('nothing to hide');
   });
 
+  it('skips undefined env entries in extra sources without error', () => {
+    // Handlers occasionally pass a ctx.env where a workflow forwarded an
+    // optional var that happens to be unset; the scanner has to tolerate
+    // `undefined` without tripping.
+    const src: Record<string, string | undefined> = {
+      GOOD_TOKEN: 'realtokenvalue-1234',
+      MAYBE_TOKEN: undefined,
+    };
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false, envSources: [src] });
+    log.info('payload: realtokenvalue-1234');
+    expect(dest.text).not.toContain('realtokenvalue-1234');
+  });
+
   it('case-insensitive on the env key pattern', () => {
-    process.env.my_token = 'lowercased';
+    process.env.my_token = 'lowercased-value-1234';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('payload: lowercased');
-    expect(dest.text).not.toContain('lowercased');
+    log.info('payload: lowercased-value-1234');
+    expect(dest.text).not.toContain('lowercased-value-1234');
   });
 });
 

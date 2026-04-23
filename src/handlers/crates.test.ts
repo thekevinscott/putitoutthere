@@ -403,6 +403,39 @@ describe('crates.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('passes a minimal env to cargo (#138): includes PATH, excludes unrelated parent secrets', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockImplementation((file: string) => {
+      if (file === 'git') throw new Error('not a git repo');
+      return Buffer.from('ok');
+    });
+    process.env.UNRELATED_AWS_SECRET = 'parent-leak-should-not-ship';
+    process.env.PATH = process.env.PATH ?? '/usr/bin';
+
+    await crates.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'ship-this-one' } }),
+    );
+
+    const cargoCall = execMock.mock.calls.find((c) => c[0] === 'cargo');
+    expect(cargoCall).toBeDefined();
+    const envSpec = (cargoCall![2] as { env: Record<string, string> }).env;
+    // ctx.env is forwarded (declared passthrough).
+    expect(envSpec.CARGO_REGISTRY_TOKEN).toBe('ship-this-one');
+    // Explicit extra set by the handler.
+    expect(envSpec.CARGO_TERM_VERBOSE).toBe('true');
+    // PATH stays so cargo can be found.
+    expect(envSpec.PATH).toBe(process.env.PATH);
+    // Unrelated parent secret is dropped.
+    expect(envSpec.UNRELATED_AWS_SECRET).toBeUndefined();
+
+    delete process.env.UNRELATED_AWS_SECRET;
+    fetchSpy.mockRestore();
+  });
+
   it('skips the network when ctx.dryRun is set', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),

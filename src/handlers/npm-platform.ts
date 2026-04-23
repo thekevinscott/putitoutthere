@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Ctx } from '../types.js';
-import { nonEmpty } from '../env.js';
+import { buildSubprocessEnv, nonEmpty } from '../env.js';
 
 export interface PlatformPkg {
   name: string;
@@ -172,7 +172,8 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
   try {
     execFileSync('npm', args, {
       cwd: stagingDir,
-      env: { ...process.env, ...ctx.env },
+      // #138: minimal env; don't leak parent process.env to npm.
+      env: buildSubprocessEnv(ctx.env),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {

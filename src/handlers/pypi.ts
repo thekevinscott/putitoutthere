@@ -24,7 +24,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
-import { nonEmpty } from '../env.js';
+import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://pypi.org';
@@ -152,12 +152,12 @@ async function publishImpl(
   try {
     execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', ...files], {
       cwd: ctx.cwd,
-      env: {
-        ...process.env,
-        ...ctx.env,
+      // #138: minimal env. Don't forward the whole parent process.env
+      // to twine.
+      env: buildSubprocessEnv(ctx.env, {
         TWINE_USERNAME: '__token__',
         TWINE_PASSWORD: token,
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {

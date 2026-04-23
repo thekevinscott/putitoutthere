@@ -685,7 +685,15 @@ export interface SecretListOptions {
   repo?: string;
   keyring?: Keyring;
   fetchFn?: typeof fetch;
-  /** Override GitHub API base URL. Tests only. */
+  /**
+   * Override GitHub API base URL. Tests only: honored only when
+   * NODE_ENV === 'test' (#139). In production callers, an arbitrary
+   * base URL would be an SSRF lever (attacker-controlled URL receives
+   * a Bearer-token GET against internal services); gating on NODE_ENV
+   * keeps that lever out of reach outside the test harness. Vitest
+   * sets NODE_ENV=test by default, so this is transparent to the
+   * existing suite.
+   */
   apiBase?: string;
   /** Per-request timeout. Defaults to 5000ms. */
   timeoutMs?: number;
@@ -720,7 +728,13 @@ const GITHUB_API = 'https://api.github.com';
 export async function tokenListSecrets(opts: SecretListOptions = {}): Promise<SecretListOutcome> {
   const keyring = opts.keyring ?? defaultKeyring();
   const fetchFn = opts.fetchFn ?? fetch;
-  const apiBase = opts.apiBase ?? GITHUB_API;
+  // #139: apiBase is test-only. Silently ignore the override outside
+  // the vitest harness so production callers can't smuggle an
+  // attacker-controlled URL in and earn a Bearer-token GET against it.
+  const apiBase =
+    opts.apiBase !== undefined && process.env.NODE_ENV === 'test'
+      ? opts.apiBase
+      : GITHUB_API;
   const timeoutMs = opts.timeoutMs ?? 5000;
   const env = opts.env ?? process.env;
 
