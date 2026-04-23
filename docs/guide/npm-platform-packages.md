@@ -123,17 +123,21 @@ there.
 
 This is the same split as the Python `build = "maturin"` / `hatch` /
 `setuptools` modes: a declarative *packaging shape* piot knows how
-to publish. Producing the binaries is the consumer's responsibility;
-the matrix and runner selection are in the consumer's workflow YAML.
+to publish. Producing the binaries is the consumer's responsibility.
+piot emits the build-job matrix (with per-target `runner` overrides
+you can declare in config — see
+[Configuration → Target entries](/guide/configuration#target-entries)),
+but the compile step itself lives in your workflow.
 
 ## Constraints worth knowing
 
-- **Target triples** must match one of the OS patterns (`linux`,
-  `darwin`, `win32`/`windows`/`msvc`) and one of the CPU patterns
-  (`x86_64`/`x64`, `aarch64`/`arm64`, `armv7`). Triples outside that
-  set (e.g. `riscv64-*`, `powerpc64le-*`) currently fall through to
-  empty `os`/`cpu` arrays — track via
-  [#170](https://github.com/thekevinscott/put-it-out-there/issues/170).
+- **Target triples** must match a known OS pattern (`linux`,
+  `darwin`, `win32`/`windows`/`msvc`) and CPU pattern
+  (`x86_64`/`x64`, `aarch64`/`arm64`, `armv7`). Unknown triples
+  (e.g. `riscv64-*`, `powerpc64le-*`) are rejected at `plan` time
+  with a clear error — they used to silently synthesise a
+  no-constraints per-platform package; that class of failure is now
+  caught loudly.
 - **Scoped names** work: set `npm = "@myorg/mytool"`. Per-platform
   sub-packages inherit the scope.
 - **Shipping `cli` + `napi` in the same top-level package** is not

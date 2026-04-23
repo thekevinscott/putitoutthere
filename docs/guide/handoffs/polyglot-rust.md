@@ -23,17 +23,15 @@ responsibilities split is opinionated.
 | Skip-if-already-published idempotency (each handler `GET`s the registry first)| ✅     |               |
 | Publish a napi-rs family with synthesised per-platform packages + `optionalDependencies` top-level | ✅     |               |
 | Publish a `bundled-cli` family (per-platform binary packages + launcher)      | ✅     |               |
-| Cross-compile `aarch64-unknown-linux-gnu` on the right runner                 |        | ✅            |
-| Build the wheels (`maturin build --target …`)                                 |        | ✅            |
-| Build the napi `.node` addons (`napi build --target …`)                       |        | ✅            |
+| Emit a per-target build matrix with the right runner per triple (object-form `targets` entries with `{triple, runner}`) | ✅ | you declare the runner in config |
+| Run `maturin build --target …`, `napi build --target …`, `cargo build` — the compilation itself |        | ✅            |
 | Attach `.tar.xz` / `.tar.gz` binary archives to the GitHub Release            |        | ✅ (compose with `cargo-dist`) |
 | Register the trusted-publisher policy on each registry (one-time, out-of-CI) |        | ✅            |
+| Diff declared trust-policy config against the workflow file + `GITHUB_WORKFLOW_REF` (catches the caller-filename-pin trap via `doctor`) | ✅ (when `[package.trust_policy]` is declared) | |
 
-The publish-side is entirely piot's. The build-side — matrix,
-runners, compilation — is your workflow's. There is no `[[build]]`
-section in `putitoutthere.toml`; that's intentional. See
-[design commitments](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md)
-for why.
+The publish-side plus the matrix + runner emission are piot's. The
+build-side — compiling the artifacts the matrix demands — is your
+workflow's.
 
 ## Configuration shape
 
@@ -119,12 +117,22 @@ jobs:
     # scaffolded by piot
 ```
 
-Pick runner OSes per target yourself — `ubuntu-24.04-arm` for
-`aarch64-unknown-linux-gnu`, `macos-14` for `aarch64-apple-darwin`,
-and so on. piot does not emit a default runner map; when the
-generated `release.yml` is missing something for your matrix, it's
-because the matrix entry came from your config and the workflow has
-to read it.
+piot's planner maps each triple to a sensible default runner
+(`ubuntu-24.04-arm` for aarch64 Linux, `macos-latest` for Darwin,
+`windows-latest` for msvc, `ubuntu-latest` otherwise). To override
+per target, use object-form `targets` entries in
+`putitoutthere.toml`:
+
+```toml
+targets = [
+  "x86_64-unknown-linux-gnu",                                           # default runner
+  { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" }, # explicit
+  { triple = "aarch64-apple-darwin",      runner = "macos-14" },         # non-default
+]
+```
+
+The emitted matrix rows carry a `runner` field the workflow reads
+via `runs-on: ${{ matrix.runner }}`.
 
 ## One-time prerequisites before your first release
 
@@ -132,7 +140,9 @@ to read it.
    See [Authentication](/guide/auth). All three pin the **caller
    workflow filename** in the JWT claim — if you rename `release.yml`,
    each registry's policy needs to be re-registered first or the
-   publish fails with HTTP 400.
+   publish fails with HTTP 400. Declare the expected workflow in
+   `[package.trust_policy]` so `doctor` catches a mismatch before
+   the publish tries.
 2. Delete any long-lived `NPM_TOKEN` / `PYPI_API_TOKEN` /
    `CARGO_REGISTRY_TOKEN` repo secrets once OIDC is working, so
    nothing can accidentally fall back.

@@ -20,7 +20,7 @@ piot is probably **not** the right tool if:
 
 - You need a registry piot doesn't cover (Maven, NuGet, Docker Hub, internal registries, etc.).
 - You publish from CI systems other than GitHub Actions.
-- You want the tool to **generate a cross-compile matrix** for you — piot is publish-side; your workflow owns the build matrix and runner selection.
+- You want piot to **run the compile** itself. piot emits the build-job matrix (with per-target `runner` overrides you declare in config), but `maturin build` / `napi build` / `cargo build` still live in your workflow's build step.
 - You want **standalone binary archives** attached to GitHub Releases with a curl-installable tarball. That's `cargo-dist`'s / `goreleaser`'s lane; compose with them, don't replace them with piot.
 - You need **changelog generation**. Delegate to `release-please` or similar.
 - You want **automatic tag rollback** on partial-publish failures. piot deliberately doesn't do this — crates.io is immutable, so deletion isn't safe. Instead piot runs a completeness-check before anything ships.
@@ -37,10 +37,19 @@ to piot, two things trip up most migrations:
   and npm pin the caller workflow filename in the OIDC trust policy's
   JWT claim. If your current trusted publisher is registered against
   (say) `patch-release.yml` and `putitoutthere init` writes a new
-  `release.yml`, the first publish fails with HTTP 400. `putitoutthere
-  doctor` does **not** catch this — re-register the policy on each
-  registry before you cut over, or keep the old filename. See
-  [Known gaps → `doctor` does not validate your OIDC trust policy](/guide/gaps#doctor-does-not-validate-your-oidc-trust-policy).
+  `release.yml`, publish fails with HTTP 400. Declare the expected
+  workflow in `putitoutthere.toml` so `doctor` catches the drift
+  before cutover:
+
+  ```toml
+  [package.trust_policy]
+  workflow    = "release.yml"
+  environment = "release"
+  ```
+
+  With the block in place, `doctor` diffs the declared workflow
+  against the local file and (in CI) against `GITHUB_WORKFLOW_REF`.
+  See [Authentication → Declaring trust-policy expectations](/guide/auth#declaring-trust-policy-expectations).
 - **Tags are per package, not shared.** piot tags each package
   independently as `{name}-v{version}`. Anything reading a single
   shared `v{version}` tag today (install scripts, doc links, release

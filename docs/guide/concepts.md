@@ -1,10 +1,8 @@
 # Concepts
 
 > Evaluating piot for a migration? Read [Known gaps](/guide/gaps)
-> alongside this page — it enumerates every non-goal and known
-> limitation in one place, including per-target runner selection,
-> build-side cross-compilation, standalone binary archives, and
-> what `doctor` does and doesn't check.
+> alongside this page — it enumerates non-goals, behaviours that
+> commonly get misread as gaps, and outstanding limitations.
 
 ## What piot covers
 

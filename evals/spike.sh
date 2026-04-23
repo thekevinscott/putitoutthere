@@ -283,27 +283,29 @@ Primitive definitions — grade strictly against these:
 
 - `per_target_runner_override`: Does piot expose a config knob to pick
   a GitHub Actions runner per target (e.g. `runner = "ubuntu-24.04-arm"`
-  for `aarch64-unknown-linux-gnu`)? Ground truth: no, it does not —
-  runner selection lives in the consumer's workflow YAML. "Missing" if
-  the evaluator notes this is absent or calls out runner selection as
-  the consumer's responsibility.
-  Example phrasings that count as "missing":
-  * "piot doesn't support per-target runner config"
-  * "runner selection stays in the consumer's workflow"
-  * "piot doesn't emit a runner map; your `release.yml` picks runners"
-  * "cross-compilation, runner selection … stay in your workflow"
+  for `aarch64-unknown-linux-gnu`)? Ground truth: yes — object-form
+  `targets` entries of shape `{ triple, runner }` override the default
+  runner per target, and the planner emits the selected runner into
+  the build-matrix rows. "Shipped" if the evaluator describes this
+  capability (by any phrasing).
+  Example phrasings that count as "shipped":
+  * "targets accept {triple, runner} object form for per-target override"
+  * "piot emits the runner in the matrix; you can override per target"
+  * "configure `runner = 'ubuntu-24.04-arm'` on the aarch64 target"
 
 - `doctor_oidc_trust_policy_check`: Does the `doctor` command validate
-  that the registered OIDC trusted-publisher policy's caller workflow
-  filename matches the consumer's `release.yml` filename? Ground
-  truth: no — doctor validates config and auth reachability but does
-  not introspect each registry's trust policy. "Missing" if the
-  evaluator notes doctor lacks this check or flags the
-  filename-pin-vs-rename risk as a concern piot doesn't cover.
-  Example phrasings that count as "missing":
-  * "doctor doesn't check the trust policy's workflow filename"
-  * "piot doesn't validate the OIDC trust policy against your workflow"
-  * "the trust policy filename pin is a concrete migration gotcha piot misses"
+  that the registered OIDC trusted-publisher policy matches the
+  consumer's actual workflow / environment? Ground truth: yes — when
+  a package declares `[package.trust_policy]`, doctor diffs the
+  declared workflow filename against the local workflow file and (in
+  CI) against `GITHUB_WORKFLOW_REF`. An opt-in phase also
+  cross-checks crates.io's registered trust policy when
+  `CRATES_IO_DOCTOR_TOKEN` is set. "Shipped" if the evaluator
+  describes any of these phases.
+  Example phrasings that count as "shipped":
+  * "declare trust_policy in config; doctor diffs it against the workflow"
+  * "doctor has a trust-policy phase that catches the caller-filename pin"
+  * "doctor runs a registry cross-check when CRATES_IO_DOCTOR_TOKEN is set"
 
 Rules:
 

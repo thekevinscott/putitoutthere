@@ -33,25 +33,6 @@ The workflow then uses [`rust-lang/crates-io-auth-action@v1`](https://github.com
 
 `actions/setup-node` with `id-token: write` permission is all the workflow needs; npm-cli handles the OIDC exchange on `npm publish --provenance`.
 
-## What `doctor` won't catch
-
-`putitoutthere doctor` validates config, manifest presence, and auth
-reachability (`id-token: write` permission, env-var fallbacks). It
-does **not** introspect the trusted-publisher policy registered on
-the registry:
-
-- It does not confirm that a trusted publisher is registered for your
-  repo + workflow.
-- It does not verify that the **caller workflow filename** matches
-  what the policy pins. crates.io and npm embed the caller filename
-  in the OIDC JWT claim; a mismatch fails at publish time with HTTP
-  400, not at `doctor` time.
-
-If you rename your publishing workflow — or you're migrating from a
-workflow named something else onto piot's default `release.yml` —
-re-register the policy on each registry before the first publish, or
-keep the existing filename to match the registered policy.
-
 ## Workflow permissions
 
 Your publishing workflow needs:
