@@ -340,6 +340,100 @@ targets = ["x86_64-unknown-linux-gnu"]
   });
 });
 
+describe('parseConfig: per-target runner override (#159)', () => {
+  it('accepts object-form targets with runner on maturin pypi', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "pypi"
+path    = "."
+paths   = ["**"]
+build   = "maturin"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" },
+]
+`);
+    const pkg = cfg.packages[0]!;
+    expect(pkg.kind).toBe('pypi');
+    // Roundtrip: bare string stays a string; object retains both fields.
+    const targets = (pkg as { targets?: unknown[] }).targets!;
+    expect(targets[0]).toBe('x86_64-unknown-linux-gnu');
+    expect(targets[1]).toEqual({
+      triple: 'aarch64-unknown-linux-gnu',
+      runner: 'ubuntu-24.04-arm',
+    });
+  });
+
+  it('accepts object-form targets with runner on napi npm', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+paths   = ["**"]
+build   = "napi"
+targets = [
+  { triple = "aarch64-apple-darwin", runner = "macos-14" },
+]
+`);
+    const targets = (cfg.packages[0] as { targets?: unknown[] }).targets!;
+    expect(targets[0]).toEqual({ triple: 'aarch64-apple-darwin', runner: 'macos-14' });
+  });
+
+  it('accepts object-form targets without a runner (triple-only)', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "pypi"
+path    = "."
+paths   = ["**"]
+build   = "maturin"
+targets = [{ triple = "x86_64-unknown-linux-gnu" }]
+`);
+    const targets = (cfg.packages[0] as { targets?: unknown[] }).targets!;
+    expect(targets[0]).toEqual({ triple: 'x86_64-unknown-linux-gnu' });
+  });
+
+  it('rejects unknown keys inside the object form (typo guard)', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "pypi"
+path    = "."
+paths   = ["**"]
+build   = "maturin"
+targets = [{ triple = "x86_64-unknown-linux-gnu", runs_on = "ubuntu-latest" }]
+`),
+    ).toThrow(/invalid|unrecognized|unknown|runs_on/i);
+  });
+
+  it('rejects object form missing triple', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "pypi"
+path    = "."
+paths   = ["**"]
+build   = "maturin"
+targets = [{ runner = "ubuntu-24.04-arm" }]
+`),
+    ).toThrow();
+  });
+});
+
 describe('parseConfig: uniqueness', () => {
   it('rejects duplicate package names', () => {
     expect(() =>

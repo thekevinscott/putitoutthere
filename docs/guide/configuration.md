@@ -37,20 +37,40 @@ consumer's machine.
 
 ### `kind = "pypi"`
 
-| Field     | Type     | Notes                                              |
-|-----------|----------|----------------------------------------------------|
-| `build`   | enum     | `maturin` \| `setuptools` \| `hatch`. Default `setuptools`. |
-| `targets` | string[] | Required when `build = "maturin"`.                 |
+| Field     | Type                   | Notes                                              |
+|-----------|------------------------|----------------------------------------------------|
+| `build`   | enum                   | `maturin` \| `setuptools` \| `hatch`. Default `setuptools`. |
+| `targets` | (string \| object)[]   | Required when `build = "maturin"`. See [Target entries](#target-entries). |
 
 ### `kind = "npm"`
 
-| Field     | Type     | Notes                                                |
-|-----------|----------|------------------------------------------------------|
-| `npm`     | string   | Override `name` → npm name (for scoped packages).    |
-| `access`  | enum     | `public` \| `restricted`. Default `public`.          |
-| `tag`     | string   | dist-tag. Default `latest`.                          |
-| `build`   | enum     | `napi` \| `bundled-cli`. Omitted = vanilla.          |
-| `targets` | string[] | Required when `build ∈ {napi, bundled-cli}`.         |
+| Field     | Type                   | Notes                                                |
+|-----------|------------------------|------------------------------------------------------|
+| `npm`     | string                 | Override `name` → npm name (for scoped packages).    |
+| `access`  | enum                   | `public` \| `restricted`. Default `public`.          |
+| `tag`     | string                 | dist-tag. Default `latest`.                          |
+| `build`   | enum                   | `napi` \| `bundled-cli`. Omitted = vanilla.          |
+| `targets` | (string \| object)[]   | Required when `build ∈ {napi, bundled-cli}`. See [Target entries](#target-entries). |
+
+### Target entries
+
+Each entry in `targets` is either:
+
+- A **bare triple string** — the planner picks a sensible default GitHub
+  Actions runner (`macos-latest` for darwin, `windows-latest` for msvc,
+  `ubuntu-24.04-arm` for aarch64-linux, `ubuntu-latest` otherwise).
+- An **object** `{ triple, runner }` — `runner` overrides the default
+  for that specific triple. Use this when you need a non-default runner
+  (e.g. native-arm cross-compile, a macOS 14 image instead of latest,
+  or a self-hosted label). Unknown keys inside the object are rejected.
+
+```toml
+targets = [
+  "x86_64-unknown-linux-gnu",                                            # bare, uses mapping default
+  { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" }, # override
+  { triple = "aarch64-apple-darwin",      runner = "macos-14" },        # override
+]
+```
 
 ## Example
 

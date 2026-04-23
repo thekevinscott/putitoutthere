@@ -15,7 +15,7 @@ import { computeCascade } from './cascade.js';
 import { loadConfig, type Package } from './config.js';
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
 import { assertTripleSupported } from './handlers/npm-platform.js';
-import type { Bump, Kind } from './types.js';
+import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
 import { bump as bumpVersion, firstVersion } from './version.js';
 
@@ -151,17 +151,18 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
 
     case 'pypi': {
       const build = (pkg as { build?: string }).build;
-      const targets = (pkg as { targets?: string[] }).targets ?? [];
+      const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
       const out: MatrixRow[] = [];
       if (build === 'maturin' && targets.length > 0) {
-        for (const t of targets) {
+        for (const entry of targets) {
+          const { triple, runner } = normalizeTarget(entry);
           out.push({
             name: pkg.name,
             kind: 'pypi',
             version,
-            target: t,
-            runs_on: defaultRunsOn(t),
-            artifact_name: `${pkg.name}-wheel-${t}`,
+            target: triple,
+            runs_on: runner ?? defaultRunsOn(triple),
+            artifact_name: `${pkg.name}-wheel-${triple}`,
             artifact_path: `${pkg.path}/dist/*.whl`,
             path: pkg.path,
             build,
@@ -185,24 +186,25 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
 
     case 'npm': {
       const build = (pkg as { build?: string }).build;
-      const targets = (pkg as { targets?: string[] }).targets ?? [];
+      const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
       if (build === 'napi' || build === 'bundled-cli') {
         // Plan-time guard: bail before a CI matrix runs on an unmapped
         // triple. Handler-time validation remains as belt-and-suspenders.
         // Issue #170 follow-up.
-        for (const t of targets) {
-          assertTripleSupported(t, pkg.name);
+        for (const entry of targets) {
+          assertTripleSupported(normalizeTarget(entry).triple, pkg.name);
         }
         const out: MatrixRow[] = [];
-        for (const t of targets) {
+        for (const entry of targets) {
+          const { triple, runner } = normalizeTarget(entry);
           out.push({
             name: pkg.name,
             kind: 'npm',
             version,
-            target: t,
-            runs_on: defaultRunsOn(t),
-            artifact_name: `${pkg.name}-${t}`,
-            artifact_path: `${pkg.path}/build/${t}`,
+            target: triple,
+            runs_on: runner ?? defaultRunsOn(triple),
+            artifact_name: `${pkg.name}-${triple}`,
+            artifact_path: `${pkg.path}/build/${triple}`,
             path: pkg.path,
             build,
           });

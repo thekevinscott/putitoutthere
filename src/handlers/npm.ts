@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { Ctx, Handler, PublishResult } from '../types.js';
+import { normalizeTarget, type Ctx, type Handler, type PublishResult, type TargetEntry } from '../types.js';
 import { publishPlatforms, type PlatformPkg } from './npm-platform.js';
 import { nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
@@ -24,7 +24,10 @@ type NpmPkg = {
   access?: 'public' | 'restricted';
   tag?: string;
   build?: 'napi' | 'bundled-cli';
-  targets?: readonly string[];
+  // #159: `targets` entries can be bare triples or `{ triple, runner }`
+  // objects. Only the triple matters at publish time; the `runner`
+  // override is a CI-matrix concern consumed by the planner.
+  targets?: readonly TargetEntry[];
 };
 
 function npmNameFor(pkg: NpmPkg): string {
@@ -100,7 +103,10 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
       access: pkg.access,
       tag: pkg.tag,
       build: pkg.build,
-      targets: pkg.targets,
+      // Platform publishing only cares about the triple — the `runner`
+      // override is a planner/CI concern. Normalize away the union here
+      // so npm-platform.ts keeps its `readonly string[]` contract.
+      targets: pkg.targets.map((t) => normalizeTarget(t).triple),
     };
     await publishPlatforms(platformPkg, version, ctx);
   }

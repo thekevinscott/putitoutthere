@@ -12,6 +12,30 @@ export type Kind = 'crates' | 'pypi' | 'npm';
 export type Bump = 'patch' | 'minor' | 'major';
 
 /**
+ * Per-target entry in `[[package]].targets`.
+ *
+ * Bare-string form keeps the historical contract: the planner resolves a
+ * GHA runner from the hardcoded triple→runner mapping in `src/plan.ts`.
+ * Object form overrides that runner per target — e.g. switching a
+ * cross-compiled `aarch64-unknown-linux-gnu` row from `ubuntu-latest`
+ * onto the free native `ubuntu-24.04-arm` runner. Issue #159.
+ */
+export type TargetEntry = string | { triple: string; runner?: string };
+
+/**
+ * Normalizes a `TargetEntry` into its canonical object shape. Callers
+ * that only need the triple can destructure; callers that drive the CI
+ * matrix read `.runner` and fall back to the hardcoded mapping when
+ * it's absent.
+ */
+export function normalizeTarget(entry: TargetEntry): { triple: string; runner?: string } {
+  if (typeof entry === 'string') return { triple: entry };
+  return entry.runner !== undefined
+    ? { triple: entry.triple, runner: entry.runner }
+    : { triple: entry.triple };
+}
+
+/**
  * Shape handlers see. Optional fields explicitly allow `undefined` so
  * the Zod-parsed `Package` (discriminated union from src/config.ts)
  * assigns cleanly under exactOptionalPropertyTypes.

@@ -37,6 +37,20 @@ const PACKAGE_BASE = {
   smoke: z.string().optional(),
 };
 
+// #159: `targets` entries can be a bare triple (uses the hardcoded
+// runner mapping in src/plan.ts) or an object form that overrides the
+// runner per target. `.strict()` on the object rejects unknown keys
+// (typos like `runs_on` fail loudly rather than silently).
+const TARGET_ENTRY = z.union([
+  z.string(),
+  z
+    .object({
+      triple: z.string(),
+      runner: z.string().optional(),
+    })
+    .strict(),
+]);
+
 const CRATES_PKG = z
   .object({
     ...PACKAGE_BASE,
@@ -59,7 +73,7 @@ const PYPI_PKG = z
     // explicitly.
     build: PYPI_BUILD.default('setuptools'),
     wheels_artifact: z.string().optional(),
-    targets: z.array(z.string()).optional(),
+    targets: z.array(TARGET_ENTRY).optional(),
   })
   .strict()
   .refine(
@@ -78,7 +92,7 @@ const NPM_PKG = z
     access: z.enum(['public', 'restricted']).optional(),
     tag: z.string().optional(),
     build: NPM_BUILD.optional(),
-    targets: z.array(z.string()).optional(),
+    targets: z.array(TARGET_ENTRY).optional(),
   })
   .strict()
   .refine(
