@@ -236,16 +236,58 @@ Output a single JSON object on its own line, no markdown, no prose:
   "doctor_oidc_trust_policy_check":    "shipped" | "missing" | "not_mentioned"
 }
 
+Primitive definitions — grade strictly against these:
+
+- `npm_platform_family`: Does piot support publishing a per-platform
+  sub-package family (`{name}-{target}` per target) + a top-level
+  package whose `optionalDependencies` pin them? The ground-truth
+  question is whether this MECHANISM exists in piot, not whether it
+  fits any specific consumer's exact shape. If the evaluator says
+  "piot has build = napi / bundled-cli that generates the family" →
+  "shipped". If the evaluator says "piot's family pattern exists but
+  doesn't fit dirsql's combined-CLI-plus-napi-in-one-package shape"
+  → still "shipped" (the mechanism exists; fit is a separate
+  question).
+
+- `depends_on_serialization`: Does piot topologically order publishes
+  by `depends_on`? "Shipped" if the evaluator confirms cross-package
+  ordering is guaranteed.
+
+- `idempotent_precheck`: Does each handler check the registry before
+  publishing and skip if the version is already there?
+
+- `bundled_cli_understood`: Does the evaluator demonstrate
+  understanding of what `bundled-cli` actually does — that it packages
+  a CLI binary across a target matrix into per-platform npm sub-packages?
+  Just saying the config value exists isn't enough; the evaluator has
+  to describe the behavior or effect. "Shipped" if they describe it.
+
+- `per_target_runner_override`: Does piot expose a config knob to pick
+  a GitHub Actions runner per target (e.g. `runner = "ubuntu-24.04-arm"`
+  for `aarch64-unknown-linux-gnu`)? Ground truth: no, it does not —
+  runner selection lives in the consumer's workflow YAML. "Missing" if
+  the evaluator notes this is absent or calls out runner selection as
+  the consumer's responsibility.
+
+- `doctor_oidc_trust_policy_check`: Does the `doctor` command validate
+  that the registered OIDC trusted-publisher policy's caller workflow
+  filename matches the consumer's `release.yml` filename? Ground
+  truth: no — doctor validates config and auth reachability but does
+  not introspect each registry's trust policy. "Missing" if the
+  evaluator notes doctor lacks this check or flags the
+  filename-pin-vs-rename risk as a concern piot doesn't cover.
+
 Rules:
-- "shipped" means the evaluator concludes piot already has it.
-- "missing" means the evaluator concludes piot lacks it or recommends
-  adding it.
-- "not_mentioned" means the evaluator does not address this primitive.
+
+- "shipped" means the evaluator concludes piot has the feature.
+- "missing" means the evaluator concludes piot lacks the feature, or
+  explicitly flags it as a gap.
+- "not_mentioned" means the evaluator doesn't address the feature.
 - If the evaluator hedges, treat as "not_mentioned" unless the overall
   conclusion is clear.
-- Match by meaning, not keyword. For "bundled_cli_understood": does the
-  evaluator demonstrate understanding of what bundled-cli does, or
-  merely note the name exists?
+- Match by meaning, not keyword.
+- Do NOT conflate "piot has feature X" with "piot's feature X fits my
+  specific shape." Those are different.
 
 Evaluation follows.
 ===
