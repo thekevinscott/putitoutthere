@@ -592,6 +592,7 @@ describe('tokenList', () => {
     paths: ['packages/py/**'],
     depends_on: [],
     first_version: '0.1.0',
+    build: 'setuptools',
   };
   const npmPkg: Package = {
     kind: 'npm',

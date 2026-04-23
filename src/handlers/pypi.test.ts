@@ -364,8 +364,32 @@ describe('pypi.publish', () => {
         '0.1.0',
         makeCtx({ cwd: dir, artifactsRoot }),
       ),
-    ).rejects.toThrow(/PYPI_API_TOKEN|§16\.4/i);
+    ).rejects.toThrow(/PYPI_API_TOKEN/i);
     fetchSpy.mockRestore();
+  });
+
+  it('no-auth error points at the published auth guide, not internal plan docs (#149)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    try {
+      await pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      );
+      throw new Error('expected publish to reject');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toMatch(
+        /thekevinscott\.github\.io\/put-it-out-there\/guide\/auth/,
+      );
+      expect(msg).not.toMatch(/plan\.md/);
+      expect(msg).not.toMatch(/§16\.4/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('fails loudly when no artifacts for this package', async () => {

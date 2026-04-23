@@ -42,6 +42,21 @@ describe('parseConfig: happy paths', () => {
     expect(cfg.packages[0]!.first_version).toBe('0.1.0');
   });
 
+  it('applies default pypi build = "setuptools" when omitted (#129)', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "py"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`);
+    const pkg = cfg.packages[0]! as { kind: string; build?: string };
+    expect(pkg.kind).toBe('pypi');
+    expect(pkg.build).toBe('setuptools');
+  });
+
   it('accepts optional top-level fields', () => {
     const cfg = parseConfig(`
 [putitoutthere]

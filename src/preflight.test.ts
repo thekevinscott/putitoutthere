@@ -194,7 +194,20 @@ describe('requireAuth', () => {
     expect(() => requireAuth([pkg('npm')])).toThrow(/NODE_AUTH_TOKEN or NPM_TOKEN/);
   });
 
-  it('throws with a pointer to §16.4 setup docs', () => {
-    expect(() => requireAuth([pkg('crates')])).toThrow(/§16\.4/);
+  it('throws with a pointer to the published auth guide (#144)', () => {
+    expect(() => requireAuth([pkg('crates')])).toThrow(
+      /thekevinscott\.github\.io\/put-it-out-there\/guide\/auth/,
+    );
+  });
+
+  it('does not reference internal plan.md sections in the error (#144)', () => {
+    try {
+      requireAuth([pkg('crates')]);
+    } catch (err) {
+      expect((err as Error).message).not.toMatch(/plan\.md/);
+      expect((err as Error).message).not.toMatch(/§16\.4/);
+      return;
+    }
+    throw new Error('expected requireAuth to throw');
   });
 });

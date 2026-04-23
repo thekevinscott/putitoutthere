@@ -54,7 +54,10 @@ const PYPI_PKG = z
     ...PACKAGE_BASE,
     kind: z.literal('pypi'),
     pypi: z.string().optional(),
-    build: PYPI_BUILD.optional(),
+    // Default matches docs/guide/configuration.md. Consumers who pick a
+    // different backend (maturin for Rust extensions, hatch) must opt in
+    // explicitly.
+    build: PYPI_BUILD.default('setuptools'),
     wheels_artifact: z.string().optional(),
     targets: z.array(z.string()).optional(),
   })
