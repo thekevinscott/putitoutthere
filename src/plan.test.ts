@@ -341,6 +341,121 @@ describe('plan: npm kinds', () => {
     expect(win.artifact_name).toBe('lib-napi-x86_64-pc-windows-msvc');
   });
 
+  it('honors per-target runner override on napi npm (#159)', async () => {
+    const toml = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "lib-napi"
+kind    = "npm"
+path    = "packages/ts"
+paths   = ["packages/ts/**"]
+build   = "napi"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" },
+  { triple = "aarch64-apple-darwin",      runner = "macos-14" },
+]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
+    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+
+    const matrix = await plan({ cwd: repo });
+    // Bare string → hardcoded mapping default.
+    const linux = matrix.find((r) => r.target === 'x86_64-unknown-linux-gnu')!;
+    expect(linux.runs_on).toBe('ubuntu-latest');
+    // Object form → runner override wins, even when the mapping default
+    // would otherwise pick a different runner. macos-14 in particular
+    // is never what the mapping would produce for aarch64-apple-darwin.
+    const arm = matrix.find((r) => r.target === 'aarch64-unknown-linux-gnu')!;
+    expect(arm.runs_on).toBe('ubuntu-24.04-arm');
+    const mac = matrix.find((r) => r.target === 'aarch64-apple-darwin')!;
+    expect(mac.runs_on).toBe('macos-14');
+    // artifact_name and path still key off the triple, not the runner.
+    expect(arm.artifact_name).toBe('lib-napi-aarch64-unknown-linux-gnu');
+  });
+
+  it('honors per-target runner override on maturin pypi (#159)', async () => {
+    const toml = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "lib-py"
+kind    = "pypi"
+path    = "packages/py"
+paths   = ["packages/py/**"]
+build   = "maturin"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" },
+]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
+    commit('feat: initial', { 'packages/py/lib.py': '# py' });
+
+    const matrix = await plan({ cwd: repo });
+    const arm = matrix.find((r) => r.target === 'aarch64-unknown-linux-gnu')!;
+    expect(arm.runs_on).toBe('ubuntu-24.04-arm');
+    expect(arm.artifact_name).toBe('lib-py-wheel-aarch64-unknown-linux-gnu');
+    // Bare string still falls back to mapping default.
+    const linux = matrix.find((r) => r.target === 'x86_64-unknown-linux-gnu')!;
+    expect(linux.runs_on).toBe('ubuntu-latest');
+  });
+
+  it('back-compat: string-only targets produce identical plan rows (#159)', async () => {
+    // Two configs that should produce byte-identical plan output: one
+    // with bare strings (historical shape), one with explicit object
+    // form but no runner override. The object-form triple-only case
+    // must degrade to the same behavior as the bare-string case.
+    const bare = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "lib-napi"
+kind    = "npm"
+path    = "packages/ts"
+paths   = ["packages/ts/**"]
+build   = "napi"
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), bare, 'utf8');
+    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+    const bareMatrix = await plan({ cwd: repo });
+
+    // Reset the repo and rerun with the object-form equivalent.
+    rmSync(repo, { recursive: true, force: true });
+    repo = mkdtempSync(join(tmpdir(), 'plan-test-'));
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'user.name', 'Test']);
+    git(['config', 'commit.gpgsign', 'false']);
+    git(['config', 'tag.gpgsign', 'false']);
+
+    const objForm = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "lib-napi"
+kind    = "npm"
+path    = "packages/ts"
+paths   = ["packages/ts/**"]
+build   = "napi"
+targets = [
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "x86_64-pc-windows-msvc" },
+]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), objForm, 'utf8');
+    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+    const objMatrix = await plan({ cwd: repo });
+
+    expect(objMatrix).toEqual(bareMatrix);
+  });
+
   it('throws at plan time when a napi target triple is unmapped (#170)', () => {
     // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
     // TRIPLE_MAP entry. Without this guard, the mistake surfaces only
