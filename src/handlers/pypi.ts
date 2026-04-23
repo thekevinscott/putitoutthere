@@ -64,12 +64,30 @@ function writeVersionImpl(
     /* v8 ignore next -- non-ENOENT read errors surface as-is */
     return Promise.reject(err instanceof Error ? err : new Error(String(err)));
   }
+  // Single TOML parse site: distinguishes (a) malformed TOML, (b) no [project]
+  // table, (c) [project] present but without static or dynamic version.
+  // The regex rewrite below only runs for case (c)-that-resolves-successfully.
+  let parsed: unknown;
+  try {
+    parsed = parseToml(original);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return Promise.reject(new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${msg}`));
+  }
+  const project = (parsed as { project?: { dynamic?: unknown } })?.project;
+  if (!project) {
+    return Promise.reject(
+      new Error(
+        'pyproject.toml has no [project] table -- declare [project].version or [project].dynamic = ["version"]',
+      ),
+    );
+  }
   // Dynamic-version projects (hatch-vcs, setuptools-scm, maturin reading
   // Cargo.toml, etc) have `dynamic = [..., "version", ...]` under [project]
   // and no literal version line to rewrite. The build backend derives the
   // version itself. Per design-commitment #1 (no version computation),
   // skip the rewrite -- the consumer's build system handles propagation.
-  if (hasDynamicVersion(original)) {
+  if (projectDynamicIncludesVersion(project)) {
     const who = pkg.name ? `pypi: ${pkg.name}` : 'pypi';
     ctx.log.info(
       `${who}: skipping pyproject.toml version rewrite; [project].dynamic includes "version" (build backend derives it)`,
@@ -80,7 +98,7 @@ function writeVersionImpl(
   try {
     updated = replacePyProjectVersion(original, version);
   } catch (err) {
-    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    return Promise.reject(err as Error);
   }
   if (updated === original) return Promise.resolve([]);
   writeFileSync(pyProjectPath, updated, 'utf8');
@@ -205,17 +223,16 @@ async function mintOidcToken(ctx: Ctx): Promise<string | null> {
 /**
  * Rewrites the first `version = "x.y.z"` inside the `[project]` table.
  *
- * Callers should check `hasDynamicVersion(source)` first and skip
- * rewriting when it returns true -- dynamic-version projects (hatch-vcs,
- * setuptools-scm, maturin, etc.) have no literal version line and should
- * not be forced to grow one.
+ * Precondition: the caller has already confirmed a `[project]` table exists
+ * and does not declare `dynamic = ["version"]`. Throws when no literal
+ * `version = "..."` line can be located inside `[project]`.
  */
 export function replacePyProjectVersion(source: string, version: string): string {
   const re = /(\[project\][\s\S]*?)(^\s*version\s*=\s*")([^"]*)(")/m;
   const m = re.exec(source);
   if (!m) {
     throw new Error(
-      'pyproject.toml: neither a static [project].version nor a dynamic version declaration was found',
+      'pyproject.toml: [project] is present but declares neither a static version nor dynamic = ["version"]',
     );
   }
   const [, pre, prefix, old, suffix] = m as unknown as [string, string, string, string, string];
@@ -226,25 +243,13 @@ export function replacePyProjectVersion(source: string, version: string): string
 }
 
 /**
- * Returns true when `[project].dynamic` is an array containing `"version"`.
- * Used to detect hatch-vcs / setuptools-scm / maturin setups where the
- * build backend computes the version and no literal `version = "..."` line
- * exists to rewrite.
- *
- * Uses smol-toml so multi-line arrays and mixed whitespace parse correctly.
- * Falls back silently (returns false) when TOML is unparseable -- in that
- * case `replacePyProjectVersion` will surface the real error.
+ * Returns true when a parsed `[project].dynamic` is an array containing
+ * `"version"`. Used to detect hatch-vcs / setuptools-scm / maturin setups
+ * where the build backend computes the version and no literal
+ * `version = "..."` line exists to rewrite.
  */
-export function hasDynamicVersion(source: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = parseToml(source);
-  } catch {
-    /* v8 ignore next -- malformed TOML is reported by the regex path */
-    return false;
-  }
-  const project = (parsed as { project?: { dynamic?: unknown } })?.project;
-  const dynamic = project?.dynamic;
+function projectDynamicIncludesVersion(project: { dynamic?: unknown }): boolean {
+  const { dynamic } = project;
   return Array.isArray(dynamic) && dynamic.includes('version');
 }
 

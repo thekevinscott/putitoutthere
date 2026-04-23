@@ -155,7 +155,7 @@ describe('pypi.writeVersion', () => {
     ).rejects.toThrow(/pyproject\.toml/);
   });
 
-  it('throws when neither static version nor dynamic version is declared (issue #171)', async () => {
+  it('throws when [project] is present but declares neither static version nor dynamic (issue #171)', async () => {
     const p = join(dir, 'pyproject.toml');
     writeFileSync(
       p,
@@ -164,7 +164,7 @@ describe('pypi.writeVersion', () => {
     );
     await expect(
       pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
-    ).rejects.toThrow(/neither a static \[project\]\.version nor a dynamic version declaration/);
+    ).rejects.toThrow(/\[project\] is present but declares neither a static version nor dynamic/);
   });
 
   it('preserves comments', async () => {
@@ -245,7 +245,7 @@ describe('pypi.writeVersion', () => {
     expect(readFileSync(p, 'utf8')).toContain('version = "0.2.0"');
   });
 
-  it('throws when [project] table is absent entirely', async () => {
+  it('throws with a distinct message when [project] table is absent entirely', async () => {
     const p = join(dir, 'pyproject.toml');
     writeFileSync(
       p,
@@ -254,7 +254,16 @@ describe('pypi.writeVersion', () => {
     );
     await expect(
       pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
-    ).rejects.toThrow(/neither a static \[project\]\.version nor a dynamic version declaration/);
+    ).rejects.toThrow(/no \[project\] table/);
+  });
+
+  it('surfaces the TOML parser message with the file path when pyproject.toml is malformed', async () => {
+    const p = join(dir, 'pyproject.toml');
+    // Unterminated string -- guaranteed parse failure.
+    writeFileSync(p, `[project]\nname = "demo\nversion = "0.1.0"\n`, 'utf8');
+    await expect(
+      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
+    ).rejects.toThrow(new RegExp(`failed to parse.*${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
   });
 });
 
