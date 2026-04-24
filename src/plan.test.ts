@@ -657,3 +657,58 @@ build_workflow = "publish-python.yml"
     }
   });
 });
+
+describe('plan: bundle_cli passthrough (#217)', () => {
+  it('attaches bundle_cli to per-target wheel rows but NOT to the sdist row', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-py"
+kind = "pypi"
+path = "py/my-py"
+paths = ["py/my-py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+
+[package.bundle_cli]
+bin = "my-cli"
+stage_to = "src/my_py/_binary"
+crate_path = "crates/my-rust"
+`,
+      'utf8',
+    );
+    commit('seed', { 'py/my-py/pyproject.toml': 'x' });
+
+    const matrix = await plan({ cwd: repo });
+    const wheelRows = matrix.filter((r) => r.target !== 'sdist');
+    const sdistRow = matrix.find((r) => r.target === 'sdist');
+
+    // Every per-target wheel row carries bundle_cli.
+    expect(wheelRows.length).toBe(2);
+    for (const r of wheelRows) {
+      expect(r.bundle_cli).toEqual({
+        bin: 'my-cli',
+        stage_to: 'src/my_py/_binary',
+        crate_path: 'crates/my-rust',
+      });
+    }
+
+    // Sdist row does not — it's source-only, no cross-compile happens.
+    expect(sdistRow).toBeDefined();
+    expect(sdistRow!.bundle_cli).toBeUndefined();
+  });
+
+  it('omits bundle_cli entirely when the package does not declare one', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML);
+    commit('seed', { 'packages/rust/Cargo.toml': 'x' });
+
+    const matrix = await plan({ cwd: repo });
+    for (const r of matrix) {
+      expect(r.bundle_cli).toBeUndefined();
+    }
+  });
+});

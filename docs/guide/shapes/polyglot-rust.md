@@ -165,14 +165,74 @@ invokes the piot action. For this shape, **it also needs**:
    `CARGO_REGISTRY_TOKEN` repo secrets once OIDC is working, so
    nothing can accidentally fall back.
 
+## Shipping a Rust CLI inside the PyPI wheel
+
+A common pattern for this shape: stage a `cargo build --bin …`
+binary into the Python source tree before `maturin build` runs, so
+each wheel ships the binary as package data and a `console_scripts`
+entry points at it. Net result: `pip install my-py` on any supported
+platform gets `my-cli` on `PATH` — no Rust toolchain needed on the
+user's machine. `ruff`, `uv`, and `pydantic-core` all ship this way.
+
+Declare it with `[package.bundle_cli]` on the pypi package:
+
+```toml
+[[package]]
+name = "my-py"
+kind = "pypi"
+build = "maturin"
+path = "packages/python"
+paths = ["packages/python/**", "crates/my-rust/**"]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+depends_on = ["my-crate"]
+
+[package.bundle_cli]
+bin        = "my-cli"
+stage_to   = "src/my_py/_binary"
+crate_path = "crates/my-rust"
+```
+
+The scaffolded build job does the cross-compile + stage step before
+maturin runs, per target. Your `pyproject.toml` ties the staged
+binary into a `console_scripts` entry:
+
+```toml
+# packages/python/pyproject.toml
+
+[project.scripts]
+my-cli = "my_py._binary:entrypoint"
+
+[tool.maturin]
+include = ["src/my_py/_binary/**"]  # ship the binary as package data
+```
+
+…with a small launcher in `packages/python/src/my_py/_binary/__init__.py`
+that `os.execv`s into the staged binary:
+
+```python
+# packages/python/src/my_py/_binary/__init__.py
+import os, sys
+from pathlib import Path
+
+def entrypoint():
+    here = Path(__file__).parent
+    binary = here / ("my-cli.exe" if os.name == "nt" else "my-cli")
+    if not binary.exists():
+        sys.stderr.write(f"my-cli binary not found at {binary}\n")
+        sys.exit(1)
+    os.execv(binary, [str(binary), *sys.argv[1:]])
+```
+
+Full field reference: [Configuration → Bundled CLI](/guide/configuration#bundled-cli).
+
 ## Gotchas specific to this shape
 
-- **Shipping a Rust CLI inside the PyPI wheel.** A common pattern is
-  to stage a `cargo build --bin …` binary into the Python source
-  tree before `maturin build` runs, so the wheel ships a `console_scripts`
-  entry pointing at the binary. piot doesn't have a pre-build hook
-  for this yet; the staging step stays in your `build` job, and the
-  wheel is what piot publishes.
 - **Two tag schemes.** piot tags each package independently as
   `{name}-v{version}` (e.g. `my-crate-v0.3.1`, `my-py-v0.3.1`).
   If your existing setup used a single shared `v0.3.1` tag across

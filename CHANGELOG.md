@@ -12,7 +12,17 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Added
 
-- _nothing yet_
+- **`[package.bundle_cli]` recipe for maturin pypi packages** (#217). Opt-in
+  declarative shape for libraries that ship a Rust CLI inside each wheel
+  (the `ruff` / `uv` / `pydantic-core` pattern). Declare `bin`, `stage_to`,
+  and optional `crate_path`; piot's scaffolded build job cross-compiles the
+  binary per target, stages it into the package source tree, and maturin
+  picks it up via `[tool.maturin].include`. Requires `build = "maturin"`
+  and non-empty `targets`. See
+  [Configuration → Bundled CLI](./docs/guide/configuration.md#bundled-cli)
+  and [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) for a
+  worked example. No behavior change for existing packages that don't
+  declare the block.
 
 ### Changed
 

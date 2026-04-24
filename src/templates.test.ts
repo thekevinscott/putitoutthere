@@ -79,6 +79,23 @@ describe('release.yml.immediate', () => {
     expect(y).not.toContain("node-version: '20'");
     expect(y).toMatch(/node-version: '24'/);
   });
+
+  it('build job emits a bundle_cli cargo-build + stage step guarded on matrix.bundle_cli.bin (#217)', () => {
+    const y = RELEASE_YML_IMMEDIATE;
+    // The step only runs for pypi wheel rows that declared bundle_cli.
+    expect(y).toMatch(/matrix\.bundle_cli\.bin\s*!=\s*''/);
+    expect(y).toMatch(/matrix\.target\s*!=\s*'sdist'/);
+    // It compiles the CLI for matrix.target.
+    expect(y).toMatch(/cargo build --release --bin/);
+    // It stages the binary into matrix.path/matrix.bundle_cli.stage_to.
+    expect(y).toContain('matrix.bundle_cli.stage_to');
+    // And runs BEFORE the maturin build step (so maturin picks the
+    // staged binary up as package data).
+    const stageIdx = y.indexOf('Build + stage bundled CLI');
+    const maturinIdx = y.indexOf('Build wheel (maturin)');
+    expect(stageIdx).toBeGreaterThan(0);
+    expect(maturinIdx).toBeGreaterThan(stageIdx);
+  });
 });
 
 describe('release.yml.scheduled', () => {
