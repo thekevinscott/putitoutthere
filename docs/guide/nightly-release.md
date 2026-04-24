@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }   # full history so last-tag lookup works
       - id: plan
-        uses: thekevinscott/put-it-out-there@v1
+        uses: thekevinscott/put-it-out-there@v0
         with:
           command: plan
 
@@ -52,7 +52,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/download-artifact@v4
         with: { path: artifacts, pattern: '*', merge-multiple: true }
-      - uses: thekevinscott/put-it-out-there@v1
+      - uses: thekevinscott/put-it-out-there@v0
         with:
           command: publish
 ```
