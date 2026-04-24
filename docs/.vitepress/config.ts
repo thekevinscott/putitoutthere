@@ -22,8 +22,37 @@ export default defineConfig({
           text: 'Library shapes',
           items: [
             { text: 'Overview', link: '/guide/shapes/' },
-            { text: 'Single-package Python library', link: '/guide/shapes/python-library' },
+          ],
+        },
+        {
+          text: 'Single-package',
+          items: [
+            { text: 'Python library', link: '/guide/shapes/python-library' },
+            { text: 'npm library', link: '/guide/shapes/npm-library' },
+            { text: 'Rust crate', link: '/guide/shapes/rust-crate' },
+          ],
+        },
+        {
+          text: 'Multi-package workspaces',
+          items: [
+            { text: 'Rust workspace', link: '/guide/shapes/rust-workspace' },
+            { text: 'npm workspace', link: '/guide/shapes/npm-workspace' },
+          ],
+        },
+        {
+          text: 'Rust core, multi-registry',
+          items: [
+            { text: 'Rust + PyO3 wheels', link: '/guide/shapes/rust-pyo3' },
+            { text: 'Rust + napi npm', link: '/guide/shapes/rust-napi' },
             { text: 'Polyglot Rust library', link: '/guide/shapes/polyglot-rust' },
+            { text: 'Python wheels (cibuildwheel)', link: '/guide/shapes/python-cibuildwheel' },
+          ],
+        },
+        {
+          text: 'Distribution patterns',
+          items: [
+            { text: 'Bundled-CLI npm family', link: '/guide/shapes/bundled-cli' },
+            { text: 'Dual-family npm (CLI + napi)', link: '/guide/shapes/dual-family-npm' },
           ],
         },
       ],
@@ -51,7 +80,16 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/guide/shapes/' },
             { text: 'Single-package Python library', link: '/guide/shapes/python-library' },
+            { text: 'Single-package npm library', link: '/guide/shapes/npm-library' },
+            { text: 'Single-package Rust crate', link: '/guide/shapes/rust-crate' },
+            { text: 'Multi-crate Rust workspace', link: '/guide/shapes/rust-workspace' },
+            { text: 'Multi-package npm workspace', link: '/guide/shapes/npm-workspace' },
+            { text: 'Rust + PyO3 wheels', link: '/guide/shapes/rust-pyo3' },
+            { text: 'Rust + napi npm', link: '/guide/shapes/rust-napi' },
             { text: 'Polyglot Rust library', link: '/guide/shapes/polyglot-rust' },
+            { text: 'Python wheels (cibuildwheel)', link: '/guide/shapes/python-cibuildwheel' },
+            { text: 'Bundled-CLI npm family', link: '/guide/shapes/bundled-cli' },
+            { text: 'Dual-family npm (CLI + napi)', link: '/guide/shapes/dual-family-npm' },
           ],
         },
       ],

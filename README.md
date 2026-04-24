@@ -92,6 +92,36 @@ A change to `packages/rust/` cascades: the crate ships, and the Python + npm
 wrappers ship on top (bumped to match). A change to only the TS shim ships
 just the npm package.
 
+## Library shapes
+
+End-to-end walkthroughs — config + `release.yml` + prerequisites + gotchas —
+for the common shapes. Pick the one that matches your repo:
+
+**Single-package**
+
+- [Python library](./docs/guide/shapes/python-library.md) — one `pyproject.toml` to PyPI
+- [npm library](./docs/guide/shapes/npm-library.md) — one `package.json` to npm
+- [Rust crate](./docs/guide/shapes/rust-crate.md) — one `Cargo.toml` to crates.io
+
+**Multi-package workspaces**
+
+- [Rust workspace](./docs/guide/shapes/rust-workspace.md) — multiple crates with `depends_on` cascade
+- [npm workspace](./docs/guide/shapes/npm-workspace.md) — multiple npm packages, shared dependency graph
+
+**Rust core, multi-registry**
+
+- [Rust + PyO3 wheels](./docs/guide/shapes/rust-pyo3.md) — crate + PyPI (no napi)
+- [Rust + napi npm](./docs/guide/shapes/rust-napi.md) — crate + npm family (no PyPI)
+- [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) — all three registries from one core
+- [Python wheels with C extensions](./docs/guide/shapes/python-cibuildwheel.md) — `cibuildwheel` for the `pillow`/`lxml`/`numpy` shape
+
+**Distribution patterns**
+
+- [Bundled-CLI npm family](./docs/guide/shapes/bundled-cli.md) — compiled CLI shipped as an npm per-platform family
+- [Dual-family npm (CLI + napi)](./docs/guide/shapes/dual-family-npm.md) — one library with both an addon and a binary
+
+Full index at [`docs/guide/shapes/`](./docs/guide/shapes/).
+
 ## Trusted publishers
 
 Preferred over long-lived tokens. One-time setup per registry:
