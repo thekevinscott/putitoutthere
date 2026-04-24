@@ -12,7 +12,7 @@
  */
 
 import { appendFileSync } from 'node:fs';
-import { redact } from './log.js';
+import { redact, type EnvSource } from './log.js';
 import type { Logger } from './types.js';
 
 /**
@@ -47,6 +47,16 @@ export interface FailureContext {
 
 export interface DumpOptions {
   log: Logger;
+  /**
+   * Additional env-like objects to scan for secrets when redacting the
+   * rendered markdown summary. `process.env` is always scanned. Pass
+   * `ctx.env` here when the caller's ctx might carry credentials that
+   * never touched `process.env` (handler-layered OIDC-minted tokens,
+   * test-supplied env maps, etc.) — otherwise the job-summary markdown
+   * could leak what the structured log line (which goes through the
+   * same logger's own envSources) would have redacted. See #195.
+   */
+  envSources?: readonly EnvSource[];
 }
 
 const SUMMARY_CAP = 4 * 1024 * 1024; // GHA job-summary ceiling: 1 MiB per step, 20 MiB total. Cap at 4 MiB to stay well under on a single failure.
@@ -57,7 +67,15 @@ export function dumpFailure(
   ctx: FailureContext,
   opts: DumpOptions,
 ): void {
-  const md = redact(renderMarkdown(err, ctx));
+  // Default redact() already scans process.env. When callers supply
+  // additional envSources (ctx.env from publish.ts, or a per-handler
+  // env layer), prepend process.env so both get scanned and the cache
+  // keys stay stable. #195.
+  const sources =
+    opts.envSources !== undefined && opts.envSources.length > 0
+      ? [process.env as EnvSource, ...opts.envSources]
+      : undefined;
+  const md = redact(renderMarkdown(err, ctx), sources);
   writeSummary(truncate(md));
 
   // A single structured record pairs the summary so downstream log
