@@ -59,6 +59,10 @@ jobs:
 
 The `matrix != ''` guard skips `build` and `publish` on quiet nights — plan emits an empty matrix when there's nothing to release.
 
+## Testing a change to this workflow
+
+A PR that only touches `.github/workflows/release.yml` won't cascade any package and won't cut a release — which is correct, but it means the PR that updates the release pipeline is the one PR that can't self-test on merge. See [testing your release workflow](./testing-your-release-workflow) for the three tiers of validation (`plan --json` locally, `workflow_dispatch` + `dry_run`, and a deliberate test commit).
+
 ## Combining with trailer-driven bumps
 
 Nightly cron and trailer-driven releases compose — they're the same pipeline, different triggers. Push a commit with `release: minor` and the next cron (or a manual `workflow_dispatch`) bumps minor across cascaded packages. Most commits won't carry a trailer, and those ship at `patch` on the next cron.

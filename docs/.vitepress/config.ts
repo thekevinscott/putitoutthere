@@ -36,6 +36,7 @@ export default defineConfig({
             { text: 'Authentication', link: '/guide/auth' },
             { text: 'Release trailer', link: '/guide/trailer' },
             { text: 'Nightly release', link: '/guide/nightly-release' },
+            { text: 'Testing your release workflow', link: '/guide/testing-your-release-workflow' },
             { text: 'Cascade', link: '/guide/cascade' },
             { text: 'npm platform packages', link: '/guide/npm-platform-packages' },
             { text: 'Runner prerequisites', link: '/guide/runner-prerequisites' },
