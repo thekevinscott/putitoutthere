@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * `putitoutthere` CLI entry. Thin wrapper around the SDK.
  *
@@ -579,17 +578,5 @@ function printAuthStatus(r: StatusResult): void {
   process.stderr.write(`${r.message}\n`);
 }
 
-// Entry point when invoked as `putitoutthere` or `node dist/cli.js`.
-/* v8 ignore start -- entry-point guard; only reachable when invoked as a binary */
-if (import.meta.url === `file://${process.argv[1]}`) {
-  run(process.argv).then(
-    (code) => {
-      process.exit(code);
-    },
-    (err: unknown) => {
-      process.stderr.write(`putitoutthere: fatal: ${err instanceof Error ? err.message : String(err)}\n`);
-      process.exit(4);
-    },
-  );
-}
-/* v8 ignore stop */
+// Binary entry point lives in `src/cli-bin.ts` to keep this module
+// guard-free — see #201.

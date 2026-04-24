@@ -61,8 +61,8 @@ Run `pnpm run test:e2e:cleanup` (to be added in a follow-up PR) to yank/deprecat
 
 1. Computes the canary version.
 2. Writes `putitoutthere.toml` + per-language manifests with that version.
-3. Runs `node dist/cli.js plan` and asserts the matrix has the expected rows.
-4. Optionally runs `node dist/cli.js publish`.
+3. Runs `node dist/cli-bin.js plan` and asserts the matrix has the expected rows.
+4. Optionally runs `node dist/cli-bin.js publish`.
 5. Asserts `{name}-v{version}` tags exist in the local repo afterward.
 
 Each `*.e2e.test.ts` file exercises one slice of the pipeline (plan-only, dry-run publish, real publish). Real-publish tests gate on `PIOT_E2E_PUBLISH=1`.

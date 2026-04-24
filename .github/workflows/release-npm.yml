@@ -58,7 +58,7 @@ jobs:
 
       - id: plan
         name: putitoutthere plan
-        run: node dist/cli.js plan --json > plan.json
+        run: node dist/cli-bin.js plan --json > plan.json
       - name: expose matrix
         env:
           GHO: ${{ github.output }}
@@ -109,7 +109,7 @@ jobs:
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          node dist/cli.js publish $DRY_RUN_FLAG
+          node dist/cli-bin.js publish $DRY_RUN_FLAG
 
       # Scaffolded workflows reference `thekevinscott/put-it-out-there@v<major>`
       # (community GitHub Actions convention, e.g. actions/checkout@v4). The

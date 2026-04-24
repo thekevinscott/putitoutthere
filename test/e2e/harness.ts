@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CLI = fileURLToPath(new URL('../../dist/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../dist/cli-bin.js', import.meta.url));
 
 export interface E2EOptions {
   /** Path relative to `test/fixtures/` to copy into a temp worktree. */

@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { makeE2ERepo, type E2ERepo } from './harness.js';
 
-const CLI = fileURLToPath(new URL('../../dist/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../dist/cli-bin.js', import.meta.url));
 
 let repo: E2ERepo;
 let spawnCwd: string;

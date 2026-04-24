@@ -17,7 +17,7 @@
     }
   },
   "bin": {
-    "putitoutthere": "./dist/cli.js"
+    "putitoutthere": "./dist/cli-bin.js"
   },
   "files": [
     "dist",
