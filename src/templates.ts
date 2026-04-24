@@ -136,6 +136,35 @@ const BUILD_JOB = `  build:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # #217: when [package.bundle_cli] is declared, compile the CLI
+      # for this target and stage it into the package source tree so
+      # maturin includes it in the wheel that's built next.
+      - name: Setup Rust (if pypi bundle_cli)
+        if: matrix.kind == 'pypi' && matrix.bundle_cli.bin != '' && matrix.target != 'sdist'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: \${{ matrix.target }}
+      - name: Build + stage bundled CLI
+        if: matrix.kind == 'pypi' && matrix.bundle_cli.bin != '' && matrix.target != 'sdist'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "\${{ matrix.bundle_cli.crate_path }}"
+          cargo build --release --bin "\${{ matrix.bundle_cli.bin }}" --target "\${{ matrix.target }}"
+          cd "\${{ github.workspace }}"
+          dest="\${{ matrix.path }}/\${{ matrix.bundle_cli.stage_to }}"
+          mkdir -p "$dest"
+          # Windows targets produce .exe; Unix don't. Copy whatever's
+          # there matching the bin name.
+          src_dir="\${{ matrix.bundle_cli.crate_path }}/target/\${{ matrix.target }}/release"
+          if [[ -f "$src_dir/\${{ matrix.bundle_cli.bin }}.exe" ]]; then
+            cp "$src_dir/\${{ matrix.bundle_cli.bin }}.exe" "$dest/"
+          elif [[ -f "$src_dir/\${{ matrix.bundle_cli.bin }}" ]]; then
+            cp "$src_dir/\${{ matrix.bundle_cli.bin }}" "$dest/"
+          else
+            echo "bundle_cli: built binary not found at $src_dir/\${{ matrix.bundle_cli.bin }}[.exe]" >&2
+            exit 1
+          fi
       - name: Build wheel (maturin)
         if: matrix.kind == 'pypi' && matrix.build == 'maturin'
         uses: PyO3/maturin-action@v1

@@ -864,3 +864,89 @@ build_workflow = "publish-npm.yml"
     }
   });
 });
+
+/* --------------------- #217: bundle_cli on pypi --------------------- */
+
+describe('parseConfig: bundle_cli (#217)', () => {
+  const WITH_BUNDLE = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-py"
+kind = "pypi"
+path = "py/my-py"
+paths = ["py/my-py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+
+[package.bundle_cli]
+bin = "my-cli"
+stage_to = "src/my_py/_binary"
+crate_path = "crates/my-rust"
+`;
+
+  it('accepts a complete [package.bundle_cli] block', () => {
+    const cfg = parseConfig(WITH_BUNDLE);
+    const pkg = cfg.packages[0] as { bundle_cli?: { bin: string; stage_to: string; crate_path: string } };
+    expect(pkg.bundle_cli).toEqual({
+      bin: 'my-cli',
+      stage_to: 'src/my_py/_binary',
+      crate_path: 'crates/my-rust',
+    });
+  });
+
+  it('defaults crate_path to "." when omitted', () => {
+    const cfg = parseConfig(
+      WITH_BUNDLE.replace('crate_path = "crates/my-rust"\n', ''),
+    );
+    const pkg = cfg.packages[0] as { bundle_cli?: { crate_path: string } };
+    expect(pkg.bundle_cli?.crate_path).toBe('.');
+  });
+
+  it('rejects bundle_cli without build = "maturin"', () => {
+    const bad = WITH_BUNDLE.replace('build = "maturin"', 'build = "setuptools"');
+    expect(() => parseConfig(bad)).toThrow(/bundle_cli is only valid when build = "maturin"/);
+  });
+
+  it('rejects bundle_cli without targets', () => {
+    const bad = WITH_BUNDLE.replace(
+      'targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]\n',
+      '',
+    );
+    expect(() => parseConfig(bad)).toThrow(/bundle_cli requires at least one entry in `targets`/);
+  });
+
+  it('rejects missing bin', () => {
+    const bad = WITH_BUNDLE.replace('bin = "my-cli"\n', '');
+    expect(() => parseConfig(bad)).toThrow();
+  });
+
+  it('rejects missing stage_to', () => {
+    const bad = WITH_BUNDLE.replace('stage_to = "src/my_py/_binary"\n', '');
+    expect(() => parseConfig(bad)).toThrow();
+  });
+
+  it('rejects unknown keys inside bundle_cli (typo guard)', () => {
+    const bad = WITH_BUNDLE + 'extra = "huh"\n';
+    expect(() => parseConfig(bad)).toThrow();
+  });
+
+  it('rejects bundle_cli on non-pypi packages', () => {
+    const bad = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-pkg"
+kind = "npm"
+path = "packages/my-pkg"
+paths = ["packages/my-pkg/**"]
+
+[package.bundle_cli]
+bin = "my-cli"
+stage_to = "bin"
+`;
+    expect(() => parseConfig(bad)).toThrow();
+  });
+});

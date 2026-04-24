@@ -95,6 +95,30 @@ const PACKAGE_BASE = {
     .optional(),
 };
 
+// #217: opt-in "bundle a Rust CLI into every wheel" recipe. Declared
+// under `[package.bundle_cli]` on pypi packages, only valid with
+// `build = "maturin"`. Piot's scaffolded build job compiles the bin
+// for each target and stages it into the package source tree so
+// maturin includes it in each wheel. The `ruff` / `uv` /
+// `pydantic-core` pattern, turned into a declarative shape. See
+// docs/guide/shapes/polyglot-rust.md.
+const BUNDLE_CLI = z
+  .object({
+    // `cargo build --bin <this>`. Required — the binary name is the
+    // one thing piot can't infer.
+    bin: z.string().min(1),
+    // Destination path relative to `pkg.path`. Piot emits
+    // `cp target/<triple>/release/<bin>[.exe] <pkg.path>/<stage_to>/`.
+    // Maturin's `[tool.maturin].include` must cover this path so the
+    // binary ends up inside each built wheel.
+    stage_to: z.string().min(1),
+    // Directory to run `cargo build` from. Defaults to repo root ("."),
+    // which works for most workspace Cargo.toml layouts. Override when
+    // the crate lives outside a workspace (e.g. `crates/my-tool`).
+    crate_path: z.string().min(1).default('.'),
+  })
+  .strict();
+
 // #159: `targets` entries can be a bare triple (uses the hardcoded
 // runner mapping in src/plan.ts) or an object form that overrides the
 // runner per target. `.strict()` on the object rejects unknown keys
@@ -132,12 +156,27 @@ const PYPI_PKG = z
     build: PYPI_BUILD.default('setuptools'),
     wheels_artifact: z.string().optional(),
     targets: z.array(TARGET_ENTRY).optional(),
+    bundle_cli: BUNDLE_CLI.optional(),
   })
   .strict()
   .refine(
     (p) => p.targets === undefined || p.build === 'maturin',
     // §12.2: targets only for maturin on pypi.
     { message: 'targets is only valid when build = "maturin" on pypi packages' },
+  )
+  .refine(
+    (p) => p.bundle_cli === undefined || p.build === 'maturin',
+    // #217: bundle_cli stages a per-target Rust binary for maturin to
+    // include in each wheel. The staging step assumes maturin on the
+    // build side; setuptools/hatch can't pick it up.
+    { message: 'bundle_cli is only valid when build = "maturin" on pypi packages' },
+  )
+  .refine(
+    (p) => p.bundle_cli === undefined || (p.targets !== undefined && p.targets.length > 0),
+    // #217: bundle_cli implies per-target wheel builds. A maturin pypi
+    // without `targets` would produce only an sdist, and the staged
+    // binary wouldn't end up in any wheel.
+    { message: 'bundle_cli requires at least one entry in `targets`' },
   );
 
 const NPM_BUILD = z.enum(['napi', 'bundled-cli']);

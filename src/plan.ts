@@ -37,6 +37,16 @@ export interface MatrixRow {
   // branch on this field — GitHub Actions doesn't support dynamic
   // `uses:`, so piot can't auto-wire the composition.
   build_workflow?: string;
+  // #217: per-target bundle-a-Rust-CLI-into-the-wheel recipe. Set on
+  // maturin per-target rows when `[package.bundle_cli]` is declared;
+  // NOT set on the sdist row (source-only, no cross-compile happens).
+  // Scaffolded build job branches on this to emit the cargo build +
+  // stage step before maturin.
+  bundle_cli?: {
+    bin: string;
+    stage_to: string;
+    crate_path: string;
+  };
 }
 
 export interface PlanOptions {
@@ -169,11 +179,12 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
     case 'pypi': {
       const build = (pkg as { build?: string }).build;
       const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
+      const bundleCli = (pkg as { bundle_cli?: MatrixRow['bundle_cli'] }).bundle_cli;
       const out: MatrixRow[] = [];
       if (build === 'maturin' && targets.length > 0) {
         for (const entry of targets) {
           const { triple, runner } = normalizeTarget(entry);
-          out.push({
+          const row: MatrixRow = {
             name: pkg.name,
             kind: 'pypi',
             version,
@@ -183,10 +194,14 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
             artifact_path: `${pkg.path}/dist/*.whl`,
             path: pkg.path,
             build,
-          });
+          };
+          // #217: per-target wheels carry bundle_cli; sdist does not.
+          if (bundleCli !== undefined) row.bundle_cli = bundleCli;
+          out.push(row);
         }
       }
-      // Always emit an sdist row for pypi.
+      // Always emit an sdist row for pypi. Source-only — no staged
+      // binary, no bundle_cli field.
       out.push({
         name: pkg.name,
         kind: 'pypi',

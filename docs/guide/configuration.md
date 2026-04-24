@@ -40,10 +40,66 @@ consumer's machine.
 
 ### `kind = "pypi"`
 
-| Field     | Type                   | Notes                                              |
-|-----------|------------------------|----------------------------------------------------|
-| `build`   | enum                   | `maturin` \| `setuptools` \| `hatch`. Default `setuptools`. |
-| `targets` | (string \| object)[]   | Required when `build = "maturin"`. See [Target entries](#target-entries). |
+| Field        | Type                   | Notes                                              |
+|--------------|------------------------|----------------------------------------------------|
+| `build`      | enum                   | `maturin` \| `setuptools` \| `hatch`. Default `setuptools`. |
+| `targets`    | (string \| object)[]   | Required when `build = "maturin"`. See [Target entries](#target-entries). |
+| `bundle_cli` | table                  | Opt-in recipe to cross-compile a Rust CLI per target and stage the binary into the package source tree so maturin includes it in each wheel. Only valid with `build = "maturin"` + non-empty `targets`. See [Bundled CLI](#bundled-cli). |
+
+#### Bundled CLI
+
+The `ruff` / `uv` / `pydantic-core` shape: `pip install my-py` on
+any platform gets a working CLI on `PATH` without requiring a Rust
+toolchain on the user's machine.
+
+```toml
+[[package]]
+name = "my-py"
+kind = "pypi"
+path = "py/my-py"
+paths = ["py/my-py/**", "crates/my-rust/**"]
+build = "maturin"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+
+[package.bundle_cli]
+bin        = "my-cli"            # `cargo build --bin <this>` per target
+stage_to   = "src/my_py/_binary" # path inside pkg.path where the binary lands
+crate_path = "crates/my-rust"    # cwd for `cargo build`; defaults to "." (repo root)
+```
+
+| Sub-field    | Type   | Required | Notes |
+|--------------|--------|----------|-------|
+| `bin`        | string | yes      | Binary name passed to `cargo build --bin`. |
+| `stage_to`   | string | yes      | Destination path **relative to `pkg.path`**. `[tool.maturin].include` must cover it so the binary ends up inside each wheel. |
+| `crate_path` | string | no       | Directory to run `cargo build` from. Defaults to `"."` (works for workspace `Cargo.toml` at the repo root). Override when the crate lives outside a workspace. |
+
+The scaffolded build job branches on `matrix.bundle_cli.bin`: when
+set, it installs the Rust toolchain with the target triple, runs
+`cargo build --release --bin <bin> --target <triple>` from
+`crate_path`, and copies the binary (including the Windows `.exe`
+suffix) into `<pkg.path>/<stage_to>/` before maturin builds the
+wheel.
+
+`pyproject.toml` needs to reference the staged binary so it ends
+up on `PATH`. The common pattern:
+
+```toml
+# pyproject.toml
+
+[project.scripts]
+my-cli = "my_py._binary:entrypoint"    # stub in src/my_py/_binary/__init__.py
+
+[tool.maturin]
+include = ["src/my_py/_binary/**"]     # ship the binary as package data
+```
+
+Where `src/my_py/_binary/__init__.py` is a few lines that `os.execv`
+into the staged binary. See [Polyglot Rust library](/guide/shapes/polyglot-rust#shipping-a-rust-cli-inside-the-pypi-wheel)
+for a worked example with the full `__init__.py`.
 
 ### `kind = "npm"`
 
