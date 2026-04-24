@@ -30,36 +30,40 @@ jobs:
           # Opt-out: `skip-changelog:` trailer (any value) on any commit
           # in the PR.
           if git log --format='%B' "${BASE_SHA}..${HEAD_SHA}" \
-               | grep -iE '^skip-changelog:[[:space:]]*.+$' >/dev/null; then
+               | grep -iqE '^skip-changelog:[[:space:]]*.+$'; then
             echo "Found 'skip-changelog:' trailer; bypassing check."
             exit 0
           fi
 
-          # Public-surface globset. Broad by design: we are not yet strict
-          # about semver, so any observable change to consumer surface must
-          # be documented. Keep in sync with AGENTS.md.
-          surface_changed=$(git diff --name-only --glob-pathspecs \
+          # Public-surface globset. Broad by design: we are not yet
+          # strict about semver, so any observable change to consumer
+          # surface must be documented. Keep in sync with AGENTS.md.
+          # --glob-pathspecs enables ** recursion and is a top-level
+          # git option, so it must come before `diff`.
+          surface=$(git --glob-pathspecs diff --name-only \
             "${BASE_SHA}" "${HEAD_SHA}" -- \
             'action.yml' \
             'src/**/*.ts' ':!src/**/*.test.ts' \
             'docs/api/**' \
             'docs/guide/**' ':!docs/guide/migrations.md')
 
-          if [ -z "${surface_changed}" ]; then
+          if [ -z "${surface}" ]; then
             echo "No public-surface files changed; skipping."
             exit 0
           fi
 
           echo "Public-surface files changed:"
-          echo "${surface_changed}" | sed 's/^/  - /'
+          printf '%s\n' "${surface}" | sed 's/^/  - /'
           echo
 
-          diff_all=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          all=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
           missing=""
-          echo "${diff_all}" | grep -qx 'CHANGELOG.md' \
-            || missing="${missing} CHANGELOG.md"
-          echo "${diff_all}" | grep -qx 'MIGRATIONS.md' \
-            || missing="${missing} MIGRATIONS.md"
+          if ! printf '%s\n' "${all}" | grep -qxF 'CHANGELOG.md'; then
+            missing="${missing} CHANGELOG.md"
+          fi
+          if ! printf '%s\n' "${all}" | grep -qxF 'MIGRATIONS.md'; then
+            missing="${missing} MIGRATIONS.md"
+          fi
 
           if [ -n "${missing}" ]; then
             echo "::error::This PR changes public-surface files but did not update:${missing}"
