@@ -1,0 +1,75 @@
+name: Changelog check
+
+# Enforces AGENTS.md's "Changelog and migration policy": every PR that
+# touches public-surface files must update both CHANGELOG.md and
+# MIGRATIONS.md. Opt out per-PR by adding a commit with a
+# `skip-changelog:` trailer (any value).
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Changelog check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Enforce changelog + migration entry
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Opt-out: `skip-changelog:` trailer (any value) on any commit
+          # in the PR.
+          if git log --format='%B' "${BASE_SHA}..${HEAD_SHA}" \
+               | grep -iqE '^skip-changelog:[[:space:]]*.+$'; then
+            echo "Found 'skip-changelog:' trailer; bypassing check."
+            exit 0
+          fi
+
+          # Public-surface globset. Broad by design: we are not yet
+          # strict about semver, so any observable change to consumer
+          # surface must be documented. Keep in sync with AGENTS.md.
+          # --glob-pathspecs enables ** recursion and is a top-level
+          # git option, so it must come before `diff`.
+          surface=$(git --glob-pathspecs diff --name-only \
+            "${BASE_SHA}" "${HEAD_SHA}" -- \
+            'action.yml' \
+            'src/**/*.ts' ':!src/**/*.test.ts' \
+            'docs/api/**' \
+            'docs/guide/**' ':!docs/guide/migrations.md')
+
+          if [ -z "${surface}" ]; then
+            echo "No public-surface files changed; skipping."
+            exit 0
+          fi
+
+          echo "Public-surface files changed:"
+          printf '%s\n' "${surface}" | sed 's/^/  - /'
+          echo
+
+          all=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          missing=""
+          if ! printf '%s\n' "${all}" | grep -qxF 'CHANGELOG.md'; then
+            missing="${missing} CHANGELOG.md"
+          fi
+          if ! printf '%s\n' "${all}" | grep -qxF 'MIGRATIONS.md'; then
+            missing="${missing} MIGRATIONS.md"
+          fi
+
+          if [ -n "${missing}" ]; then
+            echo "::error::This PR changes public-surface files but did not update:${missing}"
+            echo "See AGENTS.md > 'Changelog and migration policy'."
+            echo "If the change has no consumer impact, add a commit with a 'skip-changelog:' trailer."
+            exit 1
+          fi
+
+          echo "CHANGELOG.md and MIGRATIONS.md both updated. OK."

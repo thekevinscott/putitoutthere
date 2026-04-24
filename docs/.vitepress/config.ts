@@ -42,6 +42,7 @@ export default defineConfig({
             { text: 'Custom build workflows', link: '/guide/custom-build-workflows' },
             { text: 'Runner prerequisites', link: '/guide/runner-prerequisites' },
             { text: 'Dynamic versions', link: '/guide/dynamic-versions' },
+            { text: 'Migrations', link: '/guide/migrations' },
             { text: 'Known gaps', link: '/guide/gaps' },
           ],
         },
