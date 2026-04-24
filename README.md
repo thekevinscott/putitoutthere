@@ -55,7 +55,10 @@ Valid bumps: `patch`, `minor`, `major`, `skip`. On push to `main`, the
 changed paths, then `putitoutthere publish` per matching package. Tags are
 `{name}-v{version}`.
 
-No trailer → no release, even if code changed. That's the point.
+The trailer is optional. By default, any package whose `paths` matched
+changed files cascades at `patch`. Use `release: minor` / `release: major`
+to override the bump, or `release: skip` to suppress the release for that
+commit.
 
 ## Worked example: polyglot
 
