@@ -106,23 +106,68 @@ describe('createLogger: redaction (§22.5)', () => {
     }
   });
 
-  it('also redacts values from *PASS* and *PAT* name patterns', () => {
-    process.env.MY_PASS_THING = 'passvalue-123';
-    process.env.GH_PAT_TOKEN = 'patvalue-456';
+  it('redacts values from word-boundary *PAT* and trailing *_KEY names', () => {
+    process.env.GH_PAT = 'patvalue-123';
+    process.env.API_KEY = 'apikey-value-456';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('credentials: passvalue-123 patvalue-456');
+    log.info('credentials: patvalue-123 apikey-value-456');
     const line = dest.text;
-    expect(line).not.toContain('passvalue-123');
-    expect(line).not.toContain('patvalue-456');
+    expect(line).not.toContain('patvalue-123');
+    expect(line).not.toContain('apikey-value-456');
   });
 
   it('does not redact values from keys outside the secret patterns', () => {
-    process.env.PROJECT_NAME = 'dirsql';
+    process.env.PROJECT_NAME = 'example-lib';
     const dest = new BufStream();
     const log = createLogger({ stream: dest, pretty: false });
-    log.info('running for dirsql');
-    expect(dest.text).toContain('dirsql');
+    log.info('running for example-lib');
+    expect(dest.text).toContain('example-lib');
+  });
+
+  it('does not redact values from name false-positives with word-boundary regex (#196)', () => {
+    // Substring-only matches that were caught by the previous loose regex
+    // and would mangle unrelated log text. Each name contains a credential
+    // substring but is not credential-shaped.
+    process.env.KEYCLOAK_URL = 'https://auth.example.com/realms/main';
+    process.env.KEYCLOAK_REALM = 'my-realm-identifier';
+    process.env.TOKENIZER_MODEL = 'bert-base-uncased';
+    process.env.TOKENS_PER_SECOND = 'rate-limit-100';
+    process.env.PUBLIC_KEY_PATH = '/etc/ssl/certs/public.pem';
+    process.env.PUBLIC_KEY_FILE = '/opt/app/pubkey.pub';
+    process.env.PASSTHROUGH = 'enabled-by-default';
+    process.env.PASSPORT_URL = 'https://passport.example.com/oauth';
+    process.env.PATHWAY_URL = 'https://pathway.example.com/api';
+    process.env.PATS_COUNT = 'sixteen-characters'; // prefix, not word-boundary PAT
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info(
+      [
+        'KEYCLOAK_URL=https://auth.example.com/realms/main',
+        'KEYCLOAK_REALM=my-realm-identifier',
+        'TOKENIZER_MODEL=bert-base-uncased',
+        'TOKENS_PER_SECOND=rate-limit-100',
+        'PUBLIC_KEY_PATH=/etc/ssl/certs/public.pem',
+        'PUBLIC_KEY_FILE=/opt/app/pubkey.pub',
+        'PASSTHROUGH=enabled-by-default',
+        'PASSPORT_URL=https://passport.example.com/oauth',
+        'PATHWAY_URL=https://pathway.example.com/api',
+        'PATS_COUNT=sixteen-characters',
+      ].join(' '),
+    );
+    const line = dest.text;
+    // None of the values should have been redacted.
+    expect(line).toContain('https://auth.example.com/realms/main');
+    expect(line).toContain('my-realm-identifier');
+    expect(line).toContain('bert-base-uncased');
+    expect(line).toContain('rate-limit-100');
+    expect(line).toContain('/etc/ssl/certs/public.pem');
+    expect(line).toContain('/opt/app/pubkey.pub');
+    expect(line).toContain('enabled-by-default');
+    expect(line).toContain('https://passport.example.com/oauth');
+    expect(line).toContain('https://pathway.example.com/api');
+    expect(line).toContain('sixteen-characters');
+    expect(line).not.toMatch(/\[REDACTED:/);
   });
 
   it('redacts secrets inside structured fields, not just msg', () => {

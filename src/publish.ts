@@ -215,7 +215,10 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
           stderr: error.message,
           exitCode: -1,
         },
-        { log },
+        // Thread ctx.env through so handler-injected credentials (OIDC-
+        // minted twine/npm/crates tokens that live only on ctx.env, not
+        // process.env) are redacted in the rendered job-summary. #195.
+        { log, envSources: [ctx.env as Record<string, string | undefined>] },
       );
       throw error;
     }

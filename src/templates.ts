@@ -38,7 +38,7 @@ version = 1
 # name = "my-crate"
 # kind = "crates"
 # path = "crates/my-crate"                 # dir containing Cargo.toml
-# paths = ["crates/my-crate/**", "Cargo.toml", "Cargo.lock"]
+# paths = ["crates/my-crate/**", "**/Cargo.toml", "**/Cargo.lock"]
 # first_version = "0.1.0"
 # # tag_format defaults to "{name}-v{version}". Single-package repos
 # # often want "v{version}" to keep the existing v0.1.0-style timeline.

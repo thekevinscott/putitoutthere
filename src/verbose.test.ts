@@ -146,6 +146,44 @@ describe('dumpFailure: redaction', () => {
     const md = readFileSync(summaryPath, 'utf8');
     expect(md).not.toContain('super-secret-xyz');
   });
+
+  it('redacts secrets that live ONLY on a passed envSource (ctx.env), not process.env (#195)', () => {
+    // The handler-injected credential case: an OIDC-minted twine or npm
+    // token that's put on ctx.env but never touches process.env. Without
+    // the envSources passthrough, the job-summary markdown leaks the
+    // value even though the structured log record (which uses the logger
+    // built with the same env) does not.
+    const ctxEnv: Record<string, string> = {
+      CARGO_REGISTRY_TOKEN: 'ctx-only-abcdef1234',
+    };
+    // Sanity: process.env does NOT have this token.
+    expect(process.env.CARGO_REGISTRY_TOKEN).toBeUndefined();
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(
+      new Error('handler failed'),
+      baseCtx({ stderr: 'used token ctx-only-abcdef1234 from ctx.env' }),
+      { log, envSources: [ctxEnv] },
+    );
+    const md = readFileSync(summaryPath, 'utf8');
+    expect(md).not.toContain('ctx-only-abcdef1234');
+    expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
+  });
+
+  it('still redacts process.env secrets when an envSource is also supplied', () => {
+    process.env.NPM_TOKEN = 'proc-tok-xxxxxxxx';
+    const ctxEnv: Record<string, string> = { PYPI_API_TOKEN: 'ctx-pypi-yyyyyyyy' };
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(
+      new Error('both'),
+      baseCtx({ stderr: 'proc-tok-xxxxxxxx and ctx-pypi-yyyyyyyy both appear' }),
+      { log, envSources: [ctxEnv] },
+    );
+    const md = readFileSync(summaryPath, 'utf8');
+    expect(md).not.toContain('proc-tok-xxxxxxxx');
+    expect(md).not.toContain('ctx-pypi-yyyyyyyy');
+  });
 });
 
 describe('dumpFailure: size cap (4MB)', () => {

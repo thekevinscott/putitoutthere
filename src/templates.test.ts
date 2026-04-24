@@ -187,6 +187,18 @@ describe('TOML_SKELETON polyglot examples (#132)', () => {
     expect(TOML_SKELETON).toMatch(/# path = "crates\/[^"]+"/);
   });
 
+  it('crates example uses `**/Cargo.{toml,lock}` so nested workspace manifests cascade (#194)', () => {
+    // Cascade paths are root-anchored (minimatch matchBase: false). A bare
+    // "Cargo.toml" in the skeleton silently misses nested
+    // packages/*/Cargo.toml in a workspace layout; the `**/` prefix is the
+    // pattern docs/guide/cascade.md already recommends.
+    expect(TOML_SKELETON).toContain('"**/Cargo.toml"');
+    expect(TOML_SKELETON).toContain('"**/Cargo.lock"');
+    // Make sure we didn't leave an unanchored `Cargo.toml` entry behind.
+    expect(TOML_SKELETON).not.toMatch(/,\s*"Cargo\.toml"/);
+    expect(TOML_SKELETON).not.toMatch(/,\s*"Cargo\.lock"/);
+  });
+
   it('includes a pypi example with a pyproject.toml path hint', () => {
     expect(TOML_SKELETON).toContain('kind = "pypi"');
     expect(TOML_SKELETON).toMatch(/# path = "py\/[^"]+"/);

@@ -112,7 +112,33 @@ function formatScalar(v: unknown): string {
 
 /* ----------------------------- redaction ----------------------------- */
 
-const SECRET_KEY = /TOKEN|SECRET|PASSWORD|KEY|PASS|PAT/i;
+/**
+ * Credential-shaped env-var name matcher. Requires word boundaries
+ * (`_` or start/end of string) so non-credential names that happen to
+ * contain a credential substring aren't caught as false positives.
+ *
+ * Matches (spot-check):
+ *   GITHUB_TOKEN, PYPI_API_TOKEN, NODE_AUTH_TOKEN, CARGO_REGISTRY_TOKEN,
+ *   SECRET, JWT_SECRET, CLIENT_SECRET, NPM_PASSWORD, MY_PAT, GH_PAT,
+ *   SSH_KEY, API_KEY, SECRET_KEY, PRIVATE_KEY.
+ *
+ * Explicitly rejects (regression fixtures for #196):
+ *   KEYCLOAK_URL, KEYCLOAK_REALM, TOKENIZER_MODEL, TOKENS_PER_SECOND,
+ *   PUBLIC_KEY_PATH, PUBLIC_KEY_FILE, PASSTHROUGH, PASSPORT_URL,
+ *   PATHWAY_URL, PATS_COUNT (prefix `PATS`, not a word-boundary `PAT`).
+ *
+ * Components:
+ *   - `(^|_)(TOKEN|SECRET|PASSWORD|PAT)(_|$)` — the four unambiguous
+ *     credential shapes, anchored by word boundaries on both sides.
+ *   - `(^|_)[A-Z0-9]*KEY$` — trailing `KEY` segment. Allows `API_KEY`,
+ *     `SECRET_KEY`, `SSH_KEY`, `APP_KEY_2048`-style. Rejects
+ *     `KEY_PATH`, `KEYCLOAK_URL`, `PUBLIC_KEY_ALGORITHM`.
+ *
+ * `PASS` was previously in the substring set; dropped here because it
+ * collides with every `PASSTHROUGH` / `BYPASS*` / `PASSPORT*` name.
+ * Real credentials use `PASSWORD` or `PAT`; those remain matched.
+ */
+const SECRET_KEY = /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PAT)(?:_|$)|(?:^|_)[A-Z0-9]*KEY$/i;
 const MIN_OPAQUE_LEN = 8;
 
 /**
