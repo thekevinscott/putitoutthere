@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { init } from './init.js';
-import { CHECK_YML, RELEASE_YML_IMMEDIATE, RELEASE_YML_SCHEDULED, releaseYml, TOML_SKELETON } from './templates.js';
+import { CHECK_YML, RELEASE_YML_IMMEDIATE, RELEASE_YML_SCHEDULED, releaseYml, TOML_SKELETON, tomlSkeleton } from './templates.js';
 
 describe('release.yml.immediate', () => {
   it('has the three jobs plan / build / publish in order', () => {
@@ -155,6 +155,29 @@ describe('init round-trip', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('tomlSkeleton(seeds) (#204)', () => {
+  it('returns the bare skeleton when seeds is null or tag_format is omitted', () => {
+    expect(tomlSkeleton()).toBe(TOML_SKELETON);
+    expect(tomlSkeleton(null)).toBe(TOML_SKELETON);
+    expect(tomlSkeleton({})).toBe(TOML_SKELETON);
+  });
+
+  it('prepends a banner that explains why + includes the suggested tag_format', () => {
+    const out = tomlSkeleton({
+      tag_format: 'v{version}',
+      tag_format_reason: 'existing v*-style tag history (v0.1.0, v0.2.0)',
+    });
+    expect(out).toContain('piot init detected existing v*-style tag history (v0.1.0, v0.2.0)');
+    expect(out).toContain('tag_format = "v{version}"');
+    expect(out.endsWith(TOML_SKELETON)).toBe(true);
+  });
+
+  it('falls back to a generic reason phrase when tag_format_reason is omitted', () => {
+    const out = tomlSkeleton({ tag_format: 'v{version}' });
+    expect(out).toContain('piot init detected single-package repo');
   });
 });
 

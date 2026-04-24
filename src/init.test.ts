@@ -186,6 +186,25 @@ describe('init', () => {
     expect(toml).toMatch(/v0\.[12]\.0/);
   });
 
+  it('truncates the sampled tag list with `, …` past three entries', () => {
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: repo });
+    writeFileSync(join(repo, 'x'), 'x');
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
+    for (const v of ['v0.1.0', 'v0.2.0', 'v0.3.0', 'v0.4.0', 'v0.5.0']) {
+      execFileSync('git', ['tag', v], { cwd: repo });
+    }
+
+    const r = init({ cwd: repo });
+
+    expect(r.notes[0]).toContain(', …');
+    const toml = readFileSync(join(repo, 'putitoutthere.toml'), 'utf8');
+    expect(toml).toContain(', …');
+  });
+
   it('does NOT suggest v{version} when <name>-v* tags are present (polyglot shape)', () => {
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: repo });

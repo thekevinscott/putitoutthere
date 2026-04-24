@@ -209,6 +209,9 @@ function detectTagFormatSuggestion(cwd: string): TagFormatSuggestion | null {
 
   // If any `<name>-v*` tag exists, the repo is polyglot-shaped; don't
   // hijack the default.
+  /* v8 ignore start -- defensive: the first git call succeeded above,
+   * so this one with a different glob is vanishingly unlikely to fail.
+   * Kept as belt-and-braces for unusual filesystems. */
   try {
     const out = execFileSync('git', ['tag', '-l', '*-v*.*.*'], {
       cwd,
@@ -220,9 +223,9 @@ function detectTagFormatSuggestion(cwd: string): TagFormatSuggestion | null {
       .filter((l) => /^.+-v\d+\.\d+\.\d+$/.test(l));
     if (out.length > 0) return null;
   } catch {
-    /* fall through — `git` just succeeded above, this path shouldn't
-     * diverge, but belt-and-braces for unusual filesystems. */
+    /* fall through */
   }
+  /* v8 ignore stop */
 
   return { tag_format: 'v{version}', detectedTags: vTags };
 }

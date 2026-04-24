@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { pypi } from './pypi.js';
+import { pypi, scmEnvSuffix } from './pypi.js';
 import type { Ctx } from '../types.js';
 
 vi.mock('node:child_process', async (orig) => {
@@ -431,6 +431,34 @@ describe('pypi.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('wraps ENOENT (twine not on PATH) with an actionable pointer at runner prereqs (#205)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    // execFileSync throws a NodeJS.ErrnoException with code === 'ENOENT'
+    // when the spawn target doesn't exist on PATH — shape we reproduce here.
+    execMock.mockImplementation(() => {
+      throw Object.assign(new Error('spawn twine ENOENT'), { code: 'ENOENT' });
+    });
+    process.env.PYPI_API_TOKEN = 'tok';
+    try {
+      await pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      );
+      throw new Error('expected ENOENT to surface');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toMatch(/twine not found on PATH/);
+      expect(msg).toMatch(/pip install twine/);
+      expect(msg).toMatch(/runner-prerequisites/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('mints a short-lived token via OIDC when PYPI_API_TOKEN is unset', async () => {
     stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
@@ -567,5 +595,15 @@ describe('pypi.publish', () => {
       ),
     ).rejects.toThrow(/PYPI_API_TOKEN[\s\S]+id-token: write/);
     fetchSpy.mockRestore();
+  });
+});
+
+describe('scmEnvSuffix (#207)', () => {
+  it('uppercases + collapses dashes, dots, underscores to `_` per PEP 503', () => {
+    expect(scmEnvSuffix('my-lib')).toBe('MY_LIB');
+    expect(scmEnvSuffix('my.lib')).toBe('MY_LIB');
+    expect(scmEnvSuffix('my_lib')).toBe('MY_LIB');
+    expect(scmEnvSuffix('my--lib')).toBe('MY_LIB');
+    expect(scmEnvSuffix('coaxer')).toBe('COAXER');
   });
 });
