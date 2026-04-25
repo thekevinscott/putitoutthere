@@ -113,8 +113,5 @@ are prefixed `**BREAKING**` and link to the matching section in
     field to the central `kind = "pypi"` table.
   - `docs/guide/trailer.md` documents the package-name character
     grammar, leading-whitespace tolerance, and last-wins semantics.
-  - `README.md`'s scaffolding description now lists every file
-    `putitoutthere init` writes (workflows, `putitoutthere/AGENTS.md`,
-    `CLAUDE.md` append).
-  - VitePress sidebar exposes `docs/AGENTS.md` (docs-authoring rules
-    for LLM agents) under a Contributing group.
+  - `README.md`'s scaffolding description now correctly mentions both
+    workflow files written by `putitoutthere init`.
