@@ -56,13 +56,18 @@ Releases — no additional permission changes required.
 
 **Behavior changes without code changes.** Repos that adopt the new
 template (or apply the diff above) start seeing GitHub Release entries
-appear under `https://github.com/<owner>/<repo>/releases` after each
-publish. The Release body is the output of `git log
-<prev-tag>..<this-tag> --format='- %s' --no-merges`. Tags suffixed with
-`-rc`, `-beta`, or `-alpha` are flagged `prerelease: true`. Release
-creation is best-effort: a 4xx/5xx from the GitHub API surfaces as a
-`publish: GitHub Release creation failed` warning but does not fail the
-publish run — the registry publish and tag push remain authoritative.
+appear under the repo's `/releases` page after each publish. The
+Release body is the output of:
+
+```sh
+git log <prev-tag>..<this-tag> --format='- %s' --no-merges
+```
+
+Tags suffixed with `-rc`, `-beta`, or `-alpha` are flagged
+`prerelease: true`. Release creation is best-effort: a 4xx/5xx from
+the GitHub API surfaces as a `publish: GitHub Release creation
+failed` warning but does not fail the publish run — the registry
+publish and tag push remain authoritative.
 
 **Verification.** After the next release run on a repo that adopted the
 fix:
@@ -78,6 +83,91 @@ gh release view <name>-v<x.y.z> --repo <owner>/<repo>
 If you previously saw the warning `publish: GitHub Release creation
 failed` in your publish logs, the warning should be gone and the
 Releases page should populate.
+
+### Package names with `/` no longer need an encode/decode workaround
+
+**Summary.** Polyglot-monorepo repos that group packages by language
+(e.g. `name = "py/foo"`, `"js/bar"`) used to fail at the build job
+with:
+
+```
+The artifact name is not valid: py/foo-sdist.
+Contains the following character: Forward slash /
+```
+
+…because `actions/upload-artifact@v4` forbids `/` in artifact names
+and the planner emitted `artifact_name` verbatim from `pkg.name`
+([#230](https://github.com/thekevinscott/putitoutthere/issues/230)).
+The planner now encodes each `/` to `__`
+(`py/foo` → `py__foo-sdist`), so the build job's
+upload-artifact step works without modification — pass the matrix
+`artifact_name` field through verbatim and the encoding happens
+upstream.
+
+**Required changes.**
+
+- **None for repos with slash-free `pkg.name`** — `artifact_name`
+  is byte-identical to the previous version.
+- **Repos that ran the [`cachetta#26`-style](https://github.com/thekevinscott/cachetta/pull/26)
+  encode/decode workaround should remove it.** The planner now
+  does the encoding natively; leaving the workaround in place
+  produces double-encoded names like `py____foo-sdist`, which the
+  publish-side reader will treat as a missing artifact.
+
+  ```diff
+   - uses: actions/upload-artifact@v4
+     with:
+  -    name: ${{ format('{0}', matrix.artifact_name) }}  # any sed/format encode
+  -    path: ${{ matrix.artifact_path }}
+  +    name: ${{ matrix.artifact_name }}                 # use the field as-is
+  +    path: ${{ matrix.artifact_path }}
+  ```
+
+  ```diff
+   - uses: actions/download-artifact@v4
+     with:
+       path: artifacts
+  - - name: Decode artifact dir names
+  -   run: |
+  -     # rename artifacts/py__foo-sdist back to artifacts/py/foo-sdist
+  -     ...
+  ```
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+- `pkg.name` containing `__` (the new encoding sequence) is now
+  rejected at config load with: `package name must not contain "__"
+  (reserved: piot encodes "/" to "__" for artifact-name slots; pick
+  a different separator)`. If your config uses `__` in a package
+  name today, rename to use `-` or `_` and update any tags / consumer
+  references; piot can't safely sanitize it without ambiguity.
+- `pkg.name` containing `\`, `:`, `<`, `>`, `|`, `*`, `?`, or `"`
+  is now rejected at config load. None of these are valid in npm,
+  PyPI, or crates.io names, so any config that previously contained
+  them was already broken at publish time — the change just moves
+  the failure earlier with a clearer message.
+
+**Verification.**
+
+```sh
+putitoutthere plan --json | jq '.[].artifact_name'
+```
+
+Expect every emitted `artifact_name` to contain only ASCII letters,
+digits, `-`, `_`, and `.` — no `/` and no other forbidden chars.
+For a repo with `name = "py/cachetta"`:
+
+```
+"py__cachetta-sdist"
+"py__cachetta-wheel-x86_64-unknown-linux-gnu"
+```
+
+After the next release, the build job's `actions/upload-artifact@v4`
+step uploads under `py__cachetta-sdist/` (a single flat directory
+under `artifacts/`), and piot's publish-side reader consumes the
+same path.
 
 ### Python shape examples now use `uv build`
 

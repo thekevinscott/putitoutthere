@@ -12,7 +12,7 @@
 import { join } from 'node:path';
 
 import { computeCascade } from './cascade.js';
-import { loadConfig, type Package } from './config.js';
+import { loadConfig, sanitizeArtifactName, type Package } from './config.js';
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
 import { assertTripleSupported } from './handlers/npm-platform.js';
 import { parseTagVersion } from './tag-template.js';
@@ -161,6 +161,15 @@ function nextVersion(
 }
 
 function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
+  // #230: actions/upload-artifact@v4 forbids `/` in artifact names, so
+  // any package name containing a slash (the polyglot-monorepo
+  // grouping shape, e.g. `py/foo`, `js/bar`) needs to be encoded
+  // before being used as an artifact-name component. Encoding here +
+  // a config-load rule rejecting the encoding sequence in `pkg.name`
+  // makes the round-trip unambiguous. Read sites under publish/
+  // doctor/preflight/completeness consume `artifact_name` verbatim
+  // and need no changes.
+  const safe = sanitizeArtifactName(pkg.name);
   switch (pkg.kind) {
     case 'crates':
       return [
@@ -170,7 +179,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           version,
           target: 'noarch',
           runs_on: 'ubuntu-latest',
-          artifact_name: `${pkg.name}-crate`,
+          artifact_name: `${safe}-crate`,
           artifact_path: `${pkg.path}/target/package/*.crate`,
           path: pkg.path,
         },
@@ -190,7 +199,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
             version,
             target: triple,
             runs_on: runner ?? defaultRunsOn(triple),
-            artifact_name: `${pkg.name}-wheel-${triple}`,
+            artifact_name: `${safe}-wheel-${triple}`,
             artifact_path: `${pkg.path}/dist/*.whl`,
             path: pkg.path,
             build,
@@ -208,7 +217,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
         version,
         target: 'sdist',
         runs_on: 'ubuntu-latest',
-        artifact_name: `${pkg.name}-sdist`,
+        artifact_name: `${safe}-sdist`,
         artifact_path: `${pkg.path}/dist/*.tar.gz`,
         path: pkg.path,
         ...(build !== undefined ? { build } : {}),
@@ -235,7 +244,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
             version,
             target: triple,
             runs_on: runner ?? defaultRunsOn(triple),
-            artifact_name: `${pkg.name}-${triple}`,
+            artifact_name: `${safe}-${triple}`,
             artifact_path: `${pkg.path}/build/${triple}`,
             path: pkg.path,
             build,
@@ -248,7 +257,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           version,
           target: 'main',
           runs_on: 'ubuntu-latest',
-          artifact_name: `${pkg.name}-main`,
+          artifact_name: `${safe}-main`,
           artifact_path: pkg.path,
           path: pkg.path,
           build,
@@ -263,7 +272,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           version,
           target: 'noarch',
           runs_on: 'ubuntu-latest',
-          artifact_name: `${pkg.name}-pkg`,
+          artifact_name: `${safe}-pkg`,
           artifact_path: pkg.path,
           path: pkg.path,
           ...(build !== undefined ? { build } : {}),

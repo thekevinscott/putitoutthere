@@ -19,6 +19,28 @@ import { z, type ZodError } from 'zod';
 
 import { DEFAULT_TAG_FORMAT } from './tag-template.js';
 
+/* ------------------------------ artifact-name encoding ------------------------------ */
+
+// #230: actions/upload-artifact@v4 rejects these characters in artifact names.
+// `/` is the only one realistically used in `pkg.name` (polyglot-monorepo
+// grouping, e.g. `py/foo`); the rest are rejected at config load since they
+// have no realistic identifier use and would also break registry naming.
+const ARTIFACT_NAME_HARD_FORBIDDEN = /[\\:<>|*?"]/;
+
+// Encoding sequence for `/`. Reserved in `pkg.name` so the round-trip is
+// unambiguous: `a/b` encodes to `a__b`, and `a__b` is rejected at config load.
+const ENCODED_SLASH = '__';
+
+/**
+ * Encode a `[[package]].name` for use as an `actions/upload-artifact@v4`
+ * artifact name component (or as a path segment under `artifacts/`).
+ * Reverse mapping isn't needed at runtime — the publish-side readers
+ * just `path.join` whatever the planner emitted.
+ */
+export function sanitizeArtifactName(name: string): string {
+  return name.replaceAll('/', ENCODED_SLASH);
+}
+
 /* ------------------------------ schemas ------------------------------ */
 
 const PILOT = z
@@ -58,7 +80,20 @@ const TRUST_POLICY = z
 
 // Fields every package carries, regardless of kind.
 const PACKAGE_BASE = {
-  name: z.string().min(1),
+  // #230: piot encodes `/` to `__` for artifact-name slots; other
+  // upload-artifact-forbidden chars have no realistic identifier use,
+  // so reject them at load time rather than encode them. The `__`
+  // reservation keeps the slash round-trip unambiguous.
+  name: z
+    .string()
+    .min(1)
+    .refine((s) => !ARTIFACT_NAME_HARD_FORBIDDEN.test(s), {
+      message:
+        'package name must not contain \\, :, <, >, |, *, ?, or " (forbidden in actions/upload-artifact@v4 names; use only registry-safe characters)',
+    })
+    .refine((s) => !s.includes(ENCODED_SLASH), {
+      message: `package name must not contain "${ENCODED_SLASH}" (reserved: piot encodes "/" to "${ENCODED_SLASH}" for artifact-name slots; pick a different separator)`,
+    }),
   path: z.string().min(1),
   paths: z.array(z.string()).min(1),
   depends_on: z.array(z.string()).default([]),
