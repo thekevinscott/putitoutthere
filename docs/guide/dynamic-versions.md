@@ -18,7 +18,7 @@ Without the handoff, a release intended to publish `0.2.13` can ship
 as `0.2.13.dev14`. The sequence:
 
 1. piot's `plan` job computes `version = "0.2.13"`.
-2. The `build` job runs `python -m build --sdist`.
+2. The `build` job runs `uv build --sdist` (or `python -m build --sdist`).
 3. `hatch-vcs` reads git: latest tag is `v0.2.12`, HEAD is 14 commits
    ahead → the sdist is named `my-lib-0.2.13.dev14.tar.gz`.
 4. The `publish` job uploads that file via `twine`, then creates the
@@ -51,17 +51,14 @@ uses.
 ```yaml
 build:
   steps:
-    - uses: actions/setup-python@v5
-      with: { python-version: '3.12' }
+    - uses: astral-sh/setup-uv@v3
     - name: Build sdist
+      working-directory: ${{ matrix.path }}
       env:
         # Name-suffix is uppercased, dashes → underscores.
         # Package "my-lib" → MY_LIB. Package "coaxer" → COAXER.
         SETUPTOOLS_SCM_PRETEND_VERSION_FOR_MY_LIB: ${{ fromJSON(needs.plan.outputs.matrix)[0].version }}
-      run: |
-        cd ${{ matrix.path }}
-        python -m pip install build
-        python -m build --sdist --outdir dist
+      run: uv build --sdist
 ```
 
 `hatch-vcs` reads this env var via the
@@ -97,8 +94,9 @@ for a worked example.
 ## Where to set the env var
 
 **The build job, not the publish job.** The build backend reads the
-env var when `python -m build` runs. Setting it on the publish job
-has no effect — the sdist is already built and uploaded by then.
+env var when `uv build` (or `python -m build`) runs. Setting it on
+the publish job has no effect — the sdist is already built and
+uploaded by then.
 
 The planned version is available as a per-package field on the plan
 job's output matrix. The exact key depends on what your plan job
@@ -133,8 +131,9 @@ pypi: my-lib: detected dynamic version; skipping pyproject.toml rewrite.
   Planned version: 0.2.13. Pass it to the build backend via one of:
     - SETUPTOOLS_SCM_PRETEND_VERSION_FOR_MY_LIB=0.2.13  (hatch-vcs / setuptools-scm)
     - Update [package].version in Cargo.toml            (maturin reading Cargo)
-  Set the env var on the build job, before `python -m build` /
-  `maturin build` runs. See docs/guide/dynamic-versions.
+  Set the env var on the build job, before `uv build` /
+  `python -m build` / `maturin build` runs. See
+  docs/guide/dynamic-versions.
 ```
 
 This log fires once per PyPI package with `dynamic = ["version"]`

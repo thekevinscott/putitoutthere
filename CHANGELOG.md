@@ -23,10 +23,39 @@ are prefixed `**BREAKING**` and link to the matching section in
   and [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) for a
   worked example. No behavior change for existing packages that don't
   declare the block.
+- **[Artifact contract reference page](./docs/guide/artifact-contract.md).**
+  New top-level reference documenting the `artifact_name` grammar
+  per `kind` × `build`, the `artifacts/<artifact-name>/` post-
+  download layout, and a missing-artifact diagnosis checklist.
+  Previously this material lived only in
+  `docs/guide/custom-build-workflows.md` (a niche page) and was hard
+  to find when the publish job's completeness check failed. No
+  contract change — just makes the existing contract discoverable.
+- **[Troubleshooting publish failures page](./docs/guide/troubleshooting.md).**
+  New error-string-keyed index covering the `Artifact completeness
+  check failed`, `spawn twine ENOENT`, OIDC HTTP 400, missing git
+  identity, `.devN` sdist, and PR-event no-publish failure modes,
+  each with the underlying cause and the fix.
+- **[Concepts → What runs on which event](./docs/guide/concepts.md#what-runs-on-which-event)**
+  table making it explicit that the publish step is gated on
+  `github.event_name != 'pull_request'`, and that the signal of a
+  real release is a tag push, not a green workflow-run on a PR.
+- **["piot's surface is plan + publish — build is yours" callout](./docs/getting-started.md#install)**
+  in Getting Started, recommending `npx putitoutthere init` in a
+  scratch directory as the canonical reference when migrating from
+  a different shape.
 
 ### Changed
 
 - **Repository renamed `put-it-out-there` → `putitoutthere`.** GitHub auto-redirects the old slug, but consumers with the old URL pinned in `package.json`, `Cargo.toml`, `pyproject.toml`, or workflow files should update them. Docs site moved to <https://thekevinscott.github.io/putitoutthere/>. See [MIGRATIONS.md](./MIGRATIONS.md#repository-renamed-put-it-out-there--putitoutthere) for the consumer-facing diff.
+- **Python build-step examples switched to `uv build`** across the
+  documentation (`docs/guide/shapes/python-library.md`,
+  `docs/guide/shapes/python-cibuildwheel.md`,
+  `docs/guide/dynamic-versions.md`). `python -m build` continues to
+  work — the change is example-only, not a contract change. Backends,
+  artifact names, and matrix fields are unchanged. See
+  [MIGRATIONS.md](./MIGRATIONS.md#python-shape-examples-now-use-uv-build) for the
+  before/after, when to follow it, and when not to.
 
 ### Deprecated
 

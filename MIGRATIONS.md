@@ -21,6 +21,75 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Python shape examples now use `uv build`
+
+**Summary.** Documentation examples for the Python library, Python
+cibuildwheel, and dynamic-versions shapes switched the sdist-build
+step from `python -m build --sdist` to `uv build --sdist`. piot's
+contract is unchanged — backends, artifact names, the
+`matrix.artifact_name` / `matrix.artifact_path` fields, and the
+publish-side completeness check all work identically. The change
+removes a `pip install build` round-trip and aligns the docs with
+`uv` as the recommended Python toolchain.
+
+**Required changes.** None. `python -m build` still works. To
+follow the new examples in your own `release.yml`:
+
+```diff
+ build:
+   ...
+   steps:
+-    - uses: actions/setup-python@v5
+-      with: { python-version: '3.12' }
+     - name: Build sdist
+-      run: |
+-        cd ${{ matrix.path }}
+-        python -m pip install build
+-        python -m build --sdist --outdir dist
++      working-directory: ${{ matrix.path }}
++      run: uv build --sdist
++    # uv installs and manages Python itself; no setup-python step needed.
++    # Add this once at the top of the build job:
++    - uses: astral-sh/setup-uv@v3
+```
+
+`uv build --sdist` writes to `dist/` inside the working directory
+(same as `python -m build --outdir dist`), so
+`matrix.artifact_path` keeps pointing at the right place. The
+publish job is unchanged — `setup-python` + `pip install twine` is
+still the recommended path there because piot's PyPI handler shells
+out to `twine`.
+
+**When *not* to follow this example.** Stay on `python -m build`
+if:
+
+- Your CI image already has Python pre-installed and adding
+  `setup-uv` would slow the cold cache.
+- Your `pyproject.toml` exercises a build backend feature that uv's
+  isolated build environment doesn't yet handle (rare; uv's build
+  isolation matches `python -m build`'s).
+- Your team's runbook standardises on `python -m build` and the
+  consistency cost of switching outweighs the per-run speedup.
+
+`python -m build` is not deprecated and will keep working.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None.
+
+**Verification.**
+
+```bash
+# After the build job runs:
+ls artifacts/<pkg.name>-sdist/
+# Expected: <pypi-name>-X.Y.Z.tar.gz   (no .devN suffix)
+```
+
+If you see the expected sdist, the switch worked. If you see a
+`.devN` suffix, your project uses dynamic versioning — see
+[dynamic versions](https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions)
+for the env-var handoff (unchanged by this migration).
+
 ### Repository renamed `put-it-out-there` → `putitoutthere`
 
 **Summary.** The GitHub repository slug collapsed from `put-it-out-there`

@@ -67,6 +67,8 @@ export default defineConfig({
             { text: 'Nightly release', link: '/guide/nightly-release' },
             { text: 'Testing your release workflow', link: '/guide/testing-your-release-workflow' },
             { text: 'Cascade', link: '/guide/cascade' },
+            { text: 'Artifact contract', link: '/guide/artifact-contract' },
+            { text: 'Troubleshooting publish failures', link: '/guide/troubleshooting' },
             { text: 'npm platform packages', link: '/guide/npm-platform-packages' },
             { text: 'Custom build workflows', link: '/guide/custom-build-workflows' },
             { text: 'Runner prerequisites', link: '/guide/runner-prerequisites' },

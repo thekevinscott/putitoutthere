@@ -104,8 +104,8 @@ jobs:
           npm run build
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_path }}
+          name: ${{ matrix.artifact_name }}      # source of truth — do not substitute
+          path: ${{ matrix.artifact_path }}      # source of truth — do not substitute
 
   publish:
     needs: [plan, build]
@@ -132,6 +132,16 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}     # optional, fallback only
 ```
+
+::: tip Use `matrix.artifact_name` / `matrix.artifact_path` verbatim
+Both fields come from the `plan` job and are read by the publish
+job's completeness check. Do not substitute your own glob
+(`./build/**`, `*.tgz`). `matrix.artifact_path` already points at the
+package directory `npm pack` (or your bundler) writes into. See
+[artifact contract](/guide/artifact-contract) for the naming grammar
+and a worked diagnosis when the publish job reports
+`missing artifact directory <X>/`.
+:::
 
 ## Publish job prerequisites
 
