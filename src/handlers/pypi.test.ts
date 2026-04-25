@@ -388,7 +388,7 @@ describe('pypi.publish', () => {
     } catch (err) {
       const msg = (err as Error).message;
       expect(msg).toMatch(
-        /thekevinscott\.github\.io\/put-it-out-there\/guide\/auth/,
+        /thekevinscott\.github\.io\/putitoutthere\/guide\/auth/,
       );
       expect(msg).not.toMatch(/plan\.md/);
       expect(msg).not.toMatch(/§16\.4/);

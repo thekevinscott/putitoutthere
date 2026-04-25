@@ -11,7 +11,7 @@ hero:
       link: /getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/thekevinscott/put-it-out-there
+      link: https://github.com/thekevinscott/putitoutthere
 
 features:
   - icon: 📦

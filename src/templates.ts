@@ -27,7 +27,7 @@ export interface SkeletonSeeds {
 }
 
 const TOML_SKELETON_BODY = `# Put It Out There — release orchestration config.
-# Docs: https://github.com/thekevinscott/put-it-out-there
+# Docs: https://github.com/thekevinscott/putitoutthere
 
 [putitoutthere]
 version = 1
@@ -77,7 +77,7 @@ export function tomlSkeleton(seeds: SkeletonSeeds | null = null): string {
     `# piot init detected ${reason}; set tag_format = "${seeds.tag_format}" on\n` +
     `# each [[package]] block below to keep that timeline, or remove this comment\n` +
     `# to use the default "{name}-v{version}".\n` +
-    `# See https://thekevinscott.github.io/put-it-out-there/guide/configuration\n\n`;
+    `# See https://thekevinscott.github.io/putitoutthere/guide/configuration\n\n`;
   return banner + TOML_SKELETON_BODY;
 }
 
@@ -227,7 +227,7 @@ const PUBLISH_JOB = `  publish:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - uses: thekevinscott/put-it-out-there@v0
+      - uses: thekevinscott/putitoutthere@v0
         with:
           command: publish
           dry_run: \${{ inputs.dry_run || 'false' }}
@@ -251,7 +251,7 @@ const PLAN_JOB = `  plan:
         with:
           fetch-depth: 0
       - id: plan
-        uses: thekevinscott/put-it-out-there@v0
+        uses: thekevinscott/putitoutthere@v0
         with:
           command: plan
 `;
@@ -322,7 +322,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: thekevinscott/put-it-out-there@v0
+      - uses: thekevinscott/putitoutthere@v0
         with:
           command: plan
           dry_run: true

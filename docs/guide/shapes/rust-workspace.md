@@ -95,7 +95,7 @@ publish:
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-    - uses: thekevinscott/put-it-out-there@v0
+    - uses: thekevinscott/putitoutthere@v0
       with:
         command: publish
       env:

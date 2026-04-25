@@ -51,7 +51,7 @@ permissions:
 
 Today, the phase validates:
 
-- **A publish workflow exists.** At least one workflow file under `.github/workflows/` invokes `putitoutthere publish` (as a `run:` step) or uses `thekevinscott/put-it-out-there@...` with `command: publish`.
+- **A publish workflow exists.** At least one workflow file under `.github/workflows/` invokes `putitoutthere publish` (as a `run:` step) or uses `thekevinscott/putitoutthere@...` with `command: publish`.
 - **Required permissions.** The publishing job declares (or inherits from the workflow) `id-token: write` and `contents: write`. Missing either breaks the OIDC exchange with an opaque HTTP 400.
 - **An environment is pinned.** The publishing job has an `environment:` key. Most trust policies pin an environment; if the job doesn't set one, the registry policy check will reject the OIDC token.
 - **A publish step is actually live.** The publishing step isn't commented out — a common state after a temporary rollback.

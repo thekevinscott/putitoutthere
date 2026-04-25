@@ -18,7 +18,7 @@ export async function main(): Promise<void> {
 
   if (!command) {
     process.stderr.write(
-      'put-it-out-there action: missing required input `command`\n',
+      'putitoutthere action: missing required input `command`\n',
     );
     process.exit(1);
   }
@@ -30,7 +30,7 @@ export async function main(): Promise<void> {
   const code = await run(argv);
   if (code !== 0 && !failOnError) {
     process.stderr.write(
-      `put-it-out-there action: ignoring non-zero exit (fail_on_error=false): ${code}\n`,
+      `putitoutthere action: ignoring non-zero exit (fail_on_error=false): ${code}\n`,
     );
     process.exit(0);
   }

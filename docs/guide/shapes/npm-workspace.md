@@ -127,7 +127,7 @@ publish:
         git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
     - uses: actions/download-artifact@v4
       with: { path: artifacts }
-    - uses: thekevinscott/put-it-out-there@v0
+    - uses: thekevinscott/putitoutthere@v0
       with:
         command: publish
 ```

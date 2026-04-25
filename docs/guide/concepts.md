@@ -62,7 +62,7 @@ checks so partial publishes are rare. That's the whole tool.
   pre-publish completeness check to prevent the class of failure
   that would motivate rollback.
 
-Full non-goals list: [`notes/design-commitments.md`](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md).
+Full non-goals list: [`notes/design-commitments.md`](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
 
 ## The loop
 

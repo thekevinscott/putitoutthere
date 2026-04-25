@@ -6,7 +6,7 @@
  * (no cleanUrls). Serves a directory tree with:
  *   - cleanUrls: /guide/concepts resolves to /guide/concepts.html
  *   - directory index: /guide/ resolves to /guide/index.html
- *   - optional base path prefix (e.g. /put-it-out-there/) that's stripped
+ *   - optional base path prefix (e.g. /putitoutthere/) that's stripped
  *     before filesystem lookup
  *   - one-line access log per request, to stdout
  *

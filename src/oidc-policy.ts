@@ -6,7 +6,7 @@
  *
  *   1. At least one `.github/workflows/*.yml` file invokes either
  *      `putitoutthere publish` (as a `run:` command) or the composite
- *      action `thekevinscott/put-it-out-there@...` with a `command:`
+ *      action `thekevinscott/putitoutthere@...` with a `command:`
  *      input that implies publishing.
  *   2. That workflow's publishing job has `permissions: id-token: write`
  *      and `contents: write` (either job-level or workflow-level).
@@ -130,13 +130,19 @@ export function findPublishWorkflows(repoRoot: string): WorkflowFile[] {
 /**
  * Heuristic filter. Matches:
  *   - a `run:` step that contains `putitoutthere publish`
- *   - `uses: thekevinscott/put-it-out-there@...` combined with
+ *   - `uses: thekevinscott/putitoutthere@...` combined with
  *     `command: publish` somewhere in the file (the composite action
  *     defaults to `plan`, so we only flag explicit `publish`)
+ *
+ * Also accepts the pre-rename slug `put-it-out-there` so workflows
+ * pinned to the old name (still routed via GitHub's redirect) continue
+ * to be recognised by `doctor`.
  */
+const USES_PIOT_RE = /uses:\s*thekevinscott\/(?:putitoutthere|put-it-out-there)@/;
+
 function looksLikePublishWorkflow(source: string): boolean {
   if (/\bputitoutthere\s+publish\b/.test(source)) return true;
-  const usesPiot = /uses:\s*thekevinscott\/put-it-out-there@/.test(source);
+  const usesPiot = USES_PIOT_RE.test(source);
   const commandPublish = /command:\s*['"]?publish['"]?/.test(source);
   return usesPiot && commandPublish;
 }
@@ -278,7 +284,7 @@ export function checkPublishInvocation(workflow: WorkflowFile): InvocationIssue 
   if (hasRunCmd) return null;
 
   // Composite-action form with `command: publish` explicitly.
-  const usesPiot = /uses:\s*thekevinscott\/put-it-out-there@/.test(uncommented);
+  const usesPiot = USES_PIOT_RE.test(uncommented);
   const commandPublish = /command:\s*['"]?publish['"]?/.test(uncommented);
   if (usesPiot && commandPublish) return null;
 
@@ -403,7 +409,7 @@ function findPublishJob(workflow: WorkflowFile): WorkflowJob | null {
 
 function jobRunsPublish(job: WorkflowJob): boolean {
   if (/\bputitoutthere\s+publish\b/.test(job.source)) return true;
-  const usesPiot = /uses:\s*thekevinscott\/put-it-out-there@/.test(job.source);
+  const usesPiot = USES_PIOT_RE.test(job.source);
   const commandPublish = /command:\s*['"]?publish['"]?/.test(job.source);
   return usesPiot && commandPublish;
 }

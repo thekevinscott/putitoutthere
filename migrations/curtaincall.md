@@ -93,7 +93,7 @@ jobs:
     permissions: { id-token: write, contents: write }
     steps:
       - uses: actions/download-artifact@v4
-      - uses: thekevinscott/put-it-out-there@v0
+      - uses: thekevinscott/putitoutthere@v0
         with: { command: publish }
 ```
 

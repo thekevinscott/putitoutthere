@@ -19,7 +19,7 @@
 #      local Chromium) to navigate the docs site exactly the way a
 #      real external agent would use WebFetch against the deployed
 #      site. Piot's source tree on the host is hidden from the probe
-#      via a mount namespace (tmpfs masks /home/user/put-it-out-there),
+#      via a mount namespace (tmpfs masks /home/user/putitoutthere),
 #      so the only view of piot is whatever the local docs site
 #      exposes — the variable under iteration.
 #
@@ -125,9 +125,9 @@ if [[ "$SHAPE" == "isolated" && "$DOCS_SERVER" == "yes" ]]; then
   fi
 
   DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
-  DOCS_URL="http://localhost:${DOCS_PORT}/put-it-out-there/"
+  DOCS_URL="http://localhost:${DOCS_PORT}/putitoutthere/"
   echo "==> docs: custom server on port $DOCS_PORT → $DOCS_URL"
-  node "$EVAL_ROOT/tools/docs-server.mjs" "$REPO_ROOT/docs/.vitepress/dist" "$DOCS_PORT" /put-it-out-there/ >> "$DOCS_LOG" 2>&1 &
+  node "$EVAL_ROOT/tools/docs-server.mjs" "$REPO_ROOT/docs/.vitepress/dist" "$DOCS_PORT" /putitoutthere/ >> "$DOCS_LOG" 2>&1 &
   DOCS_PID=$!
   for _ in $(seq 1 30); do
     curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null && { echo "    ready at $DOCS_URL"; break; }
@@ -168,9 +168,9 @@ if [[ "$SHAPE" == "isolated" ]]; then
       "Bash(tail:*)"
     ],
     "deny": [
-      "Read(/home/user/put-it-out-there/**)",
-      "Grep(/home/user/put-it-out-there/**)",
-      "Glob(/home/user/put-it-out-there/**)",
+      "Read(/home/user/putitoutthere/**)",
+      "Grep(/home/user/putitoutthere/**)",
+      "Glob(/home/user/putitoutthere/**)",
       "WebFetch",
       "WebSearch"
     ]
@@ -181,7 +181,7 @@ EOF
   if [[ "$DOCS_SERVER" == "yes" ]]; then
     echo "==> probe: variant=$VARIANT (Opus 4.7, via agent-browser → $DOCS_URL)"
     # Run the probe inside a user+mount namespace that masks
-    # /home/user/put-it-out-there with an empty tmpfs. This makes piot
+    # /home/user/putitoutthere with an empty tmpfs. This makes piot
     # source unreachable even via Bash (cat /abs/path, git --git-dir=,
     # etc.) — the probe can only see piot through the live docs site.
     # PUPPETEER_EXECUTABLE_PATH / CHROME_PATH tell agent-browser which
@@ -193,7 +193,7 @@ EOF
     mkdir -p "$WORK/.agent-browser"
     printf '{"executable_path": "%s"}\n' "$CHROME_BIN" > "$WORK/.agent-browser/config.json"
     unshare --user --mount --map-root-user bash -c "
-      mount -t tmpfs tmpfs /home/user/put-it-out-there || exit 5
+      mount -t tmpfs tmpfs /home/user/putitoutthere || exit 5
       cd '$WORK'
       export HOME='$WORK'
       export AGENT_BROWSER_EXECUTABLE_PATH='$CHROME_BIN'

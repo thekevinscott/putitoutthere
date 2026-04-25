@@ -3,10 +3,10 @@ import { defineConfig } from 'vitepress';
 export default defineConfig({
   title: 'Put It Out There',
   description: 'Polyglot release orchestrator for crates.io, PyPI, and npm.',
-  base: '/put-it-out-there/',
+  base: '/putitoutthere/',
   cleanUrls: true,
   head: [
-    ['link', { rel: 'icon', href: '/put-it-out-there/favicon.svg' }],
+    ['link', { rel: 'icon', href: '/putitoutthere/favicon.svg' }],
   ],
   themeConfig: {
     nav: [
@@ -14,7 +14,7 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/concepts' },
       { text: 'Library shapes', link: '/guide/shapes/' },
       { text: 'API', link: '/api/cli' },
-      { text: 'GitHub', link: 'https://github.com/thekevinscott/put-it-out-there' },
+      { text: 'GitHub', link: 'https://github.com/thekevinscott/putitoutthere' },
     ],
     sidebar: {
       '/guide/shapes/': [
@@ -104,7 +104,7 @@ export default defineConfig({
       ],
     },
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/thekevinscott/put-it-out-there' },
+      { icon: 'github', link: 'https://github.com/thekevinscott/putitoutthere' },
     ],
     footer: {
       message: 'Released under the MIT License.',

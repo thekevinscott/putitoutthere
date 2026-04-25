@@ -100,7 +100,7 @@ function writeVersionImpl(
         `    - SETUPTOOLS_SCM_PRETEND_VERSION_FOR_${envSuffix}=${version}  (hatch-vcs / setuptools-scm)`,
         `    - Update [package].version in Cargo.toml                ${' '.repeat(Math.max(0, envSuffix.length - 12))}  (maturin reading Cargo)`,
         `  Set the env var on the build job, before \`python -m build\` / \`maturin build\` runs.`,
-        `  See https://thekevinscott.github.io/put-it-out-there/guide/dynamic-versions`,
+        `  See https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions`,
       ].join('\n'),
     );
     return Promise.resolve([]);
@@ -151,7 +151,7 @@ async function publishImpl(
         '  - enable trusted publishing: add `permissions.id-token: write` to the job and register a pending publisher on pypi.org.',
         // Points consumers at the published auth guide, not internal plan
         // docs (#149).
-        'See https://thekevinscott.github.io/put-it-out-there/guide/auth for setup.',
+        'See https://thekevinscott.github.io/putitoutthere/guide/auth for setup.',
       ].join('\n'),
     );
   }
@@ -183,7 +183,7 @@ async function publishImpl(
           '  - uses: actions/setup-python@v5',
           "    with: { python-version: '3.12' }",
           '  - run: pip install twine',
-          'See https://thekevinscott.github.io/put-it-out-there/guide/runner-prerequisites',
+          'See https://thekevinscott.github.io/putitoutthere/guide/runner-prerequisites',
         ].join('\n'),
         { cause: err },
       );

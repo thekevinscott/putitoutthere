@@ -96,11 +96,19 @@ describe('findPublishWorkflows', () => {
   it('picks up a workflow that uses the composite action with command=publish', () => {
     writeWorkflow(
       'ship.yml',
-      `jobs:\n  go:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: thekevinscott/put-it-out-there@v0\n        with:\n          command: publish\n`,
+      `jobs:\n  go:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: thekevinscott/putitoutthere@v0\n        with:\n          command: publish\n`,
     );
     const wfs = findPublishWorkflows(repo);
     expect(wfs).toHaveLength(1);
     expect(wfs[0]!.filename).toBe('ship.yml');
+  });
+
+  it('still recognises the pre-rename slug `put-it-out-there` (back-compat)', () => {
+    writeWorkflow(
+      'ship.yml',
+      `jobs:\n  go:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: thekevinscott/put-it-out-there@v0\n        with:\n          command: publish\n`,
+    );
+    expect(findPublishWorkflows(repo)).toHaveLength(1);
   });
 
   it('ignores workflows that do not invoke piot', () => {
@@ -123,7 +131,7 @@ describe('findPublishWorkflows', () => {
   it('ignores plan-only composite-action usage (command: plan default)', () => {
     writeWorkflow(
       'check.yml',
-      `jobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: thekevinscott/put-it-out-there@v0\n        with:\n          command: plan\n`,
+      `jobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: thekevinscott/putitoutthere@v0\n        with:\n          command: plan\n`,
     );
     expect(findPublishWorkflows(repo)).toEqual([]);
   });
@@ -209,7 +217,7 @@ describe('checkPublishInvocation', () => {
   });
 
   it('returns null for composite-action publish', () => {
-    const src = `jobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: thekevinscott/put-it-out-there@v0\n        with:\n          command: publish\n`;
+    const src = `jobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: thekevinscott/putitoutthere@v0\n        with:\n          command: publish\n`;
     expect(checkPublishInvocation(wf('release.yml', src))).toBeNull();
   });
 

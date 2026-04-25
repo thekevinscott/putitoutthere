@@ -3,7 +3,7 @@
   "version": "__VERSION__",
   "description": "Put It Out There canary fixture. Safe to ignore.",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/put-it-out-there.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
   "bin": { "piot-fixture-zzz": "shim.js" },
   "files": ["shim.js"]
 }

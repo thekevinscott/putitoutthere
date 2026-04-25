@@ -6,7 +6,7 @@ build backend derives the version itself — usually from git tags
 (`maturin`). piot detects this pattern and **does not** rewrite
 `pyproject.toml`. That's the right behaviour — piot is a publisher,
 not a version computer (see
-[`notes/design-commitments.md`](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md)
+[`notes/design-commitments.md`](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
 non-goal #1) — but it means you need to tell the build backend which
 version to use.
 
@@ -165,5 +165,5 @@ version cleanly.
   how to validate the env-var handoff end-to-end before ship.
 - [Single-package Python library shape](/guide/shapes/python-library) —
   end-to-end worked example.
-- [Design commitments](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md) —
+- [Design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) —
   non-goal #1 (no version computation).

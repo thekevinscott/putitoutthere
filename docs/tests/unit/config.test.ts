@@ -17,7 +17,7 @@ describe('vitepress config', () => {
   });
 
   it('exposes a base path for GitHub Pages', () => {
-    expect(config.base).toBe('/put-it-out-there/');
+    expect(config.base).toBe('/putitoutthere/');
   });
 
   it('wires up the expected navigation items', () => {

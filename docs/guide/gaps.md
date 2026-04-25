@@ -15,7 +15,7 @@ Gaps come in three flavours:
 
 ## Out of scope (permanent non-goals)
 
-Reference: [`notes/design-commitments.md`](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md).
+Reference: [`notes/design-commitments.md`](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
 
 ### Build-side cross-compilation
 

@@ -34,7 +34,7 @@ const TOKEN_ENV: Record<Kind, readonly string[]> = {
 const OIDC_ENV = 'ACTIONS_ID_TOKEN_REQUEST_TOKEN';
 // Points consumers at the published auth guide, not internal plan docs
 // (#144).
-const DOCS_POINTER = 'https://thekevinscott.github.io/put-it-out-there/guide/auth';
+const DOCS_POINTER = 'https://thekevinscott.github.io/putitoutthere/guide/auth';
 
 export interface AuthResult {
   package: string;

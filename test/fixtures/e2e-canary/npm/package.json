@@ -1,13 +1,13 @@
 {
   "name": "piot-fixture-zzz-cli",
   "version": "__VERSION__",
-  "description": "E2E canary for put-it-out-there. Safe to ignore.",
+  "description": "E2E canary for putitoutthere. Safe to ignore.",
   "license": "MIT",
   "type": "module",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thekevinscott/put-it-out-there.git"
+    "url": "git+https://github.com/thekevinscott/putitoutthere.git"
   },
   "keywords": ["putitoutthere-canary", "internal-test-fixture"],
   "files": ["index.js"]

@@ -70,7 +70,7 @@ function printUsage(): void {
       '  --token <value>   token inspect: token value (else read from env)',
       '  --registry <r>    token inspect: crates|npm|pypi',
       '',
-      'See https://github.com/thekevinscott/put-it-out-there for docs.',
+      'See https://github.com/thekevinscott/putitoutthere for docs.',
       '',
     ].join('\n'),
   );

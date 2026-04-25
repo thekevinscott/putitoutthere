@@ -196,7 +196,7 @@ describe('requireAuth', () => {
 
   it('throws with a pointer to the published auth guide (#144)', () => {
     expect(() => requireAuth([pkg('crates')])).toThrow(
-      /thekevinscott\.github\.io\/put-it-out-there\/guide\/auth/,
+      /thekevinscott\.github\.io\/putitoutthere\/guide\/auth/,
     );
   });
 

@@ -1,6 +1,6 @@
 # GitHub Action
 
-`thekevinscott/put-it-out-there@v0` wraps the CLI for use in GitHub Actions workflows.
+`thekevinscott/putitoutthere@v0` wraps the CLI for use in GitHub Actions workflows.
 
 ## Inputs
 
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - id: plan
-        uses: thekevinscott/put-it-out-there@v0
+        uses: thekevinscott/putitoutthere@v0
         with: { command: plan }
 
   publish:
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: thekevinscott/put-it-out-there@v0
+      - uses: thekevinscott/putitoutthere@v0
         with: { command: publish }
 ```
 
@@ -58,7 +58,7 @@ The full three-job (plan → build → publish) workflow is what `putitoutthere 
 Use `@v0`:
 
 ```yaml
-- uses: thekevinscott/put-it-out-there@v0
+- uses: thekevinscott/putitoutthere@v0
   with:
     command: plan
 ```

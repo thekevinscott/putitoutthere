@@ -35,7 +35,7 @@ produces three files in `evals/snapshots/`: `*-raw.md` (probe output),
 - Boots `vitepress dev` against this repo's `docs/` on a free port;
   the probe's only view of piot is that live rendered site.
 - Runs the probe inside `unshare --user --mount` with a tmpfs masking
-  `/home/user/put-it-out-there` — piot's source tree on the host is
+  `/home/user/putitoutthere` — piot's source tree on the host is
   invisible from inside the namespace even through `cat /abs/path` or
   `git --git-dir=…` escapes.
 - The probe invokes `agent-browser open / snapshot -i / click / close`

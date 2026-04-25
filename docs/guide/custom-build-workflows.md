@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - id: plan
-        uses: thekevinscott/put-it-out-there@v0
+        uses: thekevinscott/putitoutthere@v0
         with:
           command: plan
       # Split the matrix so the default build job only sees the rows

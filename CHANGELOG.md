@@ -26,7 +26,7 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Changed
 
-- _nothing yet_
+- **Repository renamed `put-it-out-there` → `putitoutthere`.** GitHub auto-redirects the old slug, but consumers with the old URL pinned in `package.json`, `Cargo.toml`, `pyproject.toml`, or workflow files should update them. Docs site moved to <https://thekevinscott.github.io/putitoutthere/>. See [MIGRATIONS.md](./MIGRATIONS.md#repository-renamed-put-it-out-there--putitoutthere) for the consumer-facing diff.
 
 ### Deprecated
 

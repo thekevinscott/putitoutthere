@@ -25,7 +25,7 @@ All three registries use OIDC trusted publishing; no long-lived tokens.
 ## Your task
 
 Investigate piot's current capabilities. The docs are at
-<https://thekevinscott.github.io/put-it-out-there/>. Based on what you
+<https://thekevinscott.github.io/putitoutthere/>. Based on what you
 can discover, write an opinionated evaluation:
 
 1. What does piot already support well for this migration?

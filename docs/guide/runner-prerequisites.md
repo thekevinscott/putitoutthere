@@ -27,7 +27,7 @@ Without these steps, the publish job fails with:
 ```
 pypi: twine not found on PATH (ENOENT).
 Did the publish job run `pip install twine` before the piot step?
-See https://thekevinscott.github.io/put-it-out-there/guide/runner-prerequisites
+See https://thekevinscott.github.io/putitoutthere/guide/runner-prerequisites
 ```
 
 Python minor version is flexible — `3.10`+ all work. We pick `3.12` in

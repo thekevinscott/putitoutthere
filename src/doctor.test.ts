@@ -345,7 +345,7 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: thekevinscott/put-it-out-there@v0
+      - uses: thekevinscott/putitoutthere@v0
         with:
           command: publish
       # - run: putitoutthere publish

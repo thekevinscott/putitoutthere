@@ -26,7 +26,7 @@ piot is probably **not** the right tool if:
 - You want **automatic tag rollback** on partial-publish failures. piot deliberately doesn't do this — crates.io is immutable, so deletion isn't safe. Instead piot runs a completeness-check before anything ships.
 
 See [Known gaps](/guide/gaps) for the full enumeration of non-goals
-and limitations, or [Design commitments](https://github.com/thekevinscott/put-it-out-there/blob/main/notes/design-commitments.md) for the policy these are derived from.
+and limitations, or [Design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) for the policy these are derived from.
 
 ## Migrating? Read this first
 

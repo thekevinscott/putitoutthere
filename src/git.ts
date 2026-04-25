@@ -53,7 +53,7 @@ function run(args: string[], opts: GitOptions = {}): string {
           '  - run: |',
           '      git config --global user.name "github-actions[bot]"',
           '      git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"',
-          'See https://thekevinscott.github.io/put-it-out-there/guide/runner-prerequisites',
+          'See https://thekevinscott.github.io/putitoutthere/guide/runner-prerequisites',
           '',
           `Underlying git output:\n${stderr}`,
         ].join('\n'),

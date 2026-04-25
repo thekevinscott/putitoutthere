@@ -127,7 +127,7 @@ jobs:
           fi
           node dist/cli-bin.js publish $DRY_RUN_FLAG
 
-      # Scaffolded workflows reference `thekevinscott/put-it-out-there@v<major>`
+      # Scaffolded workflows reference `thekevinscott/putitoutthere@v<major>`
       # (community GitHub Actions convention, e.g. actions/checkout@v4). The
       # canonical per-release tag is `putitoutthere-v<x.y.z>`; this step keeps
       # a floating `v<major>` tag pointing at the latest release in the major

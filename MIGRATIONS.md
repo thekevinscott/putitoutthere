@@ -21,6 +21,64 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Repository renamed `put-it-out-there` → `putitoutthere`
+
+**Summary.** The GitHub repository slug collapsed from `put-it-out-there`
+to `putitoutthere`, matching the npm package and CLI binary name. The
+human-readable name "Put It Out There" (with spaces) is unchanged. GitHub
+auto-redirects the old URL, but any place a consumer has hard-coded the
+old slug — npm/Cargo/pyproject `repository` URLs, GitHub Actions
+references, OIDC trust policy `repository:` claims, docs links — should
+be updated.
+
+**Required changes.**
+
+```diff
+ # package.json (or Cargo.toml / pyproject.toml)
+-"repository": "https://github.com/<owner>/put-it-out-there"
++"repository": "https://github.com/<owner>/putitoutthere"
+```
+
+```diff
+ # .github/workflows/release.yml — if you reference the action by full repo path
+-uses: thekevinscott/put-it-out-there/.github/actions/<...>
++uses: thekevinscott/putitoutthere/.github/actions/<...>
+```
+
+```diff
+ # OIDC trust policies (PyPI, npm) that gate on the source repo
+-"repository": "<owner>/put-it-out-there"
++"repository": "<owner>/putitoutthere"
+```
+
+If you only ever invoked `putitoutthere` via the npm package
+(`npx putitoutthere`, `pnpm add -D putitoutthere`) or the published
+GitHub Action, no change is required — those references already used the
+collapsed name.
+
+**Deprecations removed.** None. The old slug continues to redirect at
+the GitHub layer.
+
+**Behavior changes without code changes.**
+
+- Documentation site moved from
+  `https://thekevinscott.github.io/put-it-out-there/` to
+  `https://thekevinscott.github.io/putitoutthere/`. The old URL
+  redirects.
+- `git remote -v` will still show the old URL until you `git remote
+  set-url origin https://github.com/thekevinscott/putitoutthere.git`.
+  Push and fetch keep working via redirect, but updating the remote
+  avoids surprise breakage if the redirect is ever retired.
+
+**Verification.**
+
+```sh
+# Confirm no stale references in your repo
+grep -r "put-it-out-there" .
+```
+
+Expect no hits outside historical changelog/migration entries.
+
 ### `[package.bundle_cli]` — stage a Rust CLI into every maturin wheel (#217)
 
 **Summary.** New optional sub-table under `[[package]]` for pypi packages
@@ -59,7 +117,7 @@ And in the Python package's `pyproject.toml`:
 +include = ["...", "src/my_py/_binary/**"]  # ship the staged binary
 ```
 
-See [Polyglot Rust library → Shipping a Rust CLI inside the PyPI wheel](https://github.com/thekevinscott/put-it-out-there/blob/main/docs/guide/shapes/polyglot-rust.md#shipping-a-rust-cli-inside-the-pypi-wheel)
+See [Polyglot Rust library → Shipping a Rust CLI inside the PyPI wheel](https://github.com/thekevinscott/putitoutthere/blob/main/docs/guide/shapes/polyglot-rust.md#shipping-a-rust-cli-inside-the-pypi-wheel)
 for the full worked example including the launcher stub.
 
 **Deprecations removed.** None.

@@ -1,1 +1,1 @@
-{ "name": "piot-fixture-zzz-cli", "version": "__VERSION__", "license": "MIT", "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/put-it-out-there.git" }, "bin": { "piot-fixture-zzz": "shim.js" } }
+{ "name": "piot-fixture-zzz-cli", "version": "__VERSION__", "license": "MIT", "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" }, "bin": { "piot-fixture-zzz": "shim.js" } }

@@ -45,8 +45,8 @@ jobs:
             --verbose
             --exclude '^@.+'
             --exclude 'https://claude\.ai/code/'
-            --exclude 'https://github\.com/thekevinscott/put-it-out-there/issues/\d+'
-            --exclude 'https://github\.com/thekevinscott/put-it-out-there/pull/\d+'
+            --exclude 'https://github\.com/thekevinscott/putitoutthere/issues/\d+'
+            --exclude 'https://github\.com/thekevinscott/putitoutthere/pull/\d+'
             --exclude '<[^>]+>'
             --exclude '^http://localhost[:/]'
             --exclude-path 'notes/4-17-2026-initial-plan/transcript.md'
