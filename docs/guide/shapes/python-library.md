@@ -19,7 +19,7 @@ end-to-end walkthrough.
 | Skip-if-already-published idempotency (`GET` PyPI before upload)               | ✅     |               |
 | Run `twine upload`                                                             | ✅     |               |
 | Cut a git tag + GitHub Release                                                 | ✅     |               |
-| Run `python -m build` (sdist / wheel)                                          |        | ✅            |
+| Run `uv build` (or `python -m build`) for sdist / wheel                        |        | ✅            |
 | Install Python and twine on the publish runner                                 |        | ✅ ([runner prereqs](/guide/runner-prerequisites)) |
 | Register the trusted-publisher policy on PyPI (one-time, out-of-CI)            |        | ✅            |
 | Set `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG>` for dynamic-version projects    |        | ✅ ([dynamic versions](/guide/dynamic-versions)) |
@@ -50,8 +50,8 @@ Two supported setups:
 
 - **Static version.** `pyproject.toml` has a literal
   `version = "x.y.z"` under `[project]`. piot rewrites this line
-  before `python -m build` runs, and the built sdist carries the
-  correct version. No extra wiring needed.
+  before `uv build` runs, and the built sdist carries the correct
+  version. No extra wiring needed.
 
 - **Dynamic version** (`hatch-vcs`, `setuptools-scm`, or similar).
   `pyproject.toml` declares `[project].dynamic = ["version"]` and the
@@ -109,20 +109,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
+      - uses: astral-sh/setup-uv@v3
       - name: Build sdist
-        run: |
-          cd ${{ matrix.path }}
-          python -m pip install build
-          # If your project uses dynamic versioning, set
-          # SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG> here. See
-          # /guide/dynamic-versions.
-          python -m build --sdist --outdir dist
+        working-directory: ${{ matrix.path }}
+        # If your project uses dynamic versioning, set
+        # SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG> here. See
+        # /guide/dynamic-versions.
+        run: uv build --sdist
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_path }}
+          name: ${{ matrix.artifact_name }}      # source of truth — do not substitute
+          path: ${{ matrix.artifact_path }}      # source of truth — do not substitute
 
   publish:
     needs: [plan, build]
@@ -149,6 +146,17 @@ jobs:
         env:
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}   # optional, fallback only
 ```
+
+::: tip Use `matrix.artifact_name` / `matrix.artifact_path` verbatim
+Those two fields are emitted by the `plan` job and read by the
+`publish` job's completeness check. **Do not substitute your own
+glob** (`dist/`, `dist/*.tar.gz`). `uv build --sdist` writes to
+`dist/` inside `matrix.path`, which is exactly what
+`matrix.artifact_path` already references; passing the matrix value
+through keeps the contract intact. See [artifact contract](/guide/artifact-contract)
+for the full naming grammar and a worked diagnosis when the publish
+job reports `missing artifact directory <X>/`.
+:::
 
 ## Publish job prerequisites
 

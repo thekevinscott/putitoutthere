@@ -72,6 +72,49 @@ Every push to `main` triggers the release workflow, which runs three jobs:
 2. **build** — fan out across the matrix. User-owned build steps produce the artifacts.
 3. **publish** — per package: write version file, run the handler's publish, create a git tag, create a GitHub Release.
 
+::: tip piot's surface is plan + publish — build is yours
+The piot Action exposes two `command:` values: `plan` and `publish`.
+There is no `command: build`. The middle job is **your workflow's
+responsibility** — your build step produces the artifacts and uploads
+them under the names piot's `plan` job emitted on each matrix row
+(`matrix.artifact_name`, `matrix.artifact_path`). The publish job
+then reads those artifacts off disk via `actions/download-artifact`.
+
+If you're hand-rolling the workflow or migrating from a different
+shape, run `npx putitoutthere init` in a scratch directory first and
+treat the scaffolded `release.yml` as the canonical reference. The
+3-job plan → build → publish structure (with `upload-artifact` /
+`download-artifact` between them) is part of piot's contract; piot's
+publish-side completeness check assumes it. See the
+[artifact contract](/guide/artifact-contract) for the file-layout
+half of that contract.
+:::
+
+## What runs on which event
+
+The scaffolded workflows run different subsets of the loop depending on the event that triggered them. Knowing the table prevents the most common false-positive: assuming a green run on a PR is a release.
+
+| Event                                  | Workflow                            | plan | build | publish | tag + Release |
+|----------------------------------------|-------------------------------------|:----:|:-----:|:-------:|:-------------:|
+| `push: branches: [main]`               | `release.yml`                       | ✅   | ✅    | ✅      | ✅            |
+| `pull_request`                         | `putitoutthere-check.yml`           | ✅   | —     | —       | —             |
+| `pull_request` (if release.yml runs)   | `release.yml` (publish step gated)  | ✅   | ✅    | skipped | —             |
+| `workflow_dispatch` (`dry_run: true`)  | `release.yml`                       | ✅   | ✅    | skipped | —             |
+| `workflow_dispatch` (`dry_run: false`) | `release.yml`                       | ✅   | ✅    | ✅      | ✅            |
+| `schedule:`                            | `release.yml`                       | ✅   | ✅    | ✅      | ✅            |
+
+The publish step is gated on `github.event_name != 'pull_request'`
+(and on `dry_run != true`). A green PR-event run validates the plan
++ build halves of your pipeline — it does **not** indicate that
+anything was published.
+
+**The signal of a real release is a tag push**
+(`{name}-v{version}`, or your `tag_format`) plus a GitHub Release on
+the Releases page. Workflow-run success alone is necessary but not
+sufficient. See [Testing your release workflow](/guide/testing-your-release-workflow)
+for how to deliberately exercise the publish path before the next
+natural release.
+
 ## Cascade
 
 Every package declares `paths` — globs that say "these files belong to me." When you merge a commit that touches any of those globs, the package **cascades** into the plan.

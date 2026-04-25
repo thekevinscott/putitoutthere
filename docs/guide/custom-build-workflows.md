@@ -179,6 +179,11 @@ Don't use it when:
 
 ## Related
 
+- [Artifact contract](/guide/artifact-contract) — the canonical
+  reference for the `artifact_name` grammar and the post-download
+  directory layout your delegated workflow must produce.
+- [Troubleshooting publish failures](/guide/troubleshooting) — error
+  strings keyed to artifact / prereq misconfigurations.
 - [Configuration reference](/guide/configuration) — every field in
   `putitoutthere.toml`.
 - [Concepts](/guide/concepts) — plan → build → publish.

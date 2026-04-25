@@ -86,6 +86,21 @@ Scaffolds:
 - `.github/workflows/putitoutthere-check.yml` — PR dry-run check.
 - `putitoutthere/AGENTS.md` — the trailer convention your LLM agent will follow.
 
+::: tip Migrating an existing workflow? Run `init` in a scratch directory first
+piot's Action surface is `command: plan` and `command: publish` —
+**there is no `command: build`**. The middle job is your workflow's
+job. The 3-job structure plan → build → publish (with
+`actions/upload-artifact` between them, keyed off
+`matrix.artifact_name`) is part of piot's contract; the publish-side
+completeness check assumes it.
+
+If you're hand-porting from a 2-job inline-build-publish workflow,
+run `npx putitoutthere init` in a temp directory first, treat the
+emitted `release.yml` as the canonical reference, and copy in only
+the diff you care about. See [Concepts → piot's surface](/guide/concepts#the-loop)
+and the [artifact contract](/guide/artifact-contract).
+:::
+
 ## Minimum config
 
 ```toml

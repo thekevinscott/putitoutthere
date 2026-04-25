@@ -131,3 +131,10 @@ Before cutting your first release, confirm the publish job has:
 - [ ] `permissions: contents: write, id-token: write`.
 - [ ] OIDC trusted publisher registered per registry (see
       [Authentication](/guide/auth)).
+
+## Related
+
+- [Artifact contract](/guide/artifact-contract) — what the build job
+  must upload and under which names.
+- [Troubleshooting publish failures](/guide/troubleshooting) — error
+  strings keyed to the prereqs above.

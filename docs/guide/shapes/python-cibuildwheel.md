@@ -26,7 +26,7 @@ and cibuildwheel is your wheel-matrix orchestrator.
 | Skip-if-already-published idempotency                                          | ✅     |               |
 | Cut a git tag + GitHub Release                                                 | ✅     |               |
 | Run `cibuildwheel` to produce the wheel matrix                                 |        | ✅            |
-| Run `python -m build --sdist` for the source distribution                      |        | ✅            |
+| Run `uv build --sdist` (or `python -m build --sdist`) for the source distribution |     | ✅            |
 | Install Python, cibuildwheel, twine on the publish runner                      |        | ✅ ([runner prereqs](/guide/runner-prerequisites)) |
 | Register the trusted-publisher policy on PyPI (one-time)                       |        | ✅            |
 
@@ -134,13 +134,10 @@ build:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
+      - uses: astral-sh/setup-uv@v3
       - name: Build sdist
-        run: |
-          cd ${{ matrix.path }}
-          python -m pip install build
-          python -m build --sdist --outdir dist
+        working-directory: ${{ matrix.path }}
+        run: uv build --sdist
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
