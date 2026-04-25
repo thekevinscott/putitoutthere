@@ -140,13 +140,16 @@ artifacts/my-lib-sdist/my-lib-0.2.13.tar.gz
 
 ### maturin per-target wheel
 
-When you delegate via `build_workflow` and hand-roll the upload:
+When you delegate via `build_workflow` and hand-roll the upload,
+prefer a directory `path:` over a glob — `actions/upload-artifact@v4`
+preserves the workspace-relative path under a glob, which produces
+nested layouts the publish job's reader has to walk through:
 
 ```yaml
 - uses: actions/upload-artifact@v4
   with:
     name: my-py-wheel-${{ matrix.target }}     # e.g. "my-py-wheel-x86_64-unknown-linux-gnu"
-    path: target/wheels/*.whl
+    path: target/wheels                        # directory; contents land flat under <name>/
 ```
 
 Publish job sees:
@@ -154,6 +157,10 @@ Publish job sees:
 ```
 artifacts/my-py-wheel-x86_64-unknown-linux-gnu/my_py-0.4.1-cp312-cp312-manylinux_2_17_x86_64.whl
 ```
+
+(The publish-side reader walks recursively, so glob `path:` values
+that produce `<name>/target/wheels/*.whl` still work — but the
+directory shape keeps the on-disk layout flat and predictable.)
 
 ### napi per-target sub-package
 

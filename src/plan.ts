@@ -180,7 +180,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           target: 'noarch',
           runs_on: 'ubuntu-latest',
           artifact_name: `${safe}-crate`,
-          artifact_path: `${pkg.path}/target/package/*.crate`,
+          artifact_path: `${pkg.path}/target/package`,
           path: pkg.path,
         },
       ];
@@ -200,7 +200,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
             target: triple,
             runs_on: runner ?? defaultRunsOn(triple),
             artifact_name: `${safe}-wheel-${triple}`,
-            artifact_path: `${pkg.path}/dist/*.whl`,
+            artifact_path: `${pkg.path}/dist`,
             path: pkg.path,
             build,
           };
@@ -218,7 +218,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
         target: 'sdist',
         runs_on: 'ubuntu-latest',
         artifact_name: `${safe}-sdist`,
-        artifact_path: `${pkg.path}/dist/*.tar.gz`,
+        artifact_path: `${pkg.path}/dist`,
         path: pkg.path,
         ...(build !== undefined ? { build } : {}),
       });

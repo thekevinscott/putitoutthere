@@ -187,6 +187,32 @@ paths   = ["js/cachetta/**"]
     ).toBe('js__cachetta-x86_64-unknown-linux-gnu');
   });
 
+  // #237: `artifact_path` must be a directory shape (no glob). Glob
+  // values produce nested upload-artifact layouts; the directory
+  // shape uploads contents flat under `<artifact_name>/`.
+  it('emits directory-shaped `artifact_path` for every slot (no glob)', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+
+    const matrix = await plan({ cwd: repo });
+    for (const row of matrix) {
+      expect(row.artifact_path).not.toMatch(/\*/);
+    }
+    expect(matrix.find((r) => r.kind === 'crates')!.artifact_path).toBe(
+      'packages/rust/target/package',
+    );
+    expect(
+      matrix.find((r) => r.kind === 'pypi' && r.target === 'sdist')!.artifact_path,
+    ).toBe('packages/python/dist');
+    expect(
+      matrix.find((r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu')!
+        .artifact_path,
+    ).toBe('packages/python/dist');
+  });
+
   it('leaves the human-facing `name` field unchanged (encoding is artifact-side only)', async () => {
     writeFileSync(
       join(repo, 'putitoutthere.toml'),

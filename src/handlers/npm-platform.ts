@@ -23,6 +23,7 @@ import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { sanitizeArtifactName } from '../config.js';
 import type { Ctx } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 
@@ -123,7 +124,10 @@ function synthesizePlatformPackage(
   const platformName = platformPackageName(mainName, target);
   const staging = mkdtempSync(join(tmpdir(), 'putitoutthere-plat-'));
 
-  const artifactName = `${pkg.name}-${target}`;
+  // #237: encode pkg.name to match the on-disk artifact directory the
+  // planner emitted (slash-containing names like `js/foo` land at
+  // `artifacts/js__foo-<triple>/`, not `artifacts/js/foo-<triple>/`).
+  const artifactName = `${sanitizeArtifactName(pkg.name)}-${target}`;
   /* v8 ignore next -- tests inject artifactsRoot explicitly; publish.ts always sets it */
   const artifactsRoot = ctx.artifactsRoot ?? join(ctx.cwd, 'artifacts');
   const artifactDir = join(artifactsRoot, artifactName);

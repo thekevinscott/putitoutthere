@@ -22,6 +22,7 @@ import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
+import { sanitizeArtifactName } from '../config.js';
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
@@ -297,16 +298,38 @@ export function scmEnvSuffix(pkgName: string): string {
  */
 function collectArtifacts(pkgName: string, artifactsRoot: string | undefined): string[] {
   if (!artifactsRoot || !existsSync(artifactsRoot)) return [];
+  // #237: prefix-match against the encoded pkg.name so slash-containing
+  // names (e.g. `py/foo` → `py__foo-`) line up with the on-disk
+  // directory the planner emitted.
+  const prefix = `${sanitizeArtifactName(pkgName)}-`;
   const out: string[] = [];
   for (const entry of readdirSync(artifactsRoot)) {
-    if (!entry.startsWith(`${pkgName}-`)) continue;
+    if (!entry.startsWith(prefix)) continue;
     const sub = join(artifactsRoot, entry);
     /* v8 ignore next -- fs entries shouldn't vanish between readdir and stat */
     if (!statSync(sub).isDirectory()) continue;
-    for (const file of readdirSync(sub)) {
+    // #237: walk recursively so we tolerate any layout inside the
+    // artifact directory. upload-artifact's behavior differs per
+    // path-input shape (directory vs glob), so a flat `readdir` here
+    // would miss files that landed in a workspace-relative subdir.
+    for (const file of walkFiles(sub)) {
       if (file.endsWith('.whl') || file.endsWith('.tar.gz')) {
-        out.push(join(sub, file));
+        out.push(file);
       }
+    }
+  }
+  return out;
+}
+
+function walkFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      out.push(...walkFiles(full));
+    } else if (st.isFile()) {
+      out.push(full);
     }
   }
   return out;

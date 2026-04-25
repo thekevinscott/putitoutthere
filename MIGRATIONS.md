@@ -21,6 +21,100 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Publish path works end-to-end for slash-containing `pkg.name`
+
+**Summary.** Follow-up to the [`/`-encoding fix](#package-names-with--no-longer-need-an-encode-decode-workaround)
+([#230](https://github.com/thekevinscott/putitoutthere/issues/230)).
+Two bugs prevented slash-containing names from actually publishing
+even after the planner started encoding `/` to `__`
+([#237](https://github.com/thekevinscott/putitoutthere/issues/237)):
+
+1. The pypi handler (`src/handlers/pypi.ts`) and the npm-platform
+   synthesizer (`src/handlers/npm-platform.ts`) both built artifact
+   directory lookups from the raw `pkg.name`, so a package called
+   `py/foo` couldn't match the encoded on-disk directory
+   `py__foo-sdist/`. Symptom: `pypi: no artifacts found for py/foo
+   under <root>` at publish time.
+2. The planner emitted glob-shaped `artifact_path` values for crates
+   tarballs, pypi sdists, and pypi wheels (e.g.
+   `${pkg.path}/dist/*.tar.gz`). `actions/upload-artifact@v4` treats
+   a glob `path:` differently from a directory `path:` — it preserves
+   the workspace-relative path, so the sdist landed at
+   `artifacts/<name>/packages/python/dist/foo.tar.gz` instead of
+   `artifacts/<name>/foo.tar.gz`. Even after fix (1), the publish
+   handler couldn't find files inside that nested layout.
+
+Both fixed:
+
+- Handlers route directory lookups through `sanitizeArtifactName`,
+  matching whatever the planner emitted on the matrix row.
+- Handlers walk the artifact directory recursively for the expected
+  file extensions (`.tar.gz` / `.whl` / `.crate`), so any layout
+  (flat or nested) works.
+- Planner emits directory-shaped `artifact_path` values for the
+  three slots that used a glob:
+
+  | Slot | Before | After |
+  |---|---|---|
+  | crates tarball | `${pkg.path}/target/package/*.crate` | `${pkg.path}/target/package` |
+  | pypi maturin wheel | `${pkg.path}/dist/*.whl` | `${pkg.path}/dist` |
+  | pypi sdist | `${pkg.path}/dist/*.tar.gz` | `${pkg.path}/dist` |
+
+**Required changes.**
+
+- **None for repos that pass `matrix.artifact_path` straight through**
+  to `actions/upload-artifact@v4` (the canonical pattern shown in
+  `docs/guide/shapes/*`). The matrix field already carries the new
+  directory shape; on-disk artifact layout becomes flat
+  (`<name>/foo.tar.gz` instead of `<name>/packages/python/dist/foo.tar.gz`),
+  but consumer workflows see no observable change.
+- **Repos that hand-coded a glob path** should switch to the
+  directory shape (or — better — replace the hard-coded value with
+  the matrix field):
+
+  ```diff
+   - uses: actions/upload-artifact@v4
+     with:
+       name: ${{ matrix.artifact_name }}
+  -    path: packages/python/dist/*.tar.gz
+  +    path: ${{ matrix.artifact_path }}     # or "packages/python/dist"
+  ```
+
+  The recursive reader keeps glob layouts working as a safety net,
+  but the directory shape is the canonical contract going forward.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+- Artifact directory layout is now flat: `artifacts/<name>/<file>`
+  instead of `artifacts/<name>/<workspace-relative-path>/<file>`.
+  Anything reading the artifact tree (the docs page, debugging
+  scripts, custom verification jobs) should expect files at the
+  artifact root.
+- The publish-side handlers now walk subdirectories recursively
+  when looking for `.whl` / `.tar.gz` / `.crate` files. This is
+  defensive for consumers whose build steps write to a non-standard
+  location inside `<name>/`; the planner's directory `artifact_path`
+  remains the canonical contract.
+
+**Verification.**
+
+```sh
+putitoutthere plan --json | jq '.[] | {name, artifact_name, artifact_path}'
+```
+
+Expect every `artifact_path` to be a plain directory (no `*`):
+
+```json
+{ "name": "py/cachetta", "artifact_name": "py__cachetta-sdist", "artifact_path": "py/cachetta/dist" }
+```
+
+After the next release run, the `actions/upload-artifact@v4` step
+uploads `py/cachetta/dist/` contents flat under
+`artifacts/py__cachetta-sdist/` (no nested `packages/python/dist/`
+prefix), and the publish step finds the sdist immediately.
+
 ### Scaffolded `release.yml` now forwards `GITHUB_TOKEN`
 
 **Summary.** piot has supported cutting a GitHub Release alongside each

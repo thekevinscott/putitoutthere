@@ -115,3 +115,23 @@ are prefixed `**BREAKING**` and link to the matching section in
     grammar, leading-whitespace tolerance, and last-wins semantics.
   - `README.md`'s scaffolding description now correctly mentions both
     workflow files written by `putitoutthere init`.
+- **Publish path works end-to-end for slash-containing `pkg.name`** (#237).
+  Two follow-up bugs that #230 didn't catch: (1) `pypi.ts.collectArtifacts`
+  and `npm-platform.ts.synthesizePlatformPackage` both built directory
+  lookups from raw `pkg.name`, so a package called `py/foo` couldn't
+  match the encoded on-disk directory `py__foo-sdist/` and the publish
+  step reported `pypi: no artifacts found for py/foo under <root>`.
+  (2) The planner emitted glob `artifact_path` values
+  (`${pkg.path}/dist/*.tar.gz`, `${pkg.path}/dist/*.whl`,
+  `${pkg.path}/target/package/*.crate`), which `actions/upload-artifact@v4`
+  treats differently from a directory `path:` — it preserves the
+  workspace-relative path, so the file lands at
+  `<name>/packages/python/dist/foo.tar.gz` instead of `<name>/foo.tar.gz`.
+  Both bugs fixed: handlers now encode `pkg.name` via
+  `sanitizeArtifactName` and walk the artifact directory recursively
+  for the expected file extensions; planner emits directory-shaped
+  `artifact_path` values for the three slots that previously used a
+  glob. Consumers using `${{ matrix.artifact_path }}` verbatim see no
+  required workflow changes; consumers who hand-coded a glob path
+  should switch to the directory shape — see
+  [MIGRATIONS.md](./MIGRATIONS.md#publish-path-works-end-to-end-for-slash-containing-pkgname).

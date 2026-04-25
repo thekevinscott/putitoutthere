@@ -596,6 +596,59 @@ describe('pypi.publish', () => {
     ).rejects.toThrow(/PYPI_API_TOKEN[\s\S]+id-token: write/);
     fetchSpy.mockRestore();
   });
+
+  // #237: collectArtifacts must encode `/` in pkg.name so the on-disk
+  // artifact directory (`py__cachetta-sdist`, emitted by the planner)
+  // is matched. Pre-fix, `entry.startsWith("py/cachetta-")` failed
+  // against `"py__cachetta-sdist"` and the handler reported "no
+  // artifacts found".
+  it('finds artifacts for a pkg.name containing `/` (encoded directory match)', async () => {
+    stageSdist('py__cachetta-sdist', 'cachetta-0.6.2.tar.gz');
+    process.env.PYPI_API_TOKEN = 'tok';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockReturnValue('ok');
+    const result = await pypi.publish(
+      { ...basePkg({ name: 'py/cachetta', pypi: 'cachetta' }), path: dir },
+      '0.6.2',
+      makeCtx({ cwd: dir, artifactsRoot, env: { PYPI_API_TOKEN: 'tok' } }),
+    );
+    expect(result.status).toBe('published');
+    expect(execMock).toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  // #237: upload-artifact@v4 with a directory `path:` writes contents
+  // flat under `<artifact>/`, but with a single-glob `path:` it
+  // preserves the workspace-relative path so the file ends up at
+  // `<artifact>/packages/python/dist/foo.tar.gz`. The handler must
+  // tolerate either layout.
+  it('finds artifacts in a nested workspace-relative subdirectory', async () => {
+    const artifactDir = join(artifactsRoot, 'demo-python-sdist');
+    const nested = join(artifactDir, 'packages', 'python', 'dist');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(nested, 'demo-0.1.0.tar.gz'), 'fake', 'utf8');
+    process.env.PYPI_API_TOKEN = 'tok';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockReturnValue('ok');
+    const result = await pypi.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot, env: { PYPI_API_TOKEN: 'tok' } }),
+    );
+    expect(result.status).toBe('published');
+    // twine should have been invoked with the nested file path.
+    const calls = execMock.mock.calls as readonly unknown[][];
+    const tarballArg = calls
+      .flatMap((c) => (Array.isArray(c[1]) ? (c[1] as readonly unknown[]) : []))
+      .find((a): a is string => typeof a === 'string' && a.endsWith('demo-0.1.0.tar.gz'));
+    expect(tarballArg).toBeDefined();
+    expect(tarballArg).toContain('packages/python/dist');
+    fetchSpy.mockRestore();
+  });
 });
 
 describe('scmEnvSuffix (#207)', () => {

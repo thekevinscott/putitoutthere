@@ -325,4 +325,24 @@ describe('artifact path resolution', () => {
     // Not a real published-end-to-end test; just existence.
     expect(existsSync(join(repo, 'artifacts', 'demo-cli-linux-x64-gnu'))).toBe(true);
   });
+
+  // #237: slash-containing pkg.name (polyglot-monorepo grouping shape)
+  // resolves to the encoded artifact directory the planner emitted.
+  it('encodes `/` in pkg.name when looking up the artifact directory', async () => {
+    // On-disk dir uses the encoded name; the lookup must match it.
+    const dir = join(artifactsRoot, 'js__cachetta-linux-x64-gnu');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'cachetta.linux-x64-gnu.node'), Buffer.from('napi-bytes'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      return Buffer.from('');
+    });
+    const r = await publishPlatforms(
+      basePkg({ name: 'js/cachetta', targets: ['linux-x64-gnu'] }),
+      '0.3.1',
+      makeCtx(),
+    );
+    expect(r.published).toEqual(['js/cachetta-linux-x64-gnu']);
+  });
 });
