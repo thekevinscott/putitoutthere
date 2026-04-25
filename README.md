@@ -4,7 +4,7 @@ Polyglot release orchestrator for single-maintainer, LLM-authored projects
 that publish to crates.io, PyPI, and npm from one monorepo. One config file,
 one CLI, one trailer-driven signal — no per-package release plumbing.
 
-**[Documentation](https://thekevinscott.github.io/putitoutthere/)**
+**[Documentation](https://thekevinscott.github.io/put-it-out-there/)**
 
 ## Install
 
@@ -50,10 +50,13 @@ fix: handle empty token lists
 release: patch
 ```
 
-Valid bumps: `patch`, `minor`, `major`, `skip`. On push to `main`, the
-`release.yml` workflow runs `putitoutthere plan` against the trailer +
-changed paths, then `putitoutthere publish` per matching package. Tags are
-`{name}-v{version}`.
+Valid bumps: `patch`, `minor`, `major`, `skip`. The trailer decides *which
+bump*; the workflow's `on:` block (push, schedule, `workflow_dispatch`)
+decides *when* to ship. The scaffolded `release.yml` runs on push to `main`
+and invokes `putitoutthere plan` against the trailer + changed paths, then
+`putitoutthere publish` per matching package. Tags are `{name}-v{version}`
+by default — set `tag_format = "v{version}"` in `putitoutthere.toml` for
+single-package repos.
 
 The trailer is optional. By default, any package whose `paths` matched
 changed files cascades at `patch`. Use `release: minor` / `release: major`
@@ -152,4 +155,4 @@ reports which path is active.
 - [Design proposal](./notes/4-17-2026-initial-plan/plan/proposal.md) — why this tool exists.
 - [Implementation plan](./notes/4-17-2026-initial-plan/plan/plan.md) — exhaustive reference.
 - [Migration guides](./migrations/) — per-repo plans for adopting putitoutthere.
-- [v0 epic](https://github.com/thekevinscott/putitoutthere/issues/2) — remaining work.
+- [v0 epic](https://github.com/thekevinscott/put-it-out-there/issues/2) — remaining work.
