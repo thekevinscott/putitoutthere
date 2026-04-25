@@ -59,9 +59,11 @@ package called `py/cachetta` produced an invalid upload-artifact name.
 **Fix.** Upgrade the piot Action to a version that includes the
 sanitization fix; the planner now encodes `/` to `__`
 (`py/cachetta` → `py__cachetta-sdist`) and the build job's
-`name: ${{ matrix.artifact_name }}` works without modification. No
-config or workflow changes are required on the consumer side; just
-keep using `${{ matrix.artifact_name }}` and `${{ matrix.artifact_path }}`.
+upload step picks up the encoded name without modification. No
+config or workflow changes are required on the consumer side — keep
+passing `matrix.artifact_name` and `matrix.artifact_path` straight
+through to `actions/upload-artifact@v4` (the [artifact contract](/guide/artifact-contract#use-matrix-artifact-name-and-matrix-artifact-path-verbatim)
+shows the canonical snippet).
 
 If you can't upgrade immediately, the pre-fix workaround is to
 encode `/` to `__` in the upload step and decode `__` back to `/`

@@ -56,13 +56,18 @@ Releases — no additional permission changes required.
 
 **Behavior changes without code changes.** Repos that adopt the new
 template (or apply the diff above) start seeing GitHub Release entries
-appear under `https://github.com/<owner>/<repo>/releases` after each
-publish. The Release body is the output of `git log
-<prev-tag>..<this-tag> --format='- %s' --no-merges`. Tags suffixed with
-`-rc`, `-beta`, or `-alpha` are flagged `prerelease: true`. Release
-creation is best-effort: a 4xx/5xx from the GitHub API surfaces as a
-`publish: GitHub Release creation failed` warning but does not fail the
-publish run — the registry publish and tag push remain authoritative.
+appear under the repo's `/releases` page after each publish. The
+Release body is the output of:
+
+```sh
+git log <prev-tag>..<this-tag> --format='- %s' --no-merges
+```
+
+Tags suffixed with `-rc`, `-beta`, or `-alpha` are flagged
+`prerelease: true`. Release creation is best-effort: a 4xx/5xx from
+the GitHub API surfaces as a `publish: GitHub Release creation
+failed` warning but does not fail the publish run — the registry
+publish and tag push remain authoritative.
 
 **Verification.** After the next release run on a repo that adopted the
 fix:
@@ -95,7 +100,9 @@ and the planner emitted `artifact_name` verbatim from `pkg.name`
 ([#230](https://github.com/thekevinscott/putitoutthere/issues/230)).
 The planner now encodes each `/` to `__`
 (`py/foo` → `py__foo-sdist`), so the build job's
-`name: ${{ matrix.artifact_name }}` works without modification.
+upload-artifact step works without modification — pass the matrix
+`artifact_name` field through verbatim and the encoding happens
+upstream.
 
 **Required changes.**
 

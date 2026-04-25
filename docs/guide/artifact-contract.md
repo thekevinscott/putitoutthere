@@ -94,13 +94,14 @@ Notes:
   forbids `/` in artifact names, so the planner encodes each `/` to
   `__` before emitting `artifact_name`. A package named `py/cachetta`
   produces `artifacts/py__cachetta-sdist/…` — one flat directory, not
-  a nested `py/cachetta-sdist/`. The encoding is automatic; just keep
-  using `${{ matrix.artifact_name }}` verbatim in your build job and
-  the round-trip works. piot's config loader rejects `__` in
-  `pkg.name` so the encoding stays unambiguous. Other
-  upload-artifact-forbidden characters (`\`, `:`, `<`, `>`, `|`, `*`,
-  `?`, `"`) are rejected at config load — they have no realistic
-  identifier use and would also break registry naming.
+  a nested `py/cachetta-sdist/`. The encoding is automatic; pass the
+  matrix `artifact_name` field through to `upload-artifact` verbatim
+  (as the [worked examples](#worked-examples) do) and the round-trip
+  works. piot's config loader rejects `__` in `pkg.name` so the
+  encoding stays unambiguous. Other upload-artifact-forbidden
+  characters (`\`, `:`, `<`, `>`, `|`, `*`, `?`, `"`) are rejected at
+  config load — they have no realistic identifier use and would also
+  break registry naming.
 - crates.io takes source on upload; the `<pkg.name>-crate` slot is
   optional and only checked if you pre-package via `cargo package`.
   Most repos let `cargo publish` build from source on the publish
