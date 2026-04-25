@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, parseConfig } from './config.js';
+import { loadConfig, parseConfig, sanitizeArtifactName } from './config.js';
 
 const MINIMAL = `
 [putitoutthere]
@@ -948,5 +948,78 @@ bin = "my-cli"
 stage_to = "bin"
 `;
     expect(() => parseConfig(bad)).toThrow();
+  });
+});
+
+// #230: actions/upload-artifact@v4 forbids `/` and several other characters
+// in artifact names. The planner encodes `/` to `__` (the only realistically
+// usable forbidden char in piot identifiers); the rest are rejected at
+// config load. The encoding sequence `__` is reserved in `pkg.name` so the
+// round-trip stays unambiguous.
+describe('parseConfig: artifact-name-safe `pkg.name` (#230)', () => {
+  it('accepts a name with `/` (planner encodes it later)', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "py/cachetta"
+kind  = "pypi"
+path  = "py/cachetta"
+paths = ["py/cachetta/**"]
+`);
+    expect(cfg.packages[0]!.name).toBe('py/cachetta');
+  });
+
+  it('rejects `__` in name (reserved encoding sequence)', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib__double"
+kind  = "crates"
+path  = "."
+paths = ["**"]
+`),
+    ).toThrow(/__/);
+  });
+
+  it.each([
+    ['backslash', 'lib\\\\name'],
+    ['colon', 'lib:name'],
+    ['less-than', 'lib<name'],
+    ['greater-than', 'lib>name'],
+    ['pipe', 'lib|name'],
+    ['asterisk', 'lib*name'],
+    ['question', 'lib?name'],
+    ['quote', 'lib\\"name'],
+  ])('rejects %s in name', (_label, badName) => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "${badName}"
+kind  = "crates"
+path  = "."
+paths = ["**"]
+`),
+    ).toThrow(/upload-artifact|forbidden|registry-safe/);
+  });
+});
+
+describe('sanitizeArtifactName (#230)', () => {
+  it('passes through names without `/` unchanged', () => {
+    expect(sanitizeArtifactName('lib-rust')).toBe('lib-rust');
+    expect(sanitizeArtifactName('lib_python')).toBe('lib_python');
+    expect(sanitizeArtifactName('a.b.c')).toBe('a.b.c');
+  });
+
+  it('encodes `/` to `__`', () => {
+    expect(sanitizeArtifactName('py/cachetta')).toBe('py__cachetta');
+  });
+
+  it('encodes every `/` (multi-segment paths)', () => {
+    expect(sanitizeArtifactName('lang/py/foo')).toBe('lang__py__foo');
   });
 });

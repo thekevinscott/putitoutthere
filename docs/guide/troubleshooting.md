@@ -36,10 +36,39 @@ checklist in the artifact-contract page. The simplest version:
 - If you're using `build_workflow` delegation, look up the expected
   name in the [naming convention reference](/guide/artifact-contract#naming-convention-reference).
 
-The `<expected-dir>` value in the error is the *full* path piot
-expected, including any slashes from the package name. A package
-named `py/cachetta` produces `py/cachetta-sdist/`, not
-`py-cachetta-sdist/`.
+The `<expected-dir>` value in the error is the encoded directory
+piot expects (a single flat path under `artifacts/`). Forward slashes
+in `pkg.name` are encoded to `__` because
+`actions/upload-artifact@v4` forbids `/` in artifact names — a
+package named `py/cachetta` produces `py__cachetta-sdist/`, not
+`py/cachetta-sdist/`. See [artifact contract → notes](/guide/artifact-contract#naming-convention-reference)
+for the encoding rule.
+
+## "The artifact name is not valid: ... Contains the following character: Forward slash /"
+
+```
+The artifact name is not valid: py/cachetta-sdist.
+Contains the following character: Forward slash /
+```
+
+**Cause.** `actions/upload-artifact@v4` rejects `/` in the `name:`
+parameter. On piot versions prior to the fix for [#230](https://github.com/thekevinscott/putitoutthere/issues/230),
+the planner emitted `artifact_name` verbatim from `pkg.name`, so a
+package called `py/cachetta` produced an invalid upload-artifact name.
+
+**Fix.** Upgrade the piot Action to a version that includes the
+sanitization fix; the planner now encodes `/` to `__`
+(`py/cachetta` → `py__cachetta-sdist`) and the build job's
+`name: ${{ matrix.artifact_name }}` works without modification. No
+config or workflow changes are required on the consumer side; just
+keep using `${{ matrix.artifact_name }}` and `${{ matrix.artifact_path }}`.
+
+If you can't upgrade immediately, the pre-fix workaround is to
+encode `/` to `__` in the upload step and decode `__` back to `/`
+on the publish side before piot's reader runs — see
+[cachetta#26](https://github.com/thekevinscott/cachetta/pull/26)
+for the pattern. Remove the workaround once you upgrade; otherwise
+double-encoding produces `py____cachetta-sdist`.
 
 ## "spawn twine ENOENT" / "twine not found on PATH"
 

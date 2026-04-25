@@ -117,6 +117,96 @@ describe('plan: first release (no tags)', () => {
       )!.artifact_name,
     ).toBe('lib-python-wheel-x86_64-unknown-linux-gnu');
   });
+
+  // #230: `pkg.name` containing `/` (the polyglot-monorepo grouping
+  // shape) used to flow through to artifact_name verbatim, which
+  // actions/upload-artifact@v4 rejects. The planner now encodes `/`
+  // to `__` so the round-trip works without consumer-side workarounds.
+  it('encodes `/` in pkg.name to `__` for every artifact_name slot', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "rust/core"
+kind  = "crates"
+path  = "rust/core"
+paths = ["rust/core/**"]
+
+[[package]]
+name       = "py/cachetta"
+kind       = "pypi"
+path       = "py/cachetta"
+build      = "maturin"
+targets    = ["x86_64-unknown-linux-gnu"]
+paths      = ["py/cachetta/**"]
+
+[[package]]
+name    = "js/cachetta"
+kind    = "npm"
+build   = "napi"
+path    = "js/cachetta"
+targets = ["x86_64-unknown-linux-gnu"]
+paths   = ["js/cachetta/**"]
+`,
+      'utf8',
+    );
+    commit('feat: initial', {
+      'rust/core/lib.rs': '// rust',
+      'py/cachetta/lib.py': '# python',
+      'js/cachetta/index.js': '// js',
+    });
+
+    const matrix = await plan({ cwd: repo });
+    const names = matrix.map((r) => r.artifact_name);
+
+    // No artifact_name should contain a forward slash.
+    for (const n of names) expect(n).not.toMatch(/\//);
+
+    // Spot-check the encoded shapes per slot.
+    expect(matrix.find((r) => r.name === 'rust/core')!.artifact_name).toBe(
+      'rust__core-crate',
+    );
+    expect(
+      matrix.find((r) => r.name === 'py/cachetta' && r.target === 'sdist')!.artifact_name,
+    ).toBe('py__cachetta-sdist');
+    expect(
+      matrix.find(
+        (r) => r.name === 'py/cachetta' && r.target === 'x86_64-unknown-linux-gnu',
+      )!.artifact_name,
+    ).toBe('py__cachetta-wheel-x86_64-unknown-linux-gnu');
+    expect(matrix.find((r) => r.name === 'js/cachetta' && r.target === 'main')!.artifact_name).toBe(
+      'js__cachetta-main',
+    );
+    expect(
+      matrix.find(
+        (r) => r.name === 'js/cachetta' && r.target === 'x86_64-unknown-linux-gnu',
+      )!.artifact_name,
+    ).toBe('js__cachetta-x86_64-unknown-linux-gnu');
+  });
+
+  it('leaves the human-facing `name` field unchanged (encoding is artifact-side only)', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py/cachetta"
+kind  = "pypi"
+path  = "py/cachetta"
+paths = ["py/cachetta/**"]
+`,
+      'utf8',
+    );
+    commit('feat: initial', { 'py/cachetta/lib.py': '# python' });
+
+    const matrix = await plan({ cwd: repo });
+    expect(matrix.every((r) => r.name === 'py/cachetta')).toBe(true);
+  });
 });
 
 describe('plan: subsequent release with last_tag', () => {

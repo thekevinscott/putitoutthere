@@ -90,11 +90,17 @@ Notes:
   the piot identifier; the file *inside* uses the registry name.
 - `<target>` is the Rust-style triple (`x86_64-unknown-linux-gnu`,
   `aarch64-apple-darwin`, etc.) for maturin / napi / bundled-cli rows.
-- Slashes in `<pkg.name>` are preserved. A package named
-  `py/cachetta` produces `artifacts/py/cachetta-sdist/…` — one
-  intermediate directory plus the suffixed leaf, **not** a single
-  flat `py-cachetta-sdist`. The completeness-check error reports the
-  full path so you can match it to a build-job upload step.
+- **Slashes in `<pkg.name>` are encoded.** `actions/upload-artifact@v4`
+  forbids `/` in artifact names, so the planner encodes each `/` to
+  `__` before emitting `artifact_name`. A package named `py/cachetta`
+  produces `artifacts/py__cachetta-sdist/…` — one flat directory, not
+  a nested `py/cachetta-sdist/`. The encoding is automatic; just keep
+  using `${{ matrix.artifact_name }}` verbatim in your build job and
+  the round-trip works. piot's config loader rejects `__` in
+  `pkg.name` so the encoding stays unambiguous. Other
+  upload-artifact-forbidden characters (`\`, `:`, `<`, `>`, `|`, `*`,
+  `?`, `"`) are rejected at config load — they have no realistic
+  identifier use and would also break registry naming.
 - crates.io takes source on upload; the `<pkg.name>-crate` slot is
   optional and only checked if you pre-package via `cargo package`.
   Most repos let `cargo publish` build from source on the publish
@@ -166,7 +172,7 @@ When the completeness check fails:
 
 ```
 putitoutthere: Artifact completeness check failed:
-  py/cachetta: sdist: missing artifact directory py/cachetta-sdist/
+  py/cachetta: sdist: missing artifact directory py__cachetta-sdist/
 ```
 
 Walk it back through the flow:

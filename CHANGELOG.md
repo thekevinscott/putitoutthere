@@ -76,3 +76,20 @@ are prefixed `**BREAKING**` and link to the matching section in
   `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}`. Existing `release.yml` files
   need a one-line patch — see
   [MIGRATIONS.md](./MIGRATIONS.md#scaffolded-releaseyml-now-forwards-github_token).
+- **`/` in `[[package]].name` is now safe — planner encodes it for
+  `actions/upload-artifact@v4`** (#230). Polyglot-monorepo grouping
+  shapes (e.g. `name = "py/cachetta"`, `"js/cachetta"`) used to
+  produce `artifact_name` values containing `/`, which
+  `actions/upload-artifact@v4` rejects with
+  `The artifact name is not valid: ... Contains the following character: Forward slash /`,
+  failing the build job before piot ever ran. The planner now encodes
+  each `/` to `__` in `artifact_name` (so `py/cachetta` →
+  `py__cachetta-sdist`) and config validation reserves `__` in
+  `pkg.name` so the round-trip stays unambiguous. Other
+  upload-artifact-forbidden characters (`\`, `:`, `<`, `>`, `|`,
+  `*`, `?`, `"`) are now rejected at config load. Read sites
+  (`publish`, `doctor`, `preflight`, `completeness`) consume
+  `artifact_name` verbatim and need no changes; consumers running
+  the `cachetta#26` encode/decode workaround should remove it once
+  they upgrade. See [MIGRATIONS.md](./MIGRATIONS.md#package-names-with--no-longer-need-an-encode-decode-workaround) and
+  [Artifact contract → notes](./docs/guide/artifact-contract.md#naming-convention-reference).
