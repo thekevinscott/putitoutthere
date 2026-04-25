@@ -67,4 +67,12 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
-- _nothing yet_
+- **Scaffolded `release.yml` now forwards `GITHUB_TOKEN` to the publish
+  step.** piot has cut GitHub Releases alongside tag pushes since #26, but
+  Actions doesn't auto-mount the runner token as an env var, so the
+  scaffolded workflow's publish step ran without `GITHUB_TOKEN` and
+  silent-skipped Release creation — leaving consumers with tags but no
+  Releases page entries. The publish job's `env:` block now includes
+  `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}`. Existing `release.yml` files
+  need a one-line patch — see
+  [MIGRATIONS.md](./MIGRATIONS.md#scaffolded-releaseyml-now-forwards-github_token).

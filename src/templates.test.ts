@@ -66,6 +66,14 @@ describe('release.yml.immediate', () => {
     expect(y).toMatch(/pip install twine/);
   });
 
+  it('publish job exposes GITHUB_TOKEN so piot can create a GitHub Release', () => {
+    // piot's release.ts skips when process.env.GITHUB_TOKEN is missing, and
+    // Actions doesn't auto-mount the runner token as an env var — the
+    // scaffolded workflow has to forward it explicitly.
+    const y = RELEASE_YML_IMMEDIATE;
+    expect(y).toMatch(/GITHUB_TOKEN:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}/);
+  });
+
   it('publish job configures git committer identity (createTag uses git tag -a — #206)', () => {
     const y = RELEASE_YML_IMMEDIATE;
     expect(y).toMatch(/git config --global user\.name/);
