@@ -183,9 +183,10 @@ Walk it back through the flow:
    per-name override). If `path:` is set to anything else, piot's
    reader is looking in the wrong place.
 4. **Did the build step actually produce files?** A successful upload
-   of an empty directory is the silent failure mode. `ls
-   ${{ matrix.artifact_path }}` immediately before the upload step
-   confirms the build wrote what you think it did.
+   of an empty directory is the silent failure mode. Add an `ls` of
+   the directory referenced by `matrix.artifact_path` immediately
+   before the upload step to confirm the build wrote what you think
+   it did.
 
 ## Related
 

@@ -27,10 +27,12 @@ of three things broke upstream:
 **Fix.** Walk the [diagnosing a missing-artifact error](/guide/artifact-contract#diagnosing-a-missing-artifact-error)
 checklist in the artifact-contract page. The simplest version:
 
-- In your build job, change `name: my-thing` to
-  `name: ${{ matrix.artifact_name }}` and `path: dist/` to
-  `path: ${{ matrix.artifact_path }}`. Those matrix fields are the
-  source of truth.
+- In your build job, replace any hand-rolled `name:` / `path:`
+  values on `actions/upload-artifact@v4` with the
+  `matrix.artifact_name` and `matrix.artifact_path` fields the plan
+  job emits — those are the source of truth. See the [artifact
+  contract](/guide/artifact-contract#use-matrix-artifact-name-and-matrix-artifact-path-verbatim)
+  for the canonical snippet.
 - If you're using `build_workflow` delegation, look up the expected
   name in the [naming convention reference](/guide/artifact-contract#naming-convention-reference).
 
