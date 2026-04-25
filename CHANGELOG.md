@@ -93,3 +93,28 @@ are prefixed `**BREAKING**` and link to the matching section in
   the `cachetta#26` encode/decode workaround should remove it once
   they upgrade. See [MIGRATIONS.md](./MIGRATIONS.md#package-names-with--no-longer-need-an-encode-decode-workaround) and
   [Artifact contract → notes](./docs/guide/artifact-contract.md#naming-convention-reference).
+- **Documentation accuracy pass** (#231). A docs-vs-code audit caught
+  several places where reference material lagged behind shipped behavior.
+  No code paths changed beyond a stale help-text line; existing configs
+  and workflows are unaffected.
+  - `putitoutthere --help` text for `--json` no longer claims "(plan
+    only)" — the flag has worked across every command that emits a
+    result since their respective additions. `docs/api/cli.md` now lists
+    the supported commands explicitly.
+  - `docs/api/cli.md` documents short flags (`-h`, `-v`, `--version`)
+    and exit codes (`0` / `1` / `4`).
+  - `docs/api/action.md` documents the `outputs.matrix` contract
+    (output key omitted when empty, not "empty string"), the matrix-row
+    field schema, and the GitHub Release body shape.
+  - `action.yml`'s `command` description and `docs/api/action.md`
+    clarify that the action shells through to any putitoutthere CLI
+    subcommand, not just `plan` / `publish` / `doctor`.
+  - `docs/guide/configuration.md` adds the previously-shape-only `pypi`
+    field to the central `kind = "pypi"` table.
+  - `docs/guide/trailer.md` documents the package-name character
+    grammar, leading-whitespace tolerance, and last-wins semantics.
+  - `README.md`'s scaffolding description now lists every file
+    `putitoutthere init` writes (workflows, `putitoutthere/AGENTS.md`,
+    `CLAUDE.md` append).
+  - VitePress sidebar exposes `docs/AGENTS.md` (docs-authoring rules
+    for LLM agents) under a Contributing group.

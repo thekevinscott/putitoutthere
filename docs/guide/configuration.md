@@ -42,6 +42,7 @@ consumer's machine.
 
 | Field        | Type                   | Notes                                              |
 |--------------|------------------------|----------------------------------------------------|
+| `pypi`       | string                 | Override `name` → PyPI registered project name. Set this when the importable Python package name (and the value used by `[[package]].name` for piot's internal graph) differs from the name registered on PyPI. Used by `putitoutthere doctor` for token-scope checks and by the pypi handler when calling the upload API. |
 | `build`      | enum                   | `maturin` \| `setuptools` \| `hatch`. Default `setuptools`. |
 | `targets`    | (string \| object)[]   | Required when `build = "maturin"`. See [Target entries](#target-entries). |
 | `bundle_cli` | table                  | Opt-in recipe to cross-compile a Rust CLI per target and stage the binary into the package source tree so maturin includes it in each wheel. Only valid with `build = "maturin"` + non-empty `targets`. See [Bundled CLI](#bundled-cli). |

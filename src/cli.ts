@@ -10,7 +10,8 @@
  *   --cwd <path>      working directory (default: process.cwd())
  *   --config <path>   path to putitoutthere.toml
  *   --dry-run         for publish; no side effects
- *   --json            for plan; emit JSON instead of a table
+ *   --json            machine-readable output (supported by most
+ *                     commands that emit a result; see docs/api/cli.md)
  */
 
 import { login, logout, status, type DevicePrompt, type StatusResult } from './auth.js';
@@ -59,7 +60,7 @@ function printUsage(): void {
       '  --cwd <path>      working directory',
       '  --config <path>   path to putitoutthere.toml',
       '  --dry-run         publish without side effects',
-      '  --json            emit machine-readable output (plan only)',
+      '  --json            emit machine-readable output (most commands)',
       '  --force           overwrite putitoutthere.toml on init',
       '  --artifacts       doctor: also check artifact completeness',
       '  --deep            doctor: also inspect each token\'s publish scope',

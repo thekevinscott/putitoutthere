@@ -105,7 +105,11 @@ putitoutthere auth status  [--json]
 
 ### `putitoutthere version`
 
-Print the CLI version.
+Print the CLI version. Equivalent forms: `putitoutthere version`, `putitoutthere --version`, `putitoutthere -v`.
+
+### `putitoutthere --help`
+
+Print the usage block to stderr and exit 0. Equivalent: `putitoutthere -h`.
 
 ## Global flags
 
@@ -113,7 +117,7 @@ Print the CLI version.
 |-----------------------|---------------------------------------------------------------------------------------------|
 | `--cwd <path>`        | Working directory. Default: `process.cwd()`.                                                |
 | `--config <path>`     | Path to `putitoutthere.toml`.                                                               |
-| `--json`              | Machine-readable output.                                                                    |
+| `--json`              | Machine-readable output. Supported on `init`, `plan`, `publish`, `doctor`, `preflight`, `token list`, `token inspect`, `auth login`, `auth logout`, `auth status`. |
 | `--dry-run`           | (publish) Skip side effects.                                                                |
 | `--force`             | (init) Overwrite `putitoutthere.toml`.                                                      |
 | `--cadence <mode>`    | (init) `immediate` (default) or `scheduled`.                                                |
@@ -124,3 +128,11 @@ Print the CLI version.
 | `--secrets`           | (token list) Also list GitHub repo/environment secrets (requires `auth login`).             |
 | `--token <value>`     | (token inspect) Token value (else read from env).                                           |
 | `--registry <r>`      | (token inspect) `crates` \| `npm` \| `pypi`.                                                |
+
+## Exit codes
+
+| Code | Meaning                                                                  |
+|------|--------------------------------------------------------------------------|
+| `0`  | Success. `doctor` and `preflight` exit `0` only when every check passes; `auth status` exits `0` only when authenticated. |
+| `1`  | Validation, configuration, or auth failure (unknown command, bad flag, schema error, `doctor`/`preflight` reported issues, `auth status` not logged in, `token inspect` reported an error). |
+| `4`  | Unhandled fatal error (uncaught exception). The error message goes to stderr; this code is set by the binary entry point in `src/cli-bin.ts`. |

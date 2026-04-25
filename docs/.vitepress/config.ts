@@ -94,6 +94,12 @@ export default defineConfig({
             { text: 'Dual-family npm (CLI + napi)', link: '/guide/shapes/dual-family-npm' },
           ],
         },
+        {
+          text: 'Contributing',
+          items: [
+            { text: 'Docs authoring (for LLM agents)', link: '/AGENTS' },
+          ],
+        },
       ],
       '/api/': [
         {
@@ -101,6 +107,14 @@ export default defineConfig({
           items: [
             { text: 'CLI', link: '/api/cli' },
             { text: 'GitHub Action', link: '/api/action' },
+          ],
+        },
+      ],
+      '/AGENTS': [
+        {
+          text: 'Contributing',
+          items: [
+            { text: 'Docs authoring (for LLM agents)', link: '/AGENTS' },
           ],
         },
       ],

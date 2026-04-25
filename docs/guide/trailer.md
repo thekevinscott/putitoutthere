@@ -12,6 +12,8 @@ release: <bump> [pkg1, pkg2, ...]
 
 - `<bump>` is one of: `patch`, `minor`, `major`, `skip`.
 - `[...]` is an optional list of package names to scope the bump to.
+- Package names must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (the same character set npm, crates.io, and PyPI accept). Spaces, slashes, and leading hyphens are rejected.
+- The line is matched anywhere in the commit body and tolerates leading whitespace, so trailers indented inside a fenced code block or quoted reply still count. If a commit has multiple `release:` lines, the **last one wins** — handy for amending an earlier hint without rewriting history.
 
 ## Semantics
 

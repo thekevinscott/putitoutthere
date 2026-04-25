@@ -169,6 +169,35 @@ step uploads under `py__cachetta-sdist/` (a single flat directory
 under `artifacts/`), and piot's publish-side reader consumes the
 same path.
 
+### Documentation accuracy pass (#231)
+
+**Summary.** A docs-vs-code audit found several places where reference
+material lagged behind shipped behavior. Existing configs and workflows
+keep working — the only consumer-observable change is that `putitoutthere
+--help` no longer mislabels `--json` as "plan only".
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+- `putitoutthere --help` output: the `--json` line now reads `emit
+  machine-readable output (most commands)` instead of `(plan only)`. The
+  flag has always been accepted on every command that emits a result;
+  only the help text was wrong.
+- No other behavior changes. All other audit findings were addressed by
+  updating documentation (`docs/api/cli.md`, `docs/api/action.md`,
+  `docs/guide/configuration.md`, `docs/guide/trailer.md`, `README.md`,
+  `action.yml` description text, VitePress sidebar).
+
+**Verification.**
+
+```sh
+putitoutthere --help | grep -- '--json'
+# Expected: --json            emit machine-readable output (most commands)
+```
+
 ### Python shape examples now use `uv build`
 
 **Summary.** Documentation examples for the Python library, Python

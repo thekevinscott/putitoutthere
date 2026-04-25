@@ -12,9 +12,13 @@ one CLI, one trailer-driven signal — no per-package release plumbing.
 npx putitoutthere init
 ```
 
-This scaffolds a `putitoutthere.toml`, a `release.yml` workflow, and an
-`AGENTS.md` file explaining the trailer convention to future
-contributors.
+This scaffolds a `putitoutthere.toml`, two workflows
+(`.github/workflows/release.yml` and
+`.github/workflows/putitoutthere-check.yml`), and a
+`putitoutthere/AGENTS.md` file explaining the trailer convention to
+future contributors. If a `CLAUDE.md` is present, an
+`@putitoutthere/AGENTS.md` include is appended so Claude picks up the
+trailer rules automatically.
 
 For one-off runs without scaffolding:
 
