@@ -21,6 +21,64 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Scaffolded `release.yml` now forwards `GITHUB_TOKEN`
+
+**Summary.** piot has supported cutting a GitHub Release alongside each
+tag push since #26, but the scaffolded `release.yml` template never
+forwarded `GITHUB_TOKEN` to the publish step. GitHub Actions does not
+auto-mount the runner token as an env var — `permissions: contents:
+write` only grants the token *scope* to write Releases; the token still
+has to be exposed via `env:` for piot's `release.ts` to read it from
+`process.env.GITHUB_TOKEN`. Without it, piot silent-skipped Release
+creation and consumers got tags but no Release entries on the repo's
+Releases page. Fresh `piot init` runs now scaffold the env line.
+
+**Required changes.** Existing repos that ran `piot init` before this
+change need a one-line addition to `.github/workflows/release.yml`:
+
+```diff
+       - uses: thekevinscott/putitoutthere@v0
+         with:
+           command: publish
+           dry_run: ${{ inputs.dry_run || 'false' }}
+         env:
+           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+The publish job already declares `permissions: contents: write`, which
+is the scope GitHub's runner-supplied `GITHUB_TOKEN` needs to create
+Releases — no additional permission changes required.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Repos that adopt the new
+template (or apply the diff above) start seeing GitHub Release entries
+appear under `https://github.com/<owner>/<repo>/releases` after each
+publish. The Release body is the output of `git log
+<prev-tag>..<this-tag> --format='- %s' --no-merges`. Tags suffixed with
+`-rc`, `-beta`, or `-alpha` are flagged `prerelease: true`. Release
+creation is best-effort: a 4xx/5xx from the GitHub API surfaces as a
+`publish: GitHub Release creation failed` warning but does not fail the
+publish run — the registry publish and tag push remain authoritative.
+
+**Verification.** After the next release run on a repo that adopted the
+fix:
+
+```bash
+# Inspect the publish job log:
+#   "publish: GitHub Release created at https://github.com/.../releases/tag/<name>-v<x.y.z>"
+
+# Or hit the API directly:
+gh release view <name>-v<x.y.z> --repo <owner>/<repo>
+```
+
+If you previously saw the warning `publish: GitHub Release creation
+failed` in your publish logs, the warning should be gone and the
+Releases page should populate.
+
 ### Python shape examples now use `uv build`
 
 **Summary.** Documentation examples for the Python library, Python

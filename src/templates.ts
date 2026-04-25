@@ -240,6 +240,12 @@ const PUBLISH_JOB = `  publish:
           NODE_AUTH_TOKEN: \${{ secrets.NPM_TOKEN }}
           CARGO_REGISTRY_TOKEN: \${{ secrets.CARGO_TOKEN }}
           PYPI_API_TOKEN: \${{ secrets.PYPI_API_TOKEN }}
+          # Exposed so piot can create a GitHub Release per pushed tag.
+          # Actions doesn't auto-mount the runner token as an env var; the
+          # \`contents: write\` permission above gives this token scope to
+          # write Releases. Without this line, piot silent-skips Release
+          # creation and you only get tags on the Releases page.
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
 `;
 
 const PLAN_JOB = `  plan:

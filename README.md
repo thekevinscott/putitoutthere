@@ -56,7 +56,12 @@ decides *when* to ship. The scaffolded `release.yml` runs on push to `main`
 and invokes `putitoutthere plan` against the trailer + changed paths, then
 `putitoutthere publish` per matching package. Tags are `{name}-v{version}`
 by default — set `tag_format = "v{version}"` in `putitoutthere.toml` for
-single-package repos.
+single-package repos. A matching GitHub Release is cut per tag with
+auto-generated notes from `git log <prev-tag>..<this-tag>`; the Release
+step is best-effort and requires `GITHUB_TOKEN` (the scaffolded
+`release.yml` forwards it) plus `permissions: contents: write`. Repos
+scaffolded before this forwarding was added need a one-line patch — see
+[`MIGRATIONS.md`](./MIGRATIONS.md#scaffolded-releaseyml-now-forwards-github_token).
 
 The trailer is optional. By default, any package whose `paths` matched
 changed files cascades at `patch`. Use `release: minor` / `release: major`
