@@ -1,13 +1,5 @@
 # Guidance for LLM agents
 
-> **Scope:** this file governs work *inside the `putitoutthere` repo* —
-> i.e., contributing to the tool itself. If you are a foreign agent
-> integrating `putitoutthere` into a host project (dirsql, your own
-> repo, etc.), this file is not your contract. Read the [README](./README.md)
-> and the [docs site](https://thekevinscott.github.io/putitoutthere/) instead.
-> In particular, the `CHANGELOG.md` / `MIGRATIONS.md` policy below applies
-> to PRs against this repo, not to consumers adopting `putitoutthere`.
-
 This file is the primary instruction set for any LLM (Claude, Codex, Cursor,
 etc.) working in this repo. `CLAUDE.md` exists as a Claude-specific entry
 point that `@`-includes this file, so edit here — not there.
