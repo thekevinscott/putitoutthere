@@ -22,7 +22,13 @@
   "files": [
     "dist",
     "action.yml",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "MIGRATIONS.md",
+    "docs/api",
+    "docs/guide",
+    "docs/getting-started.md",
+    "docs/index.md"
   ],
   "engines": {
     "node": ">=20"
