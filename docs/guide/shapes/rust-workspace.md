@@ -113,8 +113,8 @@ gate `publish` behind a separate `test` job via `needs:`.
    policy on `foo-core` does not cover `foo-macros`. For brand-new
    crates with no prior publish, you'll need a one-time bootstrap
    with a scoped `CARGO_REGISTRY_TOKEN`, then switch to OIDC.
-2. Declare `[package.trust_policy]` on each `[[package]]` so
-   `doctor` catches a rename mismatch per crate.
+2. Declare `[package.trust_policy]` on each `[[package]]` so the
+   engine catches a rename mismatch per crate.
 3. Delete any long-lived `CARGO_REGISTRY_TOKEN` repo secret once
    OIDC works across every crate.
 

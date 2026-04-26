@@ -13,7 +13,6 @@ export default defineConfig({
       { text: 'Getting Started', link: '/getting-started' },
       { text: 'Guide', link: '/guide/concepts' },
       { text: 'Library shapes', link: '/guide/shapes/' },
-      { text: 'API', link: '/api/cli' },
       { text: 'GitHub', link: 'https://github.com/thekevinscott/putitoutthere' },
     ],
     sidebar: {
@@ -45,7 +44,6 @@ export default defineConfig({
             { text: 'Rust + PyO3 wheels', link: '/guide/shapes/rust-pyo3' },
             { text: 'Rust + napi npm', link: '/guide/shapes/rust-napi' },
             { text: 'Polyglot Rust library', link: '/guide/shapes/polyglot-rust' },
-            { text: 'Python wheels (cibuildwheel)', link: '/guide/shapes/python-cibuildwheel' },
           ],
         },
         {
@@ -65,12 +63,10 @@ export default defineConfig({
             { text: 'Authentication', link: '/guide/auth' },
             { text: 'Release trailer', link: '/guide/trailer' },
             { text: 'Nightly release', link: '/guide/nightly-release' },
-            { text: 'Testing your release workflow', link: '/guide/testing-your-release-workflow' },
             { text: 'Cascade', link: '/guide/cascade' },
             { text: 'Artifact contract', link: '/guide/artifact-contract' },
             { text: 'Troubleshooting publish failures', link: '/guide/troubleshooting' },
             { text: 'npm platform packages', link: '/guide/npm-platform-packages' },
-            { text: 'Custom build workflows', link: '/guide/custom-build-workflows' },
             { text: 'Runner prerequisites', link: '/guide/runner-prerequisites' },
             { text: 'Dynamic versions', link: '/guide/dynamic-versions' },
             { text: 'Migrations', link: '/guide/migrations' },
@@ -89,18 +85,8 @@ export default defineConfig({
             { text: 'Rust + PyO3 wheels', link: '/guide/shapes/rust-pyo3' },
             { text: 'Rust + napi npm', link: '/guide/shapes/rust-napi' },
             { text: 'Polyglot Rust library', link: '/guide/shapes/polyglot-rust' },
-            { text: 'Python wheels (cibuildwheel)', link: '/guide/shapes/python-cibuildwheel' },
             { text: 'Bundled-CLI npm family', link: '/guide/shapes/bundled-cli' },
             { text: 'Dual-family npm (CLI + napi)', link: '/guide/shapes/dual-family-npm' },
-          ],
-        },
-      ],
-      '/api/': [
-        {
-          text: 'API',
-          items: [
-            { text: 'CLI', link: '/api/cli' },
-            { text: 'GitHub Action', link: '/api/action' },
           ],
         },
       ],

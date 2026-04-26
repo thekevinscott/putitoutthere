@@ -50,10 +50,12 @@ tag_format = "v{version}"                  # single-package shape: no name prefi
 
 ## Workflow shape
 
-`putitoutthere init` scaffolds `release.yml` with three jobs:
-`plan → build → publish`. For this shape, the build job needs Node
-and your toolchain (`tsc` / `tsup` / `rollup` / etc.), and the
-publish job needs Node on PATH. Minimum working example:
+The release workflow runs three phases internally
+(`plan → build → publish`). For this shape, the build phase needs
+Node and your toolchain (`tsc` / `tsup` / `rollup` / etc.), and
+the publish phase needs Node on PATH. The example below is a
+hand-written `release.yml` from the prior model; once the reusable
+workflow lands, the consumer file collapses to a few `uses:` lines.
 
 ```yaml
 name: Release
@@ -166,7 +168,7 @@ cross-shape reference.
    package. Brand-new packages can use a pending publisher to skip
    the bootstrap token.
 2. Declare the expected workflow in `[package.trust_policy]` so
-   `doctor` catches a rename mismatch before the publish tries:
+   the engine catches a rename mismatch before the publish tries:
 
    ```toml
    [package.trust_policy]

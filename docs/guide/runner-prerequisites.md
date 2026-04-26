@@ -1,9 +1,12 @@
 # Runner prerequisites
 
+::: warning Page being rewritten
+The runner prerequisites this page documents are wired into the reusable workflow. Consumers won't see this list once that workflow ships. The content below describes what the engine needs at publish time, useful for understanding internals but not consumer-facing setup. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
+:::
+
 `putitoutthere` shells out to per-language tools (`twine`, `cargo`,
-`npm`) and to `git`. The scaffolded `release.yml` covers the common
-needs, but depending on your shape, a few runner-level prerequisites
-need wiring before `putitoutthere publish` runs.
+`npm`) and to `git`. Depending on your shape, a few runner-level
+prerequisites need wiring before the publish phase runs.
 
 This page is the single reference for those prerequisites. Every
 shape guide links here rather than repeating the list.
@@ -41,10 +44,9 @@ Python runtime with the Action (enormous) or pulling it at runtime
 installing Python packages — `setup-python` + `pip install`. We use
 that mechanism instead of reinventing it.
 
-The scaffolded `release.yml` emitted by `putitoutthere init`
-**includes** these steps when your config has a `kind = "pypi"`
-package; this page is for readers adapting an existing workflow or
-debugging a failed run.
+The reusable workflow includes these steps when your config has a
+`kind = "pypi"` package; this page is for readers debugging a failed
+run or wiring a custom workflow that calls the engine directly.
 
 ## Git committer identity
 

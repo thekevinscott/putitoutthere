@@ -1,10 +1,14 @@
 # Artifact contract
 
-piot's `publish` job reads pre-built artifacts off disk. This page is
+::: warning Page being rewritten
+This page exists because consumers wrote their own `release.yml` and had to honor the artifact-naming contract by hand. Once the reusable workflow ships, the contract is internal and consumers don't see it. The grammar here documents what the engine emits and expects, which is unchanged. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
+:::
+
+piot's `publish` phase reads pre-built artifacts off disk. This page is
 the contract: **what files it expects, under which directory names,
-produced by which build step.** If your build job uploads under the
+produced by which build step.** If the build phase uploads under the
 right name, piot picks the files up and ships them. If it doesn't, the
-publish job fails the pre-publish completeness check with:
+publish phase fails the pre-publish completeness check with:
 
 ```
 putitoutthere: Artifact completeness check failed:
@@ -28,7 +32,7 @@ publish job:  actions/download-artifact@v4 path: artifacts          ← always "
               ...
                               │
                               ▼
-              putitoutthere publish     reads artifacts/<artifact-name>/
+              piot's publish phase      reads artifacts/<artifact-name>/
 ```
 
 Two contracts together:
@@ -39,9 +43,8 @@ Two contracts together:
    in the publish job). piot looks for files under
    `artifacts/<artifact-name>/`.
 
-The scaffolded `release.yml` already wires both. If you write the
-build job by hand or via `build_workflow` delegation, follow the
-naming convention below.
+The reusable workflow wires both internally. The naming convention
+below documents the engine's invariants.
 
 ## Use `matrix.artifact_name` and `matrix.artifact_path` verbatim
 
@@ -67,14 +70,11 @@ piot finds it.
 
 ## Naming convention reference
 
-For the cases where you *must* hard-code the name (custom
-`build_workflow`, multi-tool fan-in jobs, etc.), here is the grammar
-piot's `plan` emits and the publish job expects.
+The grammar piot's `plan` emits and the publish phase expects:
 
 | `kind`   | `build`                       | Slot                         | `artifact_name`                          | Files inside                          |
 |----------|-------------------------------|------------------------------|------------------------------------------|---------------------------------------|
 | `pypi`   | `setuptools` / `hatch`        | sdist                        | `<pkg.name>-sdist`                       | `<pypi-name>-<version>.tar.gz`        |
-| `pypi`   | `setuptools` / `hatch`        | wheel (cibuildwheel)         | `<pkg.name>-wheels-<runner>` *(your call)* | `*.whl` (one or many)              |
 | `pypi`   | `maturin`                     | sdist                        | `<pkg.name>-sdist`                       | `<pypi-name>-<version>.tar.gz`        |
 | `pypi`   | `maturin`                     | per-target wheel             | `<pkg.name>-wheel-<target>`              | `<pypi-name>-<version>-*.whl`         |
 | `crates` | —                             | crate tarball *(optional)*   | `<pkg.name>-crate`                       | `<pkg.name>-<version>.crate`          |
@@ -140,8 +140,7 @@ artifacts/my-lib-sdist/my-lib-0.2.13.tar.gz
 
 ### maturin per-target wheel
 
-When you delegate via `build_workflow` and hand-roll the upload,
-prefer a directory `path:` over a glob — `actions/upload-artifact@v4`
+Prefer a directory `path:` over a glob — `actions/upload-artifact@v4`
 preserves the workspace-relative path under a glob, which produces
 nested layouts the publish job's reader has to walk through:
 
@@ -204,9 +203,6 @@ Walk it back through the flow:
 
 ## Related
 
-- [Custom build workflows](/guide/custom-build-workflows) — when
-  you delegate the build step to a workflow you wrote, you own the
-  upload side of the contract.
 - [Troubleshooting publish failures](/guide/troubleshooting) — the
   full error-string → fix index.
 - [npm platform packages](/guide/npm-platform-packages) — the per-

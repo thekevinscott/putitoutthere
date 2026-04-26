@@ -41,9 +41,6 @@ One Rust crate feeds multiple artifacts on multiple registries.
 - [**Rust + PyO3 wheels**](/guide/shapes/rust-pyo3) — crate on
   crates.io + PyO3 wheels on PyPI via `maturin`, no napi.
   Subset of the polyglot shape.
-- [**Python wheels with C/C++ extensions**](/guide/shapes/python-cibuildwheel) —
-  `setuptools` or `hatch` + `cibuildwheel` for the
-  `pillow` / `lxml` / `numpy` shape (C/C++/Cython, not Rust).
 - [**Rust + napi npm**](/guide/shapes/rust-napi) — crate on
   crates.io + napi-rs family on npm, no PyPI. The inverse.
 - [**Polyglot Rust library**](/guide/shapes/polyglot-rust) — the

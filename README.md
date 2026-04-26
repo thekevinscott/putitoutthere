@@ -1,27 +1,17 @@
 # Put It Out There
 
-Polyglot release orchestrator for single-maintainer, LLM-authored projects
-that publish to crates.io, PyPI, and npm from one monorepo. One config file,
-one CLI, one trailer-driven signal — no per-package release plumbing.
+Polyglot release orchestrator for projects that publish to crates.io, PyPI,
+and npm from one repo. Ships as a reusable GitHub Actions workflow: one
+config file declares your packages, one `uses:` line in your
+`release.yml` runs the pipeline.
 
 **[Documentation](https://thekevinscott.github.io/putitoutthere/)**
 
-## Install
-
-```sh
-npx putitoutthere init
-```
-
-This scaffolds a `putitoutthere.toml` and two workflows
-(`.github/workflows/release.yml` and
-`.github/workflows/putitoutthere-check.yml`).
-
-For one-off runs without scaffolding:
-
-```sh
-pnpm add -D putitoutthere
-pnpm putitoutthere plan
-```
+> **Docs being rewritten.** The consumer surface is being collapsed to a
+> single reusable workflow. The README and docs originally described a
+> hand-written `release.yml` + CLI scaffold model that's being removed.
+> See [`notes/design-commitments.md`](./notes/design-commitments.md) for
+> the new direction.
 
 ## Minimum config
 
@@ -51,22 +41,14 @@ release: patch
 ```
 
 Valid bumps: `patch`, `minor`, `major`, `skip`. The trailer decides *which
-bump*; the workflow's `on:` block (push, schedule, `workflow_dispatch`)
-decides *when* to ship. The scaffolded `release.yml` runs on push to `main`
-and invokes `putitoutthere plan` against the trailer + changed paths, then
-`putitoutthere publish` per matching package. Tags are `{name}-v{version}`
+bump*; the consumer's workflow `on:` block (push, schedule,
+`workflow_dispatch`) decides *when* to ship. Tags are `{name}-v{version}`
 by default — set `tag_format = "v{version}"` in `putitoutthere.toml` for
-single-package repos. A matching GitHub Release is cut per tag with
-auto-generated notes from `git log <prev-tag>..<this-tag>`; the Release
-step is best-effort and requires `GITHUB_TOKEN` (the scaffolded
-`release.yml` forwards it) plus `permissions: contents: write`. Repos
-scaffolded before this forwarding was added need a one-line patch — see
-[`MIGRATIONS.md`](./MIGRATIONS.md#scaffolded-releaseyml-now-forwards-github_token).
+single-package repos.
 
 The trailer is optional. By default, any package whose `paths` matched
 changed files cascades at `patch`. Use `release: minor` / `release: major`
-to override the bump, or `release: skip` to suppress the release for that
-commit.
+to override the bump, or `release: skip` to suppress the release.
 
 ## Worked example: polyglot
 
@@ -105,8 +87,8 @@ just the npm package.
 
 ## Library shapes
 
-End-to-end walkthroughs — config + `release.yml` + prerequisites + gotchas —
-for the common shapes. Pick the one that matches your repo:
+End-to-end walkthroughs for the common shapes. Pick the one that matches
+your repo:
 
 **Single-package**
 
@@ -124,7 +106,6 @@ for the common shapes. Pick the one that matches your repo:
 - [Rust + PyO3 wheels](./docs/guide/shapes/rust-pyo3.md) — crate + PyPI (no napi)
 - [Rust + napi npm](./docs/guide/shapes/rust-napi.md) — crate + npm family (no PyPI)
 - [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) — all three registries from one core
-- [Python wheels with C extensions](./docs/guide/shapes/python-cibuildwheel.md) — `cibuildwheel` for the `pillow`/`lxml`/`numpy` shape
 
 **Distribution patterns**
 
@@ -146,27 +127,21 @@ renaming `release.yml` after registration requires updating the policy
 on each. npm provenance does not pin filenames; renames are free.
 
 Token fallbacks (`NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) are
-still read as env vars if OIDC isn't available. `putitoutthere doctor`
-reports which path is active.
+still read as env vars if OIDC isn't available.
 
 ## What it is not
 
-- Not a changelog generator. Use `git log` + conventional commits if you
-  want one.
+See [`notes/design-commitments.md`](./notes/design-commitments.md) for the
+authoritative non-goals. Highlights:
+
+- Not a changelog generator. Use `git log` + conventional commits if you want one.
 - Not a monorepo manager. Package boundaries are declared, not discovered.
-- Not a dependency resolver across ecosystems. `depends_on` is about
-  *cascading releases*, not runtime version pinning.
-- Not a build system. Handlers shell out to `cargo`, `uv`/`maturin`/`hatch`,
-  `npm` — standard toolchains only.
-- Not a build-step runner. Pre-publish work that produces artifacts
-  (cross-compiling a CLI to bundle into wheels, building napi addons,
-  staging binaries into a package directory) lives in your `release.yml`
-  between `plan` and `publish` — not as a hook in `putitoutthere.toml`.
-  The scaffolded workflow shows the pattern. See [custom build
-  workflows](./docs/guide/custom-build-workflows.md).
+- Not a build system. Handlers shell out to `cargo`, `uv`/`maturin`/`hatch`, `npm` — standard toolchains only.
+- Not a build-step runner. No `steps:` in config, no `build_workflow:` delegation. Shapes that don't fit piot's named build modes write their own release workflow.
 
 ## Docs
 
+- [Design commitments](./notes/design-commitments.md) — what piot is and isn't.
 - [Design proposal](./notes/4-17-2026-initial-plan/plan/proposal.md) — why this tool exists.
 - [Implementation plan](./notes/4-17-2026-initial-plan/plan/plan.md) — exhaustive reference.
 - [Migration guides](./migrations/) — per-repo plans for adopting putitoutthere.

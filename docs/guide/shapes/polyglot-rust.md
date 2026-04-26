@@ -27,7 +27,7 @@ responsibilities split is opinionated.
 | Run `maturin build --target …`, `napi build --target …`, `cargo build` — the compilation itself |        | ✅            |
 | Attach `.tar.xz` / `.tar.gz` binary archives to the GitHub Release            |        | ✅ (compose with `cargo-dist`) |
 | Register the trusted-publisher policy on each registry (one-time, out-of-CI) |        | ✅            |
-| Diff declared trust-policy config against the workflow file + `GITHUB_WORKFLOW_REF` (catches the caller-filename-pin trap via `doctor`) | ✅ (when `[package.trust_policy]` is declared) | |
+| Diff declared trust-policy config against the workflow file + `GITHUB_WORKFLOW_REF` (catches the caller-filename-pin trap) | ✅ (when `[package.trust_policy]` is declared) | |
 
 The publish-side plus the matrix + runner emission are piot's. The
 build-side — compiling the artifacts the matrix demands — is your
@@ -84,9 +84,10 @@ depends_on = ["my-crate"]
 
 ## Workflow shape
 
-`putitoutthere init` scaffolds `release.yml` with three jobs:
-`plan → build → publish`. For a polyglot shape, the `build` job is
-yours to fill in. A minimum sketch:
+The release workflow runs three phases internally
+(`plan → build → publish`). The example below is a hand-written
+`release.yml` from the prior model; once the reusable workflow
+lands, the consumer file collapses to a few `uses:` lines. Sketch:
 
 ```yaml
 jobs:
@@ -159,7 +160,7 @@ invokes the piot action. For this shape, **it also needs**:
    workflow filename** in the JWT claim — if you rename `release.yml`,
    each registry's policy needs to be re-registered first or the
    publish fails with HTTP 400. Declare the expected workflow in
-   `[package.trust_policy]` so `doctor` catches a mismatch before
+   `[package.trust_policy]` so the engine catches a mismatch before
    the publish tries.
 2. Delete any long-lived `NPM_TOKEN` / `PYPI_API_TOKEN` /
    `CARGO_REGISTRY_TOKEN` repo secrets once OIDC is working, so

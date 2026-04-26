@@ -1,9 +1,12 @@
 # Getting started
 
-Put It Out There (piot) is a polyglot release orchestrator. One
-`putitoutthere.toml` describes your packages; the CLI computes a
-release plan from git + a commit trailer and publishes to crates.io,
-PyPI, and npm.
+::: warning Docs being rewritten
+The consumer surface is being collapsed to a single reusable GitHub Actions workflow. The "scaffold a `release.yml` and run a CLI" model these docs were originally written against is being removed. Pages will be rewritten as the new surface lands. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) for the direction.
+:::
+
+Put It Out There (piot) is a polyglot release orchestrator. One config file
+declares your packages; a reusable GitHub Actions workflow publishes them to
+crates.io, PyPI, and npm.
 
 ## Does piot fit your library?
 
@@ -11,7 +14,7 @@ piot is a good fit if you can answer **yes** to most of these:
 
 - [ ] Your artifacts publish to some combination of **crates.io, PyPI, and npm** — piot only covers those three registries.
 - [ ] You use (or are willing to use) **OIDC trusted publishing** on each registry. Long-lived tokens work as a fallback, but OIDC is the happy path.
-- [ ] You build your artifacts in **GitHub Actions**. The scaffolded workflow is a GitHub Actions workflow; piot's Action and OIDC flows assume that runtime.
+- [ ] You build your artifacts in **GitHub Actions**. piot ships as a reusable workflow; that runtime is assumed.
 - [ ] You're comfortable with **one tag per package** — defaults to `{name}-v{version}`, or pick your own template via [`tag_format`](/guide/configuration).
 - [ ] Your release trigger is **up to you**: merge to `main`, scheduled cron, or manual dispatch all work. See the [nightly release recipe](/guide/nightly-release) for the cron shape.
 - [ ] The default bump is **`patch` whenever a package's files change**. Opt into explicit `minor`/`major` bumps (or `skip`) via a [commit trailer](/guide/trailer) — trailers are optional.
@@ -20,10 +23,10 @@ piot is probably **not** the right tool if:
 
 - You need a registry piot doesn't cover (Maven, NuGet, Docker Hub, internal registries, etc.).
 - You publish from CI systems other than GitHub Actions.
-- You want piot to **run the compile** itself. piot emits the build-job matrix (with per-target `runner` overrides you declare in config), but `maturin build` / `napi build` / `cargo build` still live in your workflow's build step.
+- You need a **build escape hatch** for shapes that don't fit piot's named build modes (`hatch`, `maturin`, `napi`, `bundled-cli`). Examples: `cibuildwheel`, custom `Makefile`s, exotic cross-compile rigs. Write your own release workflow; don't use piot.
 - You want **standalone binary archives** attached to GitHub Releases with a curl-installable tarball. That's `cargo-dist`'s / `goreleaser`'s lane; compose with them, don't replace them with piot.
 - You need **changelog generation**. Delegate to `release-please` or similar.
-- You want **automatic tag rollback** on partial-publish failures. piot deliberately doesn't do this — crates.io is immutable, so deletion isn't safe. Instead piot runs a completeness-check before anything ships.
+- You want **automatic tag rollback** on partial-publish failures. piot deliberately doesn't do this — crates.io is immutable, so deletion isn't safe. Instead piot runs a completeness check before anything ships.
 
 See [Known gaps](/guide/gaps) for the full enumeration of non-goals
 and limitations, or [Design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) for the policy these are derived from.
@@ -36,20 +39,9 @@ to piot, two things trip up most migrations:
 - **The caller workflow filename is load-bearing for OIDC.** crates.io
   and npm pin the caller workflow filename in the OIDC trust policy's
   JWT claim. If your current trusted publisher is registered against
-  (say) `patch-release.yml` and `putitoutthere init` writes a new
-  `release.yml`, publish fails with HTTP 400. Declare the expected
-  workflow in `putitoutthere.toml` so `doctor` catches the drift
-  before cutover:
-
-  ```toml
-  [package.trust_policy]
-  workflow    = "release.yml"
-  environment = "release"
-  ```
-
-  With the block in place, `doctor` diffs the declared workflow
-  against the local file and (in CI) against `GITHUB_WORKFLOW_REF`.
-  See [Authentication → Declaring trust-policy expectations](/guide/auth#declaring-trust-policy-expectations).
+  (say) `patch-release.yml` and your new piot-driven workflow is named
+  `release.yml`, publish fails with HTTP 400. Update the trust policy
+  on each registry to match your new filename before cutover.
 - **Tags are per package, not shared.** piot tags each package
   independently as `{name}-v{version}`. Anything reading a single
   shared `v{version}` tag today (install scripts, doc links, release
@@ -66,40 +58,14 @@ to piot, two things trip up most migrations:
 
 ## Pick your library shape
 
-Worked end-to-end examples for the common shapes. Pick the one that matches your repo:
+Worked examples for the common shapes. Note that shape pages still
+describe the prior hand-written-`release.yml` integration model and
+will be rewritten as the reusable workflow surface lands.
 
-- [**Single-package Python library**](/guide/shapes/python-library) — one `pyproject.toml`, publishing to PyPI. Covers static-version and dynamic-version (`hatch-vcs` / `setuptools-scm`) setups.
-- [**Polyglot Rust library** (Rust crate + PyO3 wheel + napi npm)](/guide/shapes/polyglot-rust) — one Rust core, three artifacts (crates.io, PyPI via `maturin`, npm via `napi-rs`).
+- [**Single-package Python library**](/guide/shapes/python-library) — one `pyproject.toml`, publishing to PyPI.
+- [**Polyglot Rust library** (Rust crate + PyO3 wheel + napi npm)](/guide/shapes/polyglot-rust) — one Rust core, three artifacts.
 
-More shapes will live under [Library shapes](/guide/shapes/) as they're written.
-
-## Install
-
-```bash
-npx putitoutthere init
-```
-
-Scaffolds:
-
-- `putitoutthere.toml` — declare your packages.
-- `.github/workflows/release.yml` — plan → build → publish pipeline.
-- `.github/workflows/putitoutthere-check.yml` — PR dry-run check.
-- `putitoutthere/AGENTS.md` — the trailer convention your LLM agent will follow.
-
-::: tip Migrating an existing workflow? Run `init` in a scratch directory first
-piot's Action surface is `command: plan` and `command: publish` —
-**there is no `command: build`**. The middle job is your workflow's
-job. The 3-job structure plan → build → publish (with
-`actions/upload-artifact` between them, keyed off
-`matrix.artifact_name`) is part of piot's contract; the publish-side
-completeness check assumes it.
-
-If you're hand-porting from a 2-job inline-build-publish workflow,
-run `npx putitoutthere init` in a temp directory first, treat the
-emitted `release.yml` as the canonical reference, and copy in only
-the diff you care about. See [Concepts → piot's surface](/guide/concepts#the-loop)
-and the [artifact contract](/guide/artifact-contract).
-:::
+More shapes at [Library shapes](/guide/shapes/).
 
 ## Minimum config
 
@@ -128,5 +94,5 @@ in the merge commit body. See [the trailer guide](/guide/trailer) for the full g
 ## Further reading
 
 - [Concepts](/guide/concepts) — cascade, trailer, plan/build/publish, and what piot does / doesn't cover.
-- [Configuration](/guide/configuration) — every field in `putitoutthere.toml`.
-- [CLI reference](/api/cli).
+- [Configuration](/guide/configuration) — every field in the config.
+- [Design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) — what piot is and isn't.

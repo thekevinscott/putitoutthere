@@ -55,10 +55,12 @@ dependency bump should cascade a publish.
 
 ## Workflow shape
 
-`putitoutthere init` scaffolds `release.yml` with three jobs:
-`plan → build → publish`. For a plain crate, the build job is
+The release workflow runs three phases internally:
+`plan → build → publish`. For a plain crate, the build phase is
 minimal (or absent — piot doesn't need build artifacts for
-crates.io). Minimum working example:
+crates.io). The example below is a hand-written `release.yml` from
+the prior model; once the reusable workflow lands, the consumer
+file collapses to a few `uses:` lines.
 
 ```yaml
 name: Release
@@ -136,7 +138,7 @@ cross-shape reference.
    one-time bootstrap with a scoped `CARGO_REGISTRY_TOKEN` and
    then switch to OIDC.
 2. Declare the expected workflow in `[package.trust_policy]` so
-   `doctor` catches a rename mismatch before the publish tries:
+   the engine catches a rename mismatch before the publish tries:
 
    ```toml
    [package.trust_policy]

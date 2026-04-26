@@ -1,5 +1,9 @@
 # Troubleshooting publish failures
 
+::: warning Page being rewritten
+Examples on this page reference the prior hand-written-`release.yml` model. Engine error messages and root causes are still accurate; integration-side fixes will change as the reusable workflow lands. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
+:::
+
 Error-string-keyed index of common publish-job failures. Every entry
 gives you the literal message piot prints, the underlying cause, and
 the fix. If your error isn't here, the [Known gaps](/guide/gaps)
@@ -33,8 +37,6 @@ checklist in the artifact-contract page. The simplest version:
   job emits — those are the source of truth. See the [artifact
   contract](/guide/artifact-contract#use-matrix-artifact-name-and-matrix-artifact-path-verbatim)
   for the canonical snippet.
-- If you're using `build_workflow` delegation, look up the expected
-  name in the [naming convention reference](/guide/artifact-contract#naming-convention-reference).
 
 The `<expected-dir>` value in the error is the encoded directory
 piot expects (a single flat path under `artifacts/`). Forward slashes
@@ -116,10 +118,9 @@ won't update the registry side — that's a one-time out-of-band step.
 
 1. **Re-register the trusted publisher** against the new workflow
    filename (and environment, if you set one).
-2. **Rename the scaffolded workflow** to match the existing trust
-   policy. If you go this route, declare it in
-   `[package.trust_policy]` so `doctor` catches drift on the next
-   migration:
+2. **Rename the workflow** to match the existing trust policy. If
+   you go this route, declare it in `[package.trust_policy]` so the
+   engine catches drift on the next migration:
 
    ```toml
    [package.trust_policy]
@@ -127,8 +128,8 @@ won't update the registry side — that's a one-time out-of-band step.
    environment = "release"
    ```
 
-`doctor` diffs the declared workflow against the local file and (in
-CI) against `GITHUB_WORKFLOW_REF`. With the block in place, the
+The engine diffs the declared workflow against the local file and
+(in CI) against `GITHUB_WORKFLOW_REF`. With the block in place, the
 mismatch surfaces *before* the publish call, not after. See
 [Authentication → Declaring trust-policy expectations](/guide/auth#declaring-trust-policy-expectations).
 
@@ -168,26 +169,18 @@ matrix, build + publish were skipped. Common when:
 - The PR / commit didn't touch any file inside a `[[package]].paths`
   glob.
 - A `release: skip` trailer was present.
-- The `paths` globs are wrong. Run
-  [`putitoutthere plan --json`](/api/cli#plan) locally to inspect.
+- The `paths` globs are wrong.
 
 If you *expected* a release, the most likely cause is a `paths`
 mismatch — files outside the declared globs don't cascade. Double-
 check the globs against `git diff --name-only origin/main` for the
 range you care about.
 
-## A green PR-event run did not publish anything
+## A green workflow run did not publish anything
 
-Not an error either — this is intentional. The check workflow
-(`putitoutthere-check.yml`) and the release workflow on
-`pull_request` events both deliberately skip the publish job. A
-green workflow run on a PR validates that the plan computes and the
-build steps work; it does **not** ship anything.
-
-The signal of a real release is a **tag push** (`{name}-v{version}`,
+Workflow-run success alone is necessary but not sufficient — the
+signal of a real release is a **tag push** (`{name}-v{version}`,
 or your `tag_format`) plus a GitHub Release on the Releases page.
-Workflow-run success on a PR event is necessary but not sufficient.
-
 See [Concepts → What runs on which event](/guide/concepts#what-runs-on-which-event)
 for the matrix.
 
@@ -224,7 +217,5 @@ it.
   one-time setup that prevents most first-release failures.
 - [Authentication](/guide/auth) — OIDC trust policy registration,
   per registry.
-- [Testing your release workflow](/guide/testing-your-release-workflow) —
-  how to validate a pipeline change before the next natural release.
 - [Known gaps](/guide/gaps) — failure modes piot deliberately doesn't
   paper over.

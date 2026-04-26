@@ -67,8 +67,11 @@ wheel metadata. This shape almost never needs the
 
 ## Workflow shape
 
-`putitoutthere init` scaffolds `release.yml` with three jobs. For
-this shape, the build job runs `maturin build` once per target:
+The release workflow runs three phases internally
+(`plan → build → publish`). For this shape, the build phase runs
+`maturin build` once per target. The example below is a hand-
+written job from the prior model; once the reusable workflow
+lands, the consumer file collapses to a few `uses:` lines.
 
 ```yaml
 build:
@@ -123,7 +126,7 @@ See [runner prerequisites](/guide/runner-prerequisites).
 1. Register trusted publishers on crates.io and PyPI. See
    [Authentication](/guide/auth).
 2. Declare `[package.trust_policy]` on each `[[package]]` so
-   `doctor` catches a rename mismatch before the publish tries.
+   the engine catches a rename mismatch before the publish tries.
 3. Delete long-lived `CARGO_REGISTRY_TOKEN` / `PYPI_API_TOKEN`
    secrets once OIDC is working.
 

@@ -155,7 +155,7 @@ See [runner prerequisites](/guide/runner-prerequisites).
    you'll publish. npm trust policies are per-package; a policy
    registered only on `my-cli` won't let piot publish
    `my-cli-x86_64-unknown-linux-gnu`.
-2. Declare `[package.trust_policy]` on the top-level so `doctor`
+2. Declare `[package.trust_policy]` on the top-level so the engine
    catches a rename mismatch.
 3. Delete any long-lived `NPM_TOKEN` repo secret once OIDC is
    working.
@@ -165,8 +165,7 @@ See [runner prerequisites](/guide/runner-prerequisites).
 - **Per-platform trusted publishers.** Easiest to miss: the npm
   trust policy has to exist on every sub-package name piot will
   publish. Register a pending publisher for each before the first
-  release; piot's `doctor` will flag missing ones, but only after
-  the first attempted publish has failed.
+  release; the engine flags missing ones on the next publish.
 - **Windows binary name.** The built binary is `my-cli.exe` on
   Windows but `my-cli` elsewhere. Your launcher has to branch on
   `process.platform` when calling `require.resolve`. The example

@@ -21,6 +21,39 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Public surface scoped to the reusable workflow
+
+**Summary.** The consumer surface is being collapsed to a single
+reusable GitHub Actions workflow (`uses:
+thekevinscott/putitoutthere/.github/workflows/release.yml@v1`) plus
+a `putitoutthere.toml` config file. The CLI, the JS action, the
+`putitoutthere-check.yml` PR-gate pattern, the
+`docs/guide/custom-build-workflows.md` escape hatch, and the
+`cibuildwheel` shape are removed from the documented surface. The
+reusable workflow itself has not landed yet; this change captures
+the direction in [`notes/design-commitments.md`](./notes/design-commitments.md)
+and prunes docs that described the prior model. See
+[design commitments](./notes/design-commitments.md) for the
+authoritative non-goals.
+
+**Required changes.** None for working consumers. Existing
+hand-written `release.yml` files keep working until the reusable
+workflow lands and consumers migrate. When that lands, a follow-up
+migration entry will document the before/after.
+
+**Deprecations removed.** None enforced in code yet. The
+`build_workflow:` config field still parses; future versions will
+remove it entirely.
+
+**Behavior changes without code changes.** None. Engine behavior
+(plan, cascade, version bump, registry handlers, completeness
+check, idempotency) is unchanged.
+
+**Verification.** `pnpm --filter putitoutthere-docs test:unit &&
+pnpm --filter putitoutthere-docs build` passes; deleted pages do
+not appear in the sidebar; remaining pages carry a "page being
+rewritten" banner where they reference the prior integration model.
+
 ### Publish path works end-to-end for slash-containing `pkg.name`
 
 **Summary.** Follow-up to the [`/`-encoding fix](#package-names-with--no-longer-need-an-encode-decode-workaround)

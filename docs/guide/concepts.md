@@ -1,5 +1,9 @@
 # Concepts
 
+::: warning Page being rewritten
+The "what runs on which event" tables and the "piot's surface is plan + publish" framing on this page describe the prior hand-written-`release.yml` integration model. The consumer surface is being collapsed to a single reusable workflow; see [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md). Engine concepts (cascade, trailer, topological publish, idempotency) still apply.
+:::
+
 > Evaluating piot for a migration? Read [Known gaps](/guide/gaps)
 > alongside this page — it enumerates non-goals, behaviours that
 > commonly get misread as gaps, and outstanding limitations.
@@ -31,10 +35,9 @@ checks so partial publishes are rare. That's the whole tool.
   (`{ triple, runner }`). The planner emits the selected runner into
   the build-job matrix. See [Configuration → Target entries](/guide/configuration#target-entries).
 - Declared trust-policy validation: `[package.trust_policy]` in
-  `putitoutthere.toml`, then `doctor` diffs against the workflow
-  file (always), `GITHUB_WORKFLOW_REF` (in CI), and the crates.io
-  registry (when `CRATES_IO_DOCTOR_TOKEN` is set). See
-  [Authentication](/guide/auth).
+  `putitoutthere.toml` is diffed against the local workflow file,
+  `GITHUB_WORKFLOW_REF` (in CI), and the crates.io registry (when
+  `CRATES_IO_DOCTOR_TOKEN` is set). See [Authentication](/guide/auth).
 - Create a git tag per package (`{name}-v{version}`) and a GitHub
   Release.
 
@@ -72,48 +75,30 @@ Every push to `main` triggers the release workflow, which runs three jobs:
 2. **build** — fan out across the matrix. User-owned build steps produce the artifacts.
 3. **publish** — per package: write version file, run the handler's publish, create a git tag, create a GitHub Release.
 
-::: tip piot's surface is plan + publish — build is yours
-The piot Action exposes two `command:` values: `plan` and `publish`.
-There is no `command: build`. The middle job is **your workflow's
-responsibility** — your build step produces the artifacts and uploads
-them under the names piot's `plan` job emitted on each matrix row
-(`matrix.artifact_name`, `matrix.artifact_path`). The publish job
-then reads those artifacts off disk via `actions/download-artifact`.
-
-If you're hand-rolling the workflow or migrating from a different
-shape, run `npx putitoutthere init` in a scratch directory first and
-treat the scaffolded `release.yml` as the canonical reference. The
-3-job plan → build → publish structure (with `upload-artifact` /
-`download-artifact` between them) is part of piot's contract; piot's
-publish-side completeness check assumes it. See the
-[artifact contract](/guide/artifact-contract) for the file-layout
-half of that contract.
+::: tip Build is the engine's job, not the consumer's
+The reusable workflow internally runs the plan → build → publish
+loop. Build steps are emitted from the matrix `plan` produces and
+run inside the workflow; the consumer doesn't see the structure.
+See the [artifact contract](/guide/artifact-contract) for the
+file-layout invariants the publish phase enforces.
 :::
 
 ## What runs on which event
 
-The scaffolded workflows run different subsets of the loop depending on the event that triggered them. Knowing the table prevents the most common false-positive: assuming a green run on a PR is a release.
+The reusable workflow runs different subsets of the loop depending on
+the event that triggered the consumer's `release.yml`:
 
-| Event                                  | Workflow                            | plan | build | publish | tag + Release |
-|----------------------------------------|-------------------------------------|:----:|:-----:|:-------:|:-------------:|
-| `push: branches: [main]`               | `release.yml`                       | ✅   | ✅    | ✅      | ✅            |
-| `pull_request`                         | `putitoutthere-check.yml`           | ✅   | —     | —       | —             |
-| `pull_request` (if release.yml runs)   | `release.yml` (publish step gated)  | ✅   | ✅    | skipped | —             |
-| `workflow_dispatch` (`dry_run: true`)  | `release.yml`                       | ✅   | ✅    | skipped | —             |
-| `workflow_dispatch` (`dry_run: false`) | `release.yml`                       | ✅   | ✅    | ✅      | ✅            |
-| `schedule:`                            | `release.yml`                       | ✅   | ✅    | ✅      | ✅            |
-
-The publish step is gated on `github.event_name != 'pull_request'`
-(and on `dry_run != true`). A green PR-event run validates the plan
-+ build halves of your pipeline — it does **not** indicate that
-anything was published.
+| Event                                  | plan | build | publish | tag + Release |
+|----------------------------------------|:----:|:-----:|:-------:|:-------------:|
+| `push: branches: [main]`               | ✅   | ✅    | ✅      | ✅            |
+| `workflow_dispatch` (`dry_run: true`)  | ✅   | ✅    | skipped | —             |
+| `workflow_dispatch` (`dry_run: false`) | ✅   | ✅    | ✅      | ✅            |
+| `schedule:`                            | ✅   | ✅    | ✅      | ✅            |
 
 **The signal of a real release is a tag push**
 (`{name}-v{version}`, or your `tag_format`) plus a GitHub Release on
 the Releases page. Workflow-run success alone is necessary but not
-sufficient. See [Testing your release workflow](/guide/testing-your-release-workflow)
-for how to deliberately exercise the publish path before the next
-natural release.
+sufficient.
 
 ## Cascade
 
@@ -159,5 +144,3 @@ Each `[[package]]` declares a `kind` (`crates` / `pypi` / `npm`) and, for some k
 `putitoutthere` rewrites the version field in each package's manifest (`Cargo.toml`, `pyproject.toml`, `package.json`) right before publishing. That edit is intentional and not committed — the release tag points at the unmodified merge commit (see [cascade](/guide/cascade)).
 
 For the crates handler, that means `cargo publish --allow-dirty` is required. Before invoking cargo, `putitoutthere` scans the working tree and refuses to proceed if anything is dirty outside the managed `Cargo.toml` — that narrow scope restores cargo's default safety net without blocking the managed bump.
-
-If you run `putitoutthere publish` locally outside a git work tree (e.g. in a snapshot directory), this guard falls through silently and cargo's own `--allow-dirty` semantics take over. Prefer running publishes from inside a checked-out repo.

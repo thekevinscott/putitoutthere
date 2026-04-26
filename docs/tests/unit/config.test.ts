@@ -25,12 +25,10 @@ describe('vitepress config', () => {
     const labels = nav.map((item) => item.text);
     expect(labels).toContain('Getting Started');
     expect(labels).toContain('Guide');
-    expect(labels).toContain('API');
   });
 
-  it('has a sidebar for /guide/ and /api/', () => {
+  it('has a sidebar for /guide/', () => {
     const sidebar = config.themeConfig?.sidebar ?? {};
     expect(sidebar['/guide/']).toBeTruthy();
-    expect(sidebar['/api/']).toBeTruthy();
   });
 });

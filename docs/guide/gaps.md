@@ -125,26 +125,25 @@ single `my-lib` top-level whose `optionalDependencies` mix both
 shape, split into two published names (e.g. `my-lib` for the napi
 library, `my-lib-cli` for the CLI).
 
-### `doctor`'s trust-policy check is opt-in and scoped
+### Trust-policy validation is opt-in and scoped
 
-`doctor` validates OIDC trust-policy setup in layered phases, but
-only the first runs unconditionally:
+The engine validates OIDC trust-policy setup in layered phases at
+publish time:
 
-- **Trust policy (local)** — always on. Verifies a publishing
+- **Local structure check** — always on. Verifies a publishing
   workflow exists, `id-token: write` + `contents: write` are granted,
   an `environment:` is pinned, and the publish step isn't commented
   out.
-- **Trust policy (declared)** — runs when any package declares
+- **Declared diff** — runs when any package declares
   `[package.trust_policy]` in `putitoutthere.toml`. Diffs the
   declared workflow filename against the local workflow file and
   (in CI) against `GITHUB_WORKFLOW_REF`. Without a declaration,
-  the phase prints a neutral "not declared" line — `doctor` does
-  not infer intent.
-- **Trust policy (crates.io registry)** — opt-in, runs only when
+  the engine does not infer intent.
+- **crates.io registry cross-check** — opt-in, runs only when
   `CRATES_IO_DOCTOR_TOKEN` is set in the environment. Cross-checks
   the declaration against the trusted-publisher configs registered
   on crates.io.
 
 For PyPI and npm there is no registry cross-check (neither exposes
-an API for it); the declared phase is the full gate there. See
-[Authentication → Validating the trust-policy setup locally](/guide/auth#validating-the-trust-policy-setup-locally-doctor).
+an API for it); the declared diff is the full gate there. See
+[Authentication → Declaring trust-policy expectations](/guide/auth#declaring-trust-policy-expectations).

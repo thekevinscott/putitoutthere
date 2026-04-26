@@ -142,8 +142,8 @@ when only one package needs to ship.
    package name**. npm trust policies are per-package; a policy
    on `@scope/core` doesn't cover `@scope/parser`. Use pending
    publishers for brand-new package names.
-2. Declare `[package.trust_policy]` on each `[[package]]` so
-   `doctor` flags missing or misconfigured policies before the
+2. Declare `[package.trust_policy]` on each `[[package]]` so the
+   engine flags missing or misconfigured policies before the
    publish runs.
 3. Delete any long-lived `NPM_TOKEN` repo secret once OIDC works
    for every package.
@@ -168,9 +168,8 @@ when only one package needs to ship.
   the compiled JS. Otherwise piot uploads the wrong contents.
 - **Per-package trust policies multiply.** With N packages,
   you'll register N trust policies, N pending-publisher rows in
-  the npm UI. Easy to miss one for a brand-new sibling. piot's
-  `doctor` will flag missing policies, but only after the first
-  attempted publish has failed.
+  the npm UI. Easy to miss one for a brand-new sibling. The engine
+  flags missing policies on the next publish.
 - **Per-package tags multiply too.** Each merge that cascades
   all N packages produces N tags. If consumers grep your tag
   list, this can be noisy; that's the cost of per-package

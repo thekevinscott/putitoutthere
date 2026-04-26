@@ -31,17 +31,20 @@ surface — breaking or additive — needs an entry in both files.
 
 "Public API" means anything a downstream consumer can observe:
 
-- CLI commands, subcommands, flags, arguments, exit codes, and stdout/JSON
-  output shapes (`docs/api/cli.md`).
-- GitHub Action inputs, outputs, and default behavior (`action.yml`,
-  `docs/api/action.md`).
+- The reusable workflow's `workflow_call` inputs, outputs, and default
+  behavior (`.github/workflows/release.yml`, when published).
 - `putitoutthere.toml` schema — keys, value grammars, defaults, validation
   rules (`docs/guide/configuration.md`, `docs/guide/shapes/`).
 - The `release:` trailer grammar (`docs/guide/trailer.md`).
 - Tag format, GitHub Release body shape, and any other artifact a consumer
   workflow might grep.
-- TypeScript exports from `src/index.ts` (if/when we commit to them as a
-  library surface — today they're internal).
+
+The CLI, the JS action (`action.yml`), and `src/` exports are **not**
+public surface — they're internal seams powering the reusable workflow.
+Changes there don't require changelog entries unless they alter the
+reusable workflow's externally-visible behavior. See
+[`notes/design-commitments.md`](./notes/design-commitments.md) for the
+authoritative non-goals.
 
 Purely internal refactors, test-only changes, and docs-only edits do not
 require an entry. If CI flags a PR that genuinely has no consumer impact,
@@ -71,16 +74,16 @@ Single file at the repo root, auto-included into the docs site at
 entries go under `## Unreleased`. Each entry uses this structure:
 
 1. **Summary** — one paragraph: what changed and why.
-2. **Required changes** — before/after table covering config, CLI flags,
-   action inputs, and any code a consumer needs to touch. "None" if the
-   change is purely additive.
+2. **Required changes** — before/after table covering config, reusable
+   workflow inputs, and any consumer-side YAML they need to touch. "None"
+   if the change is purely additive.
 3. **Deprecations removed** — anything previously warned about that is now
    gone. "None" if nothing was removed.
 4. **Behavior changes without code changes** — same API, different runtime
    behavior (tag format, exit codes, retry semantics, default values).
-5. **Verification** — commands the consumer can run (`putitoutthere plan
-   --dry-run`, etc.) and the expected output that confirms the upgrade
-   worked.
+5. **Verification** — what the consumer can observe to confirm the upgrade
+   worked (a tag push, a release on GitHub, output of `workflow_dispatch`
+   with `dry_run: true`, etc.).
 
 When a version is cut, the release process renames `## Unreleased` to
 `## v<OLD> → v<NEW>` in both files and opens a fresh `## Unreleased` block.

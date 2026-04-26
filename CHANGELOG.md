@@ -47,6 +47,7 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Changed
 
+- **Public consumer surface scoped to a reusable GitHub Actions workflow.** The CLI, the JS action (`action.yml`), and the diagnostic subcommands (`doctor`, `preflight`) are no longer documented as consumer-facing; they remain in the repo as internal seams the reusable workflow invokes. Docs are mid-rewrite — pages currently describing the prior hand-written-`release.yml` integration model carry a banner. The reusable workflow itself has not landed yet; this change captures the direction in [`notes/design-commitments.md`](./notes/design-commitments.md) and removes pages whose entire content described removed surface (`docs/api/cli.md`, `docs/api/action.md`, `docs/guide/custom-build-workflows.md`, `docs/guide/shapes/python-cibuildwheel.md`, `docs/guide/testing-your-release-workflow.md`). See [MIGRATIONS.md](./MIGRATIONS.md#public-surface-scoped-to-the-reusable-workflow) for the consumer-facing implications.
 - **Repository renamed `put-it-out-there` → `putitoutthere`.** GitHub auto-redirects the old slug, but consumers with the old URL pinned in `package.json`, `Cargo.toml`, `pyproject.toml`, or workflow files should update them. Docs site moved to <https://thekevinscott.github.io/putitoutthere/>. See [MIGRATIONS.md](./MIGRATIONS.md#repository-renamed-put-it-out-there--putitoutthere) for the consumer-facing diff.
 - **Python build-step examples switched to `uv build`** across the
   documentation (`docs/guide/shapes/python-library.md`,
@@ -63,7 +64,7 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Removed
 
-- _nothing yet_
+- **`build_workflow:` config field, `cibuildwheel` shape page, and the doctor/preflight PR-gate workflow shape from the documented surface.** The engine still parses `build_workflow` (no schema enforcement change yet) but consumers are no longer encouraged to use it; shapes that don't fit piot's named build modes are explicitly out of scope per [non-goal #4](./notes/design-commitments.md#non-goals). The cibuildwheel shape depended on `build_workflow` and is now also out of scope. The `putitoutthere-check.yml` PR-gate pattern is no longer documented; trust-policy and token-scope checks fold into the reusable workflow's publish phase as internal pre-publish steps.
 
 ### Fixed
 

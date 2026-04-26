@@ -118,8 +118,7 @@ piot wires the version pins.
 publish** the artifacts. They do not build them. Your workflow's
 `build` job compiles the binaries (via `maturin`, `napi build`,
 `cargo`, whatever) and drops them into the per-target artifact
-directory piot expects. `putitoutthere publish` picks them up from
-there.
+directory piot expects. The publish phase picks them up from there.
 
 This is the same split as the Python `build = "maturin"` / `hatch` /
 `setuptools` modes: a declarative *packaging shape* piot knows how

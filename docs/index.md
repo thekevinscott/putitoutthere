@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Put It Out There
   text: Polyglot release orchestrator
-  tagline: One config, one trailer. crates.io + PyPI + npm from a single monorepo.
+  tagline: One reusable GitHub Actions workflow. crates.io + PyPI + npm from a single repo.
   actions:
     - theme: brand
       text: Get started
@@ -24,3 +24,7 @@ features:
     title: OIDC-first
     details: Trusted publishers on all three registries. No long-lived tokens unless you want them.
 ---
+
+::: warning Docs being rewritten
+The consumer surface is being collapsed to a single reusable GitHub Actions workflow. These pages describe the prior hand-written-`release.yml` model and are mid-rewrite. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) for the new direction.
+:::

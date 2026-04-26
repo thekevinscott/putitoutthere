@@ -160,8 +160,6 @@ version cleanly.
 
 - [Runner prerequisites](/guide/runner-prerequisites) — twine +
   Python + git identity on the publish runner.
-- [Testing your release workflow](/guide/testing-your-release-workflow) —
-  how to validate the env-var handoff end-to-end before ship.
 - [Single-package Python library shape](/guide/shapes/python-library) —
   end-to-end worked example.
 - [Design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) —
