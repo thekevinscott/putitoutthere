@@ -1,9 +1,5 @@
 # Artifact contract
 
-::: warning Page being rewritten
-This page exists because consumers wrote their own `release.yml` and had to honor the artifact-naming contract by hand. Once the reusable workflow ships, the contract is internal and consumers don't see it. The grammar here documents what the engine emits and expects, which is unchanged. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
-:::
-
 piot's `publish` phase reads pre-built artifacts off disk. This page is
 the contract: **what files it expects, under which directory names,
 produced by which build step.** If the build phase uploads under the

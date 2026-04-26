@@ -1,9 +1,5 @@
 # Runner prerequisites
 
-::: warning Page being rewritten
-The runner prerequisites this page documents are wired into the reusable workflow. Consumers won't see this list once that workflow ships. The content below describes what the engine needs at publish time, useful for understanding internals but not consumer-facing setup. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
-:::
-
 `putitoutthere` shells out to per-language tools (`twine`, `cargo`,
 `npm`) and to `git`. Depending on your shape, a few runner-level
 prerequisites need wiring before the publish phase runs.

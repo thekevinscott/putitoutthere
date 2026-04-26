@@ -1,9 +1,5 @@
 # Getting started
 
-::: warning Docs being rewritten
-The consumer surface is being collapsed to a single reusable GitHub Actions workflow. The "scaffold a `release.yml` and run a CLI" model these docs were originally written against is being removed. Pages will be rewritten as the new surface lands. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) for the direction.
-:::
-
 Put It Out There (piot) is a polyglot release orchestrator. One config file
 declares your packages; a reusable GitHub Actions workflow publishes them to
 crates.io, PyPI, and npm.

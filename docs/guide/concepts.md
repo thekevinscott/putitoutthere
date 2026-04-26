@@ -1,9 +1,5 @@
 # Concepts
 
-::: warning Page being rewritten
-The "what runs on which event" tables and the "piot's surface is plan + publish" framing on this page describe the prior hand-written-`release.yml` integration model. The consumer surface is being collapsed to a single reusable workflow; see [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md). Engine concepts (cascade, trailer, topological publish, idempotency) still apply.
-:::
-
 > Evaluating piot for a migration? Read [Known gaps](/guide/gaps)
 > alongside this page — it enumerates non-goals, behaviours that
 > commonly get misread as gaps, and outstanding limitations.

@@ -1,9 +1,5 @@
 # Authentication
 
-::: warning Page being rewritten
-The reusable-workflow surface is in flux. This page describes the engine's auth model, which is stable; integration glue (how `[package.trust_policy]` validation is surfaced) will change as the new workflow lands. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
-:::
-
 `putitoutthere` authenticates to crates.io, PyPI, and npm via **OIDC trusted publishing** by default. No long-lived registry tokens, no secrets in env vars. This is the recommended path for any library published from GitHub Actions.
 
 ## One-time setup: register a trusted publisher per registry

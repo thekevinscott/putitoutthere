@@ -1,9 +1,5 @@
 # Troubleshooting publish failures
 
-::: warning Page being rewritten
-Examples on this page reference the prior hand-written-`release.yml` model. Engine error messages and root causes are still accurate; integration-side fixes will change as the reusable workflow lands. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
-:::
-
 Error-string-keyed index of common publish-job failures. Every entry
 gives you the literal message piot prints, the underlying cause, and
 the fix. If your error isn't here, the [Known gaps](/guide/gaps)

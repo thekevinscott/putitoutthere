@@ -7,12 +7,6 @@ config file declares your packages, one `uses:` line in your
 
 **[Documentation](https://thekevinscott.github.io/putitoutthere/)**
 
-> **Docs being rewritten.** The consumer surface is being collapsed to a
-> single reusable workflow. The README and docs originally described a
-> hand-written `release.yml` + CLI scaffold model that's being removed.
-> See [`notes/design-commitments.md`](./notes/design-commitments.md) for
-> the new direction.
-
 ## Minimum config
 
 ```toml

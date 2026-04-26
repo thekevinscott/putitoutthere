@@ -1,9 +1,5 @@
 # Nightly release
 
-::: warning Page being rewritten
-The example workflow on this page describes the prior hand-written-`release.yml` integration model. The reusable-workflow surface will reduce this to a few lines of triggers in the consumer's file. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md).
-:::
-
 Ship a patch every night whenever there are unreleased commits — without writing a `release:` trailer on every fix.
 
 ## How it works

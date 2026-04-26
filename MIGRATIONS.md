@@ -31,10 +31,10 @@ a `putitoutthere.toml` config file. The CLI, the JS action, the
 `docs/guide/custom-build-workflows.md` escape hatch, and the
 `cibuildwheel` shape are removed from the documented surface. The
 reusable workflow itself has not landed yet; this change captures
-the direction in [`notes/design-commitments.md`](./notes/design-commitments.md)
-and prunes docs that described the prior model. See
-[design commitments](./notes/design-commitments.md) for the
-authoritative non-goals.
+the direction in [`notes/design-commitments.md`](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
+and prunes docs that described the prior model. See the
+[design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
+for the authoritative non-goals.
 
 **Required changes.** None for working consumers. Existing
 hand-written `release.yml` files keep working until the reusable
