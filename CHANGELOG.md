@@ -45,6 +45,9 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **PyPI artifact discovery now matches the documented `{name}-sdist` and `{name}-wheel-{target}` shapes exactly.** (#244)
+  Previously the handler used a bare prefix match (`entry.startsWith("{name}-")`), which silently picked up sibling packages whose names extended the same prefix (e.g. `foo`'s discovery matched `foo-extras-sdist`). The handler now matches the sdist directory exactly and the wheel directories by `{name}-wheel-` prefix only. Affects multi-package repos where one pypi package's name is a prefix of another's.
+
 - **Reusable workflow's maturin sdist row now uses `command: sdist`.** (#244)
   `maturin build --sdist` builds a wheel AND an sdist; the sdist row's
   artifact tarball ended up containing a manylinux wheel that collided

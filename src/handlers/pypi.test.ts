@@ -656,6 +656,32 @@ describe('pypi.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  // #244: collectArtifacts must not pick up sibling packages whose
+  // names share the same prefix. A bare `entry.startsWith("foo-")`
+  // would match both `foo-sdist` (foo's own) and `foo-extras-sdist`
+  // (foo-extras's sdist) — leading to the engine uploading the wrong
+  // tarball under foo's identity. Match exact `{name}-sdist` and
+  // `{name}-wheel-` prefix instead.
+  it('ignores sibling artifacts whose names extend the same prefix', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    // Sibling fixture uploaded its own sdist; it must not be picked up.
+    stageSdist('demo-python-extras-sdist', 'demo-extras-0.1.0.tar.gz');
+    process.env.PYPI_API_TOKEN = 'tok';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockReturnValue('ok');
+    await pypi.publish(
+      { ...basePkg({ name: 'demo-python' }), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot, env: { PYPI_API_TOKEN: 'tok' } }),
+    );
+    const cmd = (execMock.mock.calls[0]?.[1] ?? []) as string[];
+    expect(cmd.some((a) => a.includes('demo-extras-0.1.0.tar.gz'))).toBe(false);
+    expect(cmd.some((a) => a.includes('demo-0.1.0.tar.gz'))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
   // #237: upload-artifact@v4 with a directory `path:` writes contents
   // flat under `<artifact>/`, but with a single-glob `path:` it
   // preserves the workspace-relative path so the file ends up at

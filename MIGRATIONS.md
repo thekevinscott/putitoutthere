@@ -21,6 +21,33 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### PyPI artifact discovery matches `{name}-sdist` and `{name}-wheel-` exactly
+
+**Summary.** `src/handlers/pypi.ts:collectArtifacts` used a bare prefix
+match (`entry.startsWith("{name}-")`) to find a package's artifact
+directories under `artifacts/`. Sibling packages whose names extended
+the same prefix (`foo` and `foo-extras`) collided: `foo`'s discovery
+also picked up `foo-extras-sdist`, and twine then uploaded the sibling's
+tarball under `foo`'s OIDC identity, failing PyPI's project-name check.
+The handler now matches the sdist directory exactly (`{name}-sdist`)
+and the wheel directories by `{name}-wheel-` prefix only — the two
+shapes the planner documents in §12.4.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Repos with multiple pypi
+packages where one name is a prefix of another (e.g. `foo` and
+`foo-extras`) no longer cross-upload artifacts. Single-package repos
+and repos with non-overlapping names are unaffected.
+
+**Verification.** A repo declaring both `foo` and `foo-extras` as
+pypi packages publishes the correct tarballs to each project; neither
+job uploads the other's artifacts.
+
+---
+
 ### Reusable workflow's maturin sdist row uses `command: sdist`
 
 **Summary.** The reusable workflow's pypi-maturin build step was a single
