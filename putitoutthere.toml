@@ -10,7 +10,7 @@ version = 1
 name  = "putitoutthere"
 kind  = "npm"
 path  = "."
-paths = [
+globs = [
   "src/**/*.ts",
   "src/**/*.json",
   "package.json",
