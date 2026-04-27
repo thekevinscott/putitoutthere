@@ -26,41 +26,43 @@ Each section covers five things, in order:
 **Summary.** The consumer surface is now one line in a `release.yml`:
 
 ```yaml
+on:
+  push: { branches: [main] }
+
 jobs:
   release:
     uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
-    with:
-      dry_run: ${{ inputs.dry_run || false }}
-    secrets: inherit
     permissions:
       contents: write
       id-token: write
 ```
 
-Plus the consumer's existing `putitoutthere.toml`. Triggers
-(`on: push`, `on: schedule`, `on: workflow_dispatch`) live in the
-consumer's `release.yml`; everything below them — pinned action
-versions, plan/build/publish orchestration, runner toolchain setup,
-artifact upload/download, GitHub Release creation — moves into the
-reusable workflow that piot ships. The CLI and the JS action become
-internal seams the reusable workflow invokes; consumers do not call
-them. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
+Plus the consumer's existing `putitoutthere.toml`. Triggers live in
+the consumer's file; everything below them — pinned action versions,
+plan/build/publish orchestration, runner toolchain setup, artifact
+upload/download, GitHub Release creation — lives in the reusable
+workflow that piot ships. The CLI and the JS action are internal
+seams the reusable workflow invokes; consumers do not call them.
+Auth is OIDC trusted publishers only — long-lived registry tokens
+are not reachable through the workflow. See [design
+commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
 for the authoritative non-goals.
 
 **Required changes.**
 
 | Before (hand-written `release.yml`) | After |
 |-----|-----|
-| ~100 lines of YAML: plan job calling `npx putitoutthere plan`, build matrix with per-kind setup steps, publish job with twine install + git identity + GitHub Release backfill, hand-pinned `actions/checkout@vN`, `actions/upload-artifact@vN`, `actions/download-artifact@vN` versions | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` |
-| `putitoutthere init` to scaffold the workflow | Subcommand removed; consumers add the `release.yml` shown above by hand |
+| ~100 lines of YAML: plan/build/publish jobs, twine install, git identity, GitHub Release backfill, hand-pinned action majors | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` |
+| `putitoutthere init` to scaffold the workflow | Subcommand removed; consumers add the snippet above by hand |
 | `[[package]].build_workflow = "publish-foo.yml"` for unsupported shapes | Removed. Shapes that don't fit piot's named build modes write their own release workflow that doesn't use piot |
-| `docs/guide/shapes/{python-library,npm-library,rust-crate,rust-workspace,npm-workspace,rust-pyo3,rust-napi,dual-family-npm,python-cibuildwheel}.md` walkthroughs | Consolidated into the Configuration page as inline example blocks. `polyglot-rust` and `bundled-cli` remain as standalone pages because they have non-obvious shape-specific gotchas |
-| `docs/guide/{runner-prerequisites,artifact-contract,nightly-release,custom-build-workflows,testing-your-release-workflow}.md` | Moved to `notes/internals/` (the first two are internal contract docs; the rest deleted — runner prereqs, artifact contract, and "scaffold a workflow" are no longer consumer concerns) |
+| Long-lived registry tokens (`NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) passed to a hand-written publish step | Not reachable through the reusable workflow. Register an OIDC trusted publisher per registry once |
+| Optional inputs `dry_run`, `working_directory`, `config` | Removed. Plan job already prints the matrix without side effects; config lives at `putitoutthere.toml` in the repo root, no override |
+| Documentation site (`docs/`) | Removed. README is the single user-facing surface; `notes/internals/` holds the contracts the reusable workflow honors so consumers don't have to know them |
 
 **Deprecations removed.** `build_workflow:` is no longer in the
-config schema (`src/config.ts`). Configs that still declare it now
-fail validation. `putitoutthere init` and `--cadence` / `--force`
-flags are removed from the CLI.
+config schema (`src/config.ts`); configs that declare it now fail
+validation. `putitoutthere init`, `--cadence`, and `--force` flags
+are removed from the CLI.
 
 **Behavior changes without code changes.** Engine behavior (plan,
 cascade, version bump, registry handlers, completeness check,
@@ -81,9 +83,8 @@ known-tested versions.
 
 **Verification.**
 
-- `pnpm --filter putitoutthere-docs test:unit && pnpm --filter putitoutthere-docs build` passes.
-- `pnpm test:unit` passes (725/725 in the main repo).
-- A consumer's first cutover: drop in the 15-line `release.yml`
+- `pnpm test:unit` passes in the main repo.
+- A consumer's first cutover: drop in the 12-line `release.yml`
   shown above, push a commit that touches a `[[package]].paths`
   glob, and watch for a tag push + GitHub Release on the next
   workflow run.

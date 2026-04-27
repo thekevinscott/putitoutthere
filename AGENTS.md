@@ -6,13 +6,13 @@ point that `@`-includes this file, so edit here — not there.
 
 ## Where to put what
 
-- **`docs/`** — public-facing documentation. Rendered by VitePress and published to GitHub Pages. Anything here is read by users of `putitoutthere`. See [`docs/AGENTS.md`](docs/AGENTS.md) for authoring rules.
-- **`notes/`** — working notes, audits, handoffs, and session artifacts. Not rendered, not public. Put session debriefs, post-mortems, handoff briefs, and scratch planning here.
-  - `notes/audits/YYYY-MM-DD-<topic>.md` — post-hoc investigations and bug catalogues.
-  - `notes/handoff/YYYY-MM-DD-<topic>.md` — handoff briefs for the next agent/session.
-When in doubt: if it would confuse a first-time user reading the docs site, it belongs in `notes/`, not `docs/`.
-
-`notes/migrations-pre-rewrite/` holds per-library adoption plans drafted against the prior hand-written-`release.yml` model. Stale; do not extend. Once the reusable workflow lands, those plans will be redone from scratch and live somewhere appropriate.
+- **`README.md`** — the entire user-facing surface. Quickstart, config reference, trailer grammar, trusted-publisher setup, recipes. Edit here when shipping consumer-observable changes.
+- **`notes/`** — internal docs. Not user-facing.
+  - `notes/design-commitments.md` — non-goals.
+  - `notes/internals/` — engine contracts (artifact layout, runner setup) the reusable workflow honors so consumers don't have to.
+  - `notes/audits/YYYY-MM-DD-<topic>.md` — post-hoc investigations.
+  - `notes/handoff/YYYY-MM-DD-<topic>.md` — handoff briefs.
+  - `notes/migrations-pre-rewrite/` — stale per-library adoption plans drafted against the prior hand-written-`release.yml` model. Do not extend.
 
 ## Design commitments
 
@@ -31,11 +31,11 @@ surface — breaking or additive — needs an entry in both files.
 
 "Public API" means anything a downstream consumer can observe:
 
-- The reusable workflow's `workflow_call` inputs, outputs, and default
-  behavior (`.github/workflows/release.yml`, when published).
+- The reusable workflow's `workflow_call` inputs and behavior
+  (`.github/workflows/release.yml`).
 - `putitoutthere.toml` schema — keys, value grammars, defaults, validation
-  rules (`docs/guide/configuration.md`, `docs/guide/shapes/`).
-- The `release:` trailer grammar (`docs/guide/trailer.md`).
+  rules (documented in `README.md`).
+- The `release:` trailer grammar (documented in `README.md`).
 - Tag format, GitHub Release body shape, and any other artifact a consumer
   workflow might grep.
 
@@ -69,9 +69,8 @@ get a `**BREAKING**` prefix and link to their `MIGRATIONS.md` section.
 
 ### `MIGRATIONS.md`
 
-Single file at the repo root, auto-included into the docs site at
-`/guide/migrations` via VitePress's `<!--@include:-->` directive. New
-entries go under `## Unreleased`. Each entry uses this structure:
+Single file at the repo root. New entries go under `## Unreleased`. Each
+entry uses this structure:
 
 1. **Summary** — one paragraph: what changed and why.
 2. **Required changes** — before/after table covering config, reusable
@@ -82,8 +81,7 @@ entries go under `## Unreleased`. Each entry uses this structure:
 4. **Behavior changes without code changes** — same API, different runtime
    behavior (tag format, exit codes, retry semantics, default values).
 5. **Verification** — what the consumer can observe to confirm the upgrade
-   worked (a tag push, a release on GitHub, output of `workflow_dispatch`
-   with `dry_run: true`, etc.).
+   worked (a tag push, a release on GitHub, etc.).
 
 When a version is cut, the release process renames `## Unreleased` to
 `## v<OLD> → v<NEW>` in both files and opens a fresh `## Unreleased` block.

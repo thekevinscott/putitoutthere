@@ -24,11 +24,7 @@
     "action.yml",
     "README.md",
     "CHANGELOG.md",
-    "MIGRATIONS.md",
-    "docs/api",
-    "docs/guide",
-    "docs/getting-started.md",
-    "docs/index.md"
+    "MIGRATIONS.md"
   ],
   "engines": {
     "node": ">=20"
