@@ -46,35 +46,6 @@ export function sanitizeArtifactName(name: string): string {
 const PILOT = z
   .object({
     version: z.literal(1),
-    cadence: z.enum(['immediate', 'scheduled']).optional(),
-    agents_path: z.string().optional(),
-  })
-  .strict();
-
-// #189: declared trust-policy expectations. See `src/oidc-policy.ts` for the
-// diff logic that consumes these fields in `doctor`. The block is optional;
-// users opt in by adding `[package.trust_policy]` to their config. `.strict()`
-// rejects typos (e.g. `work_flow`) rather than silently dropping them.
-const TRUST_POLICY = z
-  .object({
-    // Bare filename, not a path. Registries (crates.io, PyPI, npm) register
-    // the workflow by filename — not by the `.github/workflows/` path — so
-    // a path-shaped value here is always a config bug.
-    workflow: z
-      .string()
-      .min(1)
-      .refine((s) => !s.includes('/') && !s.includes('\\'), {
-        message: 'trust_policy.workflow must be a bare filename (e.g. "release.yml"), not a path',
-      }),
-    environment: z.string().min(1).optional(),
-    // `owner/repo` shape. Defaulting to `$GITHUB_REPOSITORY` happens at
-    // diff-time inside `doctor`, not at config parse time.
-    repository: z
-      .string()
-      .regex(/^[^/\s]+\/[^/\s]+$/, {
-        message: 'trust_policy.repository must be in "owner/repo" format',
-      })
-      .optional(),
   })
   .strict();
 
@@ -112,8 +83,6 @@ const PACKAGE_BASE = {
       message:
         'tag_format contains an unknown placeholder (only {name} and {version} are allowed)',
     }),
-  smoke: z.string().optional(),
-  trust_policy: TRUST_POLICY.optional(),
 };
 
 // #217: opt-in "bundle a Rust CLI into every wheel" recipe. Declared
@@ -175,7 +144,6 @@ const PYPI_PKG = z
     // different backend (maturin for Rust extensions, hatch) must opt in
     // explicitly.
     build: PYPI_BUILD.default('setuptools'),
-    wheels_artifact: z.string().optional(),
     targets: z.array(TARGET_ENTRY).optional(),
     bundle_cli: BUNDLE_CLI.optional(),
   })
@@ -235,7 +203,6 @@ export type CratesPackage = z.infer<typeof CRATES_PKG>;
 export type PypiPackage = z.infer<typeof PYPI_PKG>;
 export type NpmPackage = z.infer<typeof NPM_PKG>;
 export type Package = z.infer<typeof PACKAGE>;
-export type TrustPolicyDeclaration = z.infer<typeof TRUST_POLICY>;
 
 export interface Config {
   putitoutthere: PilotBlock;

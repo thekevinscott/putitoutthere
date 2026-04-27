@@ -36,23 +36,6 @@ export function normalizeTarget(entry: TargetEntry): { triple: string; runner?: 
 }
 
 /**
- * Declared trust-policy expectations (optional). Matches the Zod schema
- * in `src/config.ts`. `doctor` diffs this against the local workflow,
- * `GITHUB_WORKFLOW_REF`, and (opt-in) the crates.io trust-policy read
- * API. See `src/oidc-policy.ts` and `src/handlers/crates-trust.ts`.
- *
- * Issue #189.
- */
-export interface TrustPolicyDeclaration {
-  /** Bare workflow filename, e.g. `release.yml`. Not a path. */
-  workflow: string;
-  /** Optional environment name, e.g. `release`. */
-  environment?: string | undefined;
-  /** Optional `owner/repo`. Defaults at diff-time to `$GITHUB_REPOSITORY`. */
-  repository?: string | undefined;
-}
-
-/**
  * Shape handlers see. Optional fields explicitly allow `undefined` so
  * the Zod-parsed `Package` (discriminated union from src/config.ts)
  * assigns cleanly under exactOptionalPropertyTypes.
@@ -64,8 +47,6 @@ export interface PackageConfig {
   paths: string[];
   depends_on?: string[] | undefined;
   first_version?: string | undefined;
-  smoke?: string | undefined;
-  trust_policy?: TrustPolicyDeclaration | undefined;
   // Handler-specific fields are validated by each handler's Zod schema.
   [key: string]: unknown;
 }
@@ -73,8 +54,6 @@ export interface PackageConfig {
 /** Shape filled in by #5. */
 export interface Config {
   version: 1;
-  cadence?: 'immediate' | 'scheduled';
-  agents_path?: string;
   packages: PackageConfig[];
 }
 

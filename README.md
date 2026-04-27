@@ -96,7 +96,6 @@ version = 1   # required; only 1 is valid today
 | `depends_on`    | string[] | no       | Package names this one cascades on top of.        |
 | `first_version` | string   | no       | Default `0.1.0`.                                  |
 | `tag_format`    | string   | no       | Template for the git tag. Default `"{name}-v{version}"`. Single-package repos often want `"v{version}"`. |
-| `trust_policy`  | table    | no       | Declared OIDC trust-policy expectations. See [Trusted publishers](#trusted-publishers). |
 
 ### `kind = "crates"`
 
@@ -250,31 +249,6 @@ filename (`release.yml`), and optionally a GitHub environment name.
    publisher**.
 3. Fill in: repository, workflow filename, environment (optional).
 4. Delete the bootstrap token.
-
-### Catching trust-policy drift before release
-
-Renaming `release.yml` to anything else, or renaming the environment, breaks
-publish with an opaque HTTP 400 from the registry. To catch the rename
-before it ships, declare the expected values in `putitoutthere.toml`:
-
-```toml
-[[package]]
-name = "my-crate"
-kind = "crates"
-path = "crates/my-crate"
-paths = ["crates/my-crate/**"]
-
-[package.trust_policy]
-workflow    = "release.yml"      # required; bare filename
-environment = "release"          # optional
-repository  = "my-org/my-crate"  # optional
-```
-
-The engine diffs the declaration against the local workflow file and (in CI)
-against `GITHUB_WORKFLOW_REF` before any registry call. For `kind = "crates"`,
-a registry cross-check runs when `CRATES_IO_DOCTOR_TOKEN` is set — calls the
-trusted-publishing read API and fails on mismatch. PyPI and npm don't expose
-read APIs for trust policy, so the declared diff is the full gate there.
 
 ## Recipes
 

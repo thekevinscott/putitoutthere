@@ -21,6 +21,58 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Removed: diagnostic CLI surface, GitHub-App auth, trust-policy validation
+
+**Summary.** Eight things removed in one pass, none consumer-observable
+under the new "reusable workflow + OIDC-only" surface:
+
+- `[package.trust_policy]` config block (false security: typo-catcher
+  for npm/PyPI; the only real check was the crates.io registry
+  cross-check, which required a separate token most consumers wouldn't
+  set up).
+- `putitoutthere doctor` subcommand (its main job was the trust-policy
+  validation above).
+- `putitoutthere preflight` subcommand (the internal `requireAuth`
+  gate inside `publish` is preserved).
+- `putitoutthere token list/inspect` subcommands (operator-debugging
+  surface for long-lived registry tokens — none exist under OIDC-only).
+- `putitoutthere auth login/logout/status` subcommands + the
+  `putitoutthere-cli` GitHub App's device-flow plumbing + the keyring
+  (only purpose was powering `token list --secrets`).
+- `src/release.ts` engine-side GitHub Release creation (duplicated by
+  the reusable workflow's `gh release create --generate-notes` step).
+- `publish --preflight-check` flag (deep token-scope check for
+  long-lived tokens; OIDC-only renders it moot).
+- Dead config fields: `cadence`, `agents_path`, `smoke`,
+  `wheels_artifact` — defined in the schema, never read.
+
+Net: ~2,800 lines of source removed, ~17% of `src/`.
+
+**Required changes.**
+
+| Before | After |
+|-----|-----|
+| `[package.trust_policy] workflow = "release.yml"` | Delete the block. Workflow renames still produce HTTP 400 from registries — same UX every other tool gives you. |
+| `putitoutthere doctor` / `preflight` / `token` / `auth` invocations in any consumer script | Remove. None of these are reachable through the reusable workflow; consumer-facing surface is the workflow itself. |
+| `cadence`, `agents_path`, `smoke`, `wheels_artifact` fields in `putitoutthere.toml` | Delete. They were never consumed; configs declaring them now fail validation under `.strict()`. |
+| `--preflight-check` flag passed to `publish` | Drop. Internal `requireAuth` still gates publish. |
+
+**Deprecations removed.** Everything in the list above.
+
+**Behavior changes without code changes.** Engine behavior on the
+plan / publish path is unchanged. `requireAuth` (the gate that
+catches missing OIDC env or missing token) still runs; the deep
+scope check (which required a long-lived token to inspect) no
+longer runs because there's no long-lived token to inspect. GitHub
+Release creation moves entirely to the reusable workflow's
+`gh release create` step — engines invoked outside that workflow
+(local dry-runs, custom integrations) no longer create Releases.
+
+**Verification.** A consumer who never used any of the removed
+surfaces sees no observable change. Consumers who used `doctor` or
+`token` subcommands see exit-1 + "unknown command"; switch to the
+reusable workflow.
+
 ### Public surface collapsed to a reusable workflow
 
 **Summary.** The consumer surface is now one line in a `release.yml`:

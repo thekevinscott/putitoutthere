@@ -106,23 +106,6 @@ paths = ["packages/py/**"]
     expect(pkg.build).toBe('setuptools');
   });
 
-  it('accepts optional top-level fields', () => {
-    const cfg = parseConfig(`
-[putitoutthere]
-version     = 1
-cadence     = "scheduled"
-agents_path = "custom/AGENTS.md"
-
-[[package]]
-name  = "x"
-kind  = "crates"
-path  = "."
-paths = ["**"]
-`);
-    expect(cfg.putitoutthere.cadence).toBe('scheduled');
-    expect(cfg.putitoutthere.agents_path).toBe('custom/AGENTS.md');
-  });
-
   it('parses all three kinds in one config', () => {
     const cfg = parseConfig(`
 [putitoutthere]
@@ -520,37 +503,6 @@ paths = ["**"]
   });
 });
 
-describe('parseConfig: cadence', () => {
-  it('accepts "immediate"', () => {
-    const cfg = parseConfig(`
-[putitoutthere]
-version = 1
-cadence = "immediate"
-[[package]]
-name  = "x"
-kind  = "crates"
-path  = "."
-paths = ["**"]
-`);
-    expect(cfg.putitoutthere.cadence).toBe('immediate');
-  });
-
-  it('rejects unknown cadence', () => {
-    expect(() =>
-      parseConfig(`
-[putitoutthere]
-version = 1
-cadence = "hourly"
-[[package]]
-name  = "x"
-kind  = "crates"
-path  = "."
-paths = ["**"]
-`),
-    ).toThrow(/cadence/i);
-  });
-});
-
 describe('parseConfig: handler-specific fields (§6.4)', () => {
   it('accepts crates fields: crate, features', () => {
     const cfg = parseConfig(`
@@ -585,28 +537,22 @@ target = ["x86_64-unknown-linux-gnu"]
     ).toThrow(/target/i);
   });
 
-  it('accepts pypi fields: pypi, build, wheels_artifact', () => {
+  it('accepts pypi fields: pypi, build', () => {
     const cfg = parseConfig(`
 [putitoutthere]
 version = 1
 [[package]]
-name            = "x"
-kind            = "pypi"
-path            = "."
-paths           = ["**"]
-pypi            = "the-name"
-build           = "maturin"
-wheels_artifact = "custom-wheels"
-targets         = ["x86_64-unknown-linux-gnu"]
+name    = "x"
+kind    = "pypi"
+path    = "."
+paths   = ["**"]
+pypi    = "the-name"
+build   = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
 `);
-    const pkg = cfg.packages[0]! as {
-      pypi?: string;
-      build?: string;
-      wheels_artifact?: string;
-    };
+    const pkg = cfg.packages[0]! as { pypi?: string; build?: string };
     expect(pkg.pypi).toBe('the-name');
     expect(pkg.build).toBe('maturin');
-    expect(pkg.wheels_artifact).toBe('custom-wheels');
   });
 
   it('accepts npm fields: npm, access, tag', () => {
@@ -659,7 +605,7 @@ build = "poetry"
   });
 });
 
-describe('parseConfig: smoke + depends_on', () => {
+describe('parseConfig: depends_on', () => {
   it('accepts depends_on and preserves order', () => {
     const cfg = parseConfig(`
 [putitoutthere]
@@ -677,20 +623,6 @@ paths      = ["b/**"]
 depends_on = ["a"]
 `);
     expect(cfg.packages[1]!.depends_on).toEqual(['a']);
-  });
-
-  it('accepts smoke command', () => {
-    const cfg = parseConfig(`
-[putitoutthere]
-version = 1
-[[package]]
-name  = "x"
-kind  = "crates"
-path  = "."
-paths = ["**"]
-smoke = "./smoke-test.sh"
-`);
-    expect(cfg.packages[0]!.smoke).toBe('./smoke-test.sh');
   });
 });
 
@@ -729,56 +661,6 @@ describe('loadConfig: filesystem', () => {
   it('throws a clear error when the file does not exist', () => {
     const path = join(tmpdir(), 'putitoutthere-does-not-exist-xxxxxx.toml');
     expect(() => loadConfig(path)).toThrow(/cannot read/);
-  });
-});
-
-/* ----------------------- #189: trust_policy block ----------------------- */
-
-describe('parseConfig: trust_policy', () => {
-  const WITH_TRUST = `
-[putitoutthere]
-version = 1
-[[package]]
-name  = "lib"
-kind  = "crates"
-path  = "packages/rust"
-paths = ["packages/rust/**"]
-[package.trust_policy]
-workflow    = "release.yml"
-environment = "release"
-repository  = "octo/hello"
-`;
-
-  it('accepts a valid [package.trust_policy] block', () => {
-    const cfg = parseConfig(WITH_TRUST);
-    expect(cfg.packages[0]!.trust_policy).toEqual({
-      workflow: 'release.yml',
-      environment: 'release',
-      repository: 'octo/hello',
-    });
-  });
-
-  it('accepts workflow alone (environment + repository optional)', () => {
-    const cfg = parseConfig(
-      WITH_TRUST.replace(/environment[^\n]*\n/, '').replace(/repository[^\n]*\n/, ''),
-    );
-    expect(cfg.packages[0]!.trust_policy?.workflow).toBe('release.yml');
-    expect(cfg.packages[0]!.trust_policy?.environment).toBeUndefined();
-  });
-
-  it('rejects a path-shaped workflow value', () => {
-    const bad = WITH_TRUST.replace('"release.yml"', '".github/workflows/release.yml"');
-    expect(() => parseConfig(bad)).toThrow(/bare filename/);
-  });
-
-  it('rejects a repository without a slash', () => {
-    const bad = WITH_TRUST.replace('"octo/hello"', '"just-a-name"');
-    expect(() => parseConfig(bad)).toThrow(/owner\/repo/);
-  });
-
-  it('rejects unknown keys via .strict()', () => {
-    const bad = WITH_TRUST + 'work_flow = "typo.yml"\n';
-    expect(() => parseConfig(bad)).toThrow();
   });
 });
 
