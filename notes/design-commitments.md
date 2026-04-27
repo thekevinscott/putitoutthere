@@ -12,7 +12,7 @@ to crates.io, PyPI, and npm — OIDC-first, cascade-aware, polyglot. The
 user-facing surface is one line in a consumer's `release.yml`:
 
 ```yaml
-uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
 ```
 
 …plus a config file declaring packages. Everything else composes around it.

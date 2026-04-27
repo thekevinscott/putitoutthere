@@ -1,5 +1,5 @@
 name: 'Put It Out There (internal)'
-description: 'Internal step-level wrapper around the putitoutthere CLI. Consumers compose with the reusable workflow at .github/workflows/release.yml@v1, not with this action directly. See notes/design-commitments.md non-goal #10.'
+description: 'Internal step-level wrapper around the putitoutthere CLI. Consumers compose with the reusable workflow at .github/workflows/release.yml@v0, not with this action directly. See notes/design-commitments.md non-goal #10.'
 author: 'Kevin Scott'
 
 inputs:

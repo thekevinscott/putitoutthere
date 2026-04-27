@@ -1,25 +1,32 @@
 name: E2E
 
-# E2E tests publish to the piot-fixture-zzz-* canary family on
-# real registries (npm, PyPI, crates.io). `canaryVersion()` emits
-# monotonic 0.0.{unix_seconds} slots so runs never collide on the
-# immutable crates.io publish rule.
+# Canary E2E. Publishes to the `piot-fixture-zzz-cli` npm package
+# (purpose-built for this; throwaway 0.0.{unix_seconds} versions) on
+# every PR and every push to main, via OIDC trusted publishing.
+#
+# Why publish on PRs and not just on main: catching publish-side
+# breakage post-merge (release-npm.yml run 24972181242 — ENEEDAUTH
+# from `npm publish --provenance`) is too late. The bug is already
+# in `main` by the time we find out. Running the live publish on PR
+# CI shifts that detection left so a broken OIDC path blocks the
+# merge instead of breaking the next real release.
 #
 # Triggers:
-# - push to main → publish for real (continuous dogfood).
-# - pull_request → dry-run only (no side effects).
-# - workflow_dispatch → operator choice; defaults to dry-run.
+# - pull_request           → live canary publish.
+# - push to main           → live canary publish (continuous dogfood).
+# - workflow_dispatch      → live canary publish unless caller passes
+#                            `publish: false` to opt out.
 
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Actually publish canary versions to real registries"
+        description: "Publish canary version to npm (uncheck for dry-run only)"
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -42,63 +49,29 @@ jobs:
           node-version: "24"
           registry-url: 'https://registry.npmjs.org'
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install pnpm
         run: npm install -g pnpm@9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The canary fixture stages a pypi sdist via `python -m build` and
-      # uploads it via `twine` (see handlers/pypi.ts). Rust toolchain is
-      # pre-installed on ubuntu-latest; we only need the Python toolchain
-      # + build/twine on PATH.
-      - name: Install pypi build tools
-        run: python -m pip install --upgrade build twine
-
-      # Trusted Publishing / OIDC:
-      # - npm: putitoutthere's npm handler auto-detects OIDC via
-      #   ACTIONS_ID_TOKEN_REQUEST_TOKEN and adds --provenance. NPM_TOKEN
-      #   fallback stays wired up for the initial canary-family publish
-      #   (npm trusted publishing requires the package to exist first).
-      # - PyPI: pending publisher registered on pypi.org claims the
-      #   canary name on first publish. No PYPI_API_TOKEN needed once
-      #   the pending publisher is live.
-      # - crates.io: rust-lang/crates-io-auth-action@v1 exchanges the
-      #   OIDC JWT for a short-lived CARGO_REGISTRY_TOKEN. The token
-      #   fallback stays wired up for the first canary publish (crates.io
-      #   trusted publishing requires crate ownership, i.e. an existing
-      #   crate).
       - name: Decide publish mode
         id: mode
-        # push to main      → publish=1 (live canary).
-        # pull_request      → publish=0 (dry-run; no registry side effects).
-        # workflow_dispatch → publish=inputs.publish (default false).
-        # "Re-run failed jobs" preserves the original event, so a re-run of a
-        # push-triggered failure stays publish=1. A fresh UI dispatch with
-        # defaults does NOT publish — toggle the input to true for that.
+        # pull_request / push → publish=1.
+        # workflow_dispatch   → publish=inputs.publish (default true).
+        # `inputs.publish` is unset on non-dispatch events, so the
+        # `!= 'false'` check defaults to publish=1 for those.
         run: |
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
-            echo "publish=1" >> "$GITHUB_OUTPUT"
-          else
+          if [ "${{ inputs.publish }}" = "false" ]; then
             echo "publish=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=1" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: crates.io OIDC token exchange
-        if: steps.mode.outputs.publish == '1'
-        uses: rust-lang/crates-io-auth-action@v1
-        id: crates-auth
 
       - name: Run e2e suite
         env:
           PIOT_E2E_PUBLISH: ${{ steps.mode.outputs.publish }}
-          # All three registries publish via OIDC trusted publishers —
-          # no long-lived secrets. npm + PyPI auto-detect OIDC via the
-          # `id-token: write` permission above; crates.io goes through
-          # the rust-lang/crates-io-auth-action step and emits a
-          # short-lived CARGO_REGISTRY_TOKEN for cargo publish.
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
+          # No long-lived registry tokens. npm OIDC trusted publishing
+          # is the only auth path the canary exercises — matches what
+          # the public reusable workflow does.
         run: pnpm run test:e2e

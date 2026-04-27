@@ -1,27 +1,13 @@
 # Canary fixture for E2E runs. Publishes to the piot-fixture-zzz-* family
-# on all three registries (crates.io, PyPI, npm). See test/e2e/README.md.
+# on npm (OIDC trusted publishing). Reduced to npm-only so the canary
+# actually exercises the npm OIDC path on every PR — see test/e2e/README.md.
 
 [putitoutthere]
 version = 1
 
 [[package]]
-name = "piot-fixture-zzz-rust"
-kind = "crates"
-path = "rust"
-paths = ["rust/**"]
-first_version = "__VERSION__"
-
-[[package]]
-name = "piot-fixture-zzz-python"
-kind = "pypi"
-path = "python"
-paths = ["python/**"]
-build = "hatch"
-first_version = "__VERSION__"
-
-[[package]]
 name = "piot-fixture-zzz-cli"
 kind = "npm"
 path = "npm"
-paths = ["npm/**"]
+globs = ["npm/**"]
 first_version = "__VERSION__"

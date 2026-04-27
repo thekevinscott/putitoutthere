@@ -5,14 +5,14 @@ version = 1
 name = "piot-fixture-zzz-rust-cli"
 kind = "crates"
 path = "packages/rust"
-paths = ["packages/rust/**"]
+globs = ["packages/rust/**"]
 first_version = "__VERSION__"
 
 [[package]]
 name = "piot-fixture-zzz-cli"
 kind = "npm"
 path = "packages/js"
-paths = ["packages/js/**"]
+globs = ["packages/js/**"]
 build = "bundled-cli"
 targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 depends_on = ["piot-fixture-zzz-rust-cli"]

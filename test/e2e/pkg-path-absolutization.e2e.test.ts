@@ -50,12 +50,7 @@ describe('e2e: pkg.path absolutization (spawn surface)', () => {
       [CLI, 'publish', '--dry-run', '--json', '--cwd', repo.cwd],
       {
         cwd: spawnCwd,
-        env: {
-          ...process.env,
-          NODE_AUTH_TOKEN: 'e2e-dry-run-placeholder',
-          PYPI_API_TOKEN: 'e2e-dry-run-placeholder',
-          CARGO_REGISTRY_TOKEN: 'e2e-dry-run-placeholder',
-        },
+        env: { ...process.env },
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -65,11 +60,7 @@ describe('e2e: pkg.path absolutization (spawn surface)', () => {
       published: Array<{ package: string; version: string }>;
     };
     expect(result.ok).toBe(true);
-    expect(result.published.map((p) => p.package).sort()).toEqual([
-      'piot-fixture-zzz-cli',
-      'piot-fixture-zzz-python',
-      'piot-fixture-zzz-rust',
-    ]);
+    expect(result.published.map((p) => p.package)).toEqual(['piot-fixture-zzz-cli']);
     for (const entry of result.published) {
       expect(entry.version).toBe(repo.version);
     }
@@ -83,11 +74,7 @@ describe('e2e: pkg.path absolutization (spawn surface)', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const matrix = JSON.parse(out.trim()) as Array<{ name: string; version: string }>;
-    expect(matrix.map((r) => r.name).sort()).toEqual([
-      'piot-fixture-zzz-cli',
-      'piot-fixture-zzz-python',
-      'piot-fixture-zzz-rust',
-    ]);
+    expect(matrix.map((r) => r.name)).toEqual(['piot-fixture-zzz-cli']);
     for (const row of matrix) {
       expect(row.version).toBe(repo.version);
     }
