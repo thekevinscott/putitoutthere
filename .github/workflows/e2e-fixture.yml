@@ -176,6 +176,11 @@ jobs:
       - if: matrix.kind == 'npm'
         working-directory: fixture-tree/${{ matrix.path }}
         shell: bash
+        env:
+          # napi / bundled-cli fixtures' build scripts read TARGET to know
+          # which per-triple stub binary to stage. Vanilla / main rows
+          # ignore it.
+          TARGET: ${{ matrix.target }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci

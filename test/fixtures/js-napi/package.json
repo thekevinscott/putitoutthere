@@ -5,5 +5,8 @@
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
   "main": "index.js",
-  "files": ["index.js"]
+  "files": ["index.js"],
+  "scripts": {
+    "build": "node scripts/build.js"
+  }
 }
