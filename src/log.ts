@@ -71,7 +71,7 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
   const pretty = opts.pretty ?? isTty(stream);
   const minLevel = LEVEL_ORDER[opts.level ?? 'info'];
   const sources: readonly EnvSource[] = [
-    process.env as EnvSource,
+    process.env,
     ...(opts.envSources ?? []),
   ];
 
@@ -212,7 +212,7 @@ function scanSource(src: EnvSource): readonly string[] {
  */
 export function redact(
   s: string,
-  sources: readonly EnvSource[] = [process.env as EnvSource],
+  sources: readonly EnvSource[] = [process.env],
 ): string {
   let out = s;
   for (const src of sources) {

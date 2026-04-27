@@ -110,7 +110,7 @@ function writeVersionImpl(
   try {
     updated = replacePyProjectVersion(original, version);
   } catch (err) {
-    return Promise.reject(err as Error);
+    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
   }
   if (updated === original) return Promise.resolve([]);
   writeFileSync(pyProjectPath, updated, 'utf8');
@@ -337,7 +337,7 @@ function walkFiles(dir: string): string[] {
 
 export const pypi: Handler = {
   kind: 'pypi',
-  isPublished: isPublishedImpl as Handler['isPublished'],
-  writeVersion: writeVersionImpl as Handler['writeVersion'],
-  publish: publishImpl as Handler['publish'],
+  isPublished: isPublishedImpl,
+  writeVersion: writeVersionImpl,
+  publish: publishImpl,
 };
