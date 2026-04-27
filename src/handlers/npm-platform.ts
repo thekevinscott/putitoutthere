@@ -198,7 +198,7 @@ function rewriteOptionalDependencies(
     optionalDeps[name] = version;
   }
   parsed.optionalDependencies = {
-    ...((parsed.optionalDependencies as Record<string, string> | undefined) ?? {}),
+    ...((parsed.optionalDependencies) ?? {}),
     ...optionalDeps,
   };
 

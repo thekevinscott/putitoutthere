@@ -73,7 +73,7 @@ export function dumpFailure(
   // keys stay stable. #195.
   const sources =
     opts.envSources !== undefined && opts.envSources.length > 0
-      ? [process.env as EnvSource, ...opts.envSources]
+      ? [process.env, ...opts.envSources]
       : undefined;
   const md = redact(renderMarkdown(err, ctx), sources);
   writeSummary(truncate(md));

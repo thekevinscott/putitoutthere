@@ -253,7 +253,7 @@ describe('crates.publish', () => {
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
     await crates.publish(
-      { ...basePkg(), path: dir, features: ['cli', 'serde'] } as Parameters<typeof crates.publish>[0],
+      { ...basePkg(), path: dir, features: ['cli', 'serde'] },
       '0.1.0',
       makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
     );
@@ -299,7 +299,7 @@ describe('crates.publish', () => {
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
     await crates.publish(
-      { ...basePkg(), path: dir, features: [] } as Parameters<typeof crates.publish>[0],
+      { ...basePkg(), path: dir, features: [] },
       '0.1.0',
       makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
     );
@@ -343,7 +343,7 @@ describe('crates.publish', () => {
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
     await crates.publish(
-      { ...basePkg(), path: dir, no_default_features: false } as Parameters<typeof crates.publish>[0],
+      { ...basePkg(), path: dir, no_default_features: false },
       '0.1.0',
       makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
     );
@@ -365,7 +365,7 @@ describe('crates.publish', () => {
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
     await crates.publish(
-      { ...basePkg(), path: dir, no_default_features: true } as Parameters<typeof crates.publish>[0],
+      { ...basePkg(), path: dir, no_default_features: true },
       '0.1.0',
       makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
     );
@@ -387,7 +387,7 @@ describe('crates.publish', () => {
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
     await crates.publish(
-      { ...basePkg(), path: dir, features: ['cli', 'serde'], no_default_features: true } as Parameters<typeof crates.publish>[0],
+      { ...basePkg(), path: dir, features: ['cli', 'serde'], no_default_features: true },
       '0.1.0',
       makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
     );

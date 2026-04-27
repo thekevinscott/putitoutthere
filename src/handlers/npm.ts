@@ -230,7 +230,7 @@ function detectIndent(source: string): number | string {
 
 export const npm: Handler = {
   kind: 'npm',
-  isPublished: isPublishedImpl as Handler['isPublished'],
-  writeVersion: writeVersionImpl as Handler['writeVersion'],
-  publish: publishImpl as Handler['publish'],
+  isPublished: isPublishedImpl,
+  writeVersion: writeVersionImpl,
+  publish: publishImpl,
 };
