@@ -21,6 +21,36 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Reusable workflow exchanges OIDC token for `CARGO_REGISTRY_TOKEN`
+
+**Summary.** Crates publishes were failing with `error: no token found,
+please run cargo login` — the reusable workflow was relying on cargo to
+find an OIDC token in env, but cargo only consumes
+`CARGO_REGISTRY_TOKEN` (a registry-issued bearer), not raw OIDC
+ID-tokens. The publish job now runs `rust-lang/crates-io-auth-action@v1`
+when the plan contains a crates row and exports its `outputs.token`
+as `CARGO_REGISTRY_TOKEN` for the engine subprocess.
+
+**Required changes.** None for consumers using the reusable workflow as
+documented. Repos publishing to crates.io must have a configured trusted
+publisher on crates.io pointing at their `release.yml` — same prerequisite
+as before, just now actually exercised.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Crates publish in the
+reusable workflow now reaches the registry; previously it failed at
+the cargo invocation. JS/Python-only repos are unaffected — the auth
+step is gated on `contains(needs.plan.outputs.matrix, '"kind":"crates"')`
+and skips entirely when no crates row is in the plan.
+
+**Verification.** A `kind = "crates"` package whose trusted publisher is
+configured on crates.io now publishes successfully through the reusable
+workflow. The publish job log shows the `Authenticate with crates.io
+(OIDC)` step running before `putitoutthere publish`.
+
+---
+
 ### Crates publish's pre-cargo dirty-tree check ignores `artifacts/`
 
 **Summary.** The crates handler scans `git status --porcelain` before

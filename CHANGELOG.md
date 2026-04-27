@@ -45,6 +45,18 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **Reusable workflow now exchanges OIDC ID-token for a `CARGO_REGISTRY_TOKEN`
+  before invoking the engine.** (#244) `cargo publish` was failing with
+  `error: no token found, please run cargo login` because the publish
+  job's env had no `CARGO_REGISTRY_TOKEN`. PyPI uploads (twine) and npm
+  publish both consume the OIDC ID-token directly via registry-side
+  acceptance; cargo doesn't — it needs a registry-issued bearer token,
+  which `rust-lang/crates-io-auth-action@v1` produces from the OIDC
+  ID-token. The workflow now runs that action conditionally (only when
+  the plan contains a `kind = "crates"` row) and exports the resulting
+  token to `$GITHUB_ENV` for the engine subprocess. No config or
+  workflow changes required for consumers.
+
 - **Crates publish's pre-cargo dirty-tree check now ignores the
   reusable workflow's `artifacts/` scratch directory.** (#244)
   The pre-publish guard scans `git status --porcelain` for stray edits
