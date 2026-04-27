@@ -3,7 +3,7 @@
  * the last release, returns the packages that will release.
  *
  * Two passes (plan.md §11.1):
- *   1. Direct match: every package whose `paths` globs intersect the
+ *   1. Direct match: every package whose `globs` intersect the
  *      files changed since *its own* last tag is cascaded.
  *   2. Transitive match: repeat until stable — any package whose
  *      `depends_on` list contains an already-cascaded package gets
@@ -50,7 +50,7 @@ export function computeCascade(
     const files = changedFilesByPackage.get(p.name);
     if (!files) continue;
     for (const f of files) {
-      if (matchesAny(p.paths, f)) {
+      if (matchesAny(p.globs, f)) {
         cascaded.add(p.name);
         break;
       }

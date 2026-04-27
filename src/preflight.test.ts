@@ -13,7 +13,7 @@ function pkg(kind: Package['kind'], overrides: Partial<Package> = {}): Package {
     name: `${kind}-pkg`,
     kind,
     path: '.',
-    paths: ['**'],
+    globs: ['**'],
     depends_on: [],
     first_version: '0.1.0',
     ...overrides,

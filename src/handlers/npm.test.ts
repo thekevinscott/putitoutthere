@@ -45,7 +45,7 @@ function basePkg(over: Partial<{ name: string; path: string; npm?: string; acces
     name: 'demo-js',
     kind: 'npm',
     path: '.',
-    paths: ['**'],
+    globs: ['**'],
     depends_on: [],
     first_version: '0.1.0',
     npm: 'demo-npm',

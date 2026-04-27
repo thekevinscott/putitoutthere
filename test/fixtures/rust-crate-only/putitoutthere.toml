@@ -5,5 +5,5 @@ version = 1
 name = "piot-fixture-zzz-rust"
 kind = "crates"
 path = "."
-paths = ["src/**", "Cargo.toml"]
+globs = ["src/**", "Cargo.toml"]
 first_version = "__VERSION__"

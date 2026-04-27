@@ -21,6 +21,83 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### `[[package]].paths` renamed to `globs`
+
+**Summary.** The `path` / `paths` pair in `[[package]]` was confusing —
+singular and plural differed only in a trailing `s` while meaning two
+unrelated things (the package working directory vs. the cascade-trigger
+globs). Renaming `paths` → `globs` removes the trailing-S collision.
+
+**Required changes.**
+
+| Before | After |
+|-----|-----|
+| `paths = ["src/**", "pyproject.toml"]` | `globs = ["src/**", "pyproject.toml"]` |
+
+Every `[[package]]` block in `putitoutthere.toml` needs the rename.
+Configs declaring `paths` now fail validation under `.strict()`.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None — the field's semantics
+are unchanged.
+
+**Verification.** `pnpm exec putitoutthere plan` (or the next reusable-
+workflow run) loads cleanly. A config still declaring `paths` fails
+load with a Zod error pointing at the unknown key.
+
+### Removed: diagnostic CLI surface, GitHub-App auth, trust-policy validation
+
+**Summary.** Eight things removed in one pass, none consumer-observable
+under the new "reusable workflow + OIDC-only" surface:
+
+- `[package.trust_policy]` config block (false security: typo-catcher
+  for npm/PyPI; the only real check was the crates.io registry
+  cross-check, which required a separate token most consumers wouldn't
+  set up).
+- `putitoutthere doctor` subcommand (its main job was the trust-policy
+  validation above).
+- `putitoutthere preflight` subcommand (the internal `requireAuth`
+  gate inside `publish` is preserved).
+- `putitoutthere token list/inspect` subcommands (operator-debugging
+  surface for long-lived registry tokens — none exist under OIDC-only).
+- `putitoutthere auth login/logout/status` subcommands + the
+  `putitoutthere-cli` GitHub App's device-flow plumbing + the keyring
+  (only purpose was powering `token list --secrets`).
+- `src/release.ts` engine-side GitHub Release creation (duplicated by
+  the reusable workflow's `gh release create --generate-notes` step).
+- `publish --preflight-check` flag (deep token-scope check for
+  long-lived tokens; OIDC-only renders it moot).
+- Dead config fields: `cadence`, `agents_path`, `smoke`,
+  `wheels_artifact` — defined in the schema, never read.
+
+Net: ~2,800 lines of source removed, ~17% of `src/`.
+
+**Required changes.**
+
+| Before | After |
+|-----|-----|
+| `[package.trust_policy] workflow = "release.yml"` | Delete the block. Workflow renames still produce HTTP 400 from registries — same UX every other tool gives you. |
+| `putitoutthere doctor` / `preflight` / `token` / `auth` invocations in any consumer script | Remove. None of these are reachable through the reusable workflow; consumer-facing surface is the workflow itself. |
+| `cadence`, `agents_path`, `smoke`, `wheels_artifact` fields in `putitoutthere.toml` | Delete. They were never consumed; configs declaring them now fail validation under `.strict()`. |
+| `--preflight-check` flag passed to `publish` | Drop. Internal `requireAuth` still gates publish. |
+
+**Deprecations removed.** Everything in the list above.
+
+**Behavior changes without code changes.** Engine behavior on the
+plan / publish path is unchanged. `requireAuth` (the gate that
+catches missing OIDC env or missing token) still runs; the deep
+scope check (which required a long-lived token to inspect) no
+longer runs because there's no long-lived token to inspect. GitHub
+Release creation moves entirely to the reusable workflow's
+`gh release create` step — engines invoked outside that workflow
+(local dry-runs, custom integrations) no longer create Releases.
+
+**Verification.** A consumer who never used any of the removed
+surfaces sees no observable change. Consumers who used `doctor` or
+`token` subcommands see exit-1 + "unknown command"; switch to the
+reusable workflow.
+
 ### Public surface collapsed to a reusable workflow
 
 **Summary.** The consumer surface is now one line in a `release.yml`:
@@ -31,7 +108,7 @@ on:
 
 jobs:
   release:
-    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
     permissions:
       contents: write
       id-token: write
@@ -52,7 +129,7 @@ for the authoritative non-goals.
 
 | Before (hand-written `release.yml`) | After |
 |-----|-----|
-| ~100 lines of YAML: plan/build/publish jobs, twine install, git identity, GitHub Release backfill, hand-pinned action majors | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` |
+| ~100 lines of YAML: plan/build/publish jobs, twine install, git identity, GitHub Release backfill, hand-pinned action majors | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0` |
 | `putitoutthere init` to scaffold the workflow | Subcommand removed; consumers add the snippet above by hand |
 | `[[package]].build_workflow = "publish-foo.yml"` for unsupported shapes | Removed. Shapes that don't fit piot's named build modes write their own release workflow that doesn't use piot |
 | Long-lived registry tokens (`NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) passed to a hand-written publish step | Not reachable through the reusable workflow. Register an OIDC trusted publisher per registry once |
@@ -85,7 +162,7 @@ known-tested versions.
 
 - `pnpm test:unit` passes in the main repo.
 - A consumer's first cutover: drop in the 12-line `release.yml`
-  shown above, push a commit that touches a `[[package]].paths`
+  shown above, push a commit that touches a `[[package]].globs`
   glob, and watch for a tag push + GitHub Release on the next
   workflow run.
 
@@ -505,7 +582,7 @@ configurations are unchanged.
  kind       = "pypi"
  build      = "maturin"
  path       = "packages/python"
- paths      = ["packages/python/**"]
+ globs      = ["packages/python/**"]
  targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 +
 +[package.bundle_cli]
@@ -525,7 +602,7 @@ And in the Python package's `pyproject.toml`:
 +include = ["...", "src/my_py/_binary/**"]  # ship the staged binary
 ```
 
-See [Polyglot Rust library → Shipping a Rust CLI inside the PyPI wheel](https://github.com/thekevinscott/putitoutthere/blob/main/docs/guide/shapes/polyglot-rust.md#shipping-a-rust-cli-inside-the-pypi-wheel)
+See [README → Rust CLI inside a PyPI wheel](https://github.com/thekevinscott/putitoutthere/blob/main/README.md#rust-cli-inside-a-pypi-wheel)
 for the full worked example including the launcher stub.
 
 **Deprecations removed.** None.

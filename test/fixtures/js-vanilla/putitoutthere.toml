@@ -5,5 +5,5 @@ version = 1
 name = "piot-fixture-zzz-js-vanilla"
 kind = "npm"
 path = "."
-paths = ["src/**", "package.json"]
+globs = ["src/**", "package.json"]
 first_version = "__VERSION__"

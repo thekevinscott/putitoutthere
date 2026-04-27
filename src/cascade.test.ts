@@ -37,38 +37,38 @@ function perPkg(entries: Record<string, readonly string[]>): ChangedFilesByPacka
 
 /**
  * Build a minimal Package suitable for cascade tests. Only the fields
- * cascade actually reads matter (name, paths, depends_on); the rest
+ * cascade actually reads matter (name, globs, depends_on); the rest
  * are shaped to satisfy the discriminated union.
  */
 function pkg(
   name: string,
-  paths: string[],
+  globs: string[],
   depends_on: string[] = [],
 ): Package {
   return {
     name,
     kind: 'crates',
     path: name,
-    paths,
+    globs,
     depends_on,
     first_version: '0.1.0',
   } as Package;
 }
 
 describe('computeCascade: pass 1 (direct glob)', () => {
-  it('returns empty when no paths match', () => {
+  it('returns empty when no globs match', () => {
     const pkgs = [pkg('a', ['a/**'])];
     const cascade = computeCascade(pkgs, everyPkgSees(pkgs, ['b/x.ts']));
     expect(cascade).toEqual([]);
   });
 
-  it('returns a package whose paths match', () => {
+  it('returns a package whose globs match', () => {
     const pkgs = [pkg('a', ['a/**'])];
     const cascade = computeCascade(pkgs, everyPkgSees(pkgs, ['a/file.ts']));
     expect(cascade.map((p) => p.name)).toEqual(['a']);
   });
 
-  it('returns multiple packages when their paths each match', () => {
+  it('returns multiple packages when their globs each match', () => {
     const pkgs = [pkg('a', ['a/**']), pkg('b', ['b/**']), pkg('c', ['c/**'])];
     const cascade = computeCascade(pkgs, everyPkgSees(pkgs, ['a/x', 'b/y']));
     expect(cascade.map((p) => p.name).sort()).toEqual(['a', 'b']);
@@ -88,7 +88,7 @@ describe('computeCascade: pass 1 (direct glob)', () => {
     // union would contain files changed between 100..200 (already
     // shipped under a prior B tag). Per-package isolation means B's
     // own diff (200..HEAD) is empty, so B does NOT cascade even
-    // though A's diff contains files matching B's paths glob.
+    // though A's diff contains files matching B's globs.
     const pkgs = [pkg('a', ['a/**']), pkg('b', ['b/**'])];
     const cascade = computeCascade(
       pkgs,
@@ -186,7 +186,7 @@ describe('computeCascade: edge cases', () => {
     expect(cascade.map((p) => p.name)).toEqual(['a', 'b', 'c']);
   });
 
-  it('a package with no `paths` but a matching depends_on still cascades', () => {
+  it('a package with no `globs` but a matching depends_on still cascades', () => {
     const pkgs = [
       pkg('a', ['a/**']),
       pkg('b', ['nothing/**'], ['a']),

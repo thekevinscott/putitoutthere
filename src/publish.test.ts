@@ -35,7 +35,7 @@ version = 1
 name  = "lib-js"
 kind  = "npm"
 path  = "packages/ts"
-paths = ["packages/ts/**"]
+globs = ["packages/ts/**"]
 `;
 
 beforeEach(() => {
@@ -153,7 +153,7 @@ version = 1
 name  = "lib-rust"
 kind  = "crates"
 path  = "packages/rust"
-paths = ["packages/rust/**"]
+globs = ["packages/rust/**"]
 `,
     );
     writeRepoFile('packages/rust/Cargo.toml', '[package]\nname = "lib-rust"\nversion = "0.0.0"\n');
@@ -196,20 +196,20 @@ version = 1
 name  = "a"
 kind  = "npm"
 path  = "packages/a"
-paths = ["packages/a/**"]
+globs = ["packages/a/**"]
 
 [[package]]
 name       = "b"
 kind       = "npm"
 path       = "packages/b"
-paths      = ["packages/b/**"]
+globs      = ["packages/b/**"]
 depends_on = ["a"]
 
 [[package]]
 name       = "c"
 kind       = "npm"
 path       = "packages/c"
-paths      = ["packages/c/**"]
+globs      = ["packages/c/**"]
 depends_on = ["a", "b"]
 `;
     // Rebuild repo with three packages.
@@ -284,60 +284,3 @@ describe('publish: pkg.path resolution', () => {
   });
 });
 
-describe('publish: --preflight-check', () => {
-  it('refuses when a scope mismatch is detected', async () => {
-    const handler = makeHandler();
-    await expect(
-      publish({
-        cwd: repo,
-        handlerFor: () => handler,
-        preflightCheck: true,
-        dryRun: true,
-        inspectFn: () => Promise.resolve({
-          registry: 'npm',
-          source_digest: 'abc',
-          format: 'granular',
-          username: 'alice',
-          scope_row: {
-            readonly: false,
-            automation: false,
-            packages: ['@acme/other'],
-            scopes: null,
-            orgs: null,
-            expires_at: null,
-            cidr_whitelist: null,
-            created: null,
-          },
-        }),
-      }),
-    ).rejects.toThrow(/preflight-check refused/);
-    expect(handler.publish).not.toHaveBeenCalled();
-  });
-
-  it('passes through when scope matches', async () => {
-    const handler = makeHandler();
-    const result = await publish({
-      cwd: repo,
-      handlerFor: () => handler,
-      preflightCheck: true,
-      inspectFn: () => Promise.resolve({
-        registry: 'npm',
-        source_digest: 'abc',
-        format: 'granular',
-        username: 'alice',
-        scope_row: {
-          readonly: false,
-          automation: false,
-          packages: ['lib-js'],
-          scopes: null,
-          orgs: null,
-          expires_at: null,
-          cidr_whitelist: null,
-          created: null,
-        },
-      }),
-    });
-    expect(result.ok).toBe(true);
-    expect(handler.publish).toHaveBeenCalledTimes(1);
-  });
-});

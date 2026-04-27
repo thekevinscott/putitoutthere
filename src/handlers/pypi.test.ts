@@ -45,7 +45,7 @@ function basePkg(over: Partial<{ name: string; path: string; pypi?: string; buil
     name: 'demo-python',
     kind: 'pypi',
     path: '.',
-    paths: ['**'],
+    globs: ['**'],
     depends_on: [],
     first_version: '0.1.0',
     pypi: 'demo-pkg',

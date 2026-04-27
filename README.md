@@ -3,7 +3,7 @@
 A reusable GitHub Actions workflow that publishes packages to crates.io, PyPI,
 and npm from one repo. OIDC-first, cascade-aware, polyglot. The consumer
 surface is one config file plus ~10 lines of YAML calling
-`uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1`.
+`uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0`.
 
 ## Quickstart
 
@@ -18,7 +18,7 @@ on:
 
 jobs:
   release:
-    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
     permissions:
       contents: write
       id-token: write
@@ -45,13 +45,13 @@ version = 1
 name  = "my-lib"
 kind  = "pypi"        # or "npm" | "crates"
 path  = "."
-paths = ["src/**", "pyproject.toml"]
+globs = ["src/**", "pyproject.toml"]
 build = "hatch"       # required for kind = "pypi"
 tag_format = "v{version}"   # single-package repos often want this
 ```
 
-`paths` are the globs that trigger a release. Any commit touching a matching
-file makes the package a candidate.
+`globs` are the path globs that trigger a release. Any commit touching a
+matching file makes the package a candidate.
 
 More config patterns are in [Configuration](#configuration) below.
 
@@ -63,7 +63,7 @@ registry.
 
 ### 4. Push a release
 
-Merge to `main`. Default behavior: any package whose `paths` matched changed
+Merge to `main`. Default behavior: any package whose `globs` matched changed
 files cascades and ships at `patch`. To bump `minor` or `major`:
 
 ```
@@ -92,11 +92,10 @@ version = 1   # required; only 1 is valid today
 | `name`          | string   | yes      | Unique across the config.                         |
 | `kind`          | enum     | yes      | `crates` \| `pypi` \| `npm`.                      |
 | `path`          | string   | yes      | Package working dir (`Cargo.toml` / `pyproject.toml` / `package.json` location). |
-| `paths`         | string[] | yes      | Globs that cascade this package.                  |
+| `globs`         | string[] | yes      | Path globs that cascade this package.             |
 | `depends_on`    | string[] | no       | Package names this one cascades on top of.        |
 | `first_version` | string   | no       | Default `0.1.0`.                                  |
 | `tag_format`    | string   | no       | Template for the git tag. Default `"{name}-v{version}"`. Single-package repos often want `"v{version}"`. |
-| `trust_policy`  | table    | no       | Declared OIDC trust-policy expectations. See [Trusted publishers](#trusted-publishers). |
 
 ### `kind = "crates"`
 
@@ -134,13 +133,13 @@ One Rust crate feeds three artifacts:
 name = "my-rust"
 kind = "crates"
 path = "crates/my-rust"
-paths = ["crates/my-rust/**"]
+globs = ["crates/my-rust/**"]
 
 [[package]]
 name       = "my-py"
 kind       = "pypi"
 path       = "py/my-py"
-paths      = ["py/my-py/**"]
+globs      = ["py/my-py/**"]
 build      = "maturin"
 targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 depends_on = ["my-rust"]
@@ -149,7 +148,7 @@ depends_on = ["my-rust"]
 name       = "my-cli"
 kind       = "npm"
 path       = "packages/ts"
-paths      = ["packages/ts/**"]
+globs      = ["packages/ts/**"]
 build      = "bundled-cli"
 targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 depends_on = ["my-rust"]
@@ -165,20 +164,20 @@ wheels and npm family ship on top, version-bumped to match.
 name  = "@my/core"
 kind  = "npm"
 path  = "packages/core"
-paths = ["packages/core/**"]
+globs = ["packages/core/**"]
 
 [[package]]
 name       = "@my/parser"
 kind       = "npm"
 path       = "packages/parser"
-paths      = ["packages/parser/**"]
+globs      = ["packages/parser/**"]
 depends_on = ["@my/core"]
 ```
 
 ## Trailer
 
 The trailer is **optional**. Default behavior is `patch` whenever a package's
-`paths` matched changed files.
+`globs` matched changed files.
 
 Grammar:
 
@@ -203,7 +202,7 @@ are present, the **last** one wins.
 ## Cascade
 
 A package cascades into the release plan when a commit changes any file
-matching one of its `paths` globs since its last tag. If another package
+matching one of its `globs` since its last tag. If another package
 declares `depends_on = ["this-package"]`, that package also cascades.
 Transitively, DFS-ordered, with cycle detection at config-load.
 
@@ -251,31 +250,6 @@ filename (`release.yml`), and optionally a GitHub environment name.
 3. Fill in: repository, workflow filename, environment (optional).
 4. Delete the bootstrap token.
 
-### Catching trust-policy drift before release
-
-Renaming `release.yml` to anything else, or renaming the environment, breaks
-publish with an opaque HTTP 400 from the registry. To catch the rename
-before it ships, declare the expected values in `putitoutthere.toml`:
-
-```toml
-[[package]]
-name = "my-crate"
-kind = "crates"
-path = "crates/my-crate"
-paths = ["crates/my-crate/**"]
-
-[package.trust_policy]
-workflow    = "release.yml"      # required; bare filename
-environment = "release"          # optional
-repository  = "my-org/my-crate"  # optional
-```
-
-The engine diffs the declaration against the local workflow file and (in CI)
-against `GITHUB_WORKFLOW_REF` before any registry call. For `kind = "crates"`,
-a registry cross-check runs when `CRATES_IO_DOCTOR_TOKEN` is set — calls the
-trusted-publishing read API and fails on mismatch. PyPI and npm don't expose
-read APIs for trust policy, so the declared diff is the full gate there.
-
 ## Recipes
 
 ### Bundled-CLI npm family
@@ -293,7 +267,7 @@ kind  = "npm"
 npm   = "my-cli"
 build = "bundled-cli"
 path  = "packages/ts-cli"
-paths = ["packages/ts-cli/**", "crates/my-cli/**"]
+globs = ["packages/ts-cli/**", "crates/my-cli/**"]
 targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",
@@ -363,7 +337,7 @@ name  = "my-py"
 kind  = "pypi"
 build = "maturin"
 path  = "packages/python"
-paths = ["packages/python/**", "crates/my-rust/**"]
+globs = ["packages/python/**", "crates/my-rust/**"]
 targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",

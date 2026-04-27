@@ -25,10 +25,8 @@ import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { formatTag } from './tag-template.js';
-import { checkAuth, requireAuth } from './preflight.js';
-import { createGitHubRelease, generateReleaseNotes } from './release.js';
+import { requireAuth } from './preflight.js';
 import { withRetry } from './retry.js';
-import { deepCheck, type InspectFn } from './token-scope.js';
 import type { Ctx, Handler, PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
 
@@ -36,17 +34,8 @@ export interface PublishOptions {
   cwd: string;
   configPath?: string;
   dryRun?: boolean;
-  /**
-   * Opt-in deep auth check. When true, resolves each target's token
-   * and calls `inspect` before any publish; refuses to proceed on a
-   * scope mismatch for pypi/npm. crates.io mismatches are non-blocking
-   * (the bearer row isn't identifiable — see #110). Off by default.
-   */
-  preflightCheck?: boolean;
   /** Override for tests. */
   handlerFor?: (kind: Handler['kind']) => Handler;
-  /** Override for tests; defaults to the real `inspect`. */
-  inspectFn?: InspectFn;
 }
 
 export interface PublishOutput {
@@ -82,44 +71,10 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   // per package (one per target) share a single version.
   const perPackage = groupByPackage(matrix, config.packages);
 
-  // 2. Pre-flight auth.
+  // 2. Pre-flight auth: every selected package must have a viable
+  //    auth path (OIDC env or env-var token) before any side effects.
   const selectedPackages = [...perPackage.keys()].map((name) => mustGet(config.packages, name));
   requireAuth(selectedPackages);
-
-  // 2b. Opt-in deep scope check. Runs after plain auth (we need a token
-  // resolved before we can inspect it). Blocking for pypi/npm scope
-  // mismatches; crates is warn-only because its bearer row isn't
-  // identifiable from /me/tokens.
-  if (opts.preflightCheck) {
-    const auth = checkAuth(selectedPackages);
-    const envVarForPackage = new Map<string, string>();
-    for (const r of auth.results) {
-      if (r.via === 'token') envVarForPackage.set(r.package, r.envVar);
-    }
-    const scopable = selectedPackages.filter((p) => envVarForPackage.has(p.name));
-    const rows = await deepCheck({
-      packages: scopable,
-      envVarForPackage,
-      ...(opts.inspectFn !== undefined ? { inspect: opts.inspectFn } : {}),
-    });
-    const blockers: string[] = [];
-    for (const row of rows) {
-      if (row.kind === 'crates' && row.match !== 'ok') {
-        log.warn(`publish: preflight: crates scope unverifiable for ${row.package}: ${row.scope}`);
-        continue;
-      }
-      if (row.match === 'mismatch' || row.match === 'error') {
-        blockers.push(`  - ${row.package} (${row.kind}): ${row.detail ?? row.scope}`);
-      }
-    }
-    if (blockers.length > 0) {
-      throw new Error(
-        ['publish: preflight-check refused; token scope does not match config:', ...blockers].join(
-          '\n',
-        ),
-      );
-    }
-  }
 
   // 3. Artifact completeness, unless dry-run (no artifacts to check).
   if (!opts.dryRun) {
@@ -184,24 +139,9 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
           /* v8 ignore next -- local tests use a throwaway repo without a remote */
           log.warn(`publish: failed to push tag ${tagName}: ${err instanceof Error ? err.message : String(err)}`);
         }
-
-        // Best-effort GitHub Release. Silent no-op when GITHUB_TOKEN or
-        // GITHUB_REPOSITORY aren't set (local / non-Actions runs).
-        try {
-          const body = generateReleaseNotes(name, tagName, { cwd });
-          const release = await createGitHubRelease({
-            tag: tagName,
-            title: `${name} ${version}`,
-            body,
-          });
-          if (release) log.info(`publish: GitHub Release created at ${release.url}`);
-          /* v8 ignore start -- tests don't exercise real GitHub API */
-        } catch (err) {
-          log.warn(
-            `publish: GitHub Release creation failed (tag still published): ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-        /* v8 ignore stop */
+        // GitHub Release creation is the reusable workflow's job
+        // (`gh release create --generate-notes` after this step). The
+        // engine cuts the tag and stops.
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
