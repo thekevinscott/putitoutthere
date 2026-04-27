@@ -248,7 +248,7 @@ function relativeOrSelf(base: string, target: string): string {
 
 export const crates: Handler = {
   kind: 'crates',
-  isPublished: isPublishedImpl as Handler['isPublished'],
-  writeVersion: writeVersionImpl as Handler['writeVersion'],
-  publish: publishImpl as Handler['publish'],
+  isPublished: isPublishedImpl,
+  writeVersion: writeVersionImpl,
+  publish: publishImpl,
 };

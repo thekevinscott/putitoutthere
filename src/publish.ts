@@ -19,7 +19,7 @@
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type Package } from './config.js';
-import { checkCompleteness, type MatrixRow as CompletenessRow } from './completeness.js';
+import { checkCompleteness } from './completeness.js';
 import { createTag, headCommit, pushTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
@@ -78,7 +78,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
 
   // 3. Artifact completeness, unless dry-run (no artifacts to check).
   if (!opts.dryRun) {
-    const completeness = checkCompleteness(matrix as CompletenessRow[], artifactsRoot(cwd));
+    const completeness = checkCompleteness(matrix, artifactsRoot(cwd));
     const incomplete = [...completeness.entries()].filter(([, r]) => !r.ok);
     if (incomplete.length > 0) {
       const lines = ['Artifact completeness check failed:'];
@@ -158,7 +158,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         // Thread ctx.env through so handler-injected credentials (OIDC-
         // minted twine/npm/crates tokens that live only on ctx.env, not
         // process.env) are redacted in the rendered job-summary. #195.
-        { log, envSources: [ctx.env as Record<string, string | undefined>] },
+        { log, envSources: [ctx.env] },
       );
       throw error;
     }
