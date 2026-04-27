@@ -351,14 +351,11 @@ describe('pypi.publish', () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
     );
-    const dir = mkdtempSync(join(tmpdir(), 'pypi-verbose-'));
-    writeFileSync(join(dir, 'pyproject.toml'), '[project]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
-    const artifactsRoot = join(dir, 'artifacts');
-    mkdirSync(join(artifactsRoot, 'demo-sdist'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-sdist', 'demo-0.1.0.tar.gz'), 'x', 'utf8');
+    stageSdist('demo-python-sdist', 'demo-python-0.1.0.tar.gz');
     execMock.mockReturnValueOnce(Buffer.from(''));
+    process.env.PYPI_API_TOKEN = 'pypi-tok';
     await pypi.publish(
-      { name: 'demo', path: dir },
+      { ...basePkg(), path: dir },
       '0.1.0',
       makeCtx({
         cwd: dir,
