@@ -7,6 +7,14 @@ inputs:
     description: 'Which CLI subcommand to run. Canonical values are `plan` and `publish`.'
     required: false
     default: 'plan'
+  working_directory:
+    description: >-
+      Path the CLI runs against (forwarded as `--cwd`). Defaults to the
+      runner working directory. Internal use; the reusable workflow
+      supplies this when invoked against a non-root tree (e.g. e2e
+      fixtures materialized into a subdir).
+    required: false
+    default: ''
   fail_on_error:
     description: 'If true, non-zero CLI exit codes fail the step.'
     required: false

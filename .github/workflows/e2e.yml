@@ -1,19 +1,24 @@
 name: E2E
 
 # Per-fixture e2e matrix. One job per distinct publish-path
-# manifestation; each fixture's job runs a real `publish` via OIDC
-# trusted publishing on every PR + push to main. Throwaway
-# `0.0.{unix_seconds}` versions, no long-lived registry tokens.
+# manifestation; each fixture entry runs the SAME job graph the
+# consumer-facing reusable workflow runs (.github/workflows/release.yml)
+# against the fixture's working tree, end-to-end against real
+# registries via OIDC trusted publishing.
+#
+# The mechanics live in .github/workflows/e2e-fixture.yml so the
+# matrix here is just the fixture list. e2e-fixture.yml is a copy of
+# release.yml's plan → build → publish job graph with one extra step:
+# materializing the fixture into fixture-tree/ before the plan runs.
 #
 # Until trusted publishers are registered for each fixture's package
 # names (#244 step 2), the corresponding job fails — by design. The
 # failure is the signal that the publisher still needs to be wired.
 #
-# Why publish on PRs and not just on main: catching publish-side
-# breakage post-merge (release-npm.yml run 24972181242 — ENEEDAUTH
-# from `npm publish --provenance`) is too late. Running the live
-# publish on PR CI shifts that detection left so a broken OIDC path
-# blocks the merge instead of breaking the next real release.
+# Triggers:
+# - pull_request           → live publish per fixture.
+# - push to main           → live publish per fixture.
+# - workflow_dispatch      → live publish per fixture.
 
 on:
   pull_request:
@@ -28,11 +33,6 @@ concurrency:
 jobs:
   e2e:
     name: e2e (${{ matrix.fixture }})
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    environment: e2e
     strategy:
       fail-fast: false
       matrix:
@@ -46,27 +46,7 @@ jobs:
           - python-rust-maturin
           - rust-crate-only
           - polyglot-everything
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install pnpm
-        run: npm install -g pnpm@9
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build CLI
-        run: pnpm run build
-
-      - name: Run e2e for ${{ matrix.fixture }}
-        # No long-lived registry tokens. OIDC trusted publishing is the
-        # only auth path the e2e suite exercises — matches what the
-        # public reusable workflow does.
-        run: pnpm exec vitest run --config test/e2e/vitest.e2e.config.ts test/e2e/${{ matrix.fixture }}.e2e.test.ts
+    uses: ./.github/workflows/e2e-fixture.yml
+    secrets: inherit
+    with:
+      fixture: ${{ matrix.fixture }}

@@ -12,6 +12,7 @@ import { run } from './cli.js';
 
 export async function main(): Promise<void> {
   const command = process.env.INPUT_COMMAND ?? '';
+  const workingDirectory = process.env.INPUT_WORKING_DIRECTORY ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
@@ -23,6 +24,7 @@ export async function main(): Promise<void> {
   }
 
   const argv = ['node', 'putitoutthere', command, '--json'];
+  if (workingDirectory) argv.push('--cwd', workingDirectory);
 
   const code = await run(argv);
   if (code !== 0 && !failOnError) {
