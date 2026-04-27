@@ -34,7 +34,7 @@ import {
 let repo: E2ERepo;
 
 beforeEach(() => {
-  repo = makeE2ERepo({ fixture: 'e2e-canary' });
+  repo = makeE2ERepo({ fixture: 'js-vanilla' });
 });
 
 afterEach(() => {

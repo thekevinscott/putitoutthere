@@ -1,8 +1,13 @@
 [putitoutthere]
 version = 1
 
+# Live canary. Publishes the `piot-fixture-zzz-cli` family on every PR
+# and push to main via OIDC trusted publishing — see test/e2e/README.md.
+# Single npm vanilla shape; covers the npm OIDC + plain `npm publish`
+# manifestation in the e2e matrix.
+
 [[package]]
-name = "piot-fixture-zzz-js-vanilla"
+name = "piot-fixture-zzz-cli"
 kind = "npm"
 path = "."
 globs = ["src/**", "package.json"]

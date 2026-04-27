@@ -31,7 +31,7 @@ let repo: E2ERepo;
 let spawnCwd: string;
 
 beforeEach(() => {
-  repo = makeE2ERepo({ fixture: 'e2e-canary' });
+  repo = makeE2ERepo({ fixture: 'js-vanilla' });
   // A fresh tmp dir with no putitoutthere.toml, no package.json, no .git.
   // If the CLI reads from process.cwd() anywhere it shouldn't, this will
   // produce either an "ENOENT" or a silently-empty plan.

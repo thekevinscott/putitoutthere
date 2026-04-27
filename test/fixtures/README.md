@@ -1,46 +1,39 @@
 # Fixtures
 
-Mini-repos exercising every `putitoutthere` shape end-to-end. Used by the unit golden tests (snapshotting `putitoutthere plan --json` output) and by the E2E suite (which actually publishes against the `piot-fixture-zzz-*` family).
+Mini-repos exercising every distinct `putitoutthere` publish-path manifestation. Used by the unit plan-shape tests (`fixtures.test.ts`) and by the e2e suite (which actually publishes against the `piot-fixture-zzz-*` family on real registries).
 
-## Pure-language (#29)
+The set is deliberately minimal: one fixture per unique manifestation. Build-backend differences that share a publish path (e.g. setuptools vs hatch) and cascade-ordering variations (covered by `polyglot-everything`) are tested at the code level, not as fixtures.
 
-No build matrix. One package, one publish per run.
+## Pure-language
 
-| Path                           | Kind   | Build       | Notes                       |
-|--------------------------------|--------|-------------|-----------------------------|
-| `rust-crate-only/`             | crates | native      | Source publish to crates.io |
-| `python-pure-setuptools/`      | pypi   | setuptools  | sdist + pure wheel          |
-| `python-pure-hatch/`           | pypi   | hatch       | sdist + pure wheel          |
-| `python-pure-sdist-only/`      | pypi   | setuptools  | sdist only                  |
-| `js-vanilla/`                  | npm    | vanilla     | One `npm publish` run       |
+One package, one publish per run.
 
-## Rust-in-language (#30)
+| Path                      | Kind   | Build       | Package                                | Notes                |
+|---------------------------|--------|-------------|----------------------------------------|----------------------|
+| `js-vanilla/`             | npm    | vanilla     | `piot-fixture-zzz-cli`                 | Live e2e canary      |
+| `python-pure-hatch/`      | pypi   | hatch       | `piot-fixture-zzz-python-hatch`        | sdist + pure wheel   |
+| `python-pure-sdist-only/` | pypi   | setuptools  | `piot-fixture-zzz-python-sdist`        | sdist only, no wheel |
+| `rust-crate-only/`        | crates | native      | `piot-fixture-zzz-rust`                | Source publish       |
+
+## Rust-in-language
 
 5-target matrix: linux-x64-gnu, linux-aarch64-gnu, darwin-x64, darwin-arm64, win32-x64-msvc.
 
-| Path                      | Kind | Build        | Output                          |
-|---------------------------|------|--------------|---------------------------------|
-| `python-rust-maturin/`    | pypi | maturin      | 5 wheels + 1 sdist              |
-| `js-napi/`                | npm  | napi         | 5 platform pkgs + 1 main        |
-| `js-bundled-cli/`         | npm  | bundled-cli  | 5 platform pkgs + 1 main (shim) |
+| Path                   | Kind | Build        | Package                                  | Output                          |
+|------------------------|------|--------------|------------------------------------------|---------------------------------|
+| `python-rust-maturin/` | pypi | maturin      | `piot-fixture-zzz-python-maturin`        | 5 wheels + 1 sdist              |
+| `js-napi/`             | npm  | napi         | `piot-fixture-zzz-js-napi` (+5 plat)     | 5 platform pkgs + 1 main        |
+| `js-bundled-cli/`      | npm  | bundled-cli  | `piot-fixture-zzz-js-bundled` (+5 plat)  | 5 platform pkgs + 1 main (shim) |
 
-## Polyglot (#31)
+## Polyglot
 
-Cross-language `depends_on` cascades. Changing a `.rs` file triggers the dependent package(s).
+| Path                   | Packages                                                                  |
+|------------------------|---------------------------------------------------------------------------|
+| `js-python-no-rust/`   | pypi `-python-no-rust` + npm `-js-no-rust` — SDK shape, no Rust           |
+| `polyglot-everything/` | crates `-rust` + pypi `-python` + npm `-cli` (bundled-cli) — dirsql shape |
 
-| Path                             | Packages                                     |
-|----------------------------------|----------------------------------------------|
-| `polyglot-rust-python/`          | crates + pypi (maturin, depends_on)          |
-| `polyglot-rust-js-napi/`         | crates + npm (napi, depends_on)              |
-| `polyglot-rust-js-bundled/`      | crates + npm (bundled-cli, depends_on)       |
-| `polyglot-everything/`           | crates + pypi + npm (bundled-cli) — dirsql shape |
-
-`polyglot-everything/` is the v0 success criterion (plan.md §25.3 #2) — publishes cleanly on a real cadence against the canary family.
-
-## E2E canary (#28)
-
-`e2e-canary/` — minimal npm vanilla fixture used by the E2E harness. Isolated from #29 because it's the one that actually publishes on every E2E run.
+`polyglot-everything/` is the v0 success criterion (plan.md §25.3 #2); it covers cross-handler interaction and `depends_on` cascade end-to-end. Single-mode polyglot variants (rust+python, rust+js-napi, rust+js-bundled) were removed: cascade ordering is pure-function logic covered by unit tests, and each underlying handler is exercised by its single-mode fixture.
 
 ## Version placeholder
 
-Fixtures use `__VERSION__` as a substitute for their version fields. The E2E harness rewrites it at test time via `makeE2ERepo()`; golden-file tests leave it literal.
+Fixtures use `__VERSION__` as a substitute for their version fields. The e2e harness rewrites it at test time via `makeE2ERepo()`; plan-shape tests rewrite to `0.1.0`.

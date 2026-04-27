@@ -1,1 +1,0 @@
-{ "name": "piot-fixture-zzz-napi", "version": "__VERSION__", "license": "MIT", "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" }, "main": "index.js" }

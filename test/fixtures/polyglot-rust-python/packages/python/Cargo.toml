@@ -1,8 +1,0 @@
-[package]
-name = "piot-fixture-zzz-python"
-version = "__VERSION__"
-edition = "2021"
-
-[lib]
-name = "piot_fixture_zzz_python"
-crate-type = ["cdylib"]

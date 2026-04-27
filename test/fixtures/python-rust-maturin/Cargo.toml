@@ -1,8 +1,8 @@
 [package]
-name = "piot-fixture-zzz-py-maturin"
+name = "piot-fixture-zzz-python-maturin"
 version = "__VERSION__"
 edition = "2021"
 
 [lib]
-name = "piot_fixture_zzz_py_maturin"
+name = "piot_fixture_zzz_python_maturin"
 crate-type = ["cdylib"]

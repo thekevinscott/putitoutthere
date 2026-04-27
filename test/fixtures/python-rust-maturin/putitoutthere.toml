@@ -2,7 +2,7 @@
 version = 1
 
 [[package]]
-name = "piot-fixture-zzz-py-maturin"
+name = "piot-fixture-zzz-python-maturin"
 kind = "pypi"
 path = "."
 globs = ["src/**", "Cargo.toml", "pyproject.toml"]

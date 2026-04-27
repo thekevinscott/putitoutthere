@@ -1,7 +1,0 @@
-[build-system]
-requires = ["maturin>=1"]
-build-backend = "maturin"
-
-[project]
-name = "piot-fixture-zzz-python"
-version = "__VERSION__"

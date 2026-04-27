@@ -53,7 +53,7 @@ Run `pnpm run test:e2e:cleanup` (to be added in a follow-up PR) to yank/deprecat
 
 ## Fixtures
 
-`test/fixtures/e2e-canary/` contains the minimal source tree for the canary packages. It's deliberately tiny — just enough to build a valid artifact for each registry.
+`test/fixtures/js-vanilla/` contains the minimal source tree for the live canary (`piot-fixture-zzz-cli`). It's deliberately tiny — just enough to build a valid artifact for npm vanilla. Other fixtures in `test/fixtures/` cover the remaining publish-path manifestations and join the e2e matrix as their trusted publishers come online (issue #244).
 
 ## Architecture
 

@@ -1,7 +1,0 @@
-[package]
-name = "piot-fixture-zzz-rust"
-version = "__VERSION__"
-edition = "2021"
-license = "MIT"
-description = "Put It Out There E2E canary fixture. Safe to ignore."
-repository = "https://github.com/thekevinscott/putitoutthere"
