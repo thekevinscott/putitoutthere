@@ -21,6 +21,35 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Crates publish's pre-cargo dirty-tree check ignores `artifacts/`
+
+**Summary.** The crates handler scans `git status --porcelain` before
+invoking `cargo publish --allow-dirty`, refusing to proceed if anything
+other than the managed `Cargo.toml` is dirty (the writeVersion bump
+runs in the same job and would otherwise be the only legitimate dirty
+file). The reusable workflow's `actions/download-artifact@v4` step
+always creates `artifacts/` at the repo root before publish runs —
+even for crates-only fixtures that have nothing to download — and the
+pre-check was rejecting on `?? artifacts/`. The scan now treats the
+engine's own `artifactsRoot` as managed scratch space and skips files
+under it.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Crates publishes that
+previously errored with `unexpected dirty files in the working tree
+outside <Cargo.toml>: - artifacts/` now proceed to `cargo publish`.
+Stray edits anywhere else in the tree still fail the check.
+
+**Verification.** A `kind = "crates"` package in a repo whose only
+"dirty" file (alongside the managed `Cargo.toml`) is the engine's
+`artifacts/` directory now reaches cargo. `git status --porcelain`
+showing `?? artifacts/` is no longer fatal.
+
+---
+
 ### Crates publish no longer fails the pre-publish completeness check
 
 **Summary.** Consumers with a `kind = "crates"` package previously hit

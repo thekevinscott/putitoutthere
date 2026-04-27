@@ -45,6 +45,19 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **Crates publish's pre-cargo dirty-tree check now ignores the
+  reusable workflow's `artifacts/` scratch directory.** (#244)
+  The pre-publish guard scans `git status --porcelain` for stray edits
+  outside the managed `Cargo.toml` (the engine passes `--allow-dirty`
+  to cargo to permit the writeVersion bump, then re-imposes a narrower
+  check). Reusable workflow's `actions/download-artifact@v4` step
+  always creates `artifacts/` under cwd, even for crates-only
+  fixtures with nothing to download — the pre-check was rejecting
+  with `unexpected dirty files in the working tree outside ... -
+  artifacts/`. The scan now treats `${ctx.artifactsRoot}` (the dir
+  the engine itself populates) as engine-managed and skips it. No
+  config or workflow changes required.
+
 - **Crates publish no longer fails the completeness check.** (#244)
   `cargo publish` packages and uploads from source on the registry
   side, so the reusable workflow never produces a `<name>-crate/`
