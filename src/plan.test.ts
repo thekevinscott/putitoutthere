@@ -51,7 +51,7 @@ version = 1
 name  = "lib-rust"
 kind  = "crates"
 path  = "packages/rust"
-paths = ["packages/rust/**"]
+globs = ["packages/rust/**"]
 
 [[package]]
 name       = "lib-python"
@@ -60,7 +60,7 @@ path       = "packages/python"
 pypi       = "lib"
 build      = "maturin"
 targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
-paths      = ["packages/python/**"]
+globs      = ["packages/python/**"]
 depends_on = ["lib-rust"]
 `;
 
@@ -133,7 +133,7 @@ version = 1
 name  = "rust/core"
 kind  = "crates"
 path  = "rust/core"
-paths = ["rust/core/**"]
+globs = ["rust/core/**"]
 
 [[package]]
 name       = "py/cachetta"
@@ -141,7 +141,7 @@ kind       = "pypi"
 path       = "py/cachetta"
 build      = "maturin"
 targets    = ["x86_64-unknown-linux-gnu"]
-paths      = ["py/cachetta/**"]
+globs      = ["py/cachetta/**"]
 
 [[package]]
 name    = "js/cachetta"
@@ -149,7 +149,7 @@ kind    = "npm"
 build   = "napi"
 path    = "js/cachetta"
 targets = ["x86_64-unknown-linux-gnu"]
-paths   = ["js/cachetta/**"]
+globs   = ["js/cachetta/**"]
 `,
       'utf8',
     );
@@ -224,7 +224,7 @@ version = 1
 name  = "py/cachetta"
 kind  = "pypi"
 path  = "py/cachetta"
-paths = ["py/cachetta/**"]
+globs = ["py/cachetta/**"]
 `,
       'utf8',
     );
@@ -236,7 +236,7 @@ paths = ["py/cachetta/**"]
 });
 
 describe('plan: subsequent release with last_tag', () => {
-  it('only cascades packages whose paths changed', async () => {
+  it('only cascades packages whose globs changed', async () => {
     writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
     commit('feat: initial', {
       'packages/rust/lib.rs': '// rust',
@@ -367,19 +367,19 @@ version = 1
 name  = "pkg-a"
 kind  = "crates"
 path  = "packages/a"
-paths = ["packages/a/**"]
+globs = ["packages/a/**"]
 
 [[package]]
 name  = "pkg-b"
 kind  = "crates"
 path  = "packages/b"
-paths = ["packages/b/**"]
+globs = ["packages/b/**"]
 
 [[package]]
 name  = "pkg-c"
 kind  = "crates"
 path  = "packages/c"
-paths = ["packages/c/**"]
+globs = ["packages/c/**"]
 `;
     writeFileSync(join(repo, 'putitoutthere.toml'), sharedTomlStructure, 'utf8');
     commit('feat: initial', {
@@ -410,7 +410,7 @@ version = 1
 name  = "lib-ts"
 kind  = "npm"
 path  = "packages/ts"
-paths = ["packages/ts/**"]
+globs = ["packages/ts/**"]
 `;
 
 const NPM_NAPI_TOML = `
@@ -421,7 +421,7 @@ version = 1
 name    = "lib-napi"
 kind    = "npm"
 path    = "packages/ts"
-paths   = ["packages/ts/**"]
+globs   = ["packages/ts/**"]
 build   = "napi"
 targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 `;
@@ -466,7 +466,7 @@ version = 1
 name    = "lib-napi"
 kind    = "npm"
 path    = "packages/ts"
-paths   = ["packages/ts/**"]
+globs   = ["packages/ts/**"]
 build   = "napi"
 targets = [
   "x86_64-unknown-linux-gnu",
@@ -501,7 +501,7 @@ version = 1
 name    = "lib-py"
 kind    = "pypi"
 path    = "packages/py"
-paths   = ["packages/py/**"]
+globs   = ["packages/py/**"]
 build   = "maturin"
 targets = [
   "x86_64-unknown-linux-gnu",
@@ -533,7 +533,7 @@ version = 1
 name    = "lib-napi"
 kind    = "npm"
 path    = "packages/ts"
-paths   = ["packages/ts/**"]
+globs   = ["packages/ts/**"]
 build   = "napi"
 targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 `;
@@ -558,7 +558,7 @@ version = 1
 name    = "lib-napi"
 kind    = "npm"
 path    = "packages/ts"
-paths   = ["packages/ts/**"]
+globs   = ["packages/ts/**"]
 build   = "napi"
 targets = [
   { triple = "x86_64-unknown-linux-gnu" },
@@ -584,7 +584,7 @@ version = 1
 name    = "lib-napi"
 kind    = "npm"
 path    = "packages/ts"
-paths   = ["packages/ts/**"]
+globs   = ["packages/ts/**"]
 build   = "napi"
 targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
 `;
@@ -730,7 +730,7 @@ version = 1
 name = "my-py"
 kind = "pypi"
 path = "py/my-py"
-paths = ["py/my-py/**"]
+globs = ["py/my-py/**"]
 build = "maturin"
 targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 

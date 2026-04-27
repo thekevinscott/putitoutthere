@@ -49,7 +49,7 @@ function basePkg(over: Partial<{ name: string; path: string; crate?: string }> =
     name: 'demo-rust',
     kind: 'crates',
     path: '.',
-    paths: ['**'],
+    globs: ['**'],
     depends_on: [],
     first_version: '0.1.0',
     crate: 'demo-crate',

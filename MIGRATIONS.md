@@ -21,6 +21,31 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### `[[package]].paths` renamed to `globs`
+
+**Summary.** The `path` / `paths` pair in `[[package]]` was confusing —
+singular and plural differed only in a trailing `s` while meaning two
+unrelated things (the package working directory vs. the cascade-trigger
+globs). Renaming `paths` → `globs` removes the trailing-S collision.
+
+**Required changes.**
+
+| Before | After |
+|-----|-----|
+| `paths = ["src/**", "pyproject.toml"]` | `globs = ["src/**", "pyproject.toml"]` |
+
+Every `[[package]]` block in `putitoutthere.toml` needs the rename.
+Configs declaring `paths` now fail validation under `.strict()`.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None — the field's semantics
+are unchanged.
+
+**Verification.** `pnpm exec putitoutthere plan` (or the next reusable-
+workflow run) loads cleanly. A config still declaring `paths` fails
+load with a Zod error pointing at the unknown key.
+
 ### Removed: diagnostic CLI surface, GitHub-App auth, trust-policy validation
 
 **Summary.** Eight things removed in one pass, none consumer-observable
@@ -83,7 +108,7 @@ on:
 
 jobs:
   release:
-    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
     permissions:
       contents: write
       id-token: write
@@ -104,7 +129,7 @@ for the authoritative non-goals.
 
 | Before (hand-written `release.yml`) | After |
 |-----|-----|
-| ~100 lines of YAML: plan/build/publish jobs, twine install, git identity, GitHub Release backfill, hand-pinned action majors | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` |
+| ~100 lines of YAML: plan/build/publish jobs, twine install, git identity, GitHub Release backfill, hand-pinned action majors | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0` |
 | `putitoutthere init` to scaffold the workflow | Subcommand removed; consumers add the snippet above by hand |
 | `[[package]].build_workflow = "publish-foo.yml"` for unsupported shapes | Removed. Shapes that don't fit piot's named build modes write their own release workflow that doesn't use piot |
 | Long-lived registry tokens (`NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) passed to a hand-written publish step | Not reachable through the reusable workflow. Register an OIDC trusted publisher per registry once |
@@ -137,7 +162,7 @@ known-tested versions.
 
 - `pnpm test:unit` passes in the main repo.
 - A consumer's first cutover: drop in the 12-line `release.yml`
-  shown above, push a commit that touches a `[[package]].paths`
+  shown above, push a commit that touches a `[[package]].globs`
   glob, and watch for a tag push + GitHub Release on the next
   workflow run.
 
@@ -557,7 +582,7 @@ configurations are unchanged.
  kind       = "pypi"
  build      = "maturin"
  path       = "packages/python"
- paths      = ["packages/python/**"]
+ globs      = ["packages/python/**"]
  targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 +
 +[package.bundle_cli]
@@ -577,7 +602,7 @@ And in the Python package's `pyproject.toml`:
 +include = ["...", "src/my_py/_binary/**"]  # ship the staged binary
 ```
 
-See [Polyglot Rust library → Shipping a Rust CLI inside the PyPI wheel](https://github.com/thekevinscott/putitoutthere/blob/main/docs/guide/shapes/polyglot-rust.md#shipping-a-rust-cli-inside-the-pypi-wheel)
+See [README → Rust CLI inside a PyPI wheel](https://github.com/thekevinscott/putitoutthere/blob/main/README.md#rust-cli-inside-a-pypi-wheel)
 for the full worked example including the launcher stub.
 
 **Deprecations removed.** None.

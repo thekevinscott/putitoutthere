@@ -44,7 +44,7 @@ export interface PackageConfig {
   name: string;
   kind: Kind;
   path: string;
-  paths: string[];
+  globs: string[];
   depends_on?: string[] | undefined;
   first_version?: string | undefined;
   // Handler-specific fields are validated by each handler's Zod schema.

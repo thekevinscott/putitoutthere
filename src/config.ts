@@ -66,7 +66,7 @@ const PACKAGE_BASE = {
       message: `package name must not contain "${ENCODED_SLASH}" (reserved: piot encodes "/" to "${ENCODED_SLASH}" for artifact-name slots; pick a different separator)`,
     }),
   path: z.string().min(1),
-  paths: z.array(z.string()).min(1),
+  globs: z.array(z.string()).min(1),
   depends_on: z.array(z.string()).default([]),
   first_version: z.string().default('0.1.0'),
   // Template for the git tag cut on release. `{version}` is required;

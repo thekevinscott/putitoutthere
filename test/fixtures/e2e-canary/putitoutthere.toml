@@ -9,5 +9,5 @@ version = 1
 name = "piot-fixture-zzz-cli"
 kind = "npm"
 path = "npm"
-paths = ["npm/**"]
+globs = ["npm/**"]
 first_version = "__VERSION__"

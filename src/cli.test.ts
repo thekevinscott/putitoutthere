@@ -93,7 +93,7 @@ version = 1
 name  = "demo"
 kind  = "npm"
 path  = "packages/ts"
-paths = ["packages/ts/**"]
+globs = ["packages/ts/**"]
 `,
       'utf8',
     );

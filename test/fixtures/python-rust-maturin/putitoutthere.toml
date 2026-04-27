@@ -5,7 +5,7 @@ version = 1
 name = "piot-fixture-zzz-py-maturin"
 kind = "pypi"
 path = "."
-paths = ["src/**", "Cargo.toml", "pyproject.toml"]
+globs = ["src/**", "Cargo.toml", "pyproject.toml"]
 build = "maturin"
 targets = [
   "x86_64-unknown-linux-gnu",

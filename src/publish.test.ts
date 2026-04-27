@@ -35,7 +35,7 @@ version = 1
 name  = "lib-js"
 kind  = "npm"
 path  = "packages/ts"
-paths = ["packages/ts/**"]
+globs = ["packages/ts/**"]
 `;
 
 beforeEach(() => {
@@ -153,7 +153,7 @@ version = 1
 name  = "lib-rust"
 kind  = "crates"
 path  = "packages/rust"
-paths = ["packages/rust/**"]
+globs = ["packages/rust/**"]
 `,
     );
     writeRepoFile('packages/rust/Cargo.toml', '[package]\nname = "lib-rust"\nversion = "0.0.0"\n');
@@ -196,20 +196,20 @@ version = 1
 name  = "a"
 kind  = "npm"
 path  = "packages/a"
-paths = ["packages/a/**"]
+globs = ["packages/a/**"]
 
 [[package]]
 name       = "b"
 kind       = "npm"
 path       = "packages/b"
-paths      = ["packages/b/**"]
+globs      = ["packages/b/**"]
 depends_on = ["a"]
 
 [[package]]
 name       = "c"
 kind       = "npm"
 path       = "packages/c"
-paths      = ["packages/c/**"]
+globs      = ["packages/c/**"]
 depends_on = ["a", "b"]
 `;
     // Rebuild repo with three packages.

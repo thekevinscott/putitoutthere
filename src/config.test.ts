@@ -19,7 +19,7 @@ version = 1
 name  = "app"
 kind  = "crates"
 path  = "packages/rust"
-paths = ["packages/rust/**"]
+globs = ["packages/rust/**"]
 `;
 
 describe('parseConfig: happy paths', () => {
@@ -55,7 +55,7 @@ version = 1
 name       = "app"
 kind       = "crates"
 path       = "."
-paths      = ["**"]
+globs      = ["**"]
 tag_format = "v{version}"
 `);
     expect(cfg.packages[0]!.tag_format).toBe('v{version}');
@@ -70,7 +70,7 @@ version = 1
 name       = "app"
 kind       = "crates"
 path       = "."
-paths      = ["**"]
+globs      = ["**"]
 tag_format = "{name}-v"
 `),
     ).toThrow(/tag_format must contain \{version\}/);
@@ -85,7 +85,7 @@ version = 1
 name       = "app"
 kind       = "crates"
 path       = "."
-paths      = ["**"]
+globs      = ["**"]
 tag_format = "{name}-{bogus}-v{version}"
 `),
     ).toThrow(/unknown placeholder/);
@@ -99,7 +99,7 @@ version = 1
 name  = "py"
 kind  = "pypi"
 path  = "packages/py"
-paths = ["packages/py/**"]
+globs = ["packages/py/**"]
 `);
     const pkg = cfg.packages[0]! as { kind: string; build?: string };
     expect(pkg.kind).toBe('pypi');
@@ -115,13 +115,13 @@ version = 1
 name  = "a-rust"
 kind  = "crates"
 path  = "packages/rust"
-paths = ["packages/rust/**"]
+globs = ["packages/rust/**"]
 
 [[package]]
 name    = "a-python"
 kind    = "pypi"
 path    = "packages/python"
-paths   = ["packages/python/**"]
+globs   = ["packages/python/**"]
 build   = "maturin"
 targets = ["x86_64-unknown-linux-gnu"]
 
@@ -129,7 +129,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 name  = "a-js"
 kind  = "npm"
 path  = "packages/ts"
-paths = ["packages/ts/**"]
+globs = ["packages/ts/**"]
 `);
     expect(cfg.packages).toHaveLength(3);
     expect(cfg.packages.map((p) => p.kind)).toEqual(['crates', 'pypi', 'npm']);
@@ -145,7 +145,7 @@ describe('parseConfig: required fields', () => {
 name  = "x"
 kind  = "crates"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow(/version/);
   });
@@ -158,12 +158,12 @@ version = 1
 [[package]]
 kind  = "crates"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow(/name/);
   });
 
-  it('rejects missing package.paths', () => {
+  it('rejects missing package.globs', () => {
     expect(() =>
       parseConfig(`
 [putitoutthere]
@@ -173,10 +173,10 @@ name = "x"
 kind = "crates"
 path = "."
 `),
-    ).toThrow(/paths/);
+    ).toThrow(/globs/);
   });
 
-  it('rejects empty package.paths', () => {
+  it('rejects empty package.globs', () => {
     expect(() =>
       parseConfig(`
 [putitoutthere]
@@ -185,7 +185,7 @@ version = 1
 name  = "x"
 kind  = "crates"
 path  = "."
-paths = []
+globs = []
 `),
     ).toThrow();
   });
@@ -212,7 +212,7 @@ unexpected = "oops"
 name  = "x"
 kind  = "crates"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow(/unexpected|unknown|unrecognized/i);
   });
@@ -226,7 +226,7 @@ version = 1
 name   = "x"
 kind   = "crates"
 path   = "."
-paths  = ["**"]
+globs  = ["**"]
 ignored_field = 42
 `),
     ).toThrow(/ignored_field|unknown|unrecognized/i);
@@ -241,7 +241,7 @@ version = 1
 name  = "x"
 kind  = "crates"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 build = "maturin"
 `),
     ).toThrow(/build|unknown|unrecognized/i);
@@ -258,7 +258,7 @@ version = 1
 name  = "x"
 kind  = "rubygems"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow();
   });
@@ -273,7 +273,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "maturin"
 targets = ["x86_64-unknown-linux-gnu"]
 `);
@@ -289,7 +289,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "setuptools"
 targets = ["x86_64-unknown-linux-gnu"]
 `),
@@ -305,7 +305,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 targets = ["x86_64-unknown-linux-gnu"]
 `),
     ).toThrow(/target/i);
@@ -319,7 +319,7 @@ version = 1
 name    = "x"
 kind    = "npm"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "napi"
 targets = ["x86_64-unknown-linux-gnu"]
 `);
@@ -334,7 +334,7 @@ version = 1
 name    = "x"
 kind    = "npm"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "bundled-cli"
 targets = ["x86_64-unknown-linux-gnu"]
 `);
@@ -350,7 +350,7 @@ version = 1
 name    = "x"
 kind    = "npm"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 targets = ["x86_64-unknown-linux-gnu"]
 `),
     ).toThrow(/target/i);
@@ -365,7 +365,7 @@ version = 1
 name    = "x"
 kind    = "crates"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 targets = ["x86_64-unknown-linux-gnu"]
 `),
     ).toThrow(/target|unknown|unrecognized/i);
@@ -381,7 +381,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "maturin"
 targets = [
   "x86_64-unknown-linux-gnu",
@@ -407,7 +407,7 @@ version = 1
 name    = "x"
 kind    = "npm"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "napi"
 targets = [
   { triple = "aarch64-apple-darwin", runner = "macos-14" },
@@ -425,7 +425,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "maturin"
 targets = [{ triple = "x86_64-unknown-linux-gnu" }]
 `);
@@ -442,7 +442,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "maturin"
 targets = [{ triple = "x86_64-unknown-linux-gnu", runs_on = "ubuntu-latest" }]
 `),
@@ -458,7 +458,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 build   = "maturin"
 targets = [{ runner = "ubuntu-24.04-arm" }]
 `),
@@ -476,12 +476,12 @@ version = 1
 name  = "dup"
 kind  = "crates"
 path  = "a"
-paths = ["**"]
+globs = ["**"]
 [[package]]
 name  = "dup"
 kind  = "npm"
 path  = "b"
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow(/duplicate|dup/i);
   });
@@ -497,7 +497,7 @@ version = 2
 name  = "x"
 kind  = "crates"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow(/version/i);
   });
@@ -512,7 +512,7 @@ version = 1
 name     = "x"
 kind     = "crates"
 path     = "."
-paths    = ["**"]
+globs    = ["**"]
 crate    = "actual-name"
 features = ["a", "b"]
 `);
@@ -531,7 +531,7 @@ version = 1
 name   = "x"
 kind   = "crates"
 path   = "."
-paths  = ["**"]
+globs  = ["**"]
 target = ["x86_64-unknown-linux-gnu"]
 `),
     ).toThrow(/target/i);
@@ -545,7 +545,7 @@ version = 1
 name    = "x"
 kind    = "pypi"
 path    = "."
-paths   = ["**"]
+globs   = ["**"]
 pypi    = "the-name"
 build   = "maturin"
 targets = ["x86_64-unknown-linux-gnu"]
@@ -563,7 +563,7 @@ version = 1
 name   = "x"
 kind   = "npm"
 path   = "."
-paths  = ["**"]
+globs  = ["**"]
 npm    = "the-name"
 access = "public"
 tag    = "next"
@@ -583,7 +583,7 @@ version = 1
 name   = "x"
 kind   = "npm"
 path   = "."
-paths  = ["**"]
+globs  = ["**"]
 access = "maybe"
 `),
     ).toThrow();
@@ -598,7 +598,7 @@ version = 1
 name  = "x"
 kind  = "pypi"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 build = "poetry"
 `),
     ).toThrow();
@@ -614,12 +614,12 @@ version = 1
 name  = "a"
 kind  = "crates"
 path  = "a"
-paths = ["a/**"]
+globs = ["a/**"]
 [[package]]
 name       = "b"
 kind       = "pypi"
 path       = "b"
-paths      = ["b/**"]
+globs      = ["b/**"]
 depends_on = ["a"]
 `);
     expect(cfg.packages[1]!.depends_on).toEqual(['a']);
@@ -675,7 +675,7 @@ version = 1
 name = "my-py"
 kind = "pypi"
 path = "py/my-py"
-paths = ["py/my-py/**"]
+globs = ["py/my-py/**"]
 build = "maturin"
 targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 
@@ -740,7 +740,7 @@ version = 1
 name = "my-pkg"
 kind = "npm"
 path = "packages/my-pkg"
-paths = ["packages/my-pkg/**"]
+globs = ["packages/my-pkg/**"]
 
 [package.bundle_cli]
 bin = "my-cli"
@@ -764,7 +764,7 @@ version = 1
 name  = "py/cachetta"
 kind  = "pypi"
 path  = "py/cachetta"
-paths = ["py/cachetta/**"]
+globs = ["py/cachetta/**"]
 `);
     expect(cfg.packages[0]!.name).toBe('py/cachetta');
   });
@@ -778,7 +778,7 @@ version = 1
 name  = "lib__double"
 kind  = "crates"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow(/__/);
   });
@@ -801,7 +801,7 @@ version = 1
 name  = "${badName}"
 kind  = "crates"
 path  = "."
-paths = ["**"]
+globs = ["**"]
 `),
     ).toThrow(/upload-artifact|forbidden|registry-safe/);
   });

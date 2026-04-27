@@ -5,6 +5,6 @@ version = 1
 name = "piot-fixture-zzz-python-hatch"
 kind = "pypi"
 path = "."
-paths = ["src/**", "pyproject.toml"]
+globs = ["src/**", "pyproject.toml"]
 build = "hatch"
 first_version = "__VERSION__"

@@ -9,7 +9,7 @@ name: putitoutthere release
 #
 #   jobs:
 #     release:
-#       uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+#       uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
 #       permissions:
 #         contents: write
 #         id-token: write
@@ -22,7 +22,7 @@ name: putitoutthere release
 # via this workflow — register a trusted publisher per registry once,
 # then publishes are zero-secret. See docs/guide/auth.md.
 #
-# The `uses: thekevinscott/putitoutthere@v1` calls inside this file
+# The `uses: thekevinscott/putitoutthere@v0` calls inside this file
 # resolve to the same git ref the workflow itself was loaded from, so
 # the workflow + engine always agree on a single version.
 
@@ -68,7 +68,7 @@ jobs:
           node-version: ${{ inputs.node_version }}
 
       - id: plan
-        uses: thekevinscott/putitoutthere@v1
+        uses: thekevinscott/putitoutthere@v0
         with:
           command: plan
 
@@ -182,7 +182,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - uses: thekevinscott/putitoutthere@v1
+      - uses: thekevinscott/putitoutthere@v0
         with:
           command: publish
 
