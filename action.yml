@@ -25,5 +25,5 @@ outputs:
     description: "JSON matrix emitted by `plan`. Output key is omitted when the plan resolves to zero rows or when command is anything other than plan; downstream jobs should coalesce with `|| '[]'`."
 
 runs:
-  using: 'node24'
+  using: 'node20'
   main: 'dist-action/index.js'

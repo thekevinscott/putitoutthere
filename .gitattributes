@@ -1,0 +1,6 @@
+# Keep YAML files LF on every platform. Workflow / config YAMLs ship
+# to runners that parse strictly; CRLF here would break GitHub Actions
+# parsing and the test/fixtures/* consumer-template snapshots that the
+# drift test compares byte-for-byte. Issue #244.
+*.yml text eol=lf
+*.yaml text eol=lf

@@ -54,8 +54,6 @@ jobs:
         name: putitoutthere plan
         run: node dist/cli-bin.js plan --json > plan.json
       - name: expose matrix
-        env:
-          GHO: ${{ github.output }}
         run: |
           # shellcheck disable=SC2002
           printf 'matrix=%s\n' "$(cat plan.json)" >> "$GITHUB_OUTPUT"

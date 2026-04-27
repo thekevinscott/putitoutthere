@@ -61,12 +61,15 @@ describe('#244 fixture consumer-template snapshots', () => {
 
   it.each(fixtures)('%s/.github/workflows/release.yml matches canonical template', (fixture) => {
     const path = join(fixturesRoot, fixture, '.github/workflows/release.yml');
-    const actual = readFileSync(path, 'utf8');
+    // Normalize CRLF → LF: git on Windows defaults to autocrlf, so the
+    // bytes on disk include \r\n even though the file is committed LF.
+    // We compare logical content, not on-disk encoding.
+    const actual = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
     expect(actual).toBe(CANONICAL_TEMPLATE);
   });
 
   it('canonical template matches the README Quickstart block', () => {
-    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8').replace(/\r\n/g, '\n');
     // The Quickstart shows the template inside a ```yaml fenced block.
     // We just need to confirm the body is present verbatim — the README
     // wraps it in fences which we strip from the search.
