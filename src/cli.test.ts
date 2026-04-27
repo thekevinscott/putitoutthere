@@ -2,8 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { run } from './cli.js';
+import { parseFlags, run } from './cli.js';
 
 describe('cli', () => {
   const stdoutChunks: string[] = [];
@@ -67,6 +68,21 @@ describe('cli', () => {
     const code = await run(['node', 'putitoutthere', 'plan', '--cwd', '/path/that/does/not/exist']);
     expect(code).toBe(1);
     expect(stderrChunks.join('')).toMatch(/^putitoutthere:/m);
+  });
+
+  it('resolves a relative --cwd to an absolute path (#244)', () => {
+    // Downstream handlers run subprocesses with `cwd: ctx.cwd` and pass
+    // file paths derived from `join(cwd, 'artifacts', ...)`. If the parsed
+    // cwd were left relative, those paths would re-resolve under the
+    // subprocess's cwd and double-up the prefix. Anchor at parse time.
+    const flags = parseFlags(['--cwd', 'fixture-tree']);
+    expect(isAbsolute(flags.cwd)).toBe(true);
+    expect(flags.cwd.endsWith('fixture-tree')).toBe(true);
+  });
+
+  it('leaves an absolute --cwd untouched', () => {
+    const flags = parseFlags(['--cwd', '/tmp/abs-path-test']);
+    expect(flags.cwd).toBe('/tmp/abs-path-test');
   });
 });
 

@@ -20,6 +20,8 @@
  * errors out.
  */
 
+import { isAbsolute, resolve } from 'node:path';
+
 import { plan } from './plan.js';
 import { publish } from './publish.js';
 import { VERSION } from './version.js';
@@ -58,7 +60,7 @@ interface ParsedFlags {
   json: boolean;
 }
 
-function parseFlags(argv: readonly string[]): ParsedFlags {
+export function parseFlags(argv: readonly string[]): ParsedFlags {
   const out: ParsedFlags = {
     cwd: process.cwd(),
     json: false,
@@ -78,6 +80,13 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
       );
     }
   }
+  // Always normalise --cwd to an absolute path. Downstream code joins
+  // `cwd` with `artifacts/` to derive paths it then hands to subprocesses
+  // (twine, cargo, npm) running with `cwd: ctx.cwd`. If cwd were left
+  // relative — e.g. `--cwd fixture-tree` from the JS action — those
+  // file paths would resolve as `fixture-tree/fixture-tree/...` from
+  // the subprocess's vantage. Anchor here once.
+  if (!isAbsolute(out.cwd)) out.cwd = resolve(out.cwd);
   return out;
 }
 
