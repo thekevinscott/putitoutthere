@@ -21,6 +21,12 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+_No migrations yet._
+
+---
+
+## v0.1.51 → v0.2.0
+
 ### Publish job rebuilds npm packages from source
 
 **Summary.** Vanilla npm packages were publishing with their compiled

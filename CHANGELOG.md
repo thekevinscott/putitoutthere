@@ -12,6 +12,28 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Added
 
+- _nothing yet_
+
+### Changed
+
+- _nothing yet_
+
+### Deprecated
+
+- _nothing yet_
+
+### Removed
+
+- _nothing yet_
+
+### Fixed
+
+- _nothing yet_
+
+## v0.1.51 → v0.2.0
+
+### Added
+
 - **`workflow_call` output `has_pypi`.** The reusable workflow now emits a string `'true'`/`'false'` indicating whether the planned matrix contains any `kind = "pypi"` rows. Consumers gate their caller-side `pypi-publish` job on this so non-PyPI repos paste the canonical template verbatim without paying any runtime cost. Computed in the `plan` job from the matrix output.
 - **Reusable workflow `.github/workflows/release.yml` (`workflow_call`).** The single user-facing surface. Consumer integration is one `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0` line in their own `release.yml`; pinned action versions, plan/build/publish orchestration, and GitHub Release creation all live inside. Three optional inputs: `environment` (default `release`), `node_version` (default `24`), `python_version` (default `3.12`). No `dry_run`, `working_directory`, or `config` inputs — the plan job is already side-effect-free, the config file is `putitoutthere.toml` at the repo root, period. The engine is invoked via `uses: thekevinscott/putitoutthere@v0` so the workflow file and the engine always agree on a single git ref.
 
