@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import { sanitizeArtifactName } from '../config.js';
+import { ErrorCodes } from '../error-codes.js';
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
@@ -142,16 +143,7 @@ async function publishImpl(
   const explicitToken = nonEmpty(ctx.env.PYPI_API_TOKEN) ?? nonEmpty(process.env.PYPI_API_TOKEN);
   const token = oidc.ok ? oidc.token : explicitToken;
   if (!token) {
-    throw new Error(
-      [
-        'pypi: no auth available. Either:',
-        '  - set PYPI_API_TOKEN (classic API token), or',
-        '  - enable trusted publishing: add `permissions.id-token: write` to the job and register a pending publisher on pypi.org.',
-        // Points consumers at the published auth guide, not internal plan
-        // docs (#149).
-        'See https://thekevinscott.github.io/putitoutthere/guide/auth for setup.',
-      ].join('\n'),
-    );
+    throw new Error(renderAuthFailure(oidc, explicitToken !== undefined));
   }
   ctx.log.info(
     oidc.ok ? 'pypi: authenticating via OIDC trusted publishing' : 'pypi: authenticating via PYPI_API_TOKEN',
@@ -208,6 +200,65 @@ async function publishImpl(
 
 function pypiNameFor(pkg: { name: string; pypi?: string }): string {
   return pkg.pypi ?? pkg.name;
+}
+
+/**
+ * Phase 2 / Idea 3. Renders the auth-failure error with a probe summary
+ * so a reader of the run log can see *why* OIDC didn't yield a token,
+ * not just that it didn't. The single most-asked question in the
+ * foreign-agent incident — "is OIDC even being attempted?" — is
+ * answered by the first line of the probe section.
+ *
+ * The error string is the *only* surface a downstream agent reading
+ * GH's public annotation strip can rely on; the warn lines emitted
+ * earlier in the run are auth-gated. Make it self-contained.
+ */
+function renderAuthFailure(
+  oidc: OidcMintResult,
+  pypiTokenSet: boolean,
+): string {
+  // Each probe row is `<probe>: <result>`. Short, parseable, and stable
+  // enough that a foreign agent can fingerprint it.
+  const probes: string[] = [];
+  if (!oidc.ok && oidc.reason === 'env-missing') {
+    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): absent');
+    probes.push('  - OIDC id-token request: skipped');
+    probes.push('  - OIDC mint exchange: skipped');
+  } else if (!oidc.ok && oidc.reason === 'id-token-http') {
+    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): present');
+    probes.push(`  - OIDC id-token request: failed (${oidc.detail ?? 'unknown'})`);
+    probes.push('  - OIDC mint exchange: skipped');
+  } else if (!oidc.ok && oidc.reason === 'id-token-empty') {
+    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): present');
+    probes.push('  - OIDC id-token request: ok (response missing `value`)');
+    probes.push('  - OIDC mint exchange: skipped');
+  } else if (!oidc.ok && oidc.reason === 'mint-rejected') {
+    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): present');
+    probes.push('  - OIDC id-token request: ok');
+    probes.push(`  - OIDC mint exchange: rejected (${oidc.detail ?? 'unknown'})`);
+  }
+  /* v8 ignore next 4 -- oidc.ok=true is unreachable here (caller only
+     enters this branch when no token resolved), but TS can't prove it */
+  if (oidc.ok) {
+    probes.push('  - OIDC: succeeded (caller bug — should not have reached here)');
+  }
+  probes.push(`  - PYPI_API_TOKEN: ${pypiTokenSet ? 'set' : 'unset'}`);
+
+  const code = ErrorCodes.AUTH_NO_TOKEN;
+  return [
+    `pypi: no auth available [${code}]`,
+    '',
+    'Probe results:',
+    ...probes,
+    '',
+    'Either:',
+    '  - set PYPI_API_TOKEN (classic API token), or',
+    '  - enable trusted publishing: add `permissions.id-token: write` to the job and register a pending publisher on pypi.org.',
+    // Code-deep-linked URL so the docs site can render code-specific
+    // guidance. Foreign agents grep on the code; the URL gives the
+    // reader a one-click jump.
+    `See https://thekevinscott.github.io/putitoutthere/guide/auth?code=${code} for setup.`,
+  ].join('\n');
 }
 
 /**

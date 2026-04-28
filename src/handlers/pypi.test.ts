@@ -712,6 +712,123 @@ describe('pypi.publish', () => {
     expect(tarballArg).toContain(join('packages', 'python', 'dist'));
     fetchSpy.mockRestore();
   });
+
+  // -------- Phase 2 / Idea 3: probe checklist + error code in error -----
+  // The previous auth-missing error was static prose ("Either: set
+  // PYPI_API_TOKEN, or enable trusted publishing"). When OIDC was tried
+  // and rejected (e.g. invalid-publisher 422), the user-facing error
+  // didn't mention that — the diagnostic lived only in a warn line a
+  // few lines above, which a foreign agent reading log excerpts could
+  // easily miss. The new error embeds the OIDC probe summary plus a
+  // PIOT_AUTH_NO_TOKEN code so the failure surface is self-describing.
+
+  it('auth-failure error tags the failure with PIOT_AUTH_NO_TOKEN', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/\[PIOT_AUTH_NO_TOKEN\]/);
+    fetchSpy.mockRestore();
+  });
+
+  it('auth-failure error reports OIDC env-missing in the probe summary', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/OIDC env vars[^\n]*absent/i);
+    fetchSpy.mockRestore();
+  });
+
+  it('auth-failure error surfaces a 422 invalid-publisher body excerpt', async () => {
+    // The exact incident: PyPI's response carries the expected
+    // `job_workflow_ref` list. The user-facing error must echo that
+    // body excerpt — not just the status — so a foreign agent reading
+    // only the final error knows the TP is registered against the wrong
+    // workflow path.
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const body = JSON.stringify({
+      errors: [
+        {
+          code: 'invalid-publisher',
+          description:
+            "valid token, but no corresponding publisher (The job_workflow_ref claim does not match, expecting one of ['thekevinscott/coaxer/.github/workflows/release.yml'])",
+        },
+      ],
+    });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.endsWith('/pypi/demo-pkg/0.1.0/json')) {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      if (url.includes('/oidc/request-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(body, { status: 422 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({
+          cwd: dir,
+          artifactsRoot,
+          env: {
+            ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+            ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+          },
+        }),
+      ),
+    ).rejects.toThrow(/422[\s\S]*invalid-publisher[\s\S]*job_workflow_ref/);
+    fetchSpy.mockRestore();
+  });
+
+  it('auth-failure error notes whether PYPI_API_TOKEN was set', async () => {
+    // When env=missing AND PYPI_API_TOKEN unset, the probe should call
+    // both out so the user sees there is no fallback either.
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/PYPI_API_TOKEN[^\n]*unset/i);
+    fetchSpy.mockRestore();
+  });
+
+  it('auth-failure error doc URL deep-links the error code', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/guide\/auth\?code=PIOT_AUTH_NO_TOKEN/);
+    fetchSpy.mockRestore();
+  });
 });
 
 describe('scmEnvSuffix (#207)', () => {

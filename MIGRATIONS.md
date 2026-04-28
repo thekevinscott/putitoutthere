@@ -21,6 +21,37 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### PyPI auth-failure error gains a probe summary and `PIOT_AUTH_NO_TOKEN` code
+
+**Summary.** When PyPI publishing failed because no auth path resolved
+(OIDC unavailable and `PYPI_API_TOKEN` unset), the thrown error was a
+static four-line message that didn't say *which* path failed or *why*.
+Foreign agents debugging a failed run had to read source to discover
+that, e.g., the OIDC mint exchange had been attempted and rejected
+(typical 422 `invalid-publisher` with the expected `job_workflow_ref`
+list in the body) — that diagnostic lived only in a warn line above
+the error, easy to miss in a log excerpt.
+
+The error now embeds an OIDC probe summary (one line per check: env
+vars present? id-token request ok? mint exchange ok?), echoes any
+registry rejection body excerpt, tags itself `[PIOT_AUTH_NO_TOKEN]`,
+and deep-links the auth guide via `?code=PIOT_AUTH_NO_TOKEN`.
+
+**Required changes.** None. Additive — the existing actionable hint
+("Either: set PYPI_API_TOKEN, or enable trusted publishing…") is
+preserved verbatim.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Failure-path log output
+is more verbose and structured. Successful publishes are unaffected.
+
+**Verification.** Trigger a publish without OIDC env or
+`PYPI_API_TOKEN`; the resulting error message contains
+`[PIOT_AUTH_NO_TOKEN]` and a `Probe results:` block with four lines.
+
+---
+
 ### PyPI artifact discovery matches `{name}-sdist` and `{name}-wheel-` exactly
 
 **Summary.** `src/handlers/pypi.ts:collectArtifacts` used a bare prefix
