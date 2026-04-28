@@ -27,6 +27,16 @@ globs = [
   # it keeps the cascade honest when only the e2e mirror is touched.
   ".github/workflows/release.yml",
   ".github/workflows/e2e-fixture.yml",
+  # The dogfood self-release workflow itself. Fixes here (e.g. the
+  # bundle-commit trailer-forward in #261) only ship when something
+  # cascades, so include the file directly so its own changes trigger
+  # the next release. Otherwise the fix sits dormant on main until an
+  # unrelated commit drags it along.
+  ".github/workflows/release-npm.yml",
+  # The config that drives every dogfood release. A change here
+  # (cascade globs, package metadata, kind) is observable in the
+  # next release run; trigger a release when it changes.
+  "putitoutthere.toml",
   # Docs changes ship a patch too -- they end up in the tarball via
   # README, and consumers sometimes pin documentation-driven behavior.
   "README.md",
