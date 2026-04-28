@@ -14,7 +14,7 @@ build = "hatch"
 first_version = "__VERSION__"
 
 [[package]]
-name = "piot-fixture-zzz-js-no-rust"
+name = "@putitoutthere/piot-fixture-zzz-js-no-rust"
 kind = "npm"
 path = "packages/js"
 globs = ["packages/js/**"]

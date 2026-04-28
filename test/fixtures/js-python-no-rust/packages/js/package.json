@@ -1,5 +1,5 @@
 {
-  "name": "piot-fixture-zzz-js-no-rust",
+  "name": "@putitoutthere/piot-fixture-zzz-js-no-rust",
   "version": "__VERSION__",
   "description": "Put It Out There canary fixture. Safe to ignore.",
   "license": "MIT",

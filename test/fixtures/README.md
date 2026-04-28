@@ -29,7 +29,7 @@ One package, one publish per run.
 
 | Path                   | Packages                                                                  |
 |------------------------|---------------------------------------------------------------------------|
-| `js-python-no-rust/`   | pypi `-python-no-rust` + npm `-js-no-rust` — SDK shape, no Rust           |
+| `js-python-no-rust/`   | pypi `-python-no-rust` + npm `@putitoutthere/-js-no-rust` — SDK shape, no Rust |
 | `polyglot-everything/` | crates `-rust` + pypi `-python` + npm `@putitoutthere/-cli` (bundled-cli) — dirsql shape |
 
 `polyglot-everything/` is the v0 success criterion (plan.md §25.3 #2); it covers cross-handler interaction and `depends_on` cascade end-to-end. Single-mode polyglot variants (rust+python, rust+js-napi, rust+js-bundled) were removed: cascade ordering is pure-function logic covered by unit tests, and each underlying handler is exercised by its single-mode fixture.
