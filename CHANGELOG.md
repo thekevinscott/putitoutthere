@@ -12,11 +12,11 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Added
 
-- _nothing yet_
+- **`PIOT_PUBLISH_EMPTY_PLAN` error code.** Surfaced when `publish` is invoked with an empty matrix. Joins `PIOT_AUTH_NO_TOKEN` in the stable error-code vocabulary; foreign agents debugging a failed publish can fingerprint on the code without parsing prose.
 
 ### Changed
 
-- _nothing yet_
+- **BREAKING: `publish` throws on an empty matrix instead of exiting clean.** The reusable workflow's `publish` step now fails red when the plan is empty, with `PIOT_PUBLISH_EMPTY_PLAN` in the message. Previously, an empty plan logged `info: publish: plan is empty; nothing to release` and returned `ok: true` — leaving consumers with green release runs that hadn't published anything. Skips belong at the workflow gate (the `if:` on the publish job that reads the plan job's matrix output), not in the publish step. See [MIGRATIONS.md](./MIGRATIONS.md#publish-throws-on-empty-matrix).
 
 ### Deprecated
 

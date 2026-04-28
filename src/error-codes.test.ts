@@ -41,6 +41,10 @@ describe('error-codes', () => {
     expect(ErrorCodes.AUTH_NO_TOKEN).toBe('PIOT_AUTH_NO_TOKEN');
   });
 
+  it('exposes the PUBLISH_EMPTY_PLAN code thrown when publish runs with an empty matrix', () => {
+    expect(ErrorCodes.PUBLISH_EMPTY_PLAN).toBe('PIOT_PUBLISH_EMPTY_PLAN');
+  });
+
   it('ErrorCode type alias resolves to the union of literal strings', () => {
     // Compile-time assertion that every value passes the type check.
     const sample: ErrorCode = ErrorCodes.AUTH_NO_TOKEN;

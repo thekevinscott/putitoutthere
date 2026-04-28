@@ -110,4 +110,19 @@ describe('#246 workflow YAML invariants', () => {
     expect(readFileSync(join(repoRoot, 'README.md'), 'utf8')).toContain(expected);
     expect(readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')).toContain(expected);
   });
+
+  // The publish step throws PIOT_PUBLISH_EMPTY_PLAN when reached with an
+  // empty matrix; the gate is what keeps `release: skip` (and any other
+  // empty-plan reason) from running publish to a non-zero exit. Lock the
+  // gate's presence in so a future edit can't quietly delete it and turn
+  // every skip-trailer commit into a red release run.
+  it.each([
+    '.github/workflows/release.yml',
+    '.github/workflows/release-npm.yml',
+  ])('%s gates the publish job on a non-empty matrix from the plan job', (path) => {
+    const text = readFileSync(join(repoRoot, path), 'utf8');
+    expect(text).toContain(
+      "if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null",
+    );
+  });
 });
