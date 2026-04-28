@@ -29,7 +29,7 @@ depends_on = ["piot-fixture-zzz-rust"]
 first_version = "__VERSION__"
 
 [[package]]
-name = "piot-fixture-zzz-cli"
+name = "@putitoutthere/piot-fixture-zzz-cli"
 kind = "npm"
 path = "packages/ts"
 globs = ["packages/ts/**"]

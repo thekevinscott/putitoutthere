@@ -1,5 +1,5 @@
 {
-  "name": "piot-fixture-zzz-cli",
+  "name": "@putitoutthere/piot-fixture-zzz-cli",
   "version": "__VERSION__",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },

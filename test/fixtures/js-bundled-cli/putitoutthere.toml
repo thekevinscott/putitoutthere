@@ -2,7 +2,7 @@
 version = 1
 
 [[package]]
-name = "piot-fixture-zzz-js-bundled"
+name = "@putitoutthere/piot-fixture-zzz-js-bundled"
 kind = "npm"
 path = "."
 globs = ["src/**", "Cargo.toml", "package.json"]

@@ -22,15 +22,15 @@ One package, one publish per run.
 | Path                   | Kind | Build        | Package                                  | Output                          |
 |------------------------|------|--------------|------------------------------------------|---------------------------------|
 | `python-rust-maturin/` | pypi | maturin      | `piot-fixture-zzz-python-maturin`        | 5 wheels + 1 sdist              |
-| `js-napi/`             | npm  | napi         | `piot-fixture-zzz-js-napi` (+5 plat)     | 5 platform pkgs + 1 main        |
-| `js-bundled-cli/`      | npm  | bundled-cli  | `piot-fixture-zzz-js-bundled` (+5 plat)  | 5 platform pkgs + 1 main (shim) |
+| `js-napi/`             | npm  | napi         | `@putitoutthere/piot-fixture-zzz-js-napi` (+5 plat)    | 5 platform pkgs + 1 main        |
+| `js-bundled-cli/`      | npm  | bundled-cli  | `@putitoutthere/piot-fixture-zzz-js-bundled` (+5 plat) | 5 platform pkgs + 1 main (shim) |
 
 ## Polyglot
 
 | Path                   | Packages                                                                  |
 |------------------------|---------------------------------------------------------------------------|
 | `js-python-no-rust/`   | pypi `-python-no-rust` + npm `-js-no-rust` — SDK shape, no Rust           |
-| `polyglot-everything/` | crates `-rust` + pypi `-python` + npm `-cli` (bundled-cli) — dirsql shape |
+| `polyglot-everything/` | crates `-rust` + pypi `-python` + npm `@putitoutthere/-cli` (bundled-cli) — dirsql shape |
 
 `polyglot-everything/` is the v0 success criterion (plan.md §25.3 #2); it covers cross-handler interaction and `depends_on` cascade end-to-end. Single-mode polyglot variants (rust+python, rust+js-napi, rust+js-bundled) were removed: cascade ordering is pure-function logic covered by unit tests, and each underlying handler is exercised by its single-mode fixture.
 
