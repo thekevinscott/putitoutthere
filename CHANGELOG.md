@@ -28,7 +28,7 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
-- _nothing yet_
+- **Dogfood release workflow no longer silently downgrades `release: minor` to `patch`.** `release-npm.yml`'s "Fold action bundle into release commit" step now forwards the parent commit's body into the bundle commit, so any `release:` trailer the operator wrote in the merge commit survives into the new HEAD. Without the forward, `putitoutthere`'s publish-time plan re-derivation read HEAD (the bundle commit), saw no trailer on a single-parent commit, and defaulted the bump to `patch` — silently downgrading a `release: minor` to `0.x.(y+1)`. Hit in the wild on the 0.1.51 → 0.2.0 attempt that landed as 0.1.52. The reusable consumer-facing `release.yml` was unaffected (it never adds a commit between plan and publish). Internal-seam fix; no consumer-side action required.
 
 ## v0.1.51 → v0.2.0
 

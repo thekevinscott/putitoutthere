@@ -99,6 +99,15 @@ jobs:
       # it) resolve to a commit that contains `dist-action/index.js`. The
       # commit is not pushed to main — it lives only as the tag's target.
       # See notes/handoff/2026-04-24-dist-action.md.
+      #
+      # The bundle commit forwards the parent's full body so any
+      # `release:` trailer the operator wrote in the merge commit
+      # survives into the new HEAD. Without this, putitoutthere's
+      # publish-time plan re-derivation reads HEAD (the bundle
+      # commit), sees no trailer on a single-parent commit, defaults
+      # the bump to `patch`, and silently downgrades a `release: minor`
+      # to a `0.x.(y+1)` patch release. (Hit in the wild on the
+      # 0.1.51 → 0.2.0 attempt that landed as 0.1.52.)
       - name: Fold action bundle into release commit
         run: |
           set -euo pipefail
@@ -107,7 +116,10 @@ jobs:
             echo "No bundle changes to commit (unexpected — build:action should have produced output)." >&2
             exit 1
           fi
-          git commit -m "chore(release): bundle action"
+          {
+            printf 'chore(release): bundle action\n\n'
+            git log -1 --format=%B HEAD
+          } | git commit -F -
 
       - name: putitoutthere publish
         env:
