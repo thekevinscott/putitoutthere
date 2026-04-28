@@ -341,37 +341,50 @@ jobs:
             echo "::endgroup::"
           done
 
-      # TEMPORARY DIAGNOSTIC (#258): one-line snapshot per npm package
-      # to surface what's between the Build step and `npm publish`. The
-      # verify step's failure annotation already captures local state at
-      # verify time; this captures it pre-publish so we can tell whether
-      # `dist/` was built in the first place vs. removed by the engine.
+      # TEMPORARY DIAGNOSTIC (#258): assert pre-publish state for each
+      # npm main/noarch package. Fails the step (with the failure
+      # annotation describing what's wrong) when:
+      #   - package.json declares a directory in `files[]` that doesn't
+      #     exist on disk (Build npm packages step didn't produce it), or
+      #   - npm pack --dry-run wouldn't include that directory.
       # Strip once the verify failure root cause is understood.
-      - name: Pre-publish fixture-tree snapshot (diagnostic)
+      - name: Pre-publish fixture-tree assertion (diagnostic)
         if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
         shell: bash
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
+          fail=0
           while IFS= read -r row; do
             pkg_path=$(printf '%s' "$row" | jq -r '.path')
             pkg_name=$(printf '%s' "$row" | jq -r '.name')
             mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "fixture-tree/${pkg_path}/package.json")
             for d in "${dirs[@]}"; do
               local_path="fixture-tree/${pkg_path}/${d}"
-              if [ -d "$local_path" ]; then
-                count=$(find "$local_path" -type f 2>/dev/null | wc -l)
-                files=$(find "$local_path" -type f 2>/dev/null | tr '\n' ' ')
-                echo "::warning::pre-publish [${pkg_name}] ${local_path}: present, ${count} file(s) — ${files}"
-              else
-                echo "::warning::pre-publish [${pkg_name}] ${local_path}: MISSING"
+              if [ ! -d "$local_path" ]; then
+                echo "::error::[${pkg_name}] declared files[\"${d}\"] but ${local_path} does not exist after Build step. ls fixture-tree/${pkg_path}: $(ls "fixture-tree/${pkg_path}" 2>&1 | tr '\n' ' ')"
+                fail=1
+                continue
+              fi
+              count=$(find "$local_path" -type f 2>/dev/null | wc -l)
+              if [ "$count" -eq 0 ]; then
+                echo "::error::[${pkg_name}] ${local_path} exists but is empty"
+                fail=1
+                continue
+              fi
+              echo "OK pre-publish [${pkg_name}] ${local_path}: ${count} file(s)"
+            done
+            pack=$(cd "fixture-tree/${pkg_path}" && npm pack --dry-run 2>&1 || true)
+            for d in "${dirs[@]}"; do
+              if ! printf '%s' "$pack" | grep -q "${d}/"; then
+                echo "::error::[${pkg_name}] npm pack --dry-run does NOT include ${d}/. Full pack output: $(printf '%s' "$pack" | tr '\n' '|')"
+                fail=1
               fi
             done
-            pack=$(cd "fixture-tree/${pkg_path}" && npm pack --dry-run 2>&1 | grep -E '^npm notice [0-9]' | tr '\n' '|' | head -c 500)
-            echo "::warning::pre-publish [${pkg_name}] npm pack tarball contents: ${pack}"
           done <<< "$rows"
+          exit "$fail"
 
       - uses: ./
         with:
