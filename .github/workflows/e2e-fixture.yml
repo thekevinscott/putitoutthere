@@ -230,6 +230,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -314,6 +315,51 @@ jobs:
           echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
           echo "::notice::Using CRATES_IO_TOKEN secret (bootstrap path); switch to OIDC TP once the crate exists"
 
+      # Mirrors release.yml: rebuild npm packages from source before
+      # the engine's `npm publish` runs. The build job's dist/ is not
+      # carried through as an artifact for vanilla npm rows.
+      - name: Build npm packages
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          FIXTURE: ${{ inputs.fixture }}
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          : > /tmp/build-debug.txt
+          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
+          echo "[fixture=${FIXTURE:-?}] npm paths: $(echo "$paths" | tr '\n' ' ')" | tee -a /tmp/build-debug.txt
+          for path in $paths; do
+            echo "::group::npm install + build at fixture-tree/${path}"
+            pushd "fixture-tree/${path}" > /dev/null
+            {
+              echo ""
+              echo "=== fixture-tree/${path} ==="
+              echo "pwd: $(pwd)"
+              echo "before build:"
+              ls -la
+            } | tee -a /tmp/build-debug.txt
+            if [ -f package-lock.json ]; then
+              npm ci
+            elif [ -f pnpm-lock.yaml ]; then
+              npm install -g pnpm@9
+              pnpm install --frozen-lockfile
+            else
+              npm install
+            fi
+            npm run build --if-present
+            {
+              echo "after build:"
+              ls -la
+              echo "dist/ contents:"
+              ls -la dist/ 2>&1 || echo "  (no dist/)"
+              echo "npm pack --dry-run preview:"
+              npm pack --dry-run 2>&1 | head -30 || true
+            } | tee -a /tmp/build-debug.txt
+            popd > /dev/null
+            echo "::endgroup::"
+          done
+
       - uses: ./
         with:
           command: publish
@@ -324,6 +370,108 @@ jobs:
           # long-lived token for e2e — the consumer-facing reusable workflow
           # remains OIDC-only.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Post-publish: download every main npm tarball from the registry and
+      # assert that directory entries declared in package.json `files` are
+      # actually present in the published artifact. Catches the cachetta
+      # 0.3.x failure mode — build job produces dist/, publish job ships
+      # from a fresh source tree without it, registry receives a tarball
+      # missing the compiled output. The publish step itself returns 0
+      # because npm publish doesn't validate `files` content; this is the
+      # only place that catches it end-to-end.
+      - name: Verify published npm tarballs honor package.json files
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
+          if [ -z "$rows" ]; then
+            echo "No npm main/noarch rows; nothing to verify."
+            exit 0
+          fi
+          fail=0
+          while IFS= read -r row; do
+            pkg_path=$(printf '%s' "$row" | jq -r '.path')
+            version=$(printf '%s' "$row" | jq -r '.version')
+            pkg_json="fixture-tree/${pkg_path}/package.json"
+            pkg_name=$(jq -r '.name' "$pkg_json")
+            # Heuristic: `files` entries without a dot are directories
+            # (dist, lib, build). Entries with a dot are individual files
+            # (README.md, index.js) and don't need a per-tree assertion.
+            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "$pkg_json")
+            if [ "${#dirs[@]}" -eq 0 ]; then
+              echo "[$pkg_name@$version] no directory entries in files[]; skipping."
+              continue
+            fi
+            echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
+            tarball_url=$(npm view "$pkg_name@$version" dist.tarball)
+            echo "  tarball url: $tarball_url"
+            tmp=$(mktemp -d)
+            curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
+            mkdir "$tmp/extracted"
+            tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
+            echo "  full tarball contents:"
+            find "$tmp/extracted/package" -type f | sed 's/^/    /'
+            for d in "${dirs[@]}"; do
+              if [ -d "$tmp/extracted/package/$d" ] && \
+                 [ "$(find "$tmp/extracted/package/$d" -type f | wc -l)" -gt 0 ]; then
+                count=$(find "$tmp/extracted/package/$d" -type f | wc -l)
+                echo "  ok: package/$d/ ($count file(s))"
+              else
+                local_path="fixture-tree/${pkg_path}/${d}"
+                local_state="local ${local_path}: missing"
+                if [ -d "$local_path" ]; then
+                  local_count=$(find "$local_path" -type f 2>/dev/null | wc -l)
+                  local_state="local ${local_path}: present, ${local_count} file(s) — $(find "$local_path" -type f 2>/dev/null | tr '\n' ' ')"
+                fi
+                echo "::error::[$pkg_name@$version] tarball missing '$d'. ${local_state}"
+                fail=1
+              fi
+            done
+            rm -rf "$tmp"
+          done <<< "$rows"
+          exit "$fail"
+
+      - name: Post diagnostic as PR comment
+        if: always() && contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        uses: actions/github-script@v7
+        env:
+          FIXTURE: ${{ inputs.fixture }}
+        with:
+          script: |
+            const fs = require('fs');
+            const cp = require('child_process');
+            let debug = '(no /tmp/build-debug.txt produced — Build step did not run)';
+            try { debug = fs.readFileSync('/tmp/build-debug.txt', 'utf8'); } catch {}
+            // Snapshot post-publish fixture-tree state.
+            let post = '';
+            try {
+              post = cp.execSync('find fixture-tree -maxdepth 4 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>&1', { encoding: 'utf8' });
+            } catch (e) { post = `(find failed: ${e.message})`; }
+            const fixture = process.env.FIXTURE;
+            const body = [
+              `**Diagnostic: \`${fixture}\` publish-job state**`,
+              '',
+              '### Build step debug output',
+              '```',
+              debug,
+              '```',
+              '',
+              '### Post-publish fixture-tree (excl node_modules, .git)',
+              '```',
+              post,
+              '```',
+            ].join('\n');
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha,
+            });
+            if (prs.data.length === 0) { core.info('no PR for sha; skipping comment'); return; }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: prs.data[0].number, body,
+            });
 
   # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
   # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside

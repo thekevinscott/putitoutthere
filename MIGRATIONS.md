@@ -21,6 +21,45 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Publish job rebuilds npm packages from source
+
+**Summary.** Vanilla npm packages were publishing with their compiled
+output (`dist/`, `lib/`, etc.) missing from the tarball. The plan
+emitted `artifact_path: package.json` for noarch npm rows, so the
+build job's compile output was never uploaded — and the publish job's
+fresh checkout had no compiled files. `npm publish` doesn't validate
+`files` content, so the broken artifact reached the registry. Caught
+in the wild as `cachetta@0.3.1`/`0.3.2`. The publish job now installs
+deps and runs `npm run build --if-present` per npm package path
+before invoking the engine — the same logic the build job already
+runs, just at the point where it actually matters.
+
+**Required changes.** None for consumers calling the reusable
+workflow at `thekevinscott/putitoutthere/.github/workflows/release.yml@v0`.
+The fix is internal to the reusable workflow.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** The publish job now spends
+additional time on `npm install` + `npm run build` for each npm
+package in the plan. For repos whose package.json had no `build`
+script, behavior is unchanged (`--if-present` skips). For repos that
+did declare a build script, the published tarball now contains
+whatever the build emits — which may be the first time the registry
+artifact actually matches what the package author intended. If your
+prior releases were unknowingly broken (compiled output missing), the
+next release will fix them; verify by inspecting the next published
+tarball with `npm view <pkg>@<ver>` + `npm pack <pkg>@<ver>`.
+
+**Verification.** After upgrading, a release run logs an `npm
+install + build at <path>` group per npm package in the plan. The
+published tarball contains every directory listed in package.json
+`files[]`:
+
+```sh
+npm pack <pkg>@<new-version> --dry-run 2>&1 | grep -E '(dist|lib|build)/'
+```
+
 ### Reusable workflow + `action.yml` move to Node 24 actions
 
 **Summary.** GitHub deprecated Node 20 actions in September 2025; the

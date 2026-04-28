@@ -49,6 +49,19 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **Reusable workflow's publish job now installs and builds npm packages before `npm publish` runs.** (#256)
+  For vanilla npm rows the plan emits `artifact_path: package.json`, so
+  the build job's `dist/` was never carried through to the publish job
+  — which then ran `npm publish` from a fresh checkout and shipped
+  tarballs missing the compiled output. Any consumer whose
+  `package.json` declared `"files": ["dist", ...]` would publish a
+  broken artifact (caught in the wild as `cachetta@0.3.1`/`0.3.2`).
+  The publish job now mirrors what a developer running `npm publish`
+  locally would do: detect the lockfile, install deps, run `npm run
+  build --if-present` per npm package path. napi / bundled-cli
+  platform packages stage from `artifacts/` and were unaffected; this
+  fix only changes the main-package path.
+
 - **PyPI artifact discovery now matches the documented `{name}-sdist` and `{name}-wheel-{target}` shapes exactly.** (#244)
   Previously the handler used a bare prefix match (`entry.startsWith("{name}-")`), which silently picked up sibling packages whose names extended the same prefix (e.g. `foo`'s discovery matched `foo-extras-sdist`). The handler now matches the sdist directory exactly and the wheel directories by `{name}-wheel-` prefix only. Affects multi-package repos where one pypi package's name is a prefix of another's.
 

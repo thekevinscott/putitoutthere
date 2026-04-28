@@ -4,9 +4,14 @@
   "description": "Put It Out There canary fixture. Safe to ignore.",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
-  "main": "index.js",
-  "files": ["index.js"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "scripts": {
-    "build": "node scripts/build.js"
+    "build": "tsc && node scripts/build.cjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
   }
 }

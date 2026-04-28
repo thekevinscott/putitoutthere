@@ -234,6 +234,39 @@ jobs:
           CRATES_IO_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
 
+      # Build npm packages from source before `npm publish` runs.
+      # The build job's `dist/` is not carried through as an artifact
+      # for vanilla npm rows (artifact_path is `package.json`); the
+      # publish job is a fresh checkout, so any package whose
+      # package.json declares `"files": ["dist", ...]` would ship a
+      # tarball missing the compiled output. Rebuild here to mirror
+      # what a developer running `npm publish` locally would do.
+      # napi / bundled-cli platform packages stage from artifacts/
+      # via the engine's npm-platform handler and are unaffected.
+      - name: Build npm packages
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
+          for path in $paths; do
+            echo "::group::npm install + build at ${path}"
+            pushd "${path}" > /dev/null
+            if [ -f package-lock.json ]; then
+              npm ci
+            elif [ -f pnpm-lock.yaml ]; then
+              npm install -g pnpm@9
+              pnpm install --frozen-lockfile
+            else
+              npm install
+            fi
+            npm run build --if-present
+            popd > /dev/null
+            echo "::endgroup::"
+          done
+
       - uses: thekevinscott/putitoutthere@v0
         with:
           command: publish

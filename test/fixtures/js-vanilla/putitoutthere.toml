@@ -10,7 +10,7 @@ version = 1
 name = "piot-fixture-zzz-cli"
 kind = "npm"
 path = "."
-globs = ["src/**", "package.json"]
+globs = ["src/**", "tsconfig.json", "package.json"]
 first_version = "__VERSION__"
 # Concurrent e2e runs across PRs use timestamp-based versions
 # (`0.0.<unix-seconds>`), and npm's implicit `latest` tag rejects
