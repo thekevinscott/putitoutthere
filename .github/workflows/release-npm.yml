@@ -18,11 +18,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Dry-run: compute plan, skip publish + tag'
-        type: boolean
-        default: false
 
 concurrency:
   group: release
@@ -59,8 +54,6 @@ jobs:
         name: putitoutthere plan
         run: node dist/cli-bin.js plan --json > plan.json
       - name: expose matrix
-        env:
-          GHO: ${{ github.output }}
         run: |
           # shellcheck disable=SC2002
           printf 'matrix=%s\n' "$(cat plan.json)" >> "$GITHUB_OUTPUT"
@@ -107,7 +100,6 @@ jobs:
       # commit is not pushed to main — it lives only as the tag's target.
       # See notes/handoff/2026-04-24-dist-action.md.
       - name: Fold action bundle into release commit
-        if: ${{ inputs.dry_run != 'true' }}
         run: |
           set -euo pipefail
           git add -f dist-action/
@@ -120,12 +112,7 @@ jobs:
       - name: putitoutthere publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          DRY_RUN_FLAG=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
-          node dist/cli-bin.js publish $DRY_RUN_FLAG
+        run: node dist/cli-bin.js publish
 
       # Scaffolded workflows reference `thekevinscott/putitoutthere@v<major>`
       # (community GitHub Actions convention, e.g. actions/checkout@v4). The
@@ -134,7 +121,6 @@ jobs:
       # line so the scaffold resolves. Idempotent: re-runs are a no-op when
       # the floating tag already matches the latest release. Issue #199.
       - name: Move floating major tag
-        if: ${{ inputs.dry_run != 'true' }}
         run: |
           set -euo pipefail
           git fetch --tags --force origin

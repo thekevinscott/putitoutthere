@@ -42,7 +42,6 @@ const pkg = {
 function ctx(): Ctx {
   return {
     cwd: '.',
-    dryRun: true,
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     env: {},
     artifacts: { get: () => '', has: () => false },

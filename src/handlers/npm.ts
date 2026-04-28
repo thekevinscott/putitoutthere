@@ -84,9 +84,6 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   if (await isPublishedImpl(pkg, version, ctx)) {
     return { status: 'already-published' };
   }
-  if (ctx.dryRun) {
-    return { status: 'skipped' };
-  }
 
   // napi / bundled-cli: publish platform packages first, then rewrite
   // the main package.json to add optionalDependencies, then fall through

@@ -30,6 +30,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # `dist-action/index.js` is gitignored on main and only exists on
+      # tag commits (release-npm.yml folds it into the release commit).
+      # actionlint validates `runs.main` paths exist for any local action
+      # referenced via `uses: ./` — without the bundle present, the
+      # e2e-fixture workflow's `uses: ./` step trips the existence check.
+      # Build the bundle here so actionlint sees what runtime sees.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build action bundle
+        run: pnpm run build:action
+
       - name: Run actionlint
         run: |
           bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)

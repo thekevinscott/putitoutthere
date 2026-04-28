@@ -27,7 +27,6 @@ const execMock = vi.mocked(execFileSync);
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
     cwd: '.',
-    dryRun: false,
     log: {
       debug: () => {},
       info: () => {},
@@ -247,18 +246,6 @@ describe('npm.publish', () => {
     // Two publishes: one platform (staging dir) + one main (dir).
     expect(publishCwds).toHaveLength(2);
     expect(publishCwds[1]).toBe(dir);
-  });
-
-  it('dry-run: does not call npm publish', async () => {
-    execMock.mockImplementationOnce(() => {
-      throw Object.assign(new Error('404'), { status: 1 });
-    });
-    const result = await npm.publish(
-      { ...basePkg(), path: dir },
-      '0.1.0',
-      makeCtx({ cwd: dir, dryRun: true }),
-    );
-    expect(result.status).toBe('skipped');
   });
 
   it('uses --access public by default (explicit on config)', async () => {

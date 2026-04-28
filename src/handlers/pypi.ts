@@ -125,9 +125,6 @@ async function publishImpl(
   if (await isPublishedImpl(pkg, version, ctx)) {
     return { status: 'already-published' };
   }
-  if (ctx.dryRun) {
-    return { status: 'skipped' };
-  }
 
   const files = collectArtifacts(pkg.name, ctx.artifactsRoot);
   if (files.length === 0) {
@@ -161,7 +158,7 @@ async function publishImpl(
   );
 
   try {
-    execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', ...files], {
+    execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', '--verbose', ...files], {
       cwd: ctx.cwd,
       // #138: minimal env. Don't forward the whole parent process.env
       // to twine.
@@ -190,8 +187,15 @@ async function publishImpl(
       );
     }
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    const stdout = (err as { stdout?: Buffer }).stdout?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
-    throw new Error(`twine upload failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
+    // Twine sometimes writes its actual failure (4xx/5xx body, render
+    // diagnostic, etc.) to stdout rather than stderr; surface both so
+    // adopters see the registry's response, not a bare "Command failed".
+    const parts = [`twine upload failed: ${base}`];
+    if (stderr) parts.push(`--- stderr ---\n${stderr}`);
+    if (stdout) parts.push(`--- stdout ---\n${stdout}`);
+    throw new Error(parts.join('\n'), { cause: err });
   }
 
   return {
@@ -298,13 +302,20 @@ export function scmEnvSuffix(pkgName: string): string {
  */
 function collectArtifacts(pkgName: string, artifactsRoot: string | undefined): string[] {
   if (!artifactsRoot || !existsSync(artifactsRoot)) return [];
-  // #237: prefix-match against the encoded pkg.name so slash-containing
-  // names (e.g. `py/foo` → `py__foo-`) line up with the on-disk
-  // directory the planner emitted.
-  const prefix = `${sanitizeArtifactName(pkgName)}-`;
+  // #237: encode pkg.name so slash-containing names (e.g. `py/foo` →
+  // `py__foo`) line up with the on-disk directory the planner emitted.
+  // Match exactly the two artifact-name shapes the planner emits per
+  // §12.4: `{name}-sdist` (single dir) and `{name}-wheel-{target}` (one
+  // dir per wheel target). A bare prefix match would also pick up
+  // sibling packages whose names extend the same prefix
+  // (`foo-extras-sdist` matched as if it were `foo`'s sdist) — the
+  // tighter shape mirrors the documented contract.
+  const base = sanitizeArtifactName(pkgName);
+  const sdistDir = `${base}-sdist`;
+  const wheelPrefix = `${base}-wheel-`;
   const out: string[] = [];
   for (const entry of readdirSync(artifactsRoot)) {
-    if (!entry.startsWith(prefix)) continue;
+    if (entry !== sdistDir && !entry.startsWith(wheelPrefix)) continue;
     const sub = join(artifactsRoot, entry);
     /* v8 ignore next -- fs entries shouldn't vanish between readdir and stat */
     if (!statSync(sub).isDirectory()) continue;

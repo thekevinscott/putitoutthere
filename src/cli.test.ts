@@ -2,8 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { run } from './cli.js';
+import { parseFlags, run } from './cli.js';
 
 describe('cli', () => {
   const stdoutChunks: string[] = [];
@@ -67,6 +68,21 @@ describe('cli', () => {
     const code = await run(['node', 'putitoutthere', 'plan', '--cwd', '/path/that/does/not/exist']);
     expect(code).toBe(1);
     expect(stderrChunks.join('')).toMatch(/^putitoutthere:/m);
+  });
+
+  it('resolves a relative --cwd to an absolute path (#244)', () => {
+    // Downstream handlers run subprocesses with `cwd: ctx.cwd` and pass
+    // file paths derived from `join(cwd, 'artifacts', ...)`. If the parsed
+    // cwd were left relative, those paths would re-resolve under the
+    // subprocess's cwd and double-up the prefix. Anchor at parse time.
+    const flags = parseFlags(['--cwd', 'fixture-tree']);
+    expect(isAbsolute(flags.cwd)).toBe(true);
+    expect(flags.cwd.endsWith('fixture-tree')).toBe(true);
+  });
+
+  it('leaves an absolute --cwd untouched', () => {
+    const flags = parseFlags(['--cwd', '/tmp/abs-path-test']);
+    expect(flags.cwd).toBe('/tmp/abs-path-test');
   });
 });
 
@@ -173,10 +189,10 @@ globs = ["packages/ts/**"]
     expect(stdoutChunks.join('')).toMatch(/no packages to release/);
   });
 
-  it('publishes in dry-run mode', async () => {
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+  it('throws when --dry-run is passed (removed in #244)', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;
     });
     const code = await run([
@@ -187,9 +203,8 @@ globs = ["packages/ts/**"]
       repo,
       '--dry-run',
     ]);
-    // publish exits 1 here because preflight fails (no NODE_AUTH_TOKEN);
-    // we're just exercising the code path.
-    expect([0, 1]).toContain(code);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/--dry-run was removed/);
   });
 
   it('publishes prints published list when plan is empty', async () => {

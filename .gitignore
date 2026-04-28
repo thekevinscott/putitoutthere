@@ -17,3 +17,7 @@ evals/snapshots/*-raw.md
 evals/snapshots/*-extracted.json
 evals/snapshots/*-extracted.json.raw
 evals/snapshots/*-grade.json
+
+# actionlint binary (locally downloaded for repro; the CI workflow
+# downloads its own copy on every run, see .github/workflows/actionlint.yml).
+/actionlint

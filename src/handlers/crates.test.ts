@@ -31,7 +31,6 @@ const execMock = vi.mocked(execFileSync);
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
     cwd: '.',
-    dryRun: false,
     log: {
       debug: () => {},
       info: () => {},
@@ -436,20 +435,6 @@ describe('crates.publish', () => {
     fetchSpy.mockRestore();
   });
 
-  it('skips the network when ctx.dryRun is set', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 404 }),
-    );
-    const result = await crates.publish(
-      { ...basePkg(), path: dir },
-      '0.1.0',
-      makeCtx({ cwd: dir, dryRun: true }),
-    );
-    expect(result.status).toBe('skipped');
-    expect(execMock).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
-  });
-
   it('reports cargo publish failure', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
@@ -540,6 +525,38 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     writeFileSync(join(repo, 'crate/src/lib.rs'), 'fn b(){}\n', 'utf8');
     const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'));
     expect(result).toContain('crate/src/lib.rs');
+  });
+
+  it('skips files under artifactsRoot — engine-managed scratch (#244)', () => {
+    // The reusable workflow's `actions/download-artifact@v4` step always
+    // creates `artifacts/` under cwd, even when nothing was uploaded
+    // (crates-only fixtures). git status sees `?? artifacts/` and the
+    // pre-publish dirty-check would refuse cargo publish unless it
+    // recognises this directory as engine-managed.
+    mkdirSync(join(repo, 'crate'), { recursive: true });
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
+    mkdirSync(join(repo, 'artifacts/some-pkg'), { recursive: true });
+    writeFileSync(join(repo, 'artifacts/some-pkg/file.txt'), 'x', 'utf8');
+    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'), join(repo, 'artifacts'));
+    expect(result).toEqual([]);
+  });
+
+  it('still flags non-artifacts-root files when artifactsRoot is provided', () => {
+    mkdirSync(join(repo, 'crate'), { recursive: true });
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
+    writeFileSync(join(repo, 'README.md'), 'init\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
+    writeFileSync(join(repo, 'README.md'), 'stray\n', 'utf8');
+    mkdirSync(join(repo, 'artifacts'), { recursive: true });
+    writeFileSync(join(repo, 'artifacts/file.txt'), 'x', 'utf8');
+    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'), join(repo, 'artifacts'));
+    expect(result).toContain('README.md');
+    expect(result?.some((p) => p.startsWith('artifacts'))).toBe(false);
   });
 
   it('returns null when cwd is not inside a git worktree', () => {

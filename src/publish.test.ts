@@ -94,18 +94,6 @@ describe('publish: happy path', () => {
     expect(result.published.map((p) => p.package)).toEqual(['lib-js']);
   });
 
-  it('dry-run: skips handler.publish and does not tag', async () => {
-    const handler = makeHandler();
-    const result = await publish({
-      cwd: repo,
-      handlerFor: () => handler,
-      dryRun: true,
-    });
-    expect(handler.publish).not.toHaveBeenCalled();
-    expect(git(['tag', '-l'])).toBe('');
-    expect(result.ok).toBe(true);
-  });
-
   it('short-circuits on already-published (no tag, clean exit)', async () => {
     const handler = makeHandler({
       isPublished: vi.fn().mockResolvedValue(true),
@@ -142,34 +130,35 @@ describe('publish: pre-flight and completeness', () => {
   });
 
   it('aborts on incomplete artifacts', async () => {
-    // Swap to a crates-kind config so the completeness check actually
-    // fires (vanilla-npm-noarch rows skip the check since npm publishes
-    // from the source tree directly).
+    // Swap to a pypi-kind config so the completeness check actually
+    // fires (vanilla-npm-noarch and crates rows skip — npm and cargo
+    // both publish from the source tree directly, so no artifact ever
+    // lives under artifacts/).
     writeRepoFile(
       'putitoutthere.toml',
       `[putitoutthere]
 version = 1
 [[package]]
-name  = "lib-rust"
-kind  = "crates"
-path  = "packages/rust"
-globs = ["packages/rust/**"]
+name  = "lib-py"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
 `,
     );
-    writeRepoFile('packages/rust/Cargo.toml', '[package]\nname = "lib-rust"\nversion = "0.0.0"\n');
-    writeRepoFile('packages/rust/src/lib.rs', '// x');
+    writeRepoFile('packages/py/pyproject.toml', '[project]\nname = "lib-py"\nversion = "0.0.0"\n');
+    writeRepoFile('packages/py/lib_py/__init__.py', '');
     git(['add', '-A']);
-    git(['commit', '-m', 'crates setup\n\nrelease: patch']);
+    git(['commit', '-m', 'pypi setup\n\nrelease: patch']);
     rmSync(join(repo, 'artifacts'), { recursive: true });
-    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    process.env.PYPI_API_TOKEN = 'tok';
 
-    const handler = makeHandler({ kind: 'crates' });
+    const handler = makeHandler({ kind: 'pypi' });
     await expect(
       publish({ cwd: repo, handlerFor: () => handler }),
     ).rejects.toThrow(/completeness|missing/i);
     expect(handler.publish).not.toHaveBeenCalled();
 
-    delete process.env.CARGO_REGISTRY_TOKEN;
+    delete process.env.PYPI_API_TOKEN;
   });
 
   it('returns empty result when plan is empty (nothing to release)', async () => {

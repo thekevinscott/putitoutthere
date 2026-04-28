@@ -45,6 +45,61 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **PyPI artifact discovery now matches the documented `{name}-sdist` and `{name}-wheel-{target}` shapes exactly.** (#244)
+  Previously the handler used a bare prefix match (`entry.startsWith("{name}-")`), which silently picked up sibling packages whose names extended the same prefix (e.g. `foo`'s discovery matched `foo-extras-sdist`). The handler now matches the sdist directory exactly and the wheel directories by `{name}-wheel-` prefix only. Affects multi-package repos where one pypi package's name is a prefix of another's.
+
+- **Reusable workflow's maturin sdist row now uses `command: sdist`.** (#244)
+  `maturin build --sdist` builds a wheel AND an sdist; the sdist row's
+  artifact tarball ended up containing a manylinux wheel that collided
+  with the per-target wheel rows at upload time, causing twine to abort
+  with `400 File already exists`. Splitting the sdist invocation to use
+  `command: sdist` (sdist-only) eliminates the collision.
+
+- **Synthesized npm platform packages now inherit `repository`, `license`, and `homepage` from the main `package.json`.** (#244)
+  npm's provenance verifier rejected platform tarballs with `E422 Error verifying sigstore provenance bundle: Failed to validate repository information: package.json: "repository.url" is "", expected to match "https://github.com/<owner>/<repo>"`. The synthesizer used to write only `name`/`version`/`os`/`cpu`/`files`/`main`/`libc`; the empty repository URL didn't match the publishing repo baked into the sigstore bundle. Identity fields are now copied from the main package so per-target tarballs validate. Affects `build = "napi"` and `build = "bundled-cli"` packages.
+
+- **Reusable workflow's npm build step now forces `shell: bash`.** (#244)
+  The build matrix can target Windows runners, where GitHub Actions defaults
+  to `pwsh` for `run:` blocks. The npm build's `if [ -f package-lock.json ]`
+  branch is bash syntax, which PowerShell parsed as a malformed expression
+  and aborted with `ParserError`. Adding `shell: bash` makes the step
+  portable across Linux, macOS, and Windows runners. No config changes
+  required for consumers; pure JS-on-ubuntu setups were unaffected.
+
+- **Reusable workflow now exchanges OIDC ID-token for a `CARGO_REGISTRY_TOKEN`
+  before invoking the engine.** (#244) `cargo publish` was failing with
+  `error: no token found, please run cargo login` because the publish
+  job's env had no `CARGO_REGISTRY_TOKEN`. PyPI uploads (twine) and npm
+  publish both consume the OIDC ID-token directly via registry-side
+  acceptance; cargo doesn't — it needs a registry-issued bearer token,
+  which `rust-lang/crates-io-auth-action@v1` produces from the OIDC
+  ID-token. The workflow now runs that action conditionally (only when
+  the plan contains a `kind = "crates"` row) and exports the resulting
+  token to `$GITHUB_ENV` for the engine subprocess. No config or
+  workflow changes required for consumers.
+
+- **Crates publish's pre-cargo dirty-tree check now ignores the
+  reusable workflow's `artifacts/` scratch directory.** (#244)
+  The pre-publish guard scans `git status --porcelain` for stray edits
+  outside the managed `Cargo.toml` (the engine passes `--allow-dirty`
+  to cargo to permit the writeVersion bump, then re-imposes a narrower
+  check). Reusable workflow's `actions/download-artifact@v4` step
+  always creates `artifacts/` under cwd, even for crates-only
+  fixtures with nothing to download — the pre-check was rejecting
+  with `unexpected dirty files in the working tree outside ... -
+  artifacts/`. The scan now treats `${ctx.artifactsRoot}` (the dir
+  the engine itself populates) as engine-managed and skips it. No
+  config or workflow changes required.
+
+- **Crates publish no longer fails the completeness check.** (#244)
+  `cargo publish` packages and uploads from source on the registry
+  side, so the reusable workflow never produces a `<name>-crate/`
+  artifact directory. The pre-publish completeness check was demanding
+  a `.crate` file that nothing in the pipeline ever creates, which made
+  any consumer with a `kind = "crates"` package fail with
+  `missing artifact directory <name>-crate/` before cargo was ever
+  invoked. Crates rows now skip the completeness check (same reasoning
+  as vanilla npm rows). No config or workflow changes required.
 - **Scaffolded `release.yml` now forwards `GITHUB_TOKEN` to the publish
   step.** piot has cut GitHub Releases alongside tag pushes since #26, but
   Actions doesn't auto-mount the runner token as an env var, so the

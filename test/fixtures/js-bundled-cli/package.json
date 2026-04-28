@@ -1,9 +1,12 @@
 {
-  "name": "piot-fixture-zzz-js-bundled",
+  "name": "@putitoutthere/piot-fixture-zzz-js-bundled",
   "version": "__VERSION__",
   "description": "Put It Out There canary fixture. Safe to ignore.",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
   "bin": { "piot-fixture-zzz": "shim.js" },
-  "files": ["shim.js"]
+  "files": ["shim.js"],
+  "scripts": {
+    "build": "node scripts/build.js"
+  }
 }

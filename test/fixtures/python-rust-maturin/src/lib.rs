@@ -1,3 +1,6 @@
-// Canary fixture. No PyO3 bindings — the fixture's purpose is to exercise
-// `plan`'s matrix emission, not to produce a working module.
-pub const CANARY: bool = true;
+use pyo3::prelude::*;
+
+#[pymodule]
+fn piot_fixture_zzz_python_maturin(_m: &Bound<'_, PyModule>) -> PyResult<()> {
+    Ok(())
+}

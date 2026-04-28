@@ -107,6 +107,11 @@ export function requireCompleteness(
  * otherwise a human-readable reason.
  */
 function verifyRow(row: MatrixRow, artifactsRoot: string): string | null {
+  // crates: `cargo publish` packages and uploads from the source tree
+  // directly — the reusable workflow never uploads a `.crate` artifact
+  // (release.yml's upload step is `if: matrix.kind != 'crates'`), so
+  // there is nothing here to verify. Same logic as vanilla npm below.
+  if (row.kind === 'crates') return null;
   // Vanilla npm publishes from the source tree directly; the build
   // step never produced a separate artifact for this kind, so there's
   // nothing to check here. Same goes for a missing artifactsRoot --

@@ -155,7 +155,14 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
   // makes the round-trip unambiguous. Read sites under publish/
   // doctor/preflight/completeness consume `artifact_name` verbatim
   // and need no changes.
+  //
+  // #244: actions/upload-artifact@v4 also rejects paths starting with
+  // `./` or equal to `.`, which is what `${pkg.path}/dist` produces
+  // when pkg.path is `.` (single-package-at-root shape). Normalize
+  // paths through `joinPath` so consumers with `path = "."` aren't
+  // tripped by the upload step.
   const safe = sanitizeArtifactName(pkg.name);
+  const at = (subdir: string): string => joinPath(pkg.path, subdir);
   switch (pkg.kind) {
     case 'crates':
       return [
@@ -166,7 +173,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           target: 'noarch',
           runs_on: 'ubuntu-latest',
           artifact_name: `${safe}-crate`,
-          artifact_path: `${pkg.path}/target/package`,
+          artifact_path: at('target/package'),
           path: pkg.path,
         },
       ];
@@ -186,7 +193,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
             target: triple,
             runs_on: runner ?? defaultRunsOn(triple),
             artifact_name: `${safe}-wheel-${triple}`,
-            artifact_path: `${pkg.path}/dist`,
+            artifact_path: at('dist'),
             path: pkg.path,
             build,
           };
@@ -204,7 +211,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
         target: 'sdist',
         runs_on: 'ubuntu-latest',
         artifact_name: `${safe}-sdist`,
-        artifact_path: `${pkg.path}/dist`,
+        artifact_path: at('dist'),
         path: pkg.path,
         ...(build !== undefined ? { build } : {}),
       });
@@ -231,7 +238,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
             target: triple,
             runs_on: runner ?? defaultRunsOn(triple),
             artifact_name: `${safe}-${triple}`,
-            artifact_path: `${pkg.path}/build/${triple}`,
+            artifact_path: at(`build/${triple}`),
             path: pkg.path,
             build,
           });
@@ -244,7 +251,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           target: 'main',
           runs_on: 'ubuntu-latest',
           artifact_name: `${safe}-main`,
-          artifact_path: pkg.path,
+          artifact_path: at('package.json'),
           path: pkg.path,
           build,
         });
@@ -259,7 +266,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           target: 'noarch',
           runs_on: 'ubuntu-latest',
           artifact_name: `${safe}-pkg`,
-          artifact_path: pkg.path,
+          artifact_path: at('package.json'),
           path: pkg.path,
           ...(build !== undefined ? { build } : {}),
         },
@@ -273,6 +280,15 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
  * cross-compile on ubuntu. Plan §12.3 calls these out as "opinionated
  * defaults; user can override".
  */
+/**
+ * Join `base` + `subdir` into a path that `actions/upload-artifact@v4`
+ * accepts. Special-cases `base === '.'` to avoid the `./subdir` /
+ * leading-`./` shape the action rejects (#244).
+ */
+function joinPath(base: string, subdir: string): string {
+  return base === '.' ? subdir : `${base}/${subdir}`;
+}
+
 function defaultRunsOn(target: string): string {
   if (target.includes('apple-darwin') || target.includes('darwin') || target.includes('mac')) {
     return 'macos-latest';

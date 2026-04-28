@@ -21,6 +21,201 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### PyPI artifact discovery matches `{name}-sdist` and `{name}-wheel-` exactly
+
+**Summary.** `src/handlers/pypi.ts:collectArtifacts` used a bare prefix
+match (`entry.startsWith("{name}-")`) to find a package's artifact
+directories under `artifacts/`. Sibling packages whose names extended
+the same prefix (`foo` and `foo-extras`) collided: `foo`'s discovery
+also picked up `foo-extras-sdist`, and twine then uploaded the sibling's
+tarball under `foo`'s OIDC identity, failing PyPI's project-name check.
+The handler now matches the sdist directory exactly (`{name}-sdist`)
+and the wheel directories by `{name}-wheel-` prefix only — the two
+shapes the planner documents in §12.4.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Repos with multiple pypi
+packages where one name is a prefix of another (e.g. `foo` and
+`foo-extras`) no longer cross-upload artifacts. Single-package repos
+and repos with non-overlapping names are unaffected.
+
+**Verification.** A repo declaring both `foo` and `foo-extras` as
+pypi packages publishes the correct tarballs to each project; neither
+job uploads the other's artifacts.
+
+---
+
+### Reusable workflow's maturin sdist row uses `command: sdist`
+
+**Summary.** The reusable workflow's pypi-maturin build step was a single
+`PyO3/maturin-action@v1` invocation with `command: build` and an
+`--sdist` flag conditional on the row being the sdist target. `maturin
+build --sdist` is documented as "build a wheel AND an sdist" — the
+sdist's artifact directory ended up containing both a `.tar.gz` and a
+manylinux wheel, which collided at upload time with the per-target
+wheel rows and aborted twine with `400 File already exists`. The build
+step is now split into two: `command: sdist` for the sdist row
+(sdist-only) and `command: build` with `--target` for wheel rows.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Maturin packages with a
+`sdist` row in their plan now upload a single `.tar.gz` from that row,
+not a wheel-plus-sdist pair. Per-target wheel rows are unaffected.
+
+**Verification.** A maturin-built package with `sdist` in `targets`
+publishes to PyPI without `400 File already exists`. The sdist
+artifact directory contains `.tar.gz` only.
+
+---
+
+### Synthesized npm platform packages inherit `repository`/`license`/`homepage`
+
+**Summary.** npm's provenance verifier rejected platform-package tarballs
+with `E422 Error verifying sigstore provenance bundle: Failed to validate
+repository information: package.json: "repository.url" is ""`. The
+synthesizer in `src/handlers/npm-platform.ts` previously wrote only
+`name`/`version`/`os`/`cpu`/`files`/`main`/`libc` into the per-target
+`package.json`. The publishing GitHub repo URL is bound into the
+sigstore bundle by `npm publish --provenance`; npm cross-checks it
+against `package.json.repository.url` at upload time, so an empty value
+fails verification. Identity fields (`repository`, `license`, `homepage`)
+are now read from the main package's `package.json` and copied into each
+synthesized platform package. Affects `build = "napi"` and
+`build = "bundled-cli"` packages.
+
+**Required changes.** None — the fix is automatic. To benefit, ensure
+the main package's `package.json` declares a `repository.url` that
+matches the publishing repo (npm provenance has always required this for
+the main package; platform packages now share the same expectation).
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Per-target platform tarballs
+on the registry now carry the same `repository`/`license`/`homepage`
+values as the main package, instead of being absent.
+
+**Verification.** A `build = "napi"` or `build = "bundled-cli"` package
+publishes its platform tarballs to npm without `E422` provenance errors.
+`npm view <pkg>-<target>@<version> repository` returns the main
+package's repository URL.
+
+---
+
+### Reusable workflow's npm build step forces `shell: bash`
+
+**Summary.** The build matrix can target Windows runners. GitHub Actions
+defaults to `pwsh` for `run:` blocks on Windows, but the npm build's
+shape detection (`if [ -f package-lock.json ]; then npm ci; elif ... fi`)
+is bash syntax — PowerShell parsed it as a malformed expression and
+aborted with `ParserError` before any package manager ran. The step now
+sets `shell: bash` explicitly, which is portable across Linux, macOS,
+and Windows runners (Git Bash ships on `windows-latest`).
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Consumers whose plan includes
+an npm package targeting Windows runners (e.g. native node-addon shapes,
+`napi-rs` matrices) now succeed past the install step. Linux/macOS-only
+matrices are unaffected — bash was already the default there.
+
+**Verification.** An npm package with a Windows row in its plan
+completes the install + build step on `windows-latest`; the job log
+shows `Run if [ -f package-lock.json ]` executing under bash, not pwsh.
+
+---
+
+### Reusable workflow exchanges OIDC token for `CARGO_REGISTRY_TOKEN`
+
+**Summary.** Crates publishes were failing with `error: no token found,
+please run cargo login` — the reusable workflow was relying on cargo to
+find an OIDC token in env, but cargo only consumes
+`CARGO_REGISTRY_TOKEN` (a registry-issued bearer), not raw OIDC
+ID-tokens. The publish job now runs `rust-lang/crates-io-auth-action@v1`
+when the plan contains a crates row and exports its `outputs.token`
+as `CARGO_REGISTRY_TOKEN` for the engine subprocess.
+
+**Required changes.** None for consumers using the reusable workflow as
+documented. Repos publishing to crates.io must have a configured trusted
+publisher on crates.io pointing at their `release.yml` — same prerequisite
+as before, just now actually exercised.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Crates publish in the
+reusable workflow now reaches the registry; previously it failed at
+the cargo invocation. JS/Python-only repos are unaffected — the auth
+step is gated on `contains(needs.plan.outputs.matrix, '"kind":"crates"')`
+and skips entirely when no crates row is in the plan.
+
+**Verification.** A `kind = "crates"` package whose trusted publisher is
+configured on crates.io now publishes successfully through the reusable
+workflow. The publish job log shows the `Authenticate with crates.io
+(OIDC)` step running before `putitoutthere publish`.
+
+---
+
+### Crates publish's pre-cargo dirty-tree check ignores `artifacts/`
+
+**Summary.** The crates handler scans `git status --porcelain` before
+invoking `cargo publish --allow-dirty`, refusing to proceed if anything
+other than the managed `Cargo.toml` is dirty (the writeVersion bump
+runs in the same job and would otherwise be the only legitimate dirty
+file). The reusable workflow's `actions/download-artifact@v4` step
+always creates `artifacts/` at the repo root before publish runs —
+even for crates-only fixtures that have nothing to download — and the
+pre-check was rejecting on `?? artifacts/`. The scan now treats the
+engine's own `artifactsRoot` as managed scratch space and skips files
+under it.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Crates publishes that
+previously errored with `unexpected dirty files in the working tree
+outside <Cargo.toml>: - artifacts/` now proceed to `cargo publish`.
+Stray edits anywhere else in the tree still fail the check.
+
+**Verification.** A `kind = "crates"` package in a repo whose only
+"dirty" file (alongside the managed `Cargo.toml`) is the engine's
+`artifacts/` directory now reaches cargo. `git status --porcelain`
+showing `?? artifacts/` is no longer fatal.
+
+---
+
+### Crates publish no longer fails the pre-publish completeness check
+
+**Summary.** Consumers with a `kind = "crates"` package previously hit
+`Artifact completeness check failed: missing artifact directory
+<name>-crate/` before cargo was ever invoked. The reusable workflow
+does not upload a `.crate` artifact (cargo packages and uploads from
+source on the registry side), so the file the check demanded never
+existed in the pipeline. The completeness check now skips crates
+rows. Same reasoning as vanilla npm rows, which were already skipped.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Crates publishes that
+previously errored at the completeness gate now reach `cargo publish`.
+A crates row whose source tree is genuinely broken still fails — the
+failure just happens at the cargo step, not before.
+
+**Verification.** A `kind = "crates"` package in
+`putitoutthere.toml` no longer requires any artifact upload step in
+the consumer's workflow. Trigger a release with a `release: patch`
+trailer; the publish job's "Run putitoutthere publish" step should
+log `crates: cargo publish ...` instead of aborting on completeness.
+
 ### `[[package]].paths` renamed to `globs`
 
 **Summary.** The `path` / `paths` pair in `[[package]]` was confusing —

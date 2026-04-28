@@ -1,0 +1,21 @@
+[putitoutthere]
+version = 1
+
+# SDK shape: a Python package + an npm package with no Rust between
+# them — e.g. a server with Python and JS clients sharing a brand.
+# Issue #244.
+
+[[package]]
+name = "piot-fixture-zzz-python-no-rust"
+kind = "pypi"
+path = "packages/python"
+globs = ["packages/python/**"]
+build = "hatch"
+first_version = "__VERSION__"
+
+[[package]]
+name = "@putitoutthere/piot-fixture-zzz-js-no-rust"
+kind = "npm"
+path = "packages/js"
+globs = ["packages/js/**"]
+first_version = "__VERSION__"

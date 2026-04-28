@@ -1,5 +1,5 @@
 {
-  "name": "piot-fixture-zzz-js-vanilla",
+  "name": "piot-fixture-zzz-cli",
   "version": "__VERSION__",
   "description": "Put It Out There canary fixture. Safe to ignore.",
   "license": "MIT",

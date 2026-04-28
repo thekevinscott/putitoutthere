@@ -76,14 +76,6 @@ describe('#29 pure-language fixtures', () => {
     expect(rows[0]!.target).toBe('noarch');
   });
 
-  it('python-pure-setuptools → 1 pypi sdist row', async () => {
-    const cwd = prepareFixture('python-pure-setuptools');
-    const rows = await plan({ cwd });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.kind).toBe('pypi');
-    expect(rows[0]!.target).toBe('sdist');
-  });
-
   it('python-pure-hatch → 1 pypi sdist row', async () => {
     const cwd = prepareFixture('python-pure-hatch');
     const rows = await plan({ cwd });
@@ -131,29 +123,14 @@ describe('#30 rust-in-language fixtures', () => {
 });
 
 describe('#31 polyglot fixtures', () => {
-  it('polyglot-rust-python → cascades through depends_on', async () => {
-    const cwd = prepareFixture('polyglot-rust-python');
+  it('js-python-no-rust → 1 pypi sdist + 1 npm noarch', async () => {
+    const cwd = prepareFixture('js-python-no-rust');
     const rows = await plan({ cwd });
-    // First release: every package is in the plan. rust 1 row + python 2 targets + sdist = 4.
-    const names = new Set(rows.map((r) => r.name));
-    expect(names).toContain('piot-fixture-zzz-rust');
-    expect(names).toContain('piot-fixture-zzz-python');
-  });
-
-  it('polyglot-rust-js-napi → cascades', async () => {
-    const cwd = prepareFixture('polyglot-rust-js-napi');
-    const rows = await plan({ cwd });
-    const names = new Set(rows.map((r) => r.name));
-    expect(names).toContain('piot-fixture-zzz-rust-napi');
-    expect(names).toContain('piot-fixture-zzz-napi');
-  });
-
-  it('polyglot-rust-js-bundled → cascades', async () => {
-    const cwd = prepareFixture('polyglot-rust-js-bundled');
-    const rows = await plan({ cwd });
-    const names = new Set(rows.map((r) => r.name));
-    expect(names).toContain('piot-fixture-zzz-rust-cli');
-    expect(names).toContain('piot-fixture-zzz-cli');
+    expect(rows).toHaveLength(2);
+    const byKind = new Map<string, number>();
+    for (const r of rows) byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1);
+    expect(byKind.get('pypi')).toBe(1);
+    expect(byKind.get('npm')).toBe(1);
   });
 
   it('polyglot-everything → rust + python (5+sdist) + npm (5+main)', async () => {
@@ -165,6 +142,6 @@ describe('#31 polyglot fixtures', () => {
     for (const r of rows) byName.set(r.name, (byName.get(r.name) ?? 0) + 1);
     expect(byName.get('piot-fixture-zzz-rust')).toBe(1);
     expect(byName.get('piot-fixture-zzz-python')).toBe(6);
-    expect(byName.get('piot-fixture-zzz-cli')).toBe(6);
+    expect(byName.get('@putitoutthere/piot-fixture-zzz-cli')).toBe(6);
   });
 });

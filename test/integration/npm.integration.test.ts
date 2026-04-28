@@ -93,7 +93,6 @@ const pkg = {
 function ctx(): Ctx {
   return {
     cwd: dir,
-    dryRun: false,
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     env: { NODE_AUTH_TOKEN: 'tok' },
     artifacts: { get: () => '', has: () => false },

@@ -60,7 +60,6 @@ export interface Config {
 /** Runtime context passed to every handler call. */
 export interface Ctx {
   cwd: string;
-  dryRun: boolean;
   log: Logger;
   env: Record<string, string>;
   artifacts: ArtifactStore;

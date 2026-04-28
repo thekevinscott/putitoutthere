@@ -12,9 +12,15 @@
  * Global flags:
  *   --cwd <path>      working directory (default: process.cwd())
  *   --config <path>   path to putitoutthere.toml
- *   --dry-run         for publish; no side effects
  *   --json            machine-readable output
+ *
+ * `--dry-run` was removed deliberately (#244). The library's job is
+ * publishing; a non-publishing mode of the publish command was a
+ * coverage hole pretending to be a feature. Passing `--dry-run` now
+ * errors out.
  */
+
+import { isAbsolute, resolve } from 'node:path';
 
 import { plan } from './plan.js';
 import { publish } from './publish.js';
@@ -40,7 +46,6 @@ function printUsage(): void {
       'Options:',
       '  --cwd <path>      working directory',
       '  --config <path>   path to putitoutthere.toml',
-      '  --dry-run         publish without side effects',
       '  --json            emit machine-readable output',
       '',
       'See https://github.com/thekevinscott/putitoutthere for docs.',
@@ -52,14 +57,12 @@ function printUsage(): void {
 interface ParsedFlags {
   cwd: string;
   config?: string | undefined;
-  dryRun: boolean;
   json: boolean;
 }
 
-function parseFlags(argv: readonly string[]): ParsedFlags {
+export function parseFlags(argv: readonly string[]): ParsedFlags {
   const out: ParsedFlags = {
     cwd: process.cwd(),
-    dryRun: false,
     json: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -67,9 +70,23 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     /* v8 ignore next -- ?? fallback is for malformed argv; tests always pass the value */
     if (a === '--cwd') out.cwd = argv[++i] ?? out.cwd;
     else if (a === '--config') out.config = argv[++i];
-    else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--json') out.json = true;
+    else if (a === '--dry-run') {
+      // Removed in #244. Publishing is the library's only job; a
+      // non-publishing flavor of `publish` is a coverage hole, not
+      // a feature. Fail loudly so callers update their invocation.
+      throw new Error(
+        '--dry-run was removed. The CLI does not support a non-publishing publish mode; remove the flag from your invocation.',
+      );
+    }
   }
+  // Always normalise --cwd to an absolute path. Downstream code joins
+  // `cwd` with `artifacts/` to derive paths it then hands to subprocesses
+  // (twine, cargo, npm) running with `cwd: ctx.cwd`. If cwd were left
+  // relative — e.g. `--cwd fixture-tree` from the JS action — those
+  // file paths would resolve as `fixture-tree/fixture-tree/...` from
+  // the subprocess's vantage. Anchor here once.
+  if (!isAbsolute(out.cwd)) out.cwd = resolve(out.cwd);
   return out;
 }
 
@@ -97,8 +114,8 @@ export async function run(argv: readonly string[]): Promise<number> {
     return 1;
   }
 
-  const flags = parseFlags(rest);
   try {
+    const flags = parseFlags(rest);
     switch (cmd) {
       case 'plan': {
         const matrix = await plan({
@@ -141,7 +158,6 @@ export async function run(argv: readonly string[]): Promise<number> {
           cwd: flags.cwd,
           /* v8 ignore next -- --config test covered in plan arm; publish shares the same plumbing */
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
-          dryRun: flags.dryRun,
         });
         if (flags.json) {
           process.stdout.write(JSON.stringify(result) + '\n');

@@ -7,10 +7,14 @@ inputs:
     description: 'Which CLI subcommand to run. Canonical values are `plan` and `publish`.'
     required: false
     default: 'plan'
-  dry_run:
-    description: 'If true, resolve the plan but skip all destructive operations.'
+  working_directory:
+    description: >-
+      Path the CLI runs against (forwarded as `--cwd`). Defaults to the
+      runner working directory. Internal use; the reusable workflow
+      supplies this when invoked against a non-root tree (e.g. e2e
+      fixtures materialized into a subdir).
     required: false
-    default: 'false'
+    default: ''
   fail_on_error:
     description: 'If true, non-zero CLI exit codes fail the step.'
     required: false
@@ -21,5 +25,5 @@ outputs:
     description: "JSON matrix emitted by `plan`. Output key is omitted when the plan resolves to zero rows or when command is anything other than plan; downstream jobs should coalesce with `|| '[]'`."
 
 runs:
-  using: 'node24'
+  using: 'node20'
   main: 'dist-action/index.js'

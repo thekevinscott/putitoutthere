@@ -27,7 +27,6 @@ const execMock = vi.mocked(execFileSync);
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
     cwd: '.',
-    dryRun: false,
     log: {
       debug: () => {},
       info: () => {},
@@ -343,20 +342,32 @@ describe('pypi.publish', () => {
     fetchSpy.mockRestore();
   });
 
-  it('dry-run: does not call twine', async () => {
+  it('runs twine upload with --verbose so 4xx response bodies surface (#244)', async () => {
+    // Plain `twine upload` returns "400 Bad Request from
+    // https://upload.pypi.org/legacy/" with no body. The actual reason
+    // (filename mismatch, missing trusted-publisher claim, malformed
+    // metadata) only appears under --verbose. Hard-coded so a future
+    // edit can't quietly drop it.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
     );
-    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
-    const result = await pypi.publish(
+    stageSdist('demo-python-sdist', 'demo-python-0.1.0.tar.gz');
+    execMock.mockReturnValueOnce(Buffer.from(''));
+    process.env.PYPI_API_TOKEN = 'pypi-tok';
+    await pypi.publish(
       { ...basePkg(), path: dir },
       '0.1.0',
-      makeCtx({ cwd: dir, artifactsRoot, dryRun: true }),
+      makeCtx({
+        cwd: dir,
+        artifactsRoot,
+        env: { PYPI_API_TOKEN: 'pypi-tok' },
+      }),
     );
-    expect(result.status).toBe('skipped');
-    expect(execMock).not.toHaveBeenCalled();
+    const args = execMock.mock.calls[0]![1] as string[];
+    expect(args).toContain('--verbose');
     fetchSpy.mockRestore();
   });
+
 
   it('fails loudly when PYPI_API_TOKEN is not set', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
@@ -428,6 +439,32 @@ describe('pypi.publish', () => {
         makeCtx({ cwd: dir, artifactsRoot }),
       ),
     ).rejects.toThrow(/unauthorized|twine/i);
+    fetchSpy.mockRestore();
+  });
+
+  it('surfaces twine failure stdout when stderr is empty (#244)', async () => {
+    // Twine sometimes writes a 4xx/5xx response body or an unsupported-
+    // metadata diagnostic to stdout rather than stderr. The previous
+    // wrapper only forwarded stderr; the actual failure was lost and
+    // adopters saw a bare "Command failed" with no signal.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    execMock.mockImplementation(() => {
+      throw Object.assign(new Error('twine exit 1'), {
+        stdout: Buffer.from('HTTPError: 400 Bad Request from https://upload.pypi.org/legacy/\nThe description failed to render in the default format of reStructuredText.'),
+        stderr: Buffer.from(''),
+      });
+    });
+    process.env.PYPI_API_TOKEN = 'tok';
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/HTTPError: 400|reStructuredText/i);
     fetchSpy.mockRestore();
   });
 
@@ -616,6 +653,32 @@ describe('pypi.publish', () => {
     );
     expect(result.status).toBe('published');
     expect(execMock).toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  // #244: collectArtifacts must not pick up sibling packages whose
+  // names share the same prefix. A bare `entry.startsWith("foo-")`
+  // would match both `foo-sdist` (foo's own) and `foo-extras-sdist`
+  // (foo-extras's sdist) — leading to the engine uploading the wrong
+  // tarball under foo's identity. Match exact `{name}-sdist` and
+  // `{name}-wheel-` prefix instead.
+  it('ignores sibling artifacts whose names extend the same prefix', async () => {
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    // Sibling fixture uploaded its own sdist; it must not be picked up.
+    stageSdist('demo-python-extras-sdist', 'demo-extras-0.1.0.tar.gz');
+    process.env.PYPI_API_TOKEN = 'tok';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    execMock.mockReturnValue('ok');
+    await pypi.publish(
+      { ...basePkg({ name: 'demo-python' }), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot, env: { PYPI_API_TOKEN: 'tok' } }),
+    );
+    const cmd = (execMock.mock.calls[0]?.[1] ?? []) as string[];
+    expect(cmd.some((a) => a.includes('demo-extras-0.1.0.tar.gz'))).toBe(false);
+    expect(cmd.some((a) => a.includes('demo-0.1.0.tar.gz'))).toBe(true);
     fetchSpy.mockRestore();
   });
 

@@ -1,68 +1,37 @@
-# E2E harness
+# E2E
 
-End-to-end tests that publish the `piot-fixture-zzz-*` canary family to **real registries** (crates.io, PyPI, npm). Not run on every push — `workflow_dispatch` only via `.github/workflows/e2e.yml`.
+End-to-end tests live entirely in CI; there is no local harness. The point of these tests is to **mirror what an external library experiences** — a consumer writes a 5-line `release.yml` that calls our reusable workflow, and the same `plan → build → publish` flow runs against their working tree, end-to-end against real registries via OIDC.
 
-## What this covers
+## How it runs
 
-The unit + integration suites verify every code path in the SDK against mocks. This harness is the last-mile check that the full pipeline works against the live registries: OIDC, provenance, tag creation, etc.
+`.github/workflows/e2e.yml` is a thin matrix over the 9 fixtures under `test/fixtures/`. Each matrix entry calls `.github/workflows/e2e-fixture.yml`, which mirrors `release.yml`'s job graph step-for-step (same `actions/setup-python@v5`, same `PyO3/maturin-action@v1`, same `actions/upload-artifact@v4` / `download-artifact@v4`, same engine action). The only difference: a "Materialize fixture" step that copies `test/fixtures/${fixture}/` into a `fixture-tree/` subdirectory at workflow start, bumps `__VERSION__` placeholders to a throwaway `0.0.{unix_seconds}` version, and points each step at that subdirectory via `working_directory:`.
 
-## Canary package family
+The job's pass/fail **is** the assertion. There is no vitest, no harness, no per-fixture test file — if every step the reusable workflow runs against this fixture passes against real registries, the matrix entry is green.
 
-All canary fixture packages are prefixed with `piot-fixture-zzz-*` so they sink in registry search results and nobody mistakes them for real packages. The `zzz` is intentional — it keeps the fixture at the bottom of alphabetical listings.
+## Auth
 
-| Registry   | Package name                                       |
-|------------|----------------------------------------------------|
-| crates.io  | `piot-fixture-zzz-rust`                            |
-| PyPI       | `piot-fixture-zzz-python`                          |
-| npm (main) | `piot-fixture-zzz-cli`                             |
-| npm (plat) | `piot-fixture-zzz-cli-{target}` (one per platform) |
+OIDC trusted publishing only. The `e2e` GitHub Actions environment grants `id-token: write`; the engine mints OIDC tokens for npm / twine / cargo as needed. **No long-lived registry tokens** in the e2e flow — that matches what the public reusable workflow does.
 
-## Required secrets (in the `e2e` GitHub Actions environment)
+A fixture's job stays red until trusted publishers are registered (`piot-fixture-zzz-*` for the package names that fixture publishes). That is by design: the failure is the signal that a publisher still needs to be wired (#244 step 2).
 
-| Secret                 | Required | Notes                                                         |
-|------------------------|----------|---------------------------------------------------------------|
-| `NPM_TOKEN`            | Yes      | Already a repo secret. Write access to `piot-fixture-zzz-cli`. |
-| `PYPI_API_TOKEN`       | Yes      | Scoped to `piot-fixture-zzz-python`.                          |
-| `CARGO_REGISTRY_TOKEN` | Yes      | Scoped to `piot-fixture-zzz-rust`.                            |
+## Versioning
 
-OIDC is the preferred auth path in production; the canary fixtures can use tokens if the OIDC trusted-publisher setup hasn't been wired up for them yet.
+Each run uses `0.0.{unix_seconds}`. Monotonically increasing, doesn't collide with human-authored versions, and crates.io's immutable-publish rule isn't blocking. The plan job bakes the version once and the build / publish jobs each re-materialize from the fixture using the same value.
 
-## Running locally
+## Why not run locally
 
-```bash
-# Dry-run (no actual publish; default)
-pnpm run test:e2e
+Local runs can't get OIDC; the only auth path the suite exercises is OIDC trusted publishing. There's nothing meaningful to run locally beyond what unit + integration tests already cover. If you need to debug an e2e failure, dispatch the `E2E` workflow on your branch and read the job logs.
 
-# Actually publish to real registries (opt-in; requires all tokens above)
-PIOT_E2E_PUBLISH=1 pnpm run test:e2e
-```
+## Fixture coverage
 
-## Version computation
-
-Each canary run uses a unix-seconds version shard appended to `0.0.` (e.g. `0.0.1717534920`). That guarantees:
-
-- Monotonically increasing (seconds since epoch).
-- Never collides with a human-authored version (the `patch` field is a 10-digit number).
-- crates.io's "immutable publish" semantics don't block us.
-
-If a run publishes 3 packages at the same second, they all share the same version. That's fine — they're independent, and the tag name disambiguates.
-
-## Cleanup
-
-Run `pnpm run test:e2e:cleanup` (to be added in a follow-up PR) to yank/deprecate canary versions older than 30 days. crates.io's `cargo yank`, npm's `npm deprecate`, and PyPI's web UI each handle the registry-specific flow.
-
-## Fixtures
-
-`test/fixtures/e2e-canary/` contains the minimal source tree for the canary packages. It's deliberately tiny — just enough to build a valid artifact for each registry.
-
-## Architecture
-
-`test/e2e/harness.ts` is a thin wrapper around `execFileSync` that:
-
-1. Computes the canary version.
-2. Writes `putitoutthere.toml` + per-language manifests with that version.
-3. Runs `node dist/cli-bin.js plan` and asserts the matrix has the expected rows.
-4. Optionally runs `node dist/cli-bin.js publish`.
-5. Asserts `{name}-v{version}` tags exist in the local repo afterward.
-
-Each `*.e2e.test.ts` file exercises one slice of the pipeline (plan-only, dry-run publish, real publish). Real-publish tests gate on `PIOT_E2E_PUBLISH=1`.
+| Fixture                  | Manifestation                                                 |
+|--------------------------|---------------------------------------------------------------|
+| `js-vanilla`             | npm OIDC + plain `npm publish`                                |
+| `js-napi`                | napi platform-family synthesis + `optionalDependencies` rewrite |
+| `js-bundled-cli`         | bundled-cli launcher + per-target binaries                    |
+| `js-python-no-rust`      | npm + pypi side-by-side, no Rust (SDK shape)                  |
+| `python-pure-hatch`      | hatch backend + twine OIDC mint-token                         |
+| `python-pure-sdist-only` | sdist-only path (no wheel)                                    |
+| `python-rust-maturin`    | per-target maturin wheels + sdist                             |
+| `rust-crate-only`        | crates.io OIDC + `cargo publish`                              |
+| `polyglot-everything`    | rust + python (maturin) + npm (bundled-cli) cascade end-to-end |

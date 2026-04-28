@@ -1,32 +1,30 @@
 name: E2E
 
-# Canary E2E. Publishes to the `piot-fixture-zzz-cli` npm package
-# (purpose-built for this; throwaway 0.0.{unix_seconds} versions) on
-# every PR and every push to main, via OIDC trusted publishing.
+# Per-fixture e2e matrix. One job per distinct publish-path
+# manifestation; each fixture entry runs the SAME job graph the
+# consumer-facing reusable workflow runs (.github/workflows/release.yml)
+# against the fixture's working tree, end-to-end against real
+# registries via OIDC trusted publishing.
 #
-# Why publish on PRs and not just on main: catching publish-side
-# breakage post-merge (release-npm.yml run 24972181242 — ENEEDAUTH
-# from `npm publish --provenance`) is too late. The bug is already
-# in `main` by the time we find out. Running the live publish on PR
-# CI shifts that detection left so a broken OIDC path blocks the
-# merge instead of breaking the next real release.
+# The mechanics live in .github/workflows/e2e-fixture.yml so the
+# matrix here is just the fixture list. e2e-fixture.yml is a copy of
+# release.yml's plan → build → publish job graph with one extra step:
+# materializing the fixture into fixture-tree/ before the plan runs.
+#
+# Until trusted publishers are registered for each fixture's package
+# names (#244 step 2), the corresponding job fails — by design. The
+# failure is the signal that the publisher still needs to be wired.
 #
 # Triggers:
-# - pull_request           → live canary publish.
-# - push to main           → live canary publish (continuous dogfood).
-# - workflow_dispatch      → live canary publish unless caller passes
-#                            `publish: false` to opt out.
+# - pull_request           → live publish per fixture.
+# - push to main           → live publish per fixture.
+# - workflow_dispatch      → live publish per fixture.
 
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "Publish canary version to npm (uncheck for dry-run only)"
-        type: boolean
-        default: true
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -34,44 +32,28 @@ concurrency:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    name: e2e (${{ matrix.fixture }})
+    # Permissions on a reusable-workflow call set the GITHUB_TOKEN scope
+    # for the called workflow. e2e-fixture.yml's publish job needs
+    # id-token: write (OIDC mint) and contents: write (tag push); both
+    # have to be granted here at the caller level.
     permissions:
-      contents: read
+      contents: write
       id-token: write
-    environment: e2e
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install pnpm
-        run: npm install -g pnpm@9
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Decide publish mode
-        id: mode
-        # pull_request / push → publish=1.
-        # workflow_dispatch   → publish=inputs.publish (default true).
-        # `inputs.publish` is unset on non-dispatch events, so the
-        # `!= 'false'` check defaults to publish=1 for those.
-        run: |
-          if [ "${{ inputs.publish }}" = "false" ]; then
-            echo "publish=0" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=1" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Run e2e suite
-        env:
-          PIOT_E2E_PUBLISH: ${{ steps.mode.outputs.publish }}
-          # No long-lived registry tokens. npm OIDC trusted publishing
-          # is the only auth path the canary exercises — matches what
-          # the public reusable workflow does.
-        run: pnpm run test:e2e
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture:
+          - js-vanilla
+          - js-napi
+          - js-bundled-cli
+          - js-python-no-rust
+          - python-pure-hatch
+          - python-pure-sdist-only
+          - python-rust-maturin
+          - rust-crate-only
+          - polyglot-everything
+    uses: ./.github/workflows/e2e-fixture.yml
+    secrets: inherit
+    with:
+      fixture: ${{ matrix.fixture }}

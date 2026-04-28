@@ -33,7 +33,6 @@ import { dumpFailure } from './verbose.js';
 export interface PublishOptions {
   cwd: string;
   configPath?: string;
-  dryRun?: boolean;
   /** Override for tests. */
   handlerFor?: (kind: Handler['kind']) => Handler;
 }
@@ -76,19 +75,17 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   const selectedPackages = [...perPackage.keys()].map((name) => mustGet(config.packages, name));
   requireAuth(selectedPackages);
 
-  // 3. Artifact completeness, unless dry-run (no artifacts to check).
-  if (!opts.dryRun) {
-    const completeness = checkCompleteness(matrix, artifactsRoot(cwd));
-    const incomplete = [...completeness.entries()].filter(([, r]) => !r.ok);
-    if (incomplete.length > 0) {
-      const lines = ['Artifact completeness check failed:'];
-      for (const [name, r] of incomplete) {
-        for (const m of r.missing) {
-          lines.push(`  ${name} / ${m.row.target}: ${m.reason}`);
-        }
+  // 3. Artifact completeness.
+  const completeness = checkCompleteness(matrix, artifactsRoot(cwd));
+  const incomplete = [...completeness.entries()].filter(([, r]) => !r.ok);
+  if (incomplete.length > 0) {
+    const lines = ['Artifact completeness check failed:'];
+    for (const [name, r] of incomplete) {
+      for (const m of r.missing) {
+        lines.push(`  ${name} / ${m.row.target}: ${m.reason}`);
       }
-      throw new Error(lines.join('\n'));
     }
+    throw new Error(lines.join('\n'));
   }
 
   // 4. Publish each package in dep-graph order.
@@ -103,7 +100,6 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
     const handler = handlerFor(pkg.kind);
     const ctx: Ctx = {
       cwd,
-      dryRun: Boolean(opts.dryRun),
       log,
       env: process.env as Record<string, string>,
       artifacts: {
@@ -116,14 +112,6 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
     try {
       if (await withRetry(() => handler.isPublished(pkg, version, ctx))) {
         log.info(`publish: ${name}@${version} already published; skipping`);
-        continue;
-      }
-      if (opts.dryRun) {
-        // Dry-run stops before any side effect, including writeVersion
-        // (which edits the CI worktree) and publish itself. Reporters
-        // still see the package in the "would publish" list.
-        log.info(`publish: DRY-RUN would publish ${name}@${version}`);
-        published.push({ package: name, version, result: { status: 'skipped' } });
         continue;
       }
       await handler.writeVersion(pkg, version, ctx);

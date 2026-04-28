@@ -1,1 +1,11 @@
-{ "name": "piot-fixture-zzz-cli", "version": "__VERSION__", "license": "MIT", "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" }, "bin": { "piot-fixture-zzz": "shim.js" }, "files": ["shim.js"] }
+{
+  "name": "@putitoutthere/piot-fixture-zzz-cli",
+  "version": "__VERSION__",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
+  "bin": { "piot-fixture-zzz": "shim.js" },
+  "files": ["shim.js"],
+  "scripts": {
+    "build": "node scripts/build.js"
+  }
+}

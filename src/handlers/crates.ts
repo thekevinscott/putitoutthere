@@ -10,7 +10,7 @@
  *   alternative (TOML round-trip) loses formatting.
  * - publish: `cargo publish --allow-dirty --verbose` with stderr
  *   captured for the failure dump. Short-circuits on
- *   already-published (idempotent). Honors ctx.dryRun.
+ *   already-published (idempotent).
  *
  * --allow-dirty is required for our writeVersion-then-publish model
  * (#135), but cargo's default dirty-check is exactly the safety net
@@ -93,15 +93,12 @@ async function publishImpl(
   if (await isPublishedImpl(pkg, version, ctx)) {
     return { status: 'already-published' };
   }
-  if (ctx.dryRun) {
-    return { status: 'skipped' };
-  }
 
   // #135: --allow-dirty disarms cargo's own "is the tree clean?" guard.
   // Reinstate a narrower check: only the Cargo.toml we just wrote may
   // be dirty. Anything else = a bug or a stray edit that would end up
   // in the crate tarball. Published crates can't be unpublished.
-  const unexpected = scanDirtyOutsideManifest(ctx.cwd, pkg.path);
+  const unexpected = scanDirtyOutsideManifest(ctx.cwd, pkg.path, ctx.artifactsRoot);
   if (unexpected !== null && unexpected.length > 0) {
     throw new Error(
       [
@@ -183,6 +180,7 @@ export function replaceCargoVersion(source: string, version: string): string {
 export function scanDirtyOutsideManifest(
   cwd: string,
   pkgPath: string,
+  artifactsRoot?: string,
 ): string[] | null {
   // Confirm we're inside a git work tree. If not, bail and let cargo's
   // own --allow-dirty handling take over.
@@ -224,6 +222,15 @@ export function scanDirtyOutsideManifest(
     return null;
   }
   /* v8 ignore stop */
+  // Reusable workflow's `actions/download-artifact@v4` step creates
+  // `artifacts/` under cwd unconditionally — even for fixtures whose
+  // packages don't upload anything (crates-only). That entry is engine-
+  // managed scratch space, not a stray edit; skip it.
+  let artifactsRel = '';
+  if (artifactsRoot !== undefined && artifactsRoot !== '') {
+    const r = relative(cwd, artifactsRoot);
+    artifactsRel = r === '' ? '' : r.replace(/\\/g, '/');
+  }
   const unexpected: string[] = [];
   for (const raw of porcelain.split('\n')) {
     if (raw.length < 4) continue;
@@ -235,6 +242,14 @@ export function scanDirtyOutsideManifest(
     /* v8 ignore next -- quoted-path rendering not exercised by current tests */
     const normalized = path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path;
     if (normalized === managedRel) continue;
+    if (
+      artifactsRel !== '' &&
+      (normalized === artifactsRel ||
+        normalized === `${artifactsRel}/` ||
+        normalized.startsWith(`${artifactsRel}/`))
+    ) {
+      continue;
+    }
     unexpected.push(normalized);
   }
   return unexpected;

@@ -22,7 +22,6 @@ describe('action', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.INPUT_COMMAND;
-    delete process.env.INPUT_DRY_RUN;
     delete process.env.INPUT_FAIL_ON_ERROR;
   });
 
@@ -44,10 +43,4 @@ describe('action', () => {
     await expect(main()).rejects.toThrow(/exit:0/);
   });
 
-  it('passes --dry-run when input set', async () => {
-    process.env.INPUT_COMMAND = 'publish';
-    process.env.INPUT_DRY_RUN = 'true';
-    // Publish will fail (no config here); we just assert the flag reaches run().
-    await expect(main()).rejects.toThrow(/exit:\d+/);
-  });
 });

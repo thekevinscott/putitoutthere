@@ -46,8 +46,12 @@ function row(over: Partial<MatrixRow>): MatrixRow {
 }
 
 describe('checkCompleteness: single package, all present', () => {
-  it('crates noarch is ok when a .crate is present', () => {
-    write('demo-crate/demo-0.1.0.crate');
+  it('crates is always ok — pipeline never uploads .crate artifacts (#244)', () => {
+    // `cargo publish` builds + uploads from source on the registry
+    // side. release.yml has no upload step for crates, so the publish
+    // job never sees a `<name>-crate/` directory under artifacts/.
+    // Skip the row instead of demanding a file that the pipeline
+    // doesn't produce.
     const out = checkCompleteness([row({})], root);
     expect(out.get('demo')?.ok).toBe(true);
   });
@@ -114,23 +118,22 @@ describe('checkCompleteness: single package, all present', () => {
 
 describe('checkCompleteness: single package, issues', () => {
   it('reports a missing artifact directory as missing', () => {
-    const out = checkCompleteness([row({})], root);
+    const out = checkCompleteness(
+      [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
+      root,
+    );
     const pkg = out.get('demo');
     expect(pkg?.ok).toBe(false);
     expect(pkg?.missing[0]?.reason).toMatch(/missing/i);
-    expect(pkg?.missing[0]?.row.target).toBe('noarch');
   });
 
   it('reports an empty artifact directory as empty', () => {
-    mkdirSync(join(root, 'demo-crate'));
-    const out = checkCompleteness([row({})], root);
+    mkdirSync(join(root, 'demo-sdist'));
+    const out = checkCompleteness(
+      [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
+      root,
+    );
     expect(out.get('demo')?.missing[0]?.reason).toMatch(/empty/i);
-  });
-
-  it('reports a crate artifact without a .crate file as wrong-shape', () => {
-    write('demo-crate/junk.txt');
-    const out = checkCompleteness([row({})], root);
-    expect(out.get('demo')?.missing[0]?.reason).toMatch(/shape|\.crate/i);
   });
 
   it('reports a pypi artifact with no .whl as wrong-shape', () => {
@@ -169,11 +172,11 @@ describe('checkCompleteness: single package, issues', () => {
 
 describe('checkCompleteness: multi-package', () => {
   it('reports per package independently', () => {
-    write('a-crate/a.crate');
+    write('a-sdist/a-0.1.0.tar.gz');
     // b's artifact is missing entirely
     const matrix: MatrixRow[] = [
-      row({ name: 'a', artifact_name: 'a-crate' }),
-      row({ name: 'b', artifact_name: 'b-crate' }),
+      row({ name: 'a', kind: 'pypi', target: 'sdist', artifact_name: 'a-sdist' }),
+      row({ name: 'b', kind: 'pypi', target: 'sdist', artifact_name: 'b-sdist' }),
     ];
     const out = checkCompleteness(matrix, root);
     expect(out.get('a')?.ok).toBe(true);
@@ -215,14 +218,22 @@ describe('checkCompleteness: multi-package', () => {
 
 describe('requireCompleteness', () => {
   it('returns silently when every package is ok', () => {
-    write('demo-crate/demo.crate');
-    expect(() => requireCompleteness([row({})], root)).not.toThrow();
+    write('demo-sdist/demo-0.1.0.tar.gz');
+    expect(() =>
+      requireCompleteness(
+        [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
+        root,
+      ),
+    ).not.toThrow();
   });
 
   it('throws naming the missing target(s) per package', () => {
-    expect(() => requireCompleteness([row({})], root)).toThrow(
-      /demo.*noarch|missing/i,
-    );
+    expect(() =>
+      requireCompleteness(
+        [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
+        root,
+      ),
+    ).toThrow(/demo.*sdist|missing/i);
   });
 
   it('throws with every missing target on a multi-target package', () => {
