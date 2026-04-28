@@ -325,9 +325,13 @@ jobs:
         run: |
           set -euo pipefail
           paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
+          echo "DEBUG: npm paths=$(echo "$paths" | tr '\n' ' ')"
           for path in $paths; do
             echo "::group::npm install + build at fixture-tree/${path}"
             pushd "fixture-tree/${path}" > /dev/null
+            echo "DEBUG: pwd=$(pwd)"
+            echo "DEBUG: contents before build:"
+            ls -la
             if [ -f package-lock.json ]; then
               npm ci
             elif [ -f pnpm-lock.yaml ]; then
@@ -337,6 +341,12 @@ jobs:
               npm install
             fi
             npm run build --if-present
+            echo "DEBUG: contents after build:"
+            ls -la
+            echo "DEBUG: dist/ contents (if exists):"
+            ls -la dist/ 2>&1 || echo "  (no dist/)"
+            echo "DEBUG: npm pack --dry-run preview:"
+            npm pack --dry-run 2>&1 | head -30 || true
             popd > /dev/null
             echo "::endgroup::"
           done
@@ -388,10 +398,13 @@ jobs:
             fi
             echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
             tarball_url=$(npm view "$pkg_name@$version" dist.tarball)
+            echo "  tarball url: $tarball_url"
             tmp=$(mktemp -d)
             curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
             mkdir "$tmp/extracted"
             tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
+            echo "  full tarball contents:"
+            find "$tmp/extracted/package" -type f | sed 's/^/    /'
             for d in "${dirs[@]}"; do
               if [ -d "$tmp/extracted/package/$d" ] && \
                  [ "$(find "$tmp/extracted/package/$d" -type f | wc -l)" -gt 0 ]; then
@@ -399,8 +412,6 @@ jobs:
                 echo "  ok: package/$d/ ($count file(s))"
               else
                 echo "::error::[$pkg_name@$version] tarball declares '$d' in files[] but package/$d/ is missing or empty."
-                echo "Tarball contents:"
-                find "$tmp/extracted/package" -type f | sed 's/^/  /'
                 fail=1
               fi
             done
