@@ -325,6 +325,62 @@ jobs:
           # remains OIDC-only.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # Post-publish: download every main npm tarball from the registry and
+      # assert that directory entries declared in package.json `files` are
+      # actually present in the published artifact. Catches the cachetta
+      # 0.3.x failure mode — build job produces dist/, publish job ships
+      # from a fresh source tree without it, registry receives a tarball
+      # missing the compiled output. The publish step itself returns 0
+      # because npm publish doesn't validate `files` content; this is the
+      # only place that catches it end-to-end.
+      - name: Verify published npm tarballs honor package.json files
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
+          if [ -z "$rows" ]; then
+            echo "No npm main/noarch rows; nothing to verify."
+            exit 0
+          fi
+          fail=0
+          while IFS= read -r row; do
+            pkg_path=$(printf '%s' "$row" | jq -r '.path')
+            version=$(printf '%s' "$row" | jq -r '.version')
+            pkg_json="fixture-tree/${pkg_path}/package.json"
+            pkg_name=$(jq -r '.name' "$pkg_json")
+            # Heuristic: `files` entries without a dot are directories
+            # (dist, lib, build). Entries with a dot are individual files
+            # (README.md, index.js) and don't need a per-tree assertion.
+            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "$pkg_json")
+            if [ "${#dirs[@]}" -eq 0 ]; then
+              echo "[$pkg_name@$version] no directory entries in files[]; skipping."
+              continue
+            fi
+            echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
+            tarball_url=$(npm view "$pkg_name@$version" dist.tarball)
+            tmp=$(mktemp -d)
+            curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
+            mkdir "$tmp/extracted"
+            tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
+            for d in "${dirs[@]}"; do
+              if [ -d "$tmp/extracted/package/$d" ] && \
+                 [ "$(find "$tmp/extracted/package/$d" -type f | wc -l)" -gt 0 ]; then
+                count=$(find "$tmp/extracted/package/$d" -type f | wc -l)
+                echo "  ok: package/$d/ ($count file(s))"
+              else
+                echo "::error::[$pkg_name@$version] tarball declares '$d' in files[] but package/$d/ is missing or empty."
+                echo "Tarball contents:"
+                find "$tmp/extracted/package" -type f | sed 's/^/  /'
+                fail=1
+              fi
+            done
+            rm -rf "$tmp"
+          done <<< "$rows"
+          exit "$fail"
+
   # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
   # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside
   # any reusable workflow (PyPA blanket-disables it; see

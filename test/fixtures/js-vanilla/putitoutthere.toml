@@ -10,5 +10,5 @@ version = 1
 name = "piot-fixture-zzz-cli"
 kind = "npm"
 path = "."
-globs = ["src/**", "package.json"]
+globs = ["src/**", "tsconfig.json", "package.json"]
 first_version = "__VERSION__"

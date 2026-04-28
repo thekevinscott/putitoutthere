@@ -1,2 +1,2 @@
 // Canary fixture main. The real napi binding would live here.
-export const canary = true;
+export const canary: boolean = true;
