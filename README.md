@@ -2,7 +2,7 @@
 
 A reusable GitHub Actions workflow that publishes packages to crates.io, PyPI,
 and npm from one repo. OIDC-first, cascade-aware, polyglot. The consumer
-surface is one config file plus ~10 lines of YAML calling
+surface is one config file plus one canonical YAML calling
 `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0`.
 
 ## Quickstart
@@ -22,10 +22,41 @@ jobs:
     permissions:
       contents: write
       id-token: write
+
+  # PyPI upload runs in the caller's workflow context. Required because
+  # PyPI Trusted Publishers can't validate OIDC tokens minted from a
+  # cross-repo reusable workflow (pypi/warehouse#11096). The `if:`
+  # gate skips this job for non-PyPI repos — paste verbatim regardless
+  # of what you publish.
+  pypi-publish:
+    needs: release
+    if: needs.release.outputs.has_pypi == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-sdist'
+          path: dist/
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-wheel-*'
+          path: dist/
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
 ```
 
 Pinned action versions, `plan → build → publish` orchestration, and GitHub
-Release creation all live inside the reusable workflow.
+Release creation all live inside the reusable workflow. The `pypi-publish`
+job is the one piece that has to live in your workflow file: PyPI's
+Trusted Publisher feature filters OIDC tokens by `repository_owner` /
+`repository_name` claims, which always reflect the caller's repo — so a
+TP registered against `thekevinscott/putitoutthere` is filtered out
+before `job_workflow_ref` is even checked. Running `pypa/gh-action-pypi-publish`
+in your workflow context aligns the claims with your TP registration.
+The job is skipped automatically for repos that don't publish to PyPI.
 
 Optional inputs — `with:` block at the call site:
 
@@ -216,11 +247,14 @@ releases without fighting registry-immutable-publish semantics.
 
 ## Trusted publishers
 
-OIDC trusted publishers — the only auth path supported by the reusable
-workflow. Long-lived registry tokens are not reachable through the workflow.
+OIDC trusted publishers — the only auth path supported. Long-lived
+registry tokens are not reachable through the workflow.
 
-The fields each registry needs are the same: repository owner/name, workflow
-filename (`release.yml`), and optionally a GitHub environment name.
+For all three registries the fields are the same: **your** repository
+owner/name, **your** workflow filename (`release.yml`), and optionally
+a GitHub environment name. Note: you register against your *own*
+repository, not against `thekevinscott/putitoutthere` — see "How
+auth flows" below for the why.
 
 ### crates.io
 
@@ -228,15 +262,15 @@ filename (`release.yml`), and optionally a GitHub environment name.
    exists. (Trusted publishing needs a crate owner record.)
 2. Go to `https://crates.io/crates/<crate>/settings` → **Trusted Publishing**
    → **Add**.
-3. Fill in: repository owner, repository name, workflow filename
+3. Fill in: your repo owner, your repo name, workflow filename
    (`release.yml`), environment (optional).
 
 ### PyPI
 
 1. Go to `https://pypi.org/manage/project/<name>/settings/publishing/` (or
    **Publishing** on the project page).
-2. Add a **GitHub** trusted publisher: owner, repo, workflow filename,
-   environment (optional).
+2. Add a **GitHub** trusted publisher: your repo owner, your repo name,
+   workflow filename (`release.yml`), environment (optional).
 3. Brand-new project? Use a [pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
    to skip the bootstrap token.
 
@@ -247,8 +281,32 @@ filename (`release.yml`), and optionally a GitHub environment name.
    publisher requires an existing package.)
 2. Go to `https://www.npmjs.com/package/<name>/access` → **Require trusted
    publisher**.
-3. Fill in: repository, workflow filename, environment (optional).
+3. Fill in: your repository, workflow filename (`release.yml`),
+   environment (optional).
 4. Delete the bootstrap token.
+
+### How auth flows
+
+`crates.io` and `npm` validate OIDC tokens that are minted by the
+reusable workflow's `publish` job. The reusable workflow already
+sits in your release path, so the OIDC `repository` and
+`job_workflow_ref` claims line up with your TP registration.
+
+PyPI is different. Its TP matching filters candidates by
+`repository_owner` + `repository_name` *before* checking
+`job_workflow_ref` ([Warehouse implementation](https://github.com/pypi/warehouse/blob/main/warehouse/oidc/models/github.py)).
+The `repository` claim always reflects the caller's repo — even
+inside a reusable workflow — so a TP registered against the
+reusable workflow's repo would be filtered out before
+`job_workflow_ref` is even checked. PyPI documents this:
+"[Reusable workflows cannot currently be used as the workflow in
+a Trusted Publisher.](https://docs.pypi.org/trusted-publishers/troubleshooting/)"
+Tracked at [pypi/warehouse#11096](https://github.com/pypi/warehouse/issues/11096).
+
+That's why the canonical template puts the PyPI upload step
+(`pypa/gh-action-pypi-publish`) directly in *your* workflow,
+gated on `needs.release.outputs.has_pypi`. In your workflow context
+both claims resolve to your repo, so your TP registration matches.
 
 ## Recipes
 

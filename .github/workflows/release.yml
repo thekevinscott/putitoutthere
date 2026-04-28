@@ -44,10 +44,19 @@ on:
         default: '24'
       python_version:
         description: >-
-          Python version for kind = "pypi" build / publish steps. Default
-          `3.12`.
+          Python version for kind = "pypi" build steps. Default `3.12`.
         type: string
         default: '3.12'
+    outputs:
+      has_pypi:
+        description: >-
+          `'true'` when the planned matrix contains any pypi rows. Consumers
+          gate their caller-side `pypi-publish` job on this so npm/crates-only
+          repos don't need the extra job. PyPI uploads run in the caller's
+          workflow context (not this reusable workflow) — see
+          README → "Publishing to PyPI". Always a string ("true"/"false")
+          per `workflow_call` output rules.
+        value: ${{ jobs.plan.outputs.has_pypi }}
 
 concurrency:
   group: putitoutthere-release-${{ github.repository }}
@@ -58,6 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      has_pypi: ${{ steps.has-pypi.outputs.has_pypi }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,6 +81,24 @@ jobs:
         uses: thekevinscott/putitoutthere@v0
         with:
           command: plan
+
+      # Compute a boolean "has_pypi" the consumer can gate their
+      # caller-side pypi-publish job on. PyPI uploads run in the
+      # caller's workflow context (not this reusable workflow) per
+      # the warehouse#11096 architectural constraint — see
+      # notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md.
+      - id: has-pypi
+        env:
+          MATRIX: ${{ steps.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          # Bash-safe substring check; the matrix is a JSON array of
+          # objects each carrying a `kind` field.
+          if printf '%s' "${MATRIX:-}" | grep -q '"kind":"pypi"'; then
+            echo "has_pypi=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pypi=false" >> "$GITHUB_OUTPUT"
+          fi
 
   build:
     needs: plan
@@ -175,13 +203,10 @@ jobs:
           node-version: ${{ inputs.node_version }}
           registry-url: 'https://registry.npmjs.org'
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ inputs.python_version }}
-
-      # twine is the upload tool the pypi handler shells out to.
-      - name: Install twine
-        run: pip install twine
+      # PyPI: the upload step is owned by the caller's `pypi-publish`
+      # job (see README → "Publishing to PyPI"). The engine's role
+      # here is plan + build artifact discovery + version-rewrite +
+      # tag creation; no twine, no setup-python.
 
       - uses: actions/download-artifact@v4
         with:

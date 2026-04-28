@@ -1,32 +1,47 @@
 /**
  * PyPI handler.
  *
+ * **Architectural note (2026-04-28).** PyPI's Trusted Publisher matching
+ * filters candidate publishers by `repository_owner` + `repository_name`
+ * before checking `job_workflow_ref`. When OIDC tokens are minted from
+ * inside a cross-repo reusable workflow, the `repository` claim is the
+ * *caller's* repo and `job_workflow_ref` is the reusable workflow's
+ * path — so a TP registered against the reusable workflow's repo is
+ * filtered out before workflow_ref is even checked. PyPI documents this
+ * as unsupported and tracks the fix at pypi/warehouse#11096 (no
+ * timeline). See `notes/audits/2026-04-28-pypi-tp-reusable-workflow-
+ * constraint.md`.
+ *
+ * Consequence for `putitoutthere`: the engine cannot upload to PyPI
+ * from inside the reusable workflow's publish job. The actual upload
+ * is delegated to a caller-side `pypi-publish` job that runs
+ * `pypa/gh-action-pypi-publish` from the consumer's own workflow
+ * context (where both `repository` and `job_workflow_ref` align with
+ * the consumer's repo + their TP registration). The reusable workflow
+ * still emits the matrix, builds artifacts, and creates+pushes git
+ * tags; only the upload step moves.
+ *
+ * The handler therefore:
+ *  - `isPublished`: unchanged. Public PyPI HEAD; no auth needed.
+ *  - `writeVersion`: unchanged. Rewrites `[project].version` in-place
+ *    or logs a SETUPTOOLS_SCM hint for dynamic-version projects.
+ *  - `publish`: NO upload. Returns `{ status: 'published' }` so
+ *    `publish.ts` creates+pushes the git tag. The tag is the engine's
+ *    record-of-intent; the caller's `pypi-publish` job performs the
+ *    actual upload using `pypa/gh-action-pypi-publish` (which is
+ *    idempotent, so a transient caller-side failure is recoverable
+ *    by re-triggering).
+ *
  * Issue #17. Plan: §6.4, §12.2, §12.3, §13.1, §14.5, §16.1.
- *
- * Publish model: twine upload. The workflow is responsible for wiring
- * up PYPI_API_TOKEN (either from a classic secret or via a
- * trusted-publisher-backed OIDC exchange step that populates the env
- * before pilot runs). Full in-handler OIDC exchange is deferred --
- * the gh-action-pypi-publish step handles that cleanly for v0.
- *
- * Artifact discovery: scans `ctx.artifactsRoot` for directories named
- * `{pkg.name}-*` (the artifact naming contract from §12.4). Uploads
- * all `.whl` and `.tar.gz` files found under those directories. Fails
- * loud if nothing's found -- the completeness check (#13) should have
- * caught that earlier, but defense in depth.
  */
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
-import { sanitizeArtifactName } from '../config.js';
-import { ErrorCodes } from '../error-codes.js';
 import type { Ctx, Handler, PublishResult } from '../types.js';
-import { TransientError, attachHandlerMeta } from '../types.js';
-import { buildSubprocessEnv, nonEmpty } from '../env.js';
+import { TransientError } from '../types.js';
 import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://pypi.org';
@@ -127,79 +142,21 @@ async function publishImpl(
     return { status: 'already-published' };
   }
 
-  const files = collectArtifacts(pkg.name, ctx.artifactsRoot);
-  if (files.length === 0) {
-    throw new Error(
-      `pypi: no artifacts found for ${pkg.name} under ${ctx.artifactsRoot ?? '(artifactsRoot unset)'}`,
-    );
-  }
-
-  // Prefer OIDC trusted publishing; fall back to an explicit
-  // PYPI_API_TOKEN when the GHA OIDC env is absent or the mint
-  // exchange fails. Docs (docs/guide/auth.md) promise OIDC wins over
-  // PYPI_API_TOKEN so a stale repo secret can't shadow the
-  // short-lived path.
-  const oidc = await mintOidcToken(ctx);
-  const explicitToken = nonEmpty(ctx.env.PYPI_API_TOKEN) ?? nonEmpty(process.env.PYPI_API_TOKEN);
-  const token = oidc.ok ? oidc.token : explicitToken;
-  if (!token) {
-    throw new Error(renderAuthFailure(oidc, explicitToken !== undefined));
-  }
+  // No upload from here. The engine's role for PyPI is plan + build +
+  // version-rewrite + tag — the actual `pypa/gh-action-pypi-publish`
+  // call lives in the caller's `pypi-publish` job, where the OIDC
+  // claims align with their TP registration. Returning 'published'
+  // triggers `publish.ts` to create + push the git tag, which is the
+  // engine's record-of-intent and the signal the caller's job uses to
+  // know there's work to do.
   ctx.log.info(
-    oidc.ok ? 'pypi: authenticating via OIDC trusted publishing' : 'pypi: authenticating via PYPI_API_TOKEN',
+    [
+      `pypi: ${pkg.name}@${version} delegated to caller-side upload step.`,
+      '  The engine creates and pushes the git tag from this job; the actual',
+      '  upload runs in your `pypi-publish` job via `pypa/gh-action-pypi-publish`.',
+      '  See README → "Publishing to PyPI" for the recipe.',
+    ].join('\n'),
   );
-
-  try {
-    execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', '--verbose', ...files], {
-      cwd: ctx.cwd,
-      // #138: minimal env. Don't forward the whole parent process.env
-      // to twine.
-      env: buildSubprocessEnv(ctx.env, {
-        TWINE_USERNAME: '__token__',
-        TWINE_PASSWORD: token,
-      }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } catch (err) {
-    // Capture tool versions lazily on failure (Phase 2 / Idea 9).
-    // Successful publishes don't pay for the extra subprocess spawns;
-    // failed ones get "twine 5.x / Python 3.y" in the dumped summary.
-    const toolVersions = captureToolVersions();
-
-    // ENOENT = twine not on PATH. The scaffolded publish job is supposed
-    // to install it (setup-python + pip install twine), but an adopter
-    // running an older template or a hand-rolled workflow will hit this.
-    // Give them an actionable message instead of a cryptic ENOENT. #205.
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw attachHandlerMeta(
-        new Error(
-          [
-            'pypi: twine not found on PATH (ENOENT).',
-            'The publish job must install it before invoking piot. Add:',
-            '  - uses: actions/setup-python@v5',
-            "    with: { python-version: '3.12' }",
-            '  - run: pip install twine',
-            'See https://thekevinscott.github.io/putitoutthere/guide/runner-prerequisites',
-          ].join('\n'),
-          { cause: err },
-        ),
-        { toolVersions },
-      );
-    }
-    const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
-    const stdout = (err as { stdout?: Buffer }).stdout?.toString('utf8').trim();
-    const base = err instanceof Error ? err.message : String(err);
-    // Twine sometimes writes its actual failure (4xx/5xx body, render
-    // diagnostic, etc.) to stdout rather than stderr; surface both so
-    // adopters see the registry's response, not a bare "Command failed".
-    const parts = [`twine upload failed: ${base}`];
-    if (stderr) parts.push(`--- stderr ---\n${stderr}`);
-    if (stdout) parts.push(`--- stdout ---\n${stdout}`);
-    throw attachHandlerMeta(
-      new Error(parts.join('\n'), { cause: err }),
-      { toolVersions },
-    );
-  }
 
   return {
     status: 'published',
@@ -211,204 +168,6 @@ async function publishImpl(
 
 function pypiNameFor(pkg: { name: string; pypi?: string }): string {
   return pkg.pypi ?? pkg.name;
-}
-
-/**
- * Best-effort tool-version probe for the pypi handler. Used by the
- * failure renderer (Phase 2 / Idea 9) so the rendered job summary
- * shows "twine 5.1.0 / Python 3.12.6" — answers the next-obvious
- * question after a twine error without re-running anything.
- *
- * Each probe is wrapped: a missing binary or a non-zero exit drops
- * the key from the result rather than crashing the failure path.
- * `python` is tried before `python3` because hosted runners (and
- * `setup-python@v5`) symlink both, but environments with system
- * Python only have `python3`.
- */
-function captureToolVersions(): Record<string, string> {
-  const out: Record<string, string> = {};
-  out.twine = probe('twine');
-  out.python = probe('python') || probe('python3');
-  // Drop empty keys so the failure renderer doesn't show a blank row.
-  for (const k of Object.keys(out)) if (!out[k]) delete out[k];
-  return out;
-}
-
-function probe(cmd: string): string {
-  try {
-    const out = execFileSync(cmd, ['--version'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    // `String(out)` keeps the helper robust against test mocks that
-    // return a Buffer regardless of the encoding option.
-    return String(out).trim();
-  } catch {
-    return '';
-  }
-}
-
-/**
- * Phase 2 / Idea 3. Renders the auth-failure error with a probe summary
- * so a reader of the run log can see *why* OIDC didn't yield a token,
- * not just that it didn't. The single most-asked question in the
- * foreign-agent incident — "is OIDC even being attempted?" — is
- * answered by the first line of the probe section.
- *
- * The error string is the *only* surface a downstream agent reading
- * GH's public annotation strip can rely on; the warn lines emitted
- * earlier in the run are auth-gated. Make it self-contained.
- */
-function renderAuthFailure(
-  oidc: OidcMintResult,
-  pypiTokenSet: boolean,
-): string {
-  // Each probe row is `<probe>: <result>`. Short, parseable, and stable
-  // enough that a foreign agent can fingerprint it.
-  const probes: string[] = [];
-  if (!oidc.ok && oidc.reason === 'env-missing') {
-    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): absent');
-    probes.push('  - OIDC id-token request: skipped');
-    probes.push('  - OIDC mint exchange: skipped');
-  } else if (!oidc.ok && oidc.reason === 'id-token-http') {
-    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): present');
-    probes.push(`  - OIDC id-token request: failed (${oidc.detail ?? 'unknown'})`);
-    probes.push('  - OIDC mint exchange: skipped');
-  } else if (!oidc.ok && oidc.reason === 'id-token-empty') {
-    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): present');
-    probes.push('  - OIDC id-token request: ok (response missing `value`)');
-    probes.push('  - OIDC mint exchange: skipped');
-  } else if (!oidc.ok && oidc.reason === 'mint-rejected') {
-    probes.push('  - OIDC env vars (ACTIONS_ID_TOKEN_REQUEST_*): present');
-    probes.push('  - OIDC id-token request: ok');
-    probes.push(`  - OIDC mint exchange: rejected (${oidc.detail ?? 'unknown'})`);
-  }
-  /* v8 ignore next 4 -- oidc.ok=true is unreachable here (caller only
-     enters this branch when no token resolved), but TS can't prove it */
-  if (oidc.ok) {
-    probes.push('  - OIDC: succeeded (caller bug — should not have reached here)');
-  }
-  probes.push(`  - PYPI_API_TOKEN: ${pypiTokenSet ? 'set' : 'unset'}`);
-
-  const code = ErrorCodes.AUTH_NO_TOKEN;
-  return [
-    `pypi: no auth available [${code}]`,
-    '',
-    'Probe results:',
-    ...probes,
-    '',
-    'Either:',
-    '  - set PYPI_API_TOKEN (classic API token), or',
-    '  - enable trusted publishing: add `permissions.id-token: write` to the job and register a pending publisher on pypi.org.',
-    // Code-deep-linked URL so the docs site can render code-specific
-    // guidance. Foreign agents grep on the code; the URL gives the
-    // reader a one-click jump.
-    `See https://thekevinscott.github.io/putitoutthere/guide/auth?code=${code} for setup.`,
-  ].join('\n');
-}
-
-/**
- * Outcome of an OIDC trusted-publishing exchange. Every non-success
- * branch carries a machine-readable `reason` so callers (and the
- * failure renderer in #verbose.ts) can distinguish:
- *
- *  - `env-missing`     ACTIONS_ID_TOKEN_REQUEST_{URL,TOKEN} not present
- *                      in the runner env. Usually means `id-token: write`
- *                      wasn't declared on the job.
- *  - `id-token-http`   The runner's id-token endpoint returned non-2xx.
- *                      `detail` carries the status. Often transient.
- *  - `id-token-empty`  2xx response but `value` field absent. Pathological
- *                      runner state; not retryable.
- *  - `mint-rejected`   PyPI returned non-2xx on the mint exchange.
- *                      `detail` carries `<status>: <body excerpt>`. The
- *                      typical `invalid-publisher` 422 lands here with
- *                      the expected `job_workflow_ref` list visible to
- *                      the caller (used by Phase 2/Idea 3 to dump the
- *                      probe result into the auth-failure error).
- *
- * Replaces the prior `string | null` shape. Phase 1 / Idea 1.
- */
-export type OidcMintResult =
-  | { ok: true; token: string }
-  | {
-      ok: false;
-      reason: 'env-missing' | 'id-token-http' | 'id-token-empty' | 'mint-rejected';
-      detail?: string;
-    };
-
-/**
- * Trusted-publishing OIDC exchange. Returns a tagged result so every
- * failure branch is named — see `OidcMintResult` for the vocabulary.
- * Exported for direct testing of each skip path.
- */
-export async function mintOidcToken(ctx: Ctx): Promise<OidcMintResult> {
-  const reqUrl =
-    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_URL) ??
-    nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
-  const reqToken =
-    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
-    nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
-  if (!reqUrl || !reqToken) {
-    // Was previously a silent `return null`. Foreign agents debugging
-    // the foreign-agent incident had no way to tell from logs that
-    // OIDC was even tried; the reason-tagged warn closes that gap.
-    ctx.log.warn(
-      'pypi: OIDC skipped (reason=env-missing): ACTIONS_ID_TOKEN_REQUEST_URL or ACTIONS_ID_TOKEN_REQUEST_TOKEN absent (id-token: write not declared on the job?)',
-    );
-    return { ok: false, reason: 'env-missing' };
-  }
-
-  // Breadcrumb on entry only — by this point we have the env to try.
-  ctx.log.info('pypi: attempting OIDC trusted publishing (audience=pypi)');
-
-  const idTokenRes = await fetch(`${reqUrl}&audience=pypi`, {
-    headers: { authorization: `bearer ${reqToken}` },
-  });
-  if (!idTokenRes.ok) {
-    ctx.log.warn(
-      `pypi: OIDC skipped (reason=id-token-http): runner id-token endpoint returned ${idTokenRes.status}`,
-    );
-    return { ok: false, reason: 'id-token-http', detail: `status ${idTokenRes.status}` };
-  }
-  const idTokenJson = (await idTokenRes.json()) as { value?: string };
-  const idToken = idTokenJson.value;
-  if (!idToken) {
-    ctx.log.warn(
-      'pypi: OIDC skipped (reason=id-token-empty): id-token response missing `value`',
-    );
-    return { ok: false, reason: 'id-token-empty' };
-  }
-
-  const mintRes = await fetch(`${REGISTRY}/_/oidc/mint-token`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: idToken }),
-  });
-  if (!mintRes.ok) {
-    const body = await mintRes.text();
-    const excerpt = body.slice(0, 400);
-    // Body excerpt is the diagnostic — typically `invalid-publisher`
-    // with the expected `job_workflow_ref` list. Phase 2 / Idea 3
-    // surfaces this same detail into the user-facing error too.
-    ctx.log.warn(
-      `pypi: OIDC skipped (reason=mint-rejected): registry returned ${mintRes.status}: ${excerpt}`,
-    );
-    return {
-      ok: false,
-      reason: 'mint-rejected',
-      detail: `status ${mintRes.status}: ${excerpt}`,
-    };
-  }
-  const mintJson = (await mintRes.json()) as { token?: string };
-  if (!mintJson.token) {
-    // Pathological — 2xx with no token field. Map to mint-rejected so
-    // callers handle it the same way as a 4xx (auth path is busted).
-    ctx.log.warn(
-      'pypi: OIDC skipped (reason=mint-rejected): mint response 2xx but missing `token` field',
-    );
-    return { ok: false, reason: 'mint-rejected', detail: 'mint response missing `token`' };
-  }
-  return { ok: true, token: mintJson.token };
 }
 
 /**
@@ -451,57 +210,6 @@ function projectDynamicIncludesVersion(project: { dynamic?: unknown }): boolean 
  */
 export function scmEnvSuffix(pkgName: string): string {
   return pkgName.replace(/[-._]+/g, '_').toUpperCase();
-}
-
-/**
- * Collects `.whl` and `.tar.gz` files across every artifact subdir whose
- * name starts with the package's pilot name. Matches the artifact naming
- * contract from §12.4: `{name}-wheel-{target}` and `{name}-sdist`.
- */
-function collectArtifacts(pkgName: string, artifactsRoot: string | undefined): string[] {
-  if (!artifactsRoot || !existsSync(artifactsRoot)) return [];
-  // #237: encode pkg.name so slash-containing names (e.g. `py/foo` →
-  // `py__foo`) line up with the on-disk directory the planner emitted.
-  // Match exactly the two artifact-name shapes the planner emits per
-  // §12.4: `{name}-sdist` (single dir) and `{name}-wheel-{target}` (one
-  // dir per wheel target). A bare prefix match would also pick up
-  // sibling packages whose names extend the same prefix
-  // (`foo-extras-sdist` matched as if it were `foo`'s sdist) — the
-  // tighter shape mirrors the documented contract.
-  const base = sanitizeArtifactName(pkgName);
-  const sdistDir = `${base}-sdist`;
-  const wheelPrefix = `${base}-wheel-`;
-  const out: string[] = [];
-  for (const entry of readdirSync(artifactsRoot)) {
-    if (entry !== sdistDir && !entry.startsWith(wheelPrefix)) continue;
-    const sub = join(artifactsRoot, entry);
-    /* v8 ignore next -- fs entries shouldn't vanish between readdir and stat */
-    if (!statSync(sub).isDirectory()) continue;
-    // #237: walk recursively so we tolerate any layout inside the
-    // artifact directory. upload-artifact's behavior differs per
-    // path-input shape (directory vs glob), so a flat `readdir` here
-    // would miss files that landed in a workspace-relative subdir.
-    for (const file of walkFiles(sub)) {
-      if (file.endsWith('.whl') || file.endsWith('.tar.gz')) {
-        out.push(file);
-      }
-    }
-  }
-  return out;
-}
-
-function walkFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const st = statSync(full);
-    if (st.isDirectory()) {
-      out.push(...walkFiles(full));
-    } else if (st.isFile()) {
-      out.push(full);
-    }
-  }
-  return out;
 }
 
 export const pypi: Handler = {

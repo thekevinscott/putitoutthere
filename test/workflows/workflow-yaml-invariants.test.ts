@@ -61,7 +61,7 @@ describe('#246 workflow YAML invariants', () => {
     ).toEqual([]);
   });
 
-  it('every external uses ref pins a major or full SHA', () => {
+  it('every external uses ref pins a major, full SHA, or vendor-recommended branch', () => {
     const external = refs.filter(
       (r) =>
         r.ref.includes('/') &&
@@ -73,11 +73,22 @@ describe('#246 workflow YAML invariants', () => {
       const at = r.ref.lastIndexOf('@');
       if (at <= 0) return true;
       const tag = r.ref.slice(at + 1);
-      return !/^v\d+(?:\.\d+){0,2}$/.test(tag) && !/^[0-9a-f]{40}$/.test(tag);
+      // Accept:
+      //  - `vN`, `vN.M`, `vN.M.P` major-pinned tags
+      //  - 40-char full SHA
+      //  - `release/vN` — PyPA publishes `pypa/gh-action-pypi-publish` against
+      //    a `release/vN` branch as their recommended pinning; specific tags
+      //    miss security patches that PyPA back-applies to the branch. The
+      //    branch is the upstream-blessed pin, even though it isn't a tag.
+      return (
+        !/^v\d+(?:\.\d+){0,2}$/.test(tag) &&
+        !/^[0-9a-f]{40}$/.test(tag) &&
+        !/^release\/v\d+$/.test(tag)
+      );
     });
     expect(
       bad,
-      `external refs must pin a major (@vN) or full SHA:\n${bad.map((r) => `  ${r.workflow}:${r.line} ${r.ref}`).join('\n')}`,
+      `external refs must pin a major (@vN), full SHA, or release/vN branch:\n${bad.map((r) => `  ${r.workflow}:${r.line} ${r.ref}`).join('\n')}`,
     ).toEqual([]);
   });
 

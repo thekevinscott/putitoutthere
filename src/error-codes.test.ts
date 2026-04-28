@@ -37,28 +37,13 @@ describe('error-codes', () => {
     expect(fromObject).toEqual(fromList);
   });
 
-  it('exposes the OIDC family the pypi handler will tag', () => {
-    expect(ErrorCodes.AUTH_OIDC_ENV_MISSING).toBe('PIOT_AUTH_OIDC_ENV_MISSING');
-    expect(ErrorCodes.AUTH_OIDC_ID_TOKEN_HTTP).toBe('PIOT_AUTH_OIDC_ID_TOKEN_HTTP');
-    expect(ErrorCodes.AUTH_OIDC_ID_TOKEN_EMPTY).toBe('PIOT_AUTH_OIDC_ID_TOKEN_EMPTY');
-    expect(ErrorCodes.AUTH_OIDC_MINT_REJECTED).toBe('PIOT_AUTH_OIDC_MINT_REJECTED');
+  it('exposes the AUTH_NO_TOKEN code surfaced by registry handlers', () => {
     expect(ErrorCodes.AUTH_NO_TOKEN).toBe('PIOT_AUTH_NO_TOKEN');
-  });
-
-  it('exposes the GHA-side propagation code Phase 4 needs', () => {
-    // The pre-flight check in action.ts (Phase 4 / Idea 7) tags the
-    // case where `id-token: write` is declared but the runner did not
-    // populate `ACTIONS_ID_TOKEN_REQUEST_URL` — distinct from
-    // AUTH_OIDC_ENV_MISSING because the consumer's posture is correct;
-    // the propagation path is the bug.
-    expect(ErrorCodes.GHA_OIDC_ENV_MISSING_DESPITE_PERMISSION).toBe(
-      'PIOT_GHA_OIDC_ENV_MISSING_DESPITE_PERMISSION',
-    );
   });
 
   it('ErrorCode type alias resolves to the union of literal strings', () => {
     // Compile-time assertion that every value passes the type check.
-    const sample: ErrorCode = ErrorCodes.AUTH_OIDC_MINT_REJECTED;
-    expect(sample).toBe('PIOT_AUTH_OIDC_MINT_REJECTED');
+    const sample: ErrorCode = ErrorCodes.AUTH_NO_TOKEN;
+    expect(sample).toBe('PIOT_AUTH_NO_TOKEN');
   });
 });

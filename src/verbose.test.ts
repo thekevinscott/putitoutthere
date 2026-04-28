@@ -194,27 +194,27 @@ describe('dumpFailure: redaction', () => {
 // error code + handler/package + first error line.
 describe('dumpFailure: GHA workflow-command annotation', () => {
   let stdoutWrites: string[] = [];
-  let restore: (() => void) | undefined;
+  let restoreWrite: (() => void) | undefined;
 
   beforeEach(() => {
     stdoutWrites = [];
-    const origWrite = process.stdout.write.bind(process.stdout);
-    // Spy that captures writes but still forwards to the real stream so
-    // vitest's reporter output isn't disturbed.
-    process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+    const original = process.stdout.write.bind(process.stdout);
+    // Replace with a capturer that records the chunk and returns true.
+    // We don't need to forward to the real stream — the dumpFailure
+    // tests only check that ::error:: lines are emitted.
+    process.stdout.write = (chunk) => {
       const s = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
       stdoutWrites.push(s);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any
-      return origWrite(chunk as any, ...(rest as any));
-    }) as typeof process.stdout.write;
-    restore = () => {
-      process.stdout.write = origWrite;
+      return true;
+    };
+    restoreWrite = () => {
+      process.stdout.write = original;
     };
     process.env.GITHUB_ACTIONS = 'true';
   });
 
   afterEach(() => {
-    restore?.();
+    restoreWrite?.();
     delete process.env.GITHUB_ACTIONS;
   });
 
@@ -236,10 +236,10 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
   });
 
   it('annotation includes the PIOT_ error code when present in the error message', () => {
-    // The auth-failure error from `renderAuthFailure` prefixes its
-    // first line with `[PIOT_AUTH_NO_TOKEN]`; the annotation should
-    // surface the bracketed code so external observers can fingerprint
-    // on it without needing to read the full markdown.
+    // Registry handlers may tag their auth-failure error message with
+    // a `[PIOT_*]` code; the annotation should surface the bracketed
+    // code so external observers can fingerprint on it without needing
+    // to read the full markdown.
     const logDest = new BufStream();
     const log = createLogger({ stream: logDest, pretty: false });
     dumpFailure(

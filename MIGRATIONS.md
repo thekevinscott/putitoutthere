@@ -21,34 +21,105 @@ Each section covers five things, in order:
 
 ## Unreleased
 
-### PyPI auth-failure error gains a probe summary and `PIOT_AUTH_NO_TOKEN` code
+### PyPI uploads moved to caller-side job
 
-**Summary.** When PyPI publishing failed because no auth path resolved
-(OIDC unavailable and `PYPI_API_TOKEN` unset), the thrown error was a
-static four-line message that didn't say *which* path failed or *why*.
-Foreign agents debugging a failed run had to read source to discover
-that, e.g., the OIDC mint exchange had been attempted and rejected
-(typical 422 `invalid-publisher` with the expected `job_workflow_ref`
-list in the body) — that diagnostic lived only in a warn line above
-the error, easy to miss in a log excerpt.
+**Summary.** PyPI's Trusted Publisher matching filters candidates by
+`repository_owner` + `repository_name` *before* checking
+`job_workflow_ref`
+([Warehouse implementation](https://github.com/pypi/warehouse/blob/main/warehouse/oidc/models/github.py)).
+The OIDC `repository` claim always reflects the caller's repo —
+including inside a reusable workflow — so a TP registered against
+the reusable workflow's repo is filtered out before workflow_ref
+is even checked. PyPI documents this as unsupported
+([troubleshooting](https://docs.pypi.org/trusted-publishers/troubleshooting/)).
+Tracked at [pypi/warehouse#11096](https://github.com/pypi/warehouse/issues/11096),
+no timeline.
 
-The error now embeds an OIDC probe summary (one line per check: env
-vars present? id-token request ok? mint exchange ok?), echoes any
-registry rejection body excerpt, tags itself `[PIOT_AUTH_NO_TOKEN]`,
-and deep-links the auth guide via `?code=PIOT_AUTH_NO_TOKEN`.
+To preserve OIDC trusted publishing for PyPI without setting
+`PYPI_API_TOKEN`, the upload step (`pypa/gh-action-pypi-publish`)
+now runs in the consumer's own workflow file as a second job,
+gated on the new `has_pypi` output. The engine still owns plan,
+build, version-rewrite, and git-tag creation for PyPI rows; only
+the actual upload moves. See
+[`notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md`](./notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md)
+for the full diagnosis.
 
-**Required changes.** None. Additive — the existing actionable hint
-("Either: set PYPI_API_TOKEN, or enable trusted publishing…") is
-preserved verbatim.
+**Required changes.** Update `.github/workflows/release.yml`:
+
+Before (~12 lines):
+
+```yaml
+name: Release
+on:
+  push:
+    branches: [main]
+jobs:
+  release:
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
+    permissions:
+      contents: write
+      id-token: write
+```
+
+After (~30 lines, single copy-paste from README → Quickstart):
+
+```yaml
+name: Release
+on:
+  push:
+    branches: [main]
+jobs:
+  release:
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
+    permissions:
+      contents: write
+      id-token: write
+
+  pypi-publish:
+    needs: release
+    if: needs.release.outputs.has_pypi == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-sdist'
+          path: dist/
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-wheel-*'
+          path: dist/
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+```
+
+The `pypi-publish` job's `if:` gate skips it for non-PyPI repos —
+paste verbatim regardless of what you publish. Crates.io and npm
+are unaffected; their TP claim semantics work fine inside the
+reusable workflow.
+
+**No PyPI TP re-registration required.** Your existing TP
+registration (against your repo, your `release.yml`, optional
+environment) was already correct for this pattern. If you'd
+attempted to register a TP against `thekevinscott/putitoutthere`
+to work around the prior failure, remove that entry — it would
+have never matched anyway.
 
 **Deprecations removed.** None.
 
-**Behavior changes without code changes.** Failure-path log output
-is more verbose and structured. Successful publishes are unaffected.
+**Behavior changes without code changes.** PyPI upload step now
+runs in the consumer's workflow context. The reusable workflow's
+publish job no longer installs `twine` or `setup-python`; engine
+log lines for PyPI rows now read "delegated to caller-side upload
+step" instead of "authenticating via OIDC".
 
-**Verification.** Trigger a publish without OIDC env or
-`PYPI_API_TOKEN`; the resulting error message contains
-`[PIOT_AUTH_NO_TOKEN]` and a `Probe results:` block with four lines.
+**Verification.** Push a release. The reusable workflow's
+`release` job creates and pushes the git tag for PyPI rows; the
+caller's `pypi-publish` job runs `pypa/gh-action-pypi-publish`
+and uploads to PyPI. Check `https://pypi.org/project/<name>/<version>/`
+to confirm.
 
 ---
 
