@@ -13,7 +13,7 @@ One package, one publish per run.
 | `js-vanilla/`             | npm    | vanilla     | `piot-fixture-zzz-cli`                 | Live e2e canary      |
 | `python-pure-hatch/`      | pypi   | hatch       | `piot-fixture-zzz-python-hatch`        | sdist + pure wheel   |
 | `python-pure-sdist-only/` | pypi   | setuptools  | `piot-fixture-zzz-python-sdist`        | sdist only, no wheel |
-| `rust-crate-only/`        | crates | native      | `piot-fixture-zzz-rust`                | Source publish       |
+| `rust-crate-only/`        | crates | native      | `piot-fixture-zzz-rust-only`           | Source publish       |
 
 ## Rust-in-language
 

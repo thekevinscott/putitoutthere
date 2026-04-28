@@ -2,7 +2,7 @@
 version = 1
 
 [[package]]
-name = "piot-fixture-zzz-rust"
+name = "piot-fixture-zzz-rust-only"
 kind = "crates"
 path = "."
 globs = ["src/**", "Cargo.toml"]
