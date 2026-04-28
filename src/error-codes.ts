@@ -22,6 +22,14 @@ export const ErrorCodes = {
    *  upload moved to a caller-side job per the reusable-workflow
    *  TP constraint — see notes/audits/). */
   AUTH_NO_TOKEN: 'PIOT_AUTH_NO_TOKEN',
+  /** `publish` was invoked but `plan` returned zero rows for a reason
+   *  other than `release: skip`. Almost always indicates the cascade
+   *  did not trigger (no committed file matched any package's globs
+   *  since its last tag) or that the plan and publish jobs disagreed
+   *  on what HEAD looked like. The reusable workflow's gate should
+   *  prevent this from being reached; if it fires, the gate was
+   *  bypassed or the engine is inconsistent. */
+  PUBLISH_EMPTY_PLAN: 'PIOT_PUBLISH_EMPTY_PLAN',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -32,4 +40,5 @@ export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
  */
 export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.AUTH_NO_TOKEN,
+  ErrorCodes.PUBLISH_EMPTY_PLAN,
 ];

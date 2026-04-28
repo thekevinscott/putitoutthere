@@ -20,6 +20,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type Package } from './config.js';
 import { checkCompleteness } from './completeness.js';
+import { ErrorCodes } from './error-codes.js';
 import { createTag, headCommit, pushTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
@@ -59,11 +60,21 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   const handlerFor = opts.handlerFor ?? defaultHandlerFor;
   const log = createLogger();
 
-  // 1. Re-run plan.
+  // 1. Re-run plan. Invariant: if publish was invoked, something
+  // should publish. An empty matrix here means the workflow gate
+  // (which reads the plan job's matrix output) was bypassed or the
+  // plan and publish jobs disagreed on what HEAD looked like. Throw
+  // loudly with a fingerprintable code rather than exiting green-but-
+  // having-done-nothing.
   const matrix = await plan({ cwd, configPath: cfgPath });
   if (matrix.length === 0) {
-    log.info('publish: plan is empty; nothing to release');
-    return { ok: true, published: [] };
+    throw new Error(
+      `[${ErrorCodes.PUBLISH_EMPTY_PLAN}] publish was invoked but the plan is empty. ` +
+      `Skips belong at the workflow gate, not in the publish step. ` +
+      `Most likely cause: no committed file matched any package's globs since its ` +
+      `last tag. To opt out of releases for a commit, gate the workflow on the plan ` +
+      `job's matrix output and let it skip the publish job.`,
+    );
   }
 
   // Collapse matrix rows back into per-package entries. Multiple rows

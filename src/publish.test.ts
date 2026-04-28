@@ -161,16 +161,36 @@ globs = ["packages/py/**"]
     delete process.env.PYPI_API_TOKEN;
   });
 
-  it('returns empty result when plan is empty (nothing to release)', async () => {
-    // Commit a skip trailer on top; plan returns [].
+  it('throws PIOT_PUBLISH_EMPTY_PLAN when the plan is empty (cascade did not trigger)', async () => {
+    // Tag HEAD so the package has a last tag, then commit a file
+    // OUTSIDE the package's globs. Cascade has no work to do.
+    // Reaching publish in this state means the workflow gate was
+    // bypassed or the engine is inconsistent — either way, surface
+    // it loudly with a fingerprintable code rather than returning
+    // a silent zero.
+    git(['tag', 'lib-js-v0.1.0']);
+    writeRepoFile('docs/notes.md', 'unrelated to packages/ts/**');
+    git(['add', '-A']);
+    git(['commit', '-m', 'docs: unrelated\n\nrelease: minor']);
+
+    const handler = makeHandler();
+    await expect(
+      publish({ cwd: repo, handlerFor: () => handler }),
+    ).rejects.toThrow(/PIOT_PUBLISH_EMPTY_PLAN/);
+    expect(handler.publish).not.toHaveBeenCalled();
+  });
+
+  it('throws PIOT_PUBLISH_EMPTY_PLAN on `release: skip` too (gate, not engine, owns skip)', async () => {
+    // `release: skip` is a workflow-gate concern: the plan job
+    // returns [] and the gate skips the publish job. If publish is
+    // reached anyway (gate misconfigured, direct CLI invocation),
+    // the engine's invariant — "publish runs => something publishes"
+    // — wins. Throws.
     git(['commit', '--allow-empty', '-m', 'chore\n\nrelease: skip']);
     const handler = makeHandler();
-    const result = await publish({
-      cwd: repo,
-      handlerFor: () => handler,
-    });
-    expect(result.ok).toBe(true);
-    expect(result.published).toEqual([]);
+    await expect(
+      publish({ cwd: repo, handlerFor: () => handler }),
+    ).rejects.toThrow(/PIOT_PUBLISH_EMPTY_PLAN/);
     expect(handler.publish).not.toHaveBeenCalled();
   });
 });

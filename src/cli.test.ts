@@ -207,13 +207,14 @@ globs = ["packages/ts/**"]
     expect(stderrChunks.join('')).toMatch(/--dry-run was removed/);
   });
 
-  it('publishes prints published list when plan is empty', async () => {
-    // Add a release: skip commit then publish -- plan returns empty,
-    // publish returns ok with empty list.
+  it('publish exits 1 with PIOT_PUBLISH_EMPTY_PLAN when the plan is empty', async () => {
+    // Invariant: if `publish` runs, something publishes. An empty
+    // plan at this stage is a workflow-gate / engine-state bug and
+    // surfaces as a non-zero exit with a fingerprintable code.
     git(['commit', '--allow-empty', '-m', 'nop\n\nrelease: skip']);
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;
     });
     const code = await run([
@@ -223,27 +224,7 @@ globs = ["packages/ts/**"]
       '--cwd',
       repo,
     ]);
-    expect(code).toBe(0);
-    expect(stdoutChunks.join('')).toMatch(/\(nothing\)/);
-  });
-
-  it('publish --json emits a JSON result', async () => {
-    git(['commit', '--allow-empty', '-m', 'nop\n\nrelease: skip']);
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    const code = await run([
-      'node',
-      'putitoutthere',
-      'publish',
-      '--cwd',
-      repo,
-      '--json',
-    ]);
-    expect(code).toBe(0);
-    const json = JSON.parse(stdoutChunks.join('').trim()) as { ok: boolean };
-    expect(json.ok).toBe(true);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/PIOT_PUBLISH_EMPTY_PLAN/);
   });
 });
