@@ -305,28 +305,10 @@ jobs:
           # remains OIDC-only.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # Caller-side PyPI upload (mirrors the consumer template in
-  # test/fixtures/*/.github/workflows/release.yml). PyPI Trusted
-  # Publishers can't validate OIDC tokens minted from the reusable
-  # workflow's job (warehouse#11096), so the upload runs here, in
-  # the e2e workflow's own context. The `if:` gate skips this job
-  # for fixtures without any PyPI rows.
-  pypi-publish:
-    needs: [plan, publish]
-    if: needs.plan.outputs.has_pypi == 'true'
-    runs-on: ubuntu-latest
-    environment: e2e
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: '*-sdist'
-          path: dist/
-          merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: '*-wheel-*'
-          path: dist/
-          merge-multiple: true
-      - uses: pypa/gh-action-pypi-publish@release/v1
+  # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
+  # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside
+  # any reusable workflow (PyPA blanket-disables it; see
+  # https://github.com/pypa/gh-action-pypi-publish/issues/166). The e2e
+  # therefore mirrors the consumer pattern: the upload step runs at the
+  # top level of `e2e.yml`, not here in the reusable. See
+  # `notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md`.

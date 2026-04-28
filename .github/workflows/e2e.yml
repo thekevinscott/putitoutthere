@@ -57,3 +57,48 @@ jobs:
     secrets: inherit
     with:
       fixture: ${{ matrix.fixture }}
+
+  # Caller-side PyPI upload — mirrors what consumers paste into their own
+  # release.yml under the canonical template. Lives at the top level (not
+  # inside the reusable e2e-fixture.yml) because pypa/gh-action-pypi-publish
+  # blanket-aborts when invoked from inside a reusable workflow (PyPA
+  # explicitly unsupported; warehouse#11096). The audit doc captures
+  # the full reasoning:
+  # notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md.
+  #
+  # Each fixture's PyPI project must have a Trusted Publisher registered
+  # against `thekevinscott/putitoutthere/.github/workflows/e2e.yml` for
+  # this to succeed. Failures here when TPs are missing are by design —
+  # the failure is the signal to register the publisher.
+  pypi-publish:
+    needs: e2e
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-sdist'
+          path: dist/
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-wheel-*'
+          path: dist/
+          merge-multiple: true
+      # Skip when no PyPI artifacts were produced — non-PyPI fixtures
+      # leave dist/ empty, and pypa errors on an empty packages-dir.
+      - id: have-pypi
+        run: |
+          if [ -n "$(ls -A dist/ 2>/dev/null)" ]; then
+            echo "have_pypi=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_pypi=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.have-pypi.outputs.have_pypi == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Idempotent re-runs: if a fixture's version already exists
+          # on PyPI from a previous e2e run, skip it cleanly instead
+          # of failing.
+          skip-existing: true
