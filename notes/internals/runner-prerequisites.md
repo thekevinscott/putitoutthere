@@ -14,7 +14,7 @@ runners don't ship twine on PATH, so the publish job must install it
 before the piot step:
 
 ```yaml
-- uses: actions/setup-python@v5
+- uses: actions/setup-python@v6
   with:
     python-version: '3.12'
 - name: Install twine
@@ -81,7 +81,7 @@ long-lived token, `actions/setup-node` wires the token under the env
 name `NODE_AUTH_TOKEN` when `registry-url` is set:
 
 ```yaml
-- uses: actions/setup-node@v4
+- uses: actions/setup-node@v6
   with:
     node-version: '24'
     registry-url: 'https://registry.npmjs.org'
@@ -119,13 +119,13 @@ gotcha section in `README.md`.
 
 Before cutting your first release, confirm the publish job has:
 
-- [ ] `actions/checkout@v4` with `fetch-depth: 0`.
-- [ ] `actions/setup-python@v5` + `pip install twine` (if any
+- [ ] `actions/checkout@v6` with `fetch-depth: 0`.
+- [ ] `actions/setup-python@v6` + `pip install twine` (if any
       `kind = "pypi"` package).
 - [ ] `git config user.name` / `user.email` step.
-- [ ] `actions/setup-node@v4` (for npm, or if the piot action runtime
+- [ ] `actions/setup-node@v6` (for npm, or if the piot action runtime
       version matters).
-- [ ] `actions/download-artifact@v4` with `path: artifacts`.
+- [ ] `actions/download-artifact@v8` with `path: artifacts`.
 - [ ] `permissions: contents: write, id-token: write`.
 - [ ] OIDC trusted publisher registered per registry (see the
       Trusted-publishers section of `README.md`).

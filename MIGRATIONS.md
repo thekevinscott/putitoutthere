@@ -21,6 +21,70 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Reusable workflow + `action.yml` move to Node 24 actions
+
+**Summary.** GitHub deprecated Node 20 actions in September 2025; the
+hosted runner forces Node 24 starting June 2, 2026 and removes Node 20
+entirely on September 16, 2026
+([changelog](https://github.blog/changelog/2025-09-09-actions-deprecation-of-node20/)).
+Every workflow run that called `putitoutthere` was emitting deprecation
+warnings — one per job inside the reusable workflow, plus a top-level
+`Actions running on Node.js 20` warning attributed to
+`thekevinscott/putitoutthere@v0` itself, which the consumer could not
+fix locally. The reusable workflow's pinned action majors and the JS
+action's `runs.using` now target Node 24-compatible versions.
+
+| Action | Before | After |
+|---|---|---|
+| `actions/checkout` | `@v4` | `@v6` |
+| `actions/setup-node` | `@v4` | `@v6` |
+| `actions/setup-python` | `@v5` | `@v6` |
+| `actions/upload-artifact` | `@v4` | `@v7` |
+| `actions/download-artifact` | `@v4` | `@v8` |
+| `action.yml` `runs.using` | `node20` | `node24` |
+
+**Required changes.** Consumers calling the reusable workflow at
+`thekevinscott/putitoutthere/.github/workflows/release.yml@v0` get the
+new pins automatically — no consumer-side YAML changes required. The
+caller-side `pypi-publish` job in the canonical template now uses
+`actions/download-artifact@v8`; existing copies still pinned at `@v4`
+keep working but should be bumped to silence the same deprecation
+warning in the consumer's own workflow file:
+
+```diff
+   pypi-publish:
+     ...
+     steps:
+-      - uses: actions/download-artifact@v4
++      - uses: actions/download-artifact@v8
+         with:
+           pattern: '*-sdist'
+           ...
+-      - uses: actions/download-artifact@v4
++      - uses: actions/download-artifact@v8
+         with:
+           pattern: '*-wheel-*'
+           ...
+```
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Reusable workflow jobs now
+run under Node 24 instead of Node 20. The artifact contract is
+unchanged — `download-artifact@v8` preserves the per-name subdirectory
+layout (`artifacts/<artifact-name>/<file>`) for downloads-by-name, and
+`upload-artifact@v7`'s default still produces zipped uploads keyed by
+the `name:` parameter. `download-artifact@v8` now fails on artifact
+hash mismatches by default (was a warning in `@v4`); this is an
+integrity check, not a behavior change for healthy uploads.
+
+**Verification.** A consumer release run no longer emits the
+`Actions running on Node.js 20 ... thekevinscott/putitoutthere@v0`
+deprecation warning, nor the per-job warnings against `actions/checkout@v4`
+et al. Tag, GitHub Release, and registry uploads occur as before.
+
+---
+
 ### PyPI uploads moved to caller-side job
 
 **Summary.** PyPI's Trusted Publisher matching filters candidates by
@@ -82,12 +146,12 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: '*-sdist'
           path: dist/
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: '*-wheel-*'
           path: dist/

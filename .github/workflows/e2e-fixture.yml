@@ -7,8 +7,8 @@ name: e2e fixture
 # publish flow that consumers experience must succeed end-to-end against
 # real registries via OIDC.
 #
-# Fidelity: every action call below (actions/setup-python@v5,
-# PyO3/maturin-action@v1, actions/upload-artifact@v4, etc.) and the
+# Fidelity: every action call below (actions/setup-python@v6,
+# PyO3/maturin-action@v1, actions/upload-artifact@v7, etc.) and the
 # step ordering matches release.yml. The only difference is the
 # "Materialize fixture" step that copies test/fixtures/${{ inputs.fixture }}/
 # into a fixture-tree/ subdir at workflow start, plus `uses: ./` (vs.
@@ -158,7 +158,7 @@ jobs:
 
       # ---- pypi ----
       - if: matrix.kind == 'pypi'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -217,7 +217,7 @@ jobs:
       # at build time. The publish job invokes cargo directly.
 
       - if: matrix.kind != 'crates'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: fixture-tree/${{ matrix.artifact_path }}
@@ -279,7 +279,7 @@ jobs:
           git add .
           git commit -q -m 'e2e: initial fixture'
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: fixture-tree/artifacts
 

@@ -17,10 +17,10 @@ This page exists so you don't have to reverse-engineer
 ## The flow
 
 ```
-build job:    actions/upload-artifact@v4   name: <artifact-name>   path: <built files>
+build job:    actions/upload-artifact@v7   name: <artifact-name>   path: <built files>
                               │
                               ▼
-publish job:  actions/download-artifact@v4 path: artifacts          ← always "artifacts"
+publish job:  actions/download-artifact@v8 path: artifacts          ← always "artifacts"
                               │
                               ▼
               artifacts/<artifact-name>/<file-1>
@@ -34,8 +34,8 @@ publish job:  actions/download-artifact@v4 path: artifacts          ← always "
 Two contracts together:
 
 1. **Upload name.** Whatever you pass as `name:` to
-   `upload-artifact@v4` becomes the directory name after download.
-2. **Download path.** Always `artifacts` (set on `download-artifact@v4`
+   `upload-artifact@v7` becomes the directory name after download.
+2. **Download path.** Always `artifacts` (set on `download-artifact@v8`
    in the publish job). piot looks for files under
    `artifacts/<artifact-name>/`.
 
@@ -45,10 +45,10 @@ below documents the engine's invariants.
 ## Use `matrix.artifact_name` and `matrix.artifact_path` verbatim
 
 piot's `plan` job emits both fields on every matrix row. **They are
-the source of truth.** Plug them straight into `upload-artifact@v4`:
+the source of truth.** Plug them straight into `upload-artifact@v7`:
 
 ```yaml
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@v7
   with:
     name: ${{ matrix.artifact_name }}
     path: ${{ matrix.artifact_path }}
@@ -86,7 +86,7 @@ Notes:
   the piot identifier; the file *inside* uses the registry name.
 - `<target>` is the Rust-style triple (`x86_64-unknown-linux-gnu`,
   `aarch64-apple-darwin`, etc.) for maturin / napi / bundled-cli rows.
-- **Slashes in `<pkg.name>` are encoded.** `actions/upload-artifact@v4`
+- **Slashes in `<pkg.name>` are encoded.** `actions/upload-artifact@v7`
   forbids `/` in artifact names, so the planner encodes each `/` to
   `__` before emitting `artifact_name`. A package named `py/cachetta`
   produces `artifacts/py__cachetta-sdist/…` — one flat directory, not
@@ -115,19 +115,19 @@ build:
       include: ${{ fromJSON(needs.plan.outputs.matrix) }}
   runs-on: ${{ matrix.runs_on }}
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with: { fetch-depth: 0 }
     - uses: astral-sh/setup-uv@v3
     - name: Build sdist
       working-directory: ${{ matrix.path }}
       run: uv build --sdist
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.artifact_name }}      # e.g. "my-lib-sdist"
         path: ${{ matrix.artifact_path }}      # e.g. "packages/python/dist"
 ```
 
-After `download-artifact@v4` with `path: artifacts`, the publish job
+After `download-artifact@v8` with `path: artifacts`, the publish job
 sees:
 
 ```
@@ -136,12 +136,12 @@ artifacts/my-lib-sdist/my-lib-0.2.13.tar.gz
 
 ### maturin per-target wheel
 
-Prefer a directory `path:` over a glob — `actions/upload-artifact@v4`
+Prefer a directory `path:` over a glob — `actions/upload-artifact@v7`
 preserves the workspace-relative path under a glob, which produces
 nested layouts the publish job's reader has to walk through:
 
 ```yaml
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@v7
   with:
     name: my-py-wheel-${{ matrix.target }}     # e.g. "my-py-wheel-x86_64-unknown-linux-gnu"
     path: target/wheels                        # directory; contents land flat under <name>/
@@ -160,7 +160,7 @@ directory shape keeps the on-disk layout flat and predictable.)
 ### napi per-target sub-package
 
 ```yaml
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@v7
   with:
     name: my-tool-${{ matrix.target }}
     path: npm/${{ matrix.target }}             # the synthesised sub-package dir
@@ -188,7 +188,7 @@ Walk it back through the flow:
    log for the same row, find the `actions/upload-artifact` step, and
    confirm the `name:` parameter matches.
 3. **Did the publish job download?** Confirm the publish job's
-   `actions/download-artifact@v4` step has `path: artifacts` (no
+   `actions/download-artifact@v8` step has `path: artifacts` (no
    per-name override). If `path:` is set to anything else, piot's
    reader is looking in the wrong place.
 4. **Did the build step actually produce files?** A successful upload
