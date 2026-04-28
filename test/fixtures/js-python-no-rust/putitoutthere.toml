@@ -19,3 +19,6 @@ kind = "npm"
 path = "packages/js"
 globs = ["packages/js/**"]
 first_version = "__VERSION__"
+# See test/fixtures/js-vanilla/putitoutthere.toml for why e2e
+# fixtures publish to a dedicated dist-tag instead of `latest`.
+tag = "e2e"

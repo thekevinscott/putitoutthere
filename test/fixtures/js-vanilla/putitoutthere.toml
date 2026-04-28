@@ -12,3 +12,9 @@ kind = "npm"
 path = "."
 globs = ["src/**", "package.json"]
 first_version = "__VERSION__"
+# Concurrent e2e runs across PRs use timestamp-based versions
+# (`0.0.<unix-seconds>`), and npm's implicit `latest` tag rejects
+# any publish whose version is below the current `latest` floor.
+# Publish under a dedicated dist-tag so cross-run timestamp races
+# can't reject each other.
+tag = "e2e"
