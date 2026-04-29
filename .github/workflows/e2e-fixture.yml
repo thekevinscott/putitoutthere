@@ -240,14 +240,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          # `registry-url` deliberately omitted: setting it makes
-          # actions/setup-node write `//registry.npmjs.org/:_authToken=
-          # ${NODE_AUTH_TOKEN}` into ~/.npmrc. Without NODE_AUTH_TOKEN
-          # populated (we publish via OIDC + Trusted Publisher, no token),
-          # that resolves to `_authToken=` literal-empty, which the npm
-          # CLI treats as "auth configured but blank" and short-circuits
-          # the OIDC TP exchange — every publish lands as 401 (404-masked).
-          # Default registry is registry.npmjs.org anyway.
+          registry-url: 'https://registry.npmjs.org'
 
       # PyPI: upload step runs in the caller-side `pypi-publish` job
       # (mirrors release.yml). No twine / setup-python in the publish
