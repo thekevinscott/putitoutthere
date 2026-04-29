@@ -451,20 +451,22 @@ jobs:
             # `npm view <pkg>@<version>` reads is updated asynchronously
             # after a successful publish. Verify runs immediately after
             # publish, so the first call usually 404s while the tarball
-            # itself is already live on the CDN. Backoff: 0s, 5s, 10s,
-            # 20s, 40s — typical lag is under 30s.
+            # itself is already live on the CDN. Backoff schedule:
+            # 5s, 15s, 30s, 90s — total ~140s. First publishes of a
+            # brand-new package name can be on the slow end of that.
             tarball_url=""
+            sleeps=(5 15 30 90)
             for attempt in 1 2 3 4 5; do
               tarball_url=$(npm view "$pkg_name@$version" dist.tarball 2>/dev/null || true)
               if [ -n "$tarball_url" ]; then break; fi
               if [ "$attempt" -lt 5 ]; then
-                sleep_for=$((attempt == 1 ? 5 : (attempt - 1) * 10))
+                sleep_for="${sleeps[$((attempt - 1))]}"
                 echo "  packument lag: npm view returned empty (attempt $attempt/5); retrying in ${sleep_for}s"
                 sleep "$sleep_for"
               fi
             done
             if [ -z "$tarball_url" ]; then
-              echo "::error::[$pkg_name@$version] npm view never returned a tarball URL after 5 attempts (~75s of backoff). Either the publish didn't actually publish, or registry packument propagation is much slower than expected."
+              echo "::error::[$pkg_name@$version] npm view never returned a tarball URL after 5 attempts (~140s of backoff). Either the publish didn't actually publish, or registry packument propagation is much slower than expected."
               fail=1
               continue
             fi
