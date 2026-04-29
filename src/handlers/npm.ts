@@ -13,7 +13,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { normalizeTarget, type Ctx, type Handler, type PublishResult, type TargetEntry } from '../types.js';
-import { publishPlatforms, type PlatformPkg } from './npm-platform.js';
+import {
+  looksLikePublishOverRace,
+  normalizeBuild,
+  publishPlatforms,
+  type NpmBuildField,
+  type PlatformPkg,
+} from './npm-platform.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
 
@@ -23,7 +29,11 @@ type NpmPkg = {
   npm?: string;
   access?: 'public' | 'restricted';
   tag?: string;
-  build?: 'napi' | 'bundled-cli';
+  // #dirsql: `build` accepts a single mode string ("napi" / "bundled-cli")
+  // for backward compat, OR an array of entries — strings or
+  // `{ mode, name }` objects — to publish multiple platform-package
+  // families per main package. See src/handlers/npm-platform.ts.
+  build?: NpmBuildField;
   // #159: `targets` entries can be bare triples or `{ triple, runner }`
   // objects. Only the triple matters at publish time; the `runner`
   // override is a CI-matrix concern consumed by the planner.
@@ -88,18 +98,15 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   // napi / bundled-cli: publish platform packages first, then rewrite
   // the main package.json to add optionalDependencies, then fall through
   // to the normal main-package publish path below. §13.7.
-  if (
-    (pkg.build === 'napi' || pkg.build === 'bundled-cli') &&
-    pkg.targets !== undefined &&
-    pkg.targets.length > 0
-  ) {
+  const buildEntries = normalizeBuild(pkg.build);
+  if (buildEntries.length > 0 && pkg.targets !== undefined && pkg.targets.length > 0) {
     const platformPkg: PlatformPkg = {
       name: pkg.name,
       path: pkg.path,
       npm: pkg.npm,
       access: pkg.access,
       tag: pkg.tag,
-      build: pkg.build,
+      build: buildEntries,
       // Platform publishing only cares about the triple — the `runner`
       // override is a planner/CI concern. Normalize away the union here
       // so npm-platform.ts keeps its `readonly string[]` contract.
@@ -137,6 +144,17 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
     const name = npmNameFor(pkg);
+    // npm CLI's retry-on-transient-network-error: a successful PUT that
+    // came back flaky (timeout / 502 / reset) gets retried, the second
+    // PUT lands on a registry that already has the version, npm exits
+    // E403 "cannot publish over the previously published versions". The
+    // first attempt actually succeeded — treat as already-published.
+    if (looksLikePublishOverRace(stderr)) {
+      return {
+        status: 'already-published',
+        url: `https://www.npmjs.com/package/${name}/v/${version}`,
+      };
+    }
     // npm trusted publishing (OIDC) requires the package to already
     // exist on the registry; the first-ever publish must go through a
     // token. Detect that exact shape — auth failure + OIDC in play +

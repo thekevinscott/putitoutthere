@@ -3,17 +3,22 @@
  * `build = "bundled-cli"`.
  *
  * Flow per plan §13.7:
- *   1. For each target, synthesize a per-platform package
- *      `{name}-{target}` with narrowed os/cpu fields and the
- *      platform binary.
+ *   1. For each (build entry, target), synthesize a per-platform package
+ *      with narrowed os/cpu fields and the platform binary.
  *   2. Publish each per-platform package (skip already-published).
  *   3. Rewrite the main package's `package.json` to add
- *      `optionalDependencies` pointing at the just-published versions.
+ *      `optionalDependencies` pointing at the just-published versions
+ *      across every build entry's family.
  *   4. Caller (npm.ts:publishImpl) publishes the main package last.
  *
  * Ordering is enforced: a failed platform publish short-circuits
  * before step 3, so the main package isn't published in an
  * inconsistent state.
+ *
+ * Multi-mode (#dirsql): when `build` is an array with more than one
+ * entry, each entry contributes its own platform-package family. The
+ * artifact directory for each (mode, triple) carries a mode infix to
+ * keep `napi` and `bundled-cli` artifacts distinct on the build side.
  *
  * Issue #19. Plan: §13.7, §12.2.
  */
@@ -27,20 +32,66 @@ import { sanitizeArtifactName } from '../config.js';
 import type { Ctx } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 
+export type NpmBuildMode = 'napi' | 'bundled-cli';
+
+/**
+ * Default template for platform package names. Resolves to
+ * `<main-name>-<triple>`, matching the historical single-mode shape.
+ */
+export const DEFAULT_NAME_TEMPLATE = '{name}-{triple}';
+
+/** Variables surfaced to `name` templates. `{version}` is intentionally
+ *  excluded — platform package names are immutable identifiers; the
+ *  registry pins `name@version` in optionalDependencies, so embedding
+ *  the version in the name itself defeats the cascade. */
+export const ALLOWED_NAME_VARIABLES = ['name', 'scope', 'base', 'triple', 'mode'] as const;
+
+/** A normalized build entry. Object form of every entry the consumer
+ *  may write under `build`; the config layer coerces string entries
+ *  (`"napi"`) into this shape with `name = DEFAULT_NAME_TEMPLATE`. */
+export interface NpmBuildEntry {
+  mode: NpmBuildMode;
+  name: string;
+}
+
+/** Raw `build` field as written in toml — string, array, or absent. */
+export type NpmBuildField =
+  | NpmBuildMode
+  | readonly (NpmBuildMode | { mode: NpmBuildMode; name: string })[]
+  | undefined;
+
+/**
+ * Coerce any of the accepted `build` shapes into a normalized entry
+ * array. Bare-string entries default to `DEFAULT_NAME_TEMPLATE` so
+ * historical `build = "napi"` configs produce the same platform-package
+ * names as before. Returns `[]` when `build` is omitted, which signals
+ * "vanilla — no platform packages".
+ */
+export function normalizeBuild(build: NpmBuildField): readonly NpmBuildEntry[] {
+  if (build === undefined) return [];
+  const arr = typeof build === 'string' ? [build] : build;
+  return arr.map((e) =>
+    typeof e === 'string'
+      ? { mode: e, name: DEFAULT_NAME_TEMPLATE }
+      : { mode: e.mode, name: e.name },
+  );
+}
+
 export interface PlatformPkg {
   name: string;
   path: string;
   npm?: string | undefined;
   access?: 'public' | 'restricted' | undefined;
   tag?: string | undefined;
-  build: 'napi' | 'bundled-cli';
+  /** One or more entries — at least one mode, optionally a `name` template. */
+  build: readonly NpmBuildEntry[];
   targets: readonly string[];
 }
 
 /**
- * Publish every per-platform package. Then rewrite the main
- * package.json to add `optionalDependencies`. Returns the list of
- * published platform names so the caller can log them.
+ * Publish every per-platform package across every build entry, then
+ * rewrite the main package.json to add `optionalDependencies`. Returns
+ * the list of published platform names so the caller can log them.
  *
  * On any failure, throws before the main package.json is modified.
  */
@@ -52,20 +103,35 @@ export async function publishPlatforms(
   const mainName = pkg.npm ?? pkg.name;
   const published: string[] = [];
   const skipped: string[] = [];
+  const isMulti = pkg.build.length > 1;
 
-  for (const target of pkg.targets) {
-    const platformName = platformPackageName(mainName, target);
-    if (await isPlatformPublished(platformName, version, ctx)) {
-      skipped.push(platformName);
-      continue;
-    }
-    const stagingDir = synthesizePlatformPackage(pkg, target, version, ctx);
-    try {
-      npmPublish(stagingDir, pkg, ctx);
-      published.push(platformName);
-    } finally {
-      /* v8 ignore next -- cleanup after publish; failure here is cosmetic */
-      rmSync(stagingDir, { recursive: true, force: true });
+  for (const entry of pkg.build) {
+    for (const target of pkg.targets) {
+      const platformName = resolvePlatformName(entry.name, {
+        name: mainName,
+        triple: target,
+        mode: entry.mode,
+      });
+      if (await isPlatformPublished(platformName, version, ctx)) {
+        skipped.push(platformName);
+        continue;
+      }
+      const stagingDir = synthesizePlatformPackage(
+        pkg,
+        entry,
+        target,
+        platformName,
+        version,
+        ctx,
+        isMulti,
+      );
+      try {
+        npmPublish(stagingDir, pkg, ctx);
+        published.push(platformName);
+      } finally {
+        /* v8 ignore next -- cleanup after publish; failure here is cosmetic */
+        rmSync(stagingDir, { recursive: true, force: true });
+      }
     }
   }
 
@@ -75,19 +141,52 @@ export async function publishPlatforms(
 }
 
 /**
- * Computes the per-platform package name. Mirrors napi-rs's scaffold
- * convention:
- *   - unscoped: `{name}-{target}`
- *   - scoped:   `@scope/{base}-{target}`
+ * Resolve a platform-package name template. `{name}`, `{scope}`,
+ * `{base}`, `{triple}`, and `{mode}` are substituted; unknown
+ * placeholders throw (config-load validation should catch these
+ * earlier — this guard is defensive).
  */
-export function platformPackageName(mainName: string, target: string): string {
-  const scopedMatch = /^@([^/]+)\/(.+)$/.exec(mainName);
-  /* v8 ignore next -- scoped packages routed through the branch below */
-  if (scopedMatch) {
-    const [, scope, base] = scopedMatch;
-    return `@${scope!}/${base!}-${target}`;
-  }
-  return `${mainName}-${target}`;
+export function resolvePlatformName(
+  template: string,
+  vars: { name: string; triple: string; mode: NpmBuildMode },
+): string {
+  const scopedMatch = /^@([^/]+)\/(.+)$/.exec(vars.name);
+  const scope = scopedMatch ? scopedMatch[1]! : '';
+  const base = scopedMatch ? scopedMatch[2]! : vars.name;
+  return template.replace(/\{(\w+)\}/g, (_match, key: string) => {
+    switch (key) {
+      case 'name':
+        return vars.name;
+      case 'scope':
+        return scope;
+      case 'base':
+        return base;
+      case 'triple':
+        return vars.triple;
+      case 'mode':
+        return vars.mode;
+      /* v8 ignore start -- config-load validation rejects unknown placeholders; this branch is defensive */
+      default:
+        throw new Error(`unknown placeholder {${key}} in name template`);
+    }
+    /* v8 ignore stop */
+  });
+}
+
+/**
+ * Plan-time + handler-time: compute the artifact directory name for a
+ * given (package, mode, triple). The mode infix is only added when
+ * the package has multiple build entries, so single-mode packages keep
+ * their historical `<safe>-<triple>` artifact layout byte-for-byte.
+ */
+export function platformArtifactName(
+  pkgName: string,
+  mode: NpmBuildMode,
+  triple: string,
+  isMulti: boolean,
+): string {
+  const safe = sanitizeArtifactName(pkgName);
+  return isMulti ? `${safe}-${mode}-${triple}` : `${safe}-${triple}`;
 }
 
 /* --------------------------- internals --------------------------- */
@@ -110,18 +209,19 @@ function isPlatformPublished(
 
 function synthesizePlatformPackage(
   pkg: PlatformPkg,
+  entry: NpmBuildEntry,
   target: string,
+  platformName: string,
   version: string,
   ctx: Ctx,
+  isMulti: boolean,
 ): string {
-  const mainName = pkg.npm ?? pkg.name;
-  const platformName = platformPackageName(mainName, target);
   const staging = mkdtempSync(join(tmpdir(), 'putitoutthere-plat-'));
 
   // #237: encode pkg.name to match the on-disk artifact directory the
   // planner emitted (slash-containing names like `js/foo` land at
   // `artifacts/js__foo-<triple>/`, not `artifacts/js/foo-<triple>/`).
-  const artifactName = `${sanitizeArtifactName(pkg.name)}-${target}`;
+  const artifactName = platformArtifactName(pkg.name, entry.mode, target, isMulti);
   /* v8 ignore next -- tests inject artifactsRoot explicitly; publish.ts always sets it */
   const artifactsRoot = ctx.artifactsRoot ?? join(ctx.cwd, 'artifacts');
   const artifactDir = join(artifactsRoot, artifactName);
@@ -153,7 +253,7 @@ function synthesizePlatformPackage(
     os,
     cpu,
     files: fileList,
-    main: pickMainFile(fileList, pkg.build),
+    main: pickMainFile(fileList, entry.mode),
     ...(libc !== undefined ? { libc } : {}),
     ...(mainPkg['repository'] !== undefined ? { repository: mainPkg['repository'] } : {}),
     ...(mainPkg['license'] !== undefined ? { license: mainPkg['license'] } : {}),
@@ -187,12 +287,35 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
     });
   } catch (err) {
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    // npm CLI's retry-on-transient-network-error: a successful PUT that
+    // the registry acked but for which npm saw a flaky response (timeout,
+    // 502, connection reset) gets retried with the same payload. The
+    // retry's PUT lands on a registry that already has the new version
+    // and gets E403 "cannot publish over the previously published versions".
+    // The first attempt actually succeeded — the package + provenance are
+    // on the registry — so treat this exact stderr shape as success.
+    if (looksLikePublishOverRace(stderr)) {
+      return;
+    }
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(
       `npm publish (platform) failed${stderr ? `:\n${stderr}` : `: ${base}`}`,
       { cause: err },
     );
   }
+}
+
+/**
+ * Match the specific stderr npm emits when its internal retry-on-transient-
+ * network-error fires after a successful PUT: the second attempt lands on a
+ * registry that already has the version and gets `E403 ... You cannot
+ * publish over the previously published versions: <ver>`. The package is
+ * already where we wanted it; npm just exits non-zero on the duplicate
+ * write.
+ */
+export function looksLikePublishOverRace(stderr: string | undefined): boolean {
+  if (!stderr) return false;
+  return /cannot publish over the previously published versions/i.test(stderr);
 }
 
 function rewriteOptionalDependencies(
@@ -309,8 +432,8 @@ function unmappedTripleMessage(target: string): string {
   return `Target triple "${target}" is not mapped to npm os/cpu. Add it to TRIPLE_MAP in src/handlers/npm-platform.ts.`;
 }
 
-function pickMainFile(files: readonly string[], build: 'napi' | 'bundled-cli'): string {
-  if (build === 'napi') {
+function pickMainFile(files: readonly string[], mode: NpmBuildMode): string {
+  if (mode === 'napi') {
     const node = files.find((f) => f.endsWith('.node'));
     /* v8 ignore next -- completeness check for napi ensures a .node file is present */
     return node ?? files[0]!;

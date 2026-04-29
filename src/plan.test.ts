@@ -572,6 +572,75 @@ targets = [
     expect(objMatrix).toEqual(bareMatrix);
   });
 
+  it('multi-mode npm (#dirsql) emits per-(mode, triple) rows with mode-infix artifact names', async () => {
+    const toml = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "dirsql"
+kind    = "npm"
+path    = "packages/ts"
+globs   = ["packages/ts/**"]
+build   = [
+  { mode = "napi",        name = "@dirsql/lib-{triple}" },
+  { mode = "bundled-cli", name = "@dirsql/cli-{triple}" },
+]
+targets = ["linux-x64-gnu", "darwin-arm64"]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
+    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+
+    const matrix = await plan({ cwd: repo });
+    // 2 modes × 2 triples + 1 main row = 5 total
+    expect(matrix).toHaveLength(5);
+
+    const napiLinux = matrix.find(
+      (r) => r.target === 'linux-x64-gnu' && r.build === 'napi',
+    )!;
+    expect(napiLinux.artifact_name).toBe('dirsql-napi-linux-x64-gnu');
+    expect(napiLinux.artifact_path).toBe('packages/ts/build/napi-linux-x64-gnu');
+
+    const cliLinux = matrix.find(
+      (r) => r.target === 'linux-x64-gnu' && r.build === 'bundled-cli',
+    )!;
+    expect(cliLinux.artifact_name).toBe('dirsql-bundled-cli-linux-x64-gnu');
+    expect(cliLinux.artifact_path).toBe('packages/ts/build/bundled-cli-linux-x64-gnu');
+
+    const napiDarwin = matrix.find(
+      (r) => r.target === 'darwin-arm64' && r.build === 'napi',
+    )!;
+    expect(napiDarwin.artifact_name).toBe('dirsql-napi-darwin-arm64');
+
+    const main = matrix.find((r) => r.target === 'main')!;
+    expect(main.artifact_name).toBe('dirsql-main');
+    // Main row carries the first mode for backward compat with single-mode shape.
+    expect(main.build).toBe('napi');
+  });
+
+  it('single-entry array form preserves single-mode artifact naming (no mode infix)', async () => {
+    const toml = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "lib-napi"
+kind    = "npm"
+path    = "packages/ts"
+globs   = ["packages/ts/**"]
+build   = ["napi"]
+targets = ["x86_64-unknown-linux-gnu"]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
+    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+
+    const matrix = await plan({ cwd: repo });
+    const linux = matrix.find((r) => r.target === 'x86_64-unknown-linux-gnu')!;
+    // Length-1 array equivalent to string form: no mode infix.
+    expect(linux.artifact_name).toBe('lib-napi-x86_64-unknown-linux-gnu');
+    expect(linux.artifact_path).toBe('packages/ts/build/x86_64-unknown-linux-gnu');
+  });
+
   it('throws at plan time when a napi target triple is unmapped (#170)', () => {
     // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
     // TRIPLE_MAP entry. Without this guard, the mistake surfaces only

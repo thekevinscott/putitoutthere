@@ -199,8 +199,10 @@ jobs:
         env:
           # napi / bundled-cli fixtures' build scripts read TARGET to know
           # which per-triple stub binary to stage. Vanilla / main rows
-          # ignore it.
+          # ignore it. Multi-mode fixtures (#dirsql) additionally read
+          # BUILD so the same script can stage either family.
           TARGET: ${{ matrix.target }}
+          BUILD: ${{ matrix.build }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci
@@ -394,12 +396,6 @@ jobs:
         with:
           command: publish
           working_directory: fixture-tree
-        env:
-          # npm trusted-publisher coverage for unscoped names is per-package;
-          # the fixture set has 18 distinct platform names. Fall back to a
-          # long-lived token for e2e — the consumer-facing reusable workflow
-          # remains OIDC-only.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Post-publish: download every main npm tarball from the registry and
       # assert that directory entries declared in package.json `files` are

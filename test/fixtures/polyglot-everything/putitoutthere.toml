@@ -2,7 +2,9 @@
 version = 1
 
 # Reference polyglot fixture mirroring the dirsql shape:
-#   rust crate → python wheels (maturin) + npm bundled-cli (rust binary).
+#   rust crate → python wheels (maturin) + multi-mode npm
+#   (bundled-cli binary AND napi-rs `.node` addon, both selected
+#   via the main package's optionalDependencies at install time).
 # The v0 success criterion (plan.md §25.3 #2).
 
 [[package]]
@@ -33,7 +35,15 @@ name = "@putitoutthere/piot-fixture-zzz-cli"
 kind = "npm"
 path = "packages/ts"
 globs = ["packages/ts/**"]
-build = "bundled-cli"
+# #dirsql: dual-mode npm. Bundled-cli keeps the historical
+# `<name>-<triple>` platform-package names (no infix) so the existing
+# trusted-publisher registrations still cover it; the napi family uses
+# a `-napi-` infix and needs new TP registrations
+# (`@putitoutthere/piot-fixture-zzz-cli-napi-<triple>`).
+build = [
+  "bundled-cli",
+  { mode = "napi", name = "{name}-napi-{triple}" },
+]
 targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",

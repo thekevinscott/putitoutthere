@@ -22,8 +22,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  platformPackageName,
+  DEFAULT_NAME_TEMPLATE,
+  looksLikePublishOverRace,
+  normalizeBuild,
+  platformArtifactName,
   publishPlatforms,
+  resolvePlatformName,
   targetToOsCpu,
   type PlatformPkg,
 } from './npm-platform.js';
@@ -60,7 +64,7 @@ function basePkg(over: Partial<PlatformPkg> = {}): PlatformPkg {
   return {
     name: 'demo-cli',
     path: join(repo, 'pkg'),
-    build: 'napi',
+    build: [{ mode: 'napi', name: DEFAULT_NAME_TEMPLATE }],
     targets: ['linux-x64-gnu', 'darwin-arm64'],
     ...over,
   };
@@ -82,13 +86,120 @@ afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
 });
 
-describe('platformPackageName', () => {
-  it('handles unscoped names', () => {
-    expect(platformPackageName('demo-cli', 'linux-x64-gnu')).toBe('demo-cli-linux-x64-gnu');
+describe('resolvePlatformName', () => {
+  it('default template + unscoped name → name-triple', () => {
+    expect(
+      resolvePlatformName(DEFAULT_NAME_TEMPLATE, {
+        name: 'demo-cli',
+        triple: 'linux-x64-gnu',
+        mode: 'napi',
+      }),
+    ).toBe('demo-cli-linux-x64-gnu');
   });
 
-  it('handles scoped names', () => {
-    expect(platformPackageName('@acme/demo-cli', 'linux-x64-gnu')).toBe('@acme/demo-cli-linux-x64-gnu');
+  it('default template + scoped name → @scope/base-triple', () => {
+    expect(
+      resolvePlatformName(DEFAULT_NAME_TEMPLATE, {
+        name: '@acme/demo-cli',
+        triple: 'linux-x64-gnu',
+        mode: 'napi',
+      }),
+    ).toBe('@acme/demo-cli-linux-x64-gnu');
+  });
+
+  it('substitutes {scope} and {base} from a scoped name', () => {
+    expect(
+      resolvePlatformName('@{scope}/lib-{triple}', {
+        name: '@dirsql/core',
+        triple: 'linux-x64-gnu',
+        mode: 'napi',
+      }),
+    ).toBe('@dirsql/lib-linux-x64-gnu');
+  });
+
+  it('{scope} resolves to empty string for unscoped names', () => {
+    expect(
+      resolvePlatformName('{scope}-{base}-{triple}', {
+        name: 'unscoped',
+        triple: 'darwin-arm64',
+        mode: 'napi',
+      }),
+    ).toBe('-unscoped-darwin-arm64');
+  });
+
+  it('substitutes {mode}', () => {
+    expect(
+      resolvePlatformName('{name}-{mode}-{triple}', {
+        name: 'demo',
+        triple: 'linux-x64-gnu',
+        mode: 'bundled-cli',
+      }),
+    ).toBe('demo-bundled-cli-linux-x64-gnu');
+  });
+});
+
+describe('platformArtifactName', () => {
+  it('single-mode keeps the historical <safe>-<triple> shape', () => {
+    expect(platformArtifactName('demo-cli', 'napi', 'linux-x64-gnu', false)).toBe(
+      'demo-cli-linux-x64-gnu',
+    );
+  });
+
+  it('multi-mode adds a <mode> infix', () => {
+    expect(platformArtifactName('demo-cli', 'napi', 'linux-x64-gnu', true)).toBe(
+      'demo-cli-napi-linux-x64-gnu',
+    );
+    expect(platformArtifactName('demo-cli', 'bundled-cli', 'linux-x64-gnu', true)).toBe(
+      'demo-cli-bundled-cli-linux-x64-gnu',
+    );
+  });
+
+  it('encodes `/` in pkg.name (#237)', () => {
+    expect(platformArtifactName('js/cachetta', 'napi', 'linux-x64-gnu', false)).toBe(
+      'js__cachetta-linux-x64-gnu',
+    );
+  });
+});
+
+describe('normalizeBuild', () => {
+  it('returns [] for undefined', () => {
+    expect(normalizeBuild(undefined)).toEqual([]);
+  });
+
+  it('coerces a single-mode string into a length-1 array with the default template', () => {
+    expect(normalizeBuild('napi')).toEqual([
+      { mode: 'napi', name: DEFAULT_NAME_TEMPLATE },
+    ]);
+  });
+
+  it('coerces a length-1 array of strings into the same shape as the string form', () => {
+    expect(normalizeBuild(['bundled-cli'])).toEqual([
+      { mode: 'bundled-cli', name: DEFAULT_NAME_TEMPLATE },
+    ]);
+  });
+
+  it('passes through object-form entries verbatim', () => {
+    expect(
+      normalizeBuild([
+        { mode: 'napi', name: '@dirsql/lib-{triple}' },
+        { mode: 'bundled-cli', name: '@dirsql/cli-{triple}' },
+      ]),
+    ).toEqual([
+      { mode: 'napi', name: '@dirsql/lib-{triple}' },
+      { mode: 'bundled-cli', name: '@dirsql/cli-{triple}' },
+    ]);
+  });
+
+  it('accepts mixed entries (bare string + object form) in the same array', () => {
+    expect(
+      normalizeBuild([
+        'napi',
+        { mode: 'bundled-cli', name: '{name}-cli-{triple}' },
+      ]),
+    ).toEqual([
+      { mode: 'napi', name: DEFAULT_NAME_TEMPLATE },
+      { mode: 'bundled-cli', name: '{name}-cli-{triple}' },
+    ]);
   });
 });
 
@@ -214,7 +325,7 @@ describe('publishPlatforms (bundled-cli)', () => {
     });
 
     const pkg: PlatformPkg = basePkg({
-      build: 'bundled-cli',
+      build: [{ mode: 'bundled-cli', name: DEFAULT_NAME_TEMPLATE }],
       targets: ['linux-x64-gnu'],
     });
     const r = await publishPlatforms(pkg, '0.2.0', makeCtx());
@@ -253,7 +364,7 @@ describe('publishPlatforms (bundled-cli)', () => {
     });
 
     const pkg: PlatformPkg = basePkg({
-      build: 'bundled-cli',
+      build: [{ mode: 'bundled-cli', name: DEFAULT_NAME_TEMPLATE }],
       targets: ['linux-x64-gnu'],
     });
     await publishPlatforms(pkg, '0.2.0', makeCtx());
@@ -373,5 +484,154 @@ describe('artifact path resolution', () => {
       makeCtx(),
     );
     expect(r.published).toEqual(['js/cachetta-linux-x64-gnu']);
+  });
+});
+
+describe('publishPlatforms (multi-mode, #dirsql)', () => {
+  it('publishes both napi and bundled-cli families and pins both in optionalDependencies', async () => {
+    // Two artifacts per triple — one per mode — each in its own
+    // mode-infixed artifact dir.
+    mkdirSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu', 'demo.linux-x64-gnu.node'), Buffer.from('napi'));
+    mkdirSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('#!/bin/bash\n'));
+
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      return Buffer.from('');
+    });
+
+    const pkg: PlatformPkg = basePkg({
+      build: [
+        { mode: 'napi', name: '@dirsql/lib-{triple}' },
+        { mode: 'bundled-cli', name: '@dirsql/cli-{triple}' },
+      ],
+      targets: ['linux-x64-gnu'],
+    });
+    const r = await publishPlatforms(pkg, '0.2.0', makeCtx());
+    expect(r.published).toEqual(['@dirsql/lib-linux-x64-gnu', '@dirsql/cli-linux-x64-gnu']);
+
+    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+      optionalDependencies: Record<string, string>;
+    };
+    expect(pkgJson.optionalDependencies).toEqual({
+      '@dirsql/lib-linux-x64-gnu': '0.2.0',
+      '@dirsql/cli-linux-x64-gnu': '0.2.0',
+    });
+  });
+
+  it('synthesized platform package picks the right main file per mode', async () => {
+    mkdirSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu', 'demo.linux-x64-gnu.node'), Buffer.from('napi'));
+    mkdirSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('x'));
+
+    const stagingByName = new Map<string, Record<string, unknown>>();
+    execMock.mockImplementation((_cmd, args, opts) => {
+      const a = args as string[];
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      const cwd = (opts as { cwd?: string } | undefined)?.cwd;
+      if (cwd) {
+        const json = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as Record<string, unknown>;
+        stagingByName.set(String(json.name), json);
+      }
+      return Buffer.from('');
+    });
+
+    await publishPlatforms(
+      basePkg({
+        build: [
+          { mode: 'napi', name: '@dirsql/lib-{triple}' },
+          { mode: 'bundled-cli', name: '@dirsql/cli-{triple}' },
+        ],
+        targets: ['linux-x64-gnu'],
+      }),
+      '0.2.0',
+      makeCtx(),
+    );
+
+    expect(stagingByName.get('@dirsql/lib-linux-x64-gnu')!.main).toBe('demo.linux-x64-gnu.node');
+    expect(stagingByName.get('@dirsql/cli-linux-x64-gnu')!.main).toBe('demo-cli');
+  });
+
+  it('resolves {scope} and {base} variables when the main package is scoped', async () => {
+    // Single-entry build → no mode infix in the artifact dir name.
+    mkdirSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo.node'), Buffer.from('x'));
+
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      return Buffer.from('');
+    });
+
+    const r = await publishPlatforms(
+      basePkg({
+        npm: '@dirsql/core',
+        build: [{ mode: 'napi', name: '@{scope}/{base}-lib-{triple}' }],
+        targets: ['linux-x64-gnu'],
+      }),
+      '0.1.0',
+      makeCtx(),
+    );
+    expect(r.published).toEqual(['@dirsql/core-lib-linux-x64-gnu']);
+  });
+});
+
+describe('looksLikePublishOverRace', () => {
+  it('matches npm\'s E403 over-publish stderr', () => {
+    expect(
+      looksLikePublishOverRace(
+        'npm error code E403\nnpm error 403 You cannot publish over the previously published versions: 0.0.1.',
+      ),
+    ).toBe(true);
+  });
+
+  it('returns false on unrelated 403 stderr', () => {
+    expect(looksLikePublishOverRace('npm error 403 Forbidden - PUT')).toBe(false);
+    expect(looksLikePublishOverRace('npm ERR! 403 ENEEDAUTH')).toBe(false);
+  });
+
+  it('returns false on undefined / empty', () => {
+    expect(looksLikePublishOverRace(undefined)).toBe(false);
+    expect(looksLikePublishOverRace('')).toBe(false);
+  });
+});
+
+describe('publishPlatforms: npm CLI retry race (#dirsql)', () => {
+  it('treats E403 over-publish as success and continues to rewrite optionalDependencies', async () => {
+    // npm CLI retried a successful PUT after a transient response and the
+    // registry rejected the duplicate. The package is on the registry;
+    // the engine should not mark this as a publish failure.
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      }
+      // publish: simulate the retry-race E403
+      throw Object.assign(new Error('publish failed'), {
+        status: 1,
+        stderr: Buffer.from(
+          'npm error code E403\nnpm error 403 You cannot publish over the previously published versions: 0.2.0.',
+        ),
+      });
+    });
+
+    const r = await publishPlatforms(
+      basePkg({ targets: ['linux-x64-gnu'] }),
+      '0.2.0',
+      makeCtx(),
+    );
+    // The race-tolerated publish counts as published from the engine's view —
+    // the package is on the registry at the requested version.
+    expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
+    // Main package.json got the optionalDependencies rewrite.
+    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+      optionalDependencies: Record<string, string>;
+    };
+    expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
   });
 });

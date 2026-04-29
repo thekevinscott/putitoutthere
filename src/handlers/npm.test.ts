@@ -248,6 +248,53 @@ describe('npm.publish', () => {
     expect(publishCwds[1]).toBe(dir);
   });
 
+  it('dispatches to platform publish for array-form build (#dirsql)', async () => {
+    // Two artifact families on disk — one per mode — each in its own
+    // mode-infixed directory. Match what plan.ts emits for array-form.
+    const artifactsRoot = join(dir, 'artifacts');
+    mkdirSync(join(artifactsRoot, 'demo-js-napi-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-js-napi-linux-x64-gnu', 'demo.node'), Buffer.from('napi'));
+    mkdirSync(join(artifactsRoot, 'demo-js-bundled-cli-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-js-bundled-cli-linux-x64-gnu', 'demo'), Buffer.from('bin'));
+
+    const viewCalls: string[] = [];
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        viewCalls.push(String(a[1]));
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      }
+      return Buffer.from('');
+    });
+
+    const result = await npm.publish(
+      {
+        ...basePkg(),
+        path: dir,
+        build: [
+          { mode: 'napi', name: '@scope/lib-{triple}' },
+          { mode: 'bundled-cli', name: '@scope/cli-{triple}' },
+        ],
+        targets: ['linux-x64-gnu'],
+      },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot }),
+    );
+    expect(result.status).toBe('published');
+    // Both family platforms must have been viewed before the main publish.
+    expect(viewCalls.some((v) => v.startsWith('@scope/lib-linux-x64-gnu@'))).toBe(true);
+    expect(viewCalls.some((v) => v.startsWith('@scope/cli-linux-x64-gnu@'))).toBe(true);
+
+    // optionalDependencies on the main package must span both families.
+    const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      optionalDependencies?: Record<string, string>;
+    };
+    expect(pkgJson.optionalDependencies).toEqual({
+      '@scope/lib-linux-x64-gnu': '0.1.0',
+      '@scope/cli-linux-x64-gnu': '0.1.0',
+    });
+  });
+
   it('uses --access public by default (explicit on config)', async () => {
     execMock
       .mockImplementationOnce(() => {
@@ -537,5 +584,33 @@ describe('npm.publish', () => {
     ).rejects.toThrow(/npm publish failed/);
     delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     fetchSpy.mockRestore();
+  });
+
+  it('treats E403 "cannot publish over previously published versions" as already-published (#dirsql)', async () => {
+    // npm CLI's retry-on-transient-network-error: the first PUT succeeded
+    // (the package + provenance landed on the registry) but came back
+    // flaky, npm retried with the same payload and the registry rejected
+    // the duplicate. The desired post-state is on the registry — return
+    // already-published instead of throwing.
+    execMock
+      .mockImplementationOnce(() => {
+        // npm view: 404 → not yet published from our perspective
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      })
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('publish failed'), {
+          status: 1,
+          stderr: Buffer.from(
+            'npm error code E403\nnpm error 403 You cannot publish over the previously published versions: 0.1.0.',
+          ),
+        });
+      });
+    const result = await npm.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
+    );
+    expect(result.status).toBe('already-published');
+    expect(result.url).toBe('https://www.npmjs.com/package/demo-npm/v/0.1.0');
   });
 });

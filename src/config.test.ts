@@ -807,6 +807,204 @@ globs = ["**"]
   });
 });
 
+describe('parseConfig: npm build array form (#dirsql)', () => {
+  it('accepts a single-mode string (backward compat)', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = "napi"
+targets = ["linux-x64-gnu"]
+`);
+    expect((cfg.packages[0] as { build?: unknown }).build).toBe('napi');
+  });
+
+  it('accepts an array of mode strings', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = ["napi"]
+targets = ["linux-x64-gnu"]
+`);
+    expect((cfg.packages[0] as { build?: unknown }).build).toEqual(['napi']);
+  });
+
+  it('accepts an array of object entries with `name` templates', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "dirsql"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [
+  { mode = "napi",        name = "@dirsql/lib-{triple}" },
+  { mode = "bundled-cli", name = "@dirsql/cli-{triple}" },
+]
+targets = ["linux-x64-gnu"]
+`);
+    expect((cfg.packages[0] as { build?: unknown }).build).toEqual([
+      { mode: 'napi', name: '@dirsql/lib-{triple}' },
+      { mode: 'bundled-cli', name: '@dirsql/cli-{triple}' },
+    ]);
+  });
+
+  it('accepts a mix of bare strings and object entries', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [
+  "napi",
+  { mode = "bundled-cli", name = "{name}-cli-{triple}" },
+]
+targets = ["linux-x64-gnu"]
+`);
+    const build = (cfg.packages[0] as { build?: unknown[] }).build!;
+    expect(build).toEqual([
+      'napi',
+      { mode: 'bundled-cli', name: '{name}-cli-{triple}' },
+    ]);
+  });
+
+  it('rejects an empty array', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = []
+targets = ["linux-x64-gnu"]
+`),
+    ).toThrow();
+  });
+
+  it('rejects duplicate modes', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = ["napi", "napi"]
+targets = ["linux-x64-gnu"]
+`),
+    ).toThrow(/unique modes|napi/);
+  });
+
+  it('rejects duplicate modes mixed across string + object entries', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [
+  "napi",
+  { mode = "napi", name = "{name}-other-{triple}" },
+]
+targets = ["linux-x64-gnu"]
+`),
+    ).toThrow(/unique modes|napi/);
+  });
+
+  it('rejects a name template missing {triple}', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [{ mode = "napi", name = "@scope/lib-fixed" }]
+targets = ["linux-x64-gnu"]
+`),
+    ).toThrow(/\{triple\}/);
+  });
+
+  it('rejects an unknown placeholder in a name template', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [{ mode = "napi", name = "{name}-{version}-{triple}" }]
+targets = ["linux-x64-gnu"]
+`),
+    ).toThrow(/unknown placeholder.*\{version\}/);
+  });
+
+  it('rejects two entries that resolve to colliding names', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [
+  { mode = "napi",        name = "{name}-{triple}" },
+  { mode = "bundled-cli", name = "{name}-{triple}" },
+]
+targets = ["linux-x64-gnu"]
+`),
+    ).toThrow(/distinct.*name templates/);
+  });
+
+  it('accepts targets when build is in array form', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [
+  { mode = "napi",        name = "@scope/lib-{triple}" },
+  { mode = "bundled-cli", name = "@scope/cli-{triple}" },
+]
+targets = ["linux-x64-gnu", "darwin-arm64"]
+`);
+    expect((cfg.packages[0] as { targets?: unknown[] }).targets).toEqual([
+      'linux-x64-gnu',
+      'darwin-arm64',
+    ]);
+  });
+});
+
 describe('sanitizeArtifactName (#230)', () => {
   it('passes through names without `/` unchanged', () => {
     expect(sanitizeArtifactName('lib-rust')).toBe('lib-rust');

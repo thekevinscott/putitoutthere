@@ -33,4 +33,4 @@ Local runs can't get OIDC; the only auth path the suite exercises is OIDC truste
 | `python-pure-hatch`      | hatch backend + twine OIDC mint-token                         |
 | `python-pure-sdist-only` | sdist-only path (no wheel)                                    |
 | `python-rust-maturin`    | per-target maturin wheels + sdist                             |
-| `polyglot-everything`    | rust + python (maturin) + npm (bundled-cli) cascade end-to-end |
+| `polyglot-everything`    | rust + python (maturin) + multi-mode npm (bundled-cli + napi) cascade end-to-end |

@@ -125,15 +125,27 @@ describe('#31 polyglot fixtures', () => {
     expect(byKind.get('npm')).toBe(1);
   });
 
-  it('polyglot-everything → rust + python (5+sdist) + npm (5+main)', async () => {
+  it('polyglot-everything → rust + python (5+sdist) + multi-mode npm (5+5+main)', async () => {
     const cwd = prepareFixture('polyglot-everything');
     const rows = await plan({ cwd });
-    // 1 rust + 6 python + 6 npm = 13 rows.
-    expect(rows).toHaveLength(13);
+    // 1 rust + 6 python + 11 npm (2 modes × 5 triples + 1 main) = 18 rows.
+    expect(rows).toHaveLength(18);
     const byName = new Map<string, number>();
     for (const r of rows) byName.set(r.name, (byName.get(r.name) ?? 0) + 1);
     expect(byName.get('piot-fixture-zzz-poly-rust')).toBe(1);
     expect(byName.get('piot-fixture-zzz-python')).toBe(6);
-    expect(byName.get('@putitoutthere/piot-fixture-zzz-cli')).toBe(6);
+    expect(byName.get('@putitoutthere/piot-fixture-zzz-cli')).toBe(11);
+    // Multi-mode rows split by build: 5 napi + 5 bundled-cli + 1 main.
+    const npmRows = rows.filter((r) => r.name === '@putitoutthere/piot-fixture-zzz-cli');
+    expect(npmRows.filter((r) => r.build === 'napi' && r.target !== 'main')).toHaveLength(5);
+    expect(npmRows.filter((r) => r.build === 'bundled-cli' && r.target !== 'main')).toHaveLength(5);
+    expect(npmRows.filter((r) => r.target === 'main')).toHaveLength(1);
+    // Multi-mode artifact names carry the mode infix.
+    const napiLinux = npmRows.find(
+      (r) => r.build === 'napi' && r.target === 'x86_64-unknown-linux-gnu',
+    )!;
+    expect(napiLinux.artifact_name).toBe(
+      '@putitoutthere__piot-fixture-zzz-cli-napi-x86_64-unknown-linux-gnu',
+    );
   });
 });

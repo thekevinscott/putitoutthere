@@ -14,7 +14,12 @@ import { join } from 'node:path';
 import { computeCascade } from './cascade.js';
 import { loadConfig, sanitizeArtifactName, type Package } from './config.js';
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
-import { assertTripleSupported } from './handlers/npm-platform.js';
+import {
+  assertTripleSupported,
+  normalizeBuild,
+  platformArtifactName,
+  type NpmBuildField,
+} from './handlers/npm-platform.js';
 import { parseTagVersion } from './tag-template.js';
 import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
@@ -219,31 +224,45 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
     }
 
     case 'npm': {
-      const build = (pkg as { build?: string }).build;
+      const rawBuild = (pkg as { build?: NpmBuildField }).build;
+      const buildEntries = normalizeBuild(rawBuild);
       const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
-      if (build === 'napi' || build === 'bundled-cli') {
+      if (buildEntries.length > 0) {
         // Plan-time guard: bail before a CI matrix runs on an unmapped
         // triple. Handler-time validation remains as belt-and-suspenders.
         // Issue #170 follow-up.
-        for (const entry of targets) {
-          assertTripleSupported(normalizeTarget(entry).triple, pkg.name);
+        for (const tEntry of targets) {
+          assertTripleSupported(normalizeTarget(tEntry).triple, pkg.name);
         }
+        const isMulti = buildEntries.length > 1;
         const out: MatrixRow[] = [];
-        for (const entry of targets) {
-          const { triple, runner } = normalizeTarget(entry);
-          out.push({
-            name: pkg.name,
-            kind: 'npm',
-            version,
-            target: triple,
-            runs_on: runner ?? defaultRunsOn(triple),
-            artifact_name: `${safe}-${triple}`,
-            artifact_path: at(`build/${triple}`),
-            path: pkg.path,
-            build,
-          });
+        for (const bEntry of buildEntries) {
+          for (const tEntry of targets) {
+            const { triple, runner } = normalizeTarget(tEntry);
+            // #dirsql: multi-mode rows carry a mode infix in both the
+            // artifact-name and artifact-path so napi `.node` files and
+            // bundled-cli binaries don't collide on the build side.
+            // Single-mode shape preserved byte-for-byte.
+            const artifactName = platformArtifactName(pkg.name, bEntry.mode, triple, isMulti);
+            const artifactPath = isMulti
+              ? at(`build/${bEntry.mode}-${triple}`)
+              : at(`build/${triple}`);
+            out.push({
+              name: pkg.name,
+              kind: 'npm',
+              version,
+              target: triple,
+              runs_on: runner ?? defaultRunsOn(triple),
+              artifact_name: artifactName,
+              artifact_path: artifactPath,
+              path: pkg.path,
+              build: bEntry.mode,
+            });
+          }
         }
-        // Plus the main package row.
+        // Plus the main package row. The main row's `build` is informational
+        // (no per-target compile happens for it); we set it to the first
+        // entry's mode so length-1 array forms match the string-form shape.
         out.push({
           name: pkg.name,
           kind: 'npm',
@@ -253,7 +272,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           artifact_name: `${safe}-main`,
           artifact_path: at('package.json'),
           path: pkg.path,
-          build,
+          build: buildEntries[0]!.mode,
         });
         return out;
       }
@@ -268,7 +287,6 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           artifact_name: `${safe}-pkg`,
           artifact_path: at('package.json'),
           path: pkg.path,
-          ...(build !== undefined ? { build } : {}),
         },
       ];
     }

@@ -168,7 +168,53 @@ const PYPI_PKG = z
     { message: 'bundle_cli requires at least one entry in `targets`' },
   );
 
-const NPM_BUILD = z.enum(['napi', 'bundled-cli']);
+const NPM_BUILD_MODE = z.enum(['napi', 'bundled-cli']);
+
+// #dirsql: must mirror ALLOWED_NAME_VARIABLES in src/handlers/npm-platform.ts.
+// `{version}` is intentionally excluded — see resolvePlatformName.
+const NPM_NAME_TEMPLATE_VARS = ['name', 'scope', 'base', 'triple', 'mode'] as const;
+const NPM_NAME_TEMPLATE_PLACEHOLDER_RE = /\{([^}]+)\}/g;
+
+function validateNameTemplate(template: string): string | null {
+  if (template.length === 0) return 'name template must not be empty';
+  if (!template.includes('{triple}')) {
+    return 'name template must contain {triple} (otherwise platform packages would collide)';
+  }
+  const allowed = new Set<string>(NPM_NAME_TEMPLATE_VARS);
+  const unknown: string[] = [];
+  for (const match of template.matchAll(NPM_NAME_TEMPLATE_PLACEHOLDER_RE)) {
+    const v = match[1]!;
+    if (!allowed.has(v)) unknown.push(v);
+  }
+  if (unknown.length > 0) {
+    return `name template contains unknown placeholder(s): ${[...new Set(unknown)].map((u) => `{${u}}`).join(', ')} (allowed: ${NPM_NAME_TEMPLATE_VARS.map((v) => `{${v}}`).join(', ')})`;
+  }
+  return null;
+}
+
+// Object form of a build entry: explicit mode + a `name` template the
+// consumer fully controls. String form (a bare mode) implies the
+// historical `{name}-{triple}` template — backward-compat with the
+// pre-multi-mode shape.
+const NPM_BUILD_ENTRY_OBJ = z
+  .object({
+    mode: NPM_BUILD_MODE,
+    name: z.string(),
+  })
+  .strict()
+  .superRefine((entry, ctx) => {
+    const reason = validateNameTemplate(entry.name);
+    if (reason !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: reason, path: ['name'] });
+    }
+  });
+
+const NPM_BUILD_ENTRY = z.union([NPM_BUILD_MODE, NPM_BUILD_ENTRY_OBJ]);
+
+// `build` accepts a single mode string ("napi" / "bundled-cli") for
+// backward compat, OR a non-empty array of entries (each: a bare mode
+// string or an object with `{mode, name}`).
+const NPM_BUILD = z.union([NPM_BUILD_MODE, z.array(NPM_BUILD_ENTRY).min(1)]);
 
 const NPM_PKG = z
   .object({
@@ -181,11 +227,59 @@ const NPM_PKG = z
     targets: z.array(TARGET_ENTRY).optional(),
   })
   .strict()
-  .refine(
-    (p) => p.targets === undefined || p.build === 'napi' || p.build === 'bundled-cli',
-    // §12.2: targets only for napi or bundled-cli on npm.
-    { message: 'targets is only valid when build = "napi" or "bundled-cli" on npm packages' },
-  );
+  .superRefine((p, ctx) => {
+    // §12.2: targets only when build is set on an npm package. Both
+    // string-mode and array forms count.
+    if (p.targets !== undefined && p.build === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'targets is only valid when build = "napi" or "bundled-cli" on npm packages',
+      });
+      return;
+    }
+    if (Array.isArray(p.build)) {
+      // Each mode value can appear at most once. There's no meaningful
+      // "two napi build entries on the same package".
+      const seenModes = new Set<string>();
+      const dupModes: string[] = [];
+      for (const e of p.build) {
+        const mode = typeof e === 'string' ? e : e.mode;
+        if (seenModes.has(mode)) dupModes.push(mode);
+        seenModes.add(mode);
+      }
+      if (dupModes.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `build entries must have unique modes; duplicates: ${[...new Set(dupModes)].join(', ')}`,
+          path: ['build'],
+        });
+      }
+      // Resolved platform-package names must be pairwise distinct. Since
+      // `{triple}` is the only per-row varying placeholder, comparing the
+      // canonical templates is sufficient: identical templates collide on
+      // every triple, distinct templates differ on every triple. Bare-string
+      // entries default to '{name}-{triple}'.
+      const seenTemplates = new Map<string, string>();
+      const collisions: string[] = [];
+      for (const e of p.build) {
+        const mode = typeof e === 'string' ? e : e.mode;
+        const tpl = typeof e === 'string' ? '{name}-{triple}' : e.name;
+        const prior = seenTemplates.get(tpl);
+        if (prior !== undefined) {
+          collisions.push(`"${tpl}" used by both ${prior} and ${mode}`);
+        } else {
+          seenTemplates.set(tpl, mode);
+        }
+      }
+      if (collisions.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `build entries must have distinct platform-package name templates; ${collisions.join('; ')}`,
+          path: ['build'],
+        });
+      }
+    }
+  });
 
 const PACKAGE = z.discriminatedUnion('kind', [CRATES_PKG, PYPI_PKG, NPM_PKG]);
 

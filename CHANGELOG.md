@@ -13,6 +13,7 @@ are prefixed `**BREAKING**` and link to the matching section in
 ### Added
 
 - **`PIOT_PUBLISH_EMPTY_PLAN` error code.** Surfaced when `publish` is invoked with an empty matrix. Joins `PIOT_AUTH_NO_TOKEN` in the stable error-code vocabulary; foreign agents debugging a failed publish can fingerprint on the code without parsing prose.
+- **`kind = "npm"` `build` accepts an array of entries with consumer-defined platform-package name templates** (#dirsql). For packages that ship both a napi-rs Node addon and a CLI binary from the same npm package (the `@swc/core` / dirsql shape), declare `build = [{ mode = "napi", name = "@scope/lib-{triple}" }, { mode = "bundled-cli", name = "@scope/cli-{triple}" }]`. Each entry contributes its own per-platform package family; the main package's `optionalDependencies` spans both. Entries can be bare mode strings (`"napi"`, defaults to `{name}-{triple}` template) or `{ mode, name }` objects. Variables surfaced in `name` templates: `{name}`, `{scope}`, `{base}`, `{triple}`, `{mode}`. `{version}` is intentionally not surfaced. Single-mode string form (`build = "napi"`) preserved byte-for-byte — same artifact-name layout, same platform-package names, no migration pressure on existing consumers. See [README → Recipes → Multi-mode npm family](./README.md#multi-mode-npm-family) and [MIGRATIONS.md](./MIGRATIONS.md#npm-build-accepts-array-of-entries).
 
 ### Changed
 
@@ -27,6 +28,8 @@ are prefixed `**BREAKING**` and link to the matching section in
 - _nothing yet_
 
 ### Fixed
+
+- **npm publish no longer fails red when npm CLI retries a successful PUT.** When the registry acks a publish but the response comes back flaky to the client (timeout / 502 / connection reset), the npm CLI retries with the same payload. The retry lands on a registry that already has the new version and exits `E403 "cannot publish over the previously published versions: <ver>"`. Both the platform-package handler (`src/handlers/npm-platform.ts:npmPublish`) and the main publish path (`src/handlers/npm.ts:publishImpl`) now detect that exact stderr shape and treat it as success — the package is already on the registry at the requested version. Hit in the wild on PR #257's polyglot-everything multi-mode publish (10 platform packages × ~1 in 10 chance per request meant the race was nearly guaranteed).
 
 - **Crates publish no longer refuses on workflow-managed install state in sibling packages.** Before, the engine's pre-publish dirty-workspace check (`scanDirtyOutsideManifest`) flagged anything dirty outside the package's `Cargo.toml`. For polyglot consumers (rust + js in one repo), the reusable workflow's `Build npm packages` step (#256) creates `node_modules/`, `package-lock.json`, and `dist/` inside each npm package's path before cargo publish runs — these are workflow scratch, not stray edits, and cargo can't pack them anyway (it only packs files inside the crate's own dir). The check now whitelists every other configured package's path, similar to how it already whitelists `artifacts/`. Stray edits elsewhere in the repo (a `README.md` change, etc.) still fail the check. Hit in the wild on the polyglot-everything e2e fixture; would also have hit any consumer with the same shape.
 

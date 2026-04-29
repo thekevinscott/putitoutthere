@@ -155,8 +155,8 @@ version = 1   # required; only 1 is valid today
 | `npm`     | string                 | Override `name` → npm name (for scoped packages).    |
 | `access`  | enum                   | `public` \| `restricted`. Default `public`.          |
 | `tag`     | string                 | dist-tag. Default `latest`.                          |
-| `build`   | enum                   | `napi` \| `bundled-cli`. Omitted = vanilla. See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
-| `targets` | (string \| object)[]   | Required when `build ∈ {napi, bundled-cli}`.         |
+| `build`   | string \| array        | `"napi"` \| `"bundled-cli"` (single mode), or an array of entries (each: a bare mode string or `{ mode, name }` with a [name template](#multi-mode-npm-family)). Omitted = vanilla. See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
+| `targets` | (string \| object)[]   | Required when `build` is set.                        |
 
 ### Example: polyglot Rust library
 
@@ -383,6 +383,65 @@ process.exit(result.status ?? 1);
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover
 `my-cli-x86_64-unknown-linux-gnu`).
+
+### Multi-mode npm family
+
+For a package that is both a napi-rs Node addon (a `.node` library) **and**
+a CLI binary, declare `build` as an array. Each entry contributes its own
+per-platform family; the main package's `optionalDependencies` spans both.
+The `@swc/core` / dirsql distribution shape.
+
+```toml
+[[package]]
+name    = "dirsql"
+kind    = "npm"
+path    = "packages/ts"
+globs   = ["packages/ts/**", "crates/dirsql/**"]
+build   = [
+  { mode = "napi",        name = "@dirsql/lib-{triple}" },
+  { mode = "bundled-cli", name = "@dirsql/cli-{triple}" },
+]
+targets = [
+  "linux-x64-gnu",
+  "darwin-arm64",
+  "win32-x64-msvc",
+]
+```
+
+Each entry has a **mode** (`napi` or `bundled-cli`) and a **`name`
+template** for its platform packages. Variables:
+
+| Variable    | Resolves to                                                       |
+|-------------|-------------------------------------------------------------------|
+| `{name}`    | The main package's npm name (`pkg.npm` if set, else `pkg.name`).  |
+| `{scope}`   | Scope without `@` for scoped names (e.g. `dirsql`); `""` if unscoped. |
+| `{base}`    | Name without scope (e.g. `core` for `@dirsql/core`).              |
+| `{triple}`  | Target triple as written in `targets` — required in the template. |
+| `{mode}`    | The entry's mode (`napi` / `bundled-cli`).                        |
+
+`{version}` is intentionally not surfaced — platform package names are
+immutable identifiers; the version is pinned in `optionalDependencies`,
+not the name.
+
+**Single-mode (string) form is preserved.** `build = "napi"` and
+`build = ["napi"]` are equivalent and produce the historical
+`<name>-<triple>` platform-package names byte-for-byte. The mode-infix
+artifact-directory naming (`<name>-napi-<triple>`, `<name>-bundled-cli-<triple>`)
+only applies when `build` has more than one entry.
+
+**Validation rules** enforced at config load:
+
+- Each `mode` value (`napi`, `bundled-cli`) appears at most once per package.
+- Every `name` template must contain `{triple}`.
+- Unknown placeholders are rejected.
+- All entries must produce distinct platform-package name templates.
+
+Each platform package across **every** family needs its own npm
+trusted-publisher registration. For the dirsql config above, that's
+`@dirsql/lib-linux-x64-gnu`, `@dirsql/lib-darwin-arm64`,
+`@dirsql/lib-win32-x64-msvc`, `@dirsql/cli-linux-x64-gnu`,
+`@dirsql/cli-darwin-arm64`, `@dirsql/cli-win32-x64-msvc` — six total,
+one per platform package, plus the top-level `dirsql`.
 
 ### Rust CLI inside a PyPI wheel
 

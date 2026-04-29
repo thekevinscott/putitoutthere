@@ -4,6 +4,7 @@
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
   "type": "module",
+  "main": "./dist/index.js",
   "bin": { "piot-fixture-zzz": "./dist/shim.js" },
   "files": ["dist"],
   "scripts": {
