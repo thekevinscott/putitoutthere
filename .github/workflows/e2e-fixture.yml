@@ -242,6 +242,14 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # npm Trusted Publishing landed in npm 11.5.1 (July 2025). Node 24's
+      # bundled npm on the runner image may be older. Force the CLI up
+      # so the OIDC-TP exchange path engages on `npm publish --provenance`
+      # without a token (without this, the publish PUT goes out
+      # unauthenticated and the registry returns 404 / 401-masked).
+      - name: Pin npm to a Trusted-Publishing-capable version
+        run: npm install -g npm@latest
+
       # PyPI: upload step runs in the caller-side `pypi-publish` job
       # (mirrors release.yml). No twine / setup-python in the publish
       # job — engine creates the tag, caller's job uploads.
