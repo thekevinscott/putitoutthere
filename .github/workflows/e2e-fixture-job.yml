@@ -1,0 +1,494 @@
+name: e2e fixture
+
+# Reusable workflow that exercises a single fixture against the same
+# job graph the consumer-facing reusable workflow runs
+# (`.github/workflows/release.yml`). The contract is: for every distinct
+# build-mode manifestation (one per fixture), the same plan → build →
+# publish flow that consumers experience must succeed end-to-end against
+# real registries via OIDC.
+#
+# Fidelity: every action call below (actions/setup-python@v6,
+# PyO3/maturin-action@v1, actions/upload-artifact@v7, etc.) and the
+# step ordering matches release.yml. The only difference is the
+# "Materialize fixture" step that copies test/fixtures/${{ inputs.fixture }}/
+# into a fixture-tree/ subdir at workflow start, plus `uses: ./` (vs.
+# `uses: thekevinscott/putitoutthere@v0`) so the engine under PR review
+# is the one being exercised.
+#
+# Internal — called only by .github/workflows/e2e.yml's matrix; not a
+# consumer integration point.
+
+on:
+  workflow_call:
+    inputs:
+      fixture:
+        description: 'Fixture directory under test/fixtures/ to exercise.'
+        type: string
+        required: true
+
+concurrency:
+  group: e2e-${{ github.ref }}-${{ inputs.fixture }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_pypi: ${{ steps.has-pypi.outputs.has_pypi }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install engine dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build engine + action bundle
+        run: |
+          pnpm run build
+          pnpm run build:action
+
+      # Materialize the fixture as a fresh git repo at fixture-tree/.
+      # Bumps __VERSION__ placeholders to a throwaway 0.0.{unix_seconds}
+      # version so each run gets a fresh registry slot (crates.io's
+      # immutable-publish rule means we can't reuse).
+      - name: Materialize fixture
+        env:
+          FIXTURE: ${{ inputs.fixture }}
+        run: |
+          set -euo pipefail
+          rm -rf fixture-tree
+          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          VERSION="0.0.$(date +%s)"
+          echo "FIXTURE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          # Walk the materialized tree and rewrite __VERSION__ in any
+          # toml/json manifest. -print0 / xargs -0 keeps paths-with-spaces
+          # safe even though our fixtures have none.
+          find fixture-tree \
+            \( -name putitoutthere.toml -o -name package.json \
+               -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
+            | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
+          # Init a throwaway git repo so the engine's tag-creation path
+          # doesn't trip on a missing HEAD.
+          cd fixture-tree
+          git init -q -b main
+          git config user.email 'e2e@putitoutthere.dev'
+          git config user.name 'piot e2e'
+          git config commit.gpgsign false
+          git config tag.gpgsign false
+          git add .
+          git commit -q -m 'e2e: initial fixture'
+
+      - id: plan
+        uses: ./
+        with:
+          command: plan
+          working_directory: fixture-tree
+
+      # Mirrors release.yml: compute has_pypi for the caller-side
+      # pypi-publish gate.
+      - id: has-pypi
+        env:
+          MATRIX: ${{ steps.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "${MATRIX:-}" | grep -q '"kind":"pypi"'; then
+            echo "has_pypi=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pypi=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install engine dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build engine + action bundle
+        run: |
+          pnpm run build
+          pnpm run build:action
+
+      - name: Materialize fixture
+        # Build matrix runs on Linux, macOS, and Windows. GitHub Actions
+        # defaults to pwsh on Windows for `run:` blocks; force bash so
+        # find/xargs/perl behave consistently across all three runners.
+        shell: bash
+        env:
+          FIXTURE: ${{ inputs.fixture }}
+          # Build steps for sdist need the same SETUPTOOLS_SCM_PRETEND_VERSION
+          # the publish path expects; bake the version in here so the
+          # filename matches.
+          PLANNED_VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          rm -rf fixture-tree
+          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          # perl -i is portable across GNU sed (Linux) and BSD sed (macOS);
+          # `sed -i ""` requires different argument shapes per platform.
+          find fixture-tree \
+            \( -name putitoutthere.toml -o -name package.json \
+               -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
+            | xargs -0 perl -i -pe "s/__VERSION__/${PLANNED_VERSION}/g"
+
+      # ---- pypi ----
+      - if: matrix.kind == 'pypi'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # Mirrors release.yml: `maturin build --sdist` produces wheel +
+      # sdist; use `command: sdist` for sdist-only.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target == 'sdist'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: fixture-tree/${{ matrix.path }}
+          command: sdist
+          args: --out dist
+
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: fixture-tree/${{ matrix.path }}
+          command: build
+          args: --release --out dist --target ${{ matrix.target }}
+
+      - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
+        working-directory: fixture-tree/${{ matrix.path }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ matrix.version }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist --outdir dist
+
+      # ---- npm ----
+      - if: matrix.kind == 'npm'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - if: matrix.kind == 'npm'
+        working-directory: fixture-tree/${{ matrix.path }}
+        shell: bash
+        env:
+          # napi / bundled-cli fixtures' build scripts read TARGET to know
+          # which per-triple stub binary to stage. Vanilla / main rows
+          # ignore it. Multi-mode fixtures (#dirsql) additionally read
+          # BUILD so the same script can stage either family.
+          TARGET: ${{ matrix.target }}
+          BUILD: ${{ matrix.build }}
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f pnpm-lock.yaml ]; then
+            npm install -g pnpm@9
+            pnpm install --frozen-lockfile
+          else
+            npm install
+          fi
+          npm run build --if-present
+
+      # ---- crates ----
+      # cargo publish builds on the registry side; no artifact needed
+      # at build time. The publish job invokes cargo directly.
+
+      - if: matrix.kind != 'crates'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: fixture-tree/${{ matrix.artifact_path }}
+
+  publish:
+    needs: [plan, build]
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    runs-on: ubuntu-latest
+    environment: e2e
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # npm Trusted Publishing landed in npm 11.5.1 (July 2025). Node 24's
+      # bundled npm on the runner image may be older. Force the CLI up
+      # so the OIDC-TP exchange path engages on `npm publish --provenance`
+      # without a token (without this, the publish PUT goes out
+      # unauthenticated and the registry returns 404 / 401-masked).
+      - name: Pin npm to a Trusted-Publishing-capable version
+        run: npm install -g npm@latest
+
+      # PyPI: upload step runs in the caller-side `pypi-publish` job
+      # (mirrors release.yml). No twine / setup-python in the publish
+      # job — engine creates the tag, caller's job uploads.
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install engine dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build engine + action bundle
+        run: |
+          pnpm run build
+          pnpm run build:action
+
+      - name: Materialize fixture
+        env:
+          FIXTURE: ${{ inputs.fixture }}
+        run: |
+          set -euo pipefail
+          rm -rf fixture-tree
+          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          # Recompute the same throwaway version the plan job baked in.
+          # plan emitted matrix.version; the first row's version is the
+          # canonical one (every package shares a single version per run).
+          VERSION='${{ fromJSON(needs.plan.outputs.matrix)[0].version }}'
+          find fixture-tree \
+            \( -name putitoutthere.toml -o -name package.json \
+               -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
+            | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
+          cd fixture-tree
+          git init -q -b main
+          git config user.email 'e2e@putitoutthere.dev'
+          git config user.name 'piot e2e'
+          git config commit.gpgsign false
+          git config tag.gpgsign false
+          git add .
+          git commit -q -m 'e2e: initial fixture'
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: fixture-tree/artifacts
+
+      - name: Authenticate with crates.io (OIDC)
+        if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        id: crates-auth
+        # Non-fatal: when no Trusted Publisher is registered yet for a
+        # fixture's crate name (the bootstrap case), the OIDC exchange
+        # 400s. A subsequent step falls back to the CRATES_IO_TOKEN
+        # secret so the e2e can still run while the TP gets registered.
+        # Once the TP exists, OIDC succeeds and the fallback skips.
+        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Export CARGO_REGISTRY_TOKEN (OIDC path)
+        if: steps.crates-auth.outcome == 'success'
+        env:
+          CRATES_IO_TOKEN: ${{ steps.crates-auth.outputs.token }}
+        run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Fall back to CRATES_IO_TOKEN secret (bootstrap path)
+        if: |
+          contains(needs.plan.outputs.matrix, '"kind":"crates"') &&
+          steps.crates-auth.outcome != 'success'
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          if [ -z "${CRATES_IO_TOKEN:-}" ]; then
+            echo "::error::OIDC mint failed and CRATES_IO_TOKEN secret is unset; cannot publish to crates.io"
+            exit 1
+          fi
+          echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
+          echo "::notice::Using CRATES_IO_TOKEN secret (bootstrap path); switch to OIDC TP once the crate exists"
+
+      # Mirrors release.yml: rebuild npm packages from source before
+      # the engine's `npm publish` runs. The build job's dist/ is not
+      # carried through as an artifact for vanilla npm rows.
+      - name: Build npm packages
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
+          for path in $paths; do
+            echo "::group::npm install + build at fixture-tree/${path}"
+            pushd "fixture-tree/${path}" > /dev/null
+            if [ -f package-lock.json ]; then
+              npm ci
+            elif [ -f pnpm-lock.yaml ]; then
+              npm install -g pnpm@9
+              pnpm install --frozen-lockfile
+            else
+              npm install
+            fi
+            npm run build --if-present
+            popd > /dev/null
+            echo "::endgroup::"
+          done
+
+      # TEMPORARY DIAGNOSTIC (#258): assert pre-publish state for each
+      # npm main/noarch package. Fails the step (with the failure
+      # annotation describing what's wrong) when:
+      #   - package.json declares a directory in `files[]` that doesn't
+      #     exist on disk (Build npm packages step didn't produce it), or
+      #   - npm pack --dry-run wouldn't include that directory.
+      # Strip once the verify failure root cause is understood.
+      - name: Pre-publish fixture-tree assertion (diagnostic)
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -uo pipefail
+          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
+          fail=0
+          while IFS= read -r row; do
+            pkg_path=$(printf '%s' "$row" | jq -r '.path')
+            pkg_name=$(printf '%s' "$row" | jq -r '.name')
+            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "fixture-tree/${pkg_path}/package.json")
+            for d in "${dirs[@]}"; do
+              local_path="fixture-tree/${pkg_path}/${d}"
+              if [ ! -d "$local_path" ]; then
+                listing=$(find "fixture-tree/${pkg_path}" -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null || true)
+                echo "::error::[${pkg_name}] declared files[${d}] but ${local_path} does not exist after Build step. fixture-tree/${pkg_path} contents: ${listing}"
+                fail=1
+                continue
+              fi
+              count=$(find "$local_path" -type f 2>/dev/null | wc -l)
+              if [ "$count" -eq 0 ]; then
+                echo "::error::[${pkg_name}] ${local_path} exists but is empty"
+                fail=1
+                continue
+              fi
+              echo "OK pre-publish [${pkg_name}] ${local_path}: ${count} file(s)"
+            done
+            pushd "fixture-tree/${pkg_path}" > /dev/null
+            pack=$(npm pack --dry-run 2>&1 || echo "(npm pack failed)")
+            popd > /dev/null
+            for d in "${dirs[@]}"; do
+              if ! printf '%s' "$pack" | grep -q "${d}/"; then
+                pack_compact=$(printf '%s' "$pack" | tr '\n' '|')
+                echo "::error::[${pkg_name}] npm pack --dry-run does NOT include ${d}/. Full pack output: ${pack_compact}"
+                fail=1
+              fi
+            done
+          done <<< "$rows"
+          exit "$fail"
+
+      - uses: ./
+        with:
+          command: publish
+          working_directory: fixture-tree
+
+      # Post-publish: download every main npm tarball from the registry and
+      # assert that directory entries declared in package.json `files` are
+      # actually present in the published artifact. Catches the cachetta
+      # 0.3.x failure mode — build job produces dist/, publish job ships
+      # from a fresh source tree without it, registry receives a tarball
+      # missing the compiled output. The publish step itself returns 0
+      # because npm publish doesn't validate `files` content; this is the
+      # only place that catches it end-to-end.
+      - name: Verify published npm tarballs honor package.json files
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
+          if [ -z "$rows" ]; then
+            echo "No npm main/noarch rows; nothing to verify."
+            exit 0
+          fi
+          fail=0
+          while IFS= read -r row; do
+            pkg_path=$(printf '%s' "$row" | jq -r '.path')
+            version=$(printf '%s' "$row" | jq -r '.version')
+            pkg_json="fixture-tree/${pkg_path}/package.json"
+            pkg_name=$(jq -r '.name' "$pkg_json")
+            # Heuristic: `files` entries without a dot are directories
+            # (dist, lib, build). Entries with a dot are individual files
+            # (README.md, index.js) and don't need a per-tree assertion.
+            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "$pkg_json")
+            if [ "${#dirs[@]}" -eq 0 ]; then
+              echo "[$pkg_name@$version] no directory entries in files[]; skipping."
+              continue
+            fi
+            echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
+            # Retry npm view: the registry packument metadata that
+            # `npm view <pkg>@<version>` reads is updated asynchronously
+            # after a successful publish. Verify runs immediately after
+            # publish, so the first call usually 404s while the tarball
+            # itself is already live on the CDN. Backoff: 0s, 5s, 10s,
+            # 20s, 40s — typical lag is under 30s.
+            tarball_url=""
+            for attempt in 1 2 3 4 5; do
+              tarball_url=$(npm view "$pkg_name@$version" dist.tarball 2>/dev/null || true)
+              if [ -n "$tarball_url" ]; then break; fi
+              if [ "$attempt" -lt 5 ]; then
+                sleep_for=$((attempt == 1 ? 5 : (attempt - 1) * 10))
+                echo "  packument lag: npm view returned empty (attempt $attempt/5); retrying in ${sleep_for}s"
+                sleep "$sleep_for"
+              fi
+            done
+            if [ -z "$tarball_url" ]; then
+              echo "::error::[$pkg_name@$version] npm view never returned a tarball URL after 5 attempts (~75s of backoff). Either the publish didn't actually publish, or registry packument propagation is much slower than expected."
+              fail=1
+              continue
+            fi
+            tmp=$(mktemp -d)
+            curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
+            mkdir "$tmp/extracted"
+            tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
+            for d in "${dirs[@]}"; do
+              if [ -d "$tmp/extracted/package/$d" ] && \
+                 [ "$(find "$tmp/extracted/package/$d" -type f | wc -l)" -gt 0 ]; then
+                count=$(find "$tmp/extracted/package/$d" -type f | wc -l)
+                echo "  ok: package/$d/ ($count file(s))"
+              else
+                local_path="fixture-tree/${pkg_path}/${d}"
+                local_state="local ${local_path}: missing"
+                if [ -d "$local_path" ]; then
+                  local_count=$(find "$local_path" -type f 2>/dev/null | wc -l)
+                  local_state="local ${local_path}: present, ${local_count} file(s) — $(find "$local_path" -type f 2>/dev/null | tr '\n' ' ')"
+                fi
+                echo "::error::[$pkg_name@$version] tarball missing '$d'. ${local_state}"
+                fail=1
+              fi
+            done
+            rm -rf "$tmp"
+          done <<< "$rows"
+          exit "$fail"
+
+  # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
+  # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside
+  # any reusable workflow (PyPA blanket-disables it; see
+  # https://github.com/pypa/gh-action-pypi-publish/issues/166). The e2e
+  # therefore mirrors the consumer pattern: the upload step runs at the
+  # top level of `e2e.yml`, not here in the reusable. See
+  # `notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md`.
