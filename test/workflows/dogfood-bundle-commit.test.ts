@@ -69,7 +69,7 @@ beforeEach(() => {
   git(['add', '-A']);
   git(['commit', '-q', '-m', 'feat: initial']);
   // Tag this commit as the prior release.
-  git(['tag', 'piot-fixture-zzz-cli-v0.1.0']);
+  git(['tag', '@putitoutthere/piot-fixture-zzz-js-vanilla-v0.1.0']);
 });
 
 afterEach(() => {

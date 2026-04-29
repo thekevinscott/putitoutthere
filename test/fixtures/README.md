@@ -10,7 +10,7 @@ One package, one publish per run.
 
 | Path                      | Kind   | Build       | Package                                | Notes                |
 |---------------------------|--------|-------------|----------------------------------------|----------------------|
-| `js-vanilla/`             | npm    | vanilla     | `piot-fixture-zzz-cli`                 | Live e2e canary      |
+| `js-vanilla/`             | npm    | vanilla     | `@putitoutthere/piot-fixture-zzz-js-vanilla` | Live e2e canary      |
 | `python-pure-hatch/`      | pypi   | hatch       | `piot-fixture-zzz-python-hatch`        | sdist + pure wheel   |
 | `python-pure-sdist-only/` | pypi   | setuptools  | `piot-fixture-zzz-python-sdist`        | sdist only, no wheel |
 

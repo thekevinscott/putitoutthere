@@ -404,6 +404,13 @@ jobs:
         with:
           command: publish
           working_directory: fixture-tree
+        env:
+          # Bootstrap path for fixture packages whose npm Trusted Publisher
+          # isn't yet registered (or is registered for a stale workflow
+          # filename). Once a TP is in place, npm CLI prefers OIDC; the
+          # token is the fallback. Granular tokens scoped to
+          # `@putitoutthere/*` cover every namespaced fixture.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Post-publish: download every main npm tarball from the registry and
       # assert that directory entries declared in package.json `files` are
