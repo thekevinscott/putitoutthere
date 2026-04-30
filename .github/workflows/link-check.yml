@@ -51,7 +51,6 @@ jobs:
             --exclude '^http://localhost[:/]'
             --exclude-path 'notes/4-17-2026-initial-plan/transcript.md'
             --exclude-path 'docs/'
-            --exclude-path 'evals/snapshots/'
             --accept '200,203,206,403,429'
             './**/*.md'
           fail: true
