@@ -122,8 +122,6 @@ jobs:
           } | git commit -F -
 
       - name: putitoutthere publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node dist/cli-bin.js publish
 
       # Scaffolded workflows reference `thekevinscott/putitoutthere@v<major>`

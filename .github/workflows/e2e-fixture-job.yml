@@ -296,33 +296,13 @@ jobs:
       - name: Authenticate with crates.io (OIDC)
         if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
         id: crates-auth
-        # Non-fatal: when no Trusted Publisher is registered yet for a
-        # fixture's crate name (the bootstrap case), the OIDC exchange
-        # 400s. A subsequent step falls back to the CRATES_IO_TOKEN
-        # secret so the e2e can still run while the TP gets registered.
-        # Once the TP exists, OIDC succeeds and the fallback skips.
-        continue-on-error: true
         uses: rust-lang/crates-io-auth-action@v1
 
-      - name: Export CARGO_REGISTRY_TOKEN (OIDC path)
+      - name: Export CARGO_REGISTRY_TOKEN
         if: steps.crates-auth.outcome == 'success'
         env:
           CRATES_IO_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
-
-      - name: Fall back to CRATES_IO_TOKEN secret (bootstrap path)
-        if: |
-          contains(needs.plan.outputs.matrix, '"kind":"crates"') &&
-          steps.crates-auth.outcome != 'success'
-        env:
-          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          if [ -z "${CRATES_IO_TOKEN:-}" ]; then
-            echo "::error::OIDC mint failed and CRATES_IO_TOKEN secret is unset; cannot publish to crates.io"
-            exit 1
-          fi
-          echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
-          echo "::notice::Using CRATES_IO_TOKEN secret (bootstrap path); switch to OIDC TP once the crate exists"
 
       # Mirrors release.yml: rebuild npm packages from source before
       # the engine's `npm publish` runs. The build job's dist/ is not
@@ -404,13 +384,6 @@ jobs:
         with:
           command: publish
           working_directory: fixture-tree
-        env:
-          # Bootstrap path for fixture packages whose npm Trusted Publisher
-          # isn't yet registered (or is registered for a stale workflow
-          # filename). Once a TP is in place, npm CLI prefers OIDC; the
-          # token is the fallback. Granular tokens scoped to
-          # `@putitoutthere/*` cover every namespaced fixture.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Post-publish: download every main npm tarball from the registry and
       # assert that directory entries declared in package.json `files` are
