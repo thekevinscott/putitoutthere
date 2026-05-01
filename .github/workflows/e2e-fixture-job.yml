@@ -244,8 +244,10 @@ jobs:
             echo "::error::no dist/ produced under ${dist_dir}"
             exit 1
           fi
+          # Use `find -print -quit` not `ls` (SC2012); robust against
+          # non-alphanumeric filenames and avoids parsing `ls` output.
           if [ "$TARGET" = 'sdist' ]; then
-            sdist=$(ls "$dist_dir"/*.tar.gz 2>/dev/null | head -1)
+            sdist=$(find "$dist_dir" -maxdepth 1 -name '*.tar.gz' -print -quit)
             if [ -z "$sdist" ]; then
               echo "::error::no sdist produced in ${dist_dir}"
               exit 1
@@ -258,7 +260,7 @@ jobs:
                 ;;
             esac
           else
-            wheel=$(ls "$dist_dir"/*.whl 2>/dev/null | head -1)
+            wheel=$(find "$dist_dir" -maxdepth 1 -name '*.whl' -print -quit)
             if [ -z "$wheel" ]; then
               echo "::error::no wheel produced in ${dist_dir}"
               exit 1
