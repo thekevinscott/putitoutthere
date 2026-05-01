@@ -119,7 +119,7 @@ jobs:
       - name: Authenticate with crates.io (OIDC)
         if: contains(needs.build.outputs.matrix, '"kind":"crates"')
         id: crates-auth
-        uses: rust-lang/crates-io-auth-action@v1
+        uses: rust-lang/crates-io-auth-action@v1.0.4
 
       - name: Export CARGO_REGISTRY_TOKEN
         if: steps.crates-auth.outcome == 'success'
