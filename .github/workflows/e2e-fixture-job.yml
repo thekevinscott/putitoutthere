@@ -172,12 +172,27 @@ jobs:
       # (or [package].version from Cargo.toml when pyproject declares
       # `dynamic = ["version"]`), with no env override. Without this
       # step, wheels ship at the literal on disk regardless of plan.
+      #
+      # TEMPORARY (#276): the production path uses `uses: ./` against
+      # the JS action; the e2e e2e-fixture-job.yml here invokes the
+      # CLI directly via `run:` while we chase a Windows-specific
+      # write-version no-op. Direct invocation isolates whether the
+      # bug is in the action wrapper's INPUT_* handling vs. the
+      # underlying CLI / write-version logic. `_matrix.yml` (the
+      # production reusable workflow) keeps `uses: ./` until we know
+      # which path to fix. Restore `uses: ./` here once the cause is
+      # identified and patched.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
-        uses: ./
-        with:
-          command: write-version
-          working_directory: fixture-tree/${{ matrix.path }}
-          version: ${{ matrix.version }}
+        name: write-version (direct CLI; bypasses action wrapper, #276)
+        shell: bash
+        env:
+          PKG_PATH: ${{ matrix.path }}
+          PLANNED_VERSION: ${{ matrix.version }}
+        run: |
+          set -euxo pipefail
+          node ./dist/cli-bin.js write-version \
+            --path "fixture-tree/${PKG_PATH}" \
+            --version "${PLANNED_VERSION}"
 
       # TEMPORARY DIAGNOSTIC (#276): the Windows maturin path produces
       # wheels at the stale 0.0.1 baseline despite write-version
