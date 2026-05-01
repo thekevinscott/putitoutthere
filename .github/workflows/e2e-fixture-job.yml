@@ -179,12 +179,15 @@ jobs:
           working_directory: fixture-tree/${{ matrix.path }}
           version: ${{ matrix.version }}
 
-      # TEMPORARY DIAGNOSTIC (#276): retained for one more cycle while
-      # the Windows-specific failure is being chased — if the
-      # bump-both-manifests fix solves it, we strip this in a
-      # follow-up. Print pyproject + Cargo state post-bump, pre-maturin.
+      # TEMPORARY DIAGNOSTIC (#276): the Windows maturin path produces
+      # wheels at the stale 0.0.1 baseline despite write-version
+      # running. Linux/macOS bump correctly. Fail this step loudly
+      # if either manifest's `version =` line doesn't match
+      # matrix.version post-bump — cleaner failure than waiting for
+      # the post-maturin assertion. Strip once Windows-specific
+      # failure mode is fixed.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
-        name: DIAG (#276) post-write-version, pre-maturin manifest snapshot
+        name: DIAG (#276) verify write-version actually bumped both manifests
         shell: bash
         env:
           PKG_PATH: ${{ matrix.path }}
@@ -193,18 +196,34 @@ jobs:
         run: |
           set -uo pipefail
           base="fixture-tree/${PKG_PATH}"
-          echo "=== runner cwd ==="
-          pwd
-          echo "=== platform ==="
+          echo "=== platform / cwd ==="
           uname -a || true
-          echo "=== matrix ==="
-          echo "TARGET=${TARGET}"
-          echo "PLANNED_VERSION=${PLANNED_VERSION}"
-          echo "PKG_PATH=${PKG_PATH}"
+          pwd
+          echo "TARGET=${TARGET}  PLANNED_VERSION=${PLANNED_VERSION}  PKG_PATH=${PKG_PATH}"
           echo "=== ${base}/pyproject.toml (full) ==="
           cat "${base}/pyproject.toml" || echo "(missing)"
           echo "=== ${base}/Cargo.toml (full) ==="
           cat "${base}/Cargo.toml" || echo "(missing)"
+          fail=0
+          py_v=$(grep -E '^[[:space:]]*version[[:space:]]*=' "${base}/pyproject.toml" | head -1 || true)
+          cg_v=$(grep -E '^[[:space:]]*version[[:space:]]*=' "${base}/Cargo.toml" | head -1 || true)
+          echo "pyproject version line: ${py_v}"
+          echo "Cargo.toml version line: ${cg_v}"
+          case "${py_v}" in
+            *"${PLANNED_VERSION}"*) ;;
+            *)
+              echo "::error::pyproject.toml version line does NOT contain planned ${PLANNED_VERSION}: '${py_v}'"
+              fail=1
+              ;;
+          esac
+          case "${cg_v}" in
+            *"${PLANNED_VERSION}"*) ;;
+            *)
+              echo "::error::Cargo.toml version line does NOT contain planned ${PLANNED_VERSION}: '${cg_v}'"
+              fail=1
+              ;;
+          esac
+          exit "$fail"
 
       # Mirrors release.yml: `maturin build --sdist` produces wheel +
       # sdist; use `command: sdist` for sdist-only.
