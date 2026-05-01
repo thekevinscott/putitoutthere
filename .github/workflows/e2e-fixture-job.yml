@@ -179,6 +179,36 @@ jobs:
           working_directory: fixture-tree/${{ matrix.path }}
           version: ${{ matrix.version }}
 
+      # TEMPORARY DIAGNOSTIC (#276): the Windows build was producing
+      # wheels at the stale literal even after write-version ran;
+      # Linux/macOS bump correctly. Print pyproject + Cargo state
+      # post-bump, pre-maturin, to localise the divergence. Strip
+      # once the Windows-specific failure mode is understood.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
+        name: DIAG (#276) post-write-version, pre-maturin manifest snapshot
+        shell: bash
+        env:
+          PKG_PATH: ${{ matrix.path }}
+          PLANNED_VERSION: ${{ matrix.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -uo pipefail
+          base="fixture-tree/${PKG_PATH}"
+          echo "=== runner cwd ==="
+          pwd
+          echo "=== platform ==="
+          uname -a || true
+          echo "=== matrix ==="
+          echo "TARGET=${TARGET}"
+          echo "PLANNED_VERSION=${PLANNED_VERSION}"
+          echo "PKG_PATH=${PKG_PATH}"
+          echo "=== ${base}/pyproject.toml (full) ==="
+          cat "${base}/pyproject.toml" || echo "(missing)"
+          echo "=== ${base}/Cargo.toml (full) ==="
+          cat "${base}/Cargo.toml" || echo "(missing)"
+          echo "=== ${base} listing ==="
+          ls -la "${base}" || true
+
       # Mirrors release.yml: `maturin build --sdist` produces wheel +
       # sdist; use `command: sdist` for sdist-only.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target == 'sdist'
