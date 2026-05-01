@@ -152,9 +152,12 @@ describe('#276 build-phase version bump bumps the manifest the build tool reads'
 
     const after = readFileSync(pyPath, 'utf8');
     expect(after).toContain('version = "9.9.9"');
-    // Cargo.toml is untouched on the static-version path — maturin
-    // reads pyproject when [project].version is a literal.
-    expect(readFileSync(join(cwd, 'Cargo.toml'), 'utf8')).toContain('version = "0.1.0"');
+    // Cargo.toml ALSO bumped on the static-version path when a
+    // sibling [package].version is present — maturin's mismatch
+    // resolution varies by platform (PR #277 hit this on Windows;
+    // wheels shipped at the stale Cargo literal). Bumping both
+    // keeps the contract platform-independent.
+    expect(readFileSync(join(cwd, 'Cargo.toml'), 'utf8')).toContain('version = "9.9.9"');
   });
 
   it('python-rust-maturin (dynamic version) → Cargo.toml carries the planned version', async () => {

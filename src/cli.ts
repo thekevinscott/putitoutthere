@@ -180,7 +180,9 @@ export async function run(argv: readonly string[]): Promise<number> {
         if (!flags.version) throw new Error('write-version: --version <v> is required');
         const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
         const written = writeVersionForBuild(target, flags.version);
-        process.stdout.write(`write-version: ${target} → ${flags.version}; wrote ${written}\n`);
+        process.stdout.write(
+          `write-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
+        );
         return 0;
       }
       case 'publish': {

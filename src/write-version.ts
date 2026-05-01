@@ -27,12 +27,20 @@ import { replaceCargoVersion } from './handlers/crates.js';
 import { replacePyProjectVersion } from './handlers/pypi.js';
 
 /**
- * Rewrite the version source for a maturin package and return the
- * absolute path to the file that was modified.
+ * Rewrite the version source(s) for a maturin package and return the
+ * list of absolute paths that were modified.
  *
  * Dispatch:
  *  - `[project].version = "..."` is a static literal → rewrite
- *    pyproject.toml in place.
+ *    pyproject.toml in place. If a sibling `Cargo.toml` with a
+ *    `[package].version` line is present, rewrite it too. This is
+ *    not redundant: a python-rust-maturin shape with both a static
+ *    pyproject literal AND a Cargo `[package].version` literal will
+ *    have the two manifests disagree post-bump if only pyproject is
+ *    rewritten, and maturin's mismatch-resolution behavior varies
+ *    by platform / version (PR #277 hit this on Windows: wheels
+ *    shipped at the stale Cargo literal even though pyproject was
+ *    bumped). Bumping both keeps the contract straightforward.
  *  - `[project].dynamic = ["version", ...]` → rewrite the sibling
  *    `Cargo.toml`'s `[package].version`. Errors if Cargo.toml is
  *    missing.
@@ -45,7 +53,7 @@ import { replacePyProjectVersion } from './handlers/pypi.js';
  * (`pull/277` advisories #13, #14), and `pypi.writeVersion` already
  * uses the same try/catch shape we mirror here.
  */
-export function writeVersionForBuild(pkgDir: string, version: string): string {
+export function writeVersionForBuild(pkgDir: string, version: string): string[] {
   const pyProjectPath = join(pkgDir, 'pyproject.toml');
   let pyOriginal: string;
   try {
@@ -73,8 +81,9 @@ export function writeVersionForBuild(pkgDir: string, version: string): string {
     );
   }
 
+  const cargoPath = join(pkgDir, 'Cargo.toml');
+
   if (isDynamicVersion(project)) {
-    const cargoPath = join(pkgDir, 'Cargo.toml');
     let cargoOriginal: string;
     try {
       cargoOriginal = readFileSync(cargoPath, 'utf8');
@@ -90,12 +99,37 @@ export function writeVersionForBuild(pkgDir: string, version: string): string {
     }
     const cargoUpdated = replaceCargoVersion(cargoOriginal, version);
     if (cargoUpdated !== cargoOriginal) writeFileSync(cargoPath, cargoUpdated, 'utf8');
-    return cargoPath;
+    return [cargoPath];
   }
 
+  const written: string[] = [];
   const pyUpdated = replacePyProjectVersion(pyOriginal, version);
   if (pyUpdated !== pyOriginal) writeFileSync(pyProjectPath, pyUpdated, 'utf8');
-  return pyProjectPath;
+  written.push(pyProjectPath);
+
+  // Bump a sibling Cargo.toml's [package].version too, when present.
+  // Pure-python pyproject (no Rust crate) → no Cargo.toml → skip.
+  // Cargo.toml without [package].version (workspace root) → skip
+  // (replaceCargoVersion throws on missing field; catch and continue).
+  let cargoOriginal: string;
+  try {
+    cargoOriginal = readFileSync(cargoPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return written;
+    /* v8 ignore next -- non-ENOENT read errors surface as-is */
+    throw err;
+  }
+  let cargoUpdated: string;
+  try {
+    cargoUpdated = replaceCargoVersion(cargoOriginal, version);
+  } catch {
+    // No [package].version in Cargo.toml — nothing to bump on the
+    // Cargo side. The pyproject bump above is the source of truth.
+    return written;
+  }
+  if (cargoUpdated !== cargoOriginal) writeFileSync(cargoPath, cargoUpdated, 'utf8');
+  written.push(cargoPath);
+  return written;
 }
 
 function isDynamicVersion(project: { dynamic?: unknown }): boolean {

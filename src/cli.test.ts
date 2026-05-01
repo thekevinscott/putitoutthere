@@ -271,6 +271,101 @@ globs = ["packages/ts/**"]
     }
   });
 
+  it('write-version: bumps BOTH pyproject and sibling Cargo.toml on the static-literal path (#276)', async () => {
+    // python-rust-maturin shape: pyproject's [project].version is a
+    // static literal AND a sibling Cargo.toml carries [package].version.
+    // Maturin's mismatch-resolution behavior varies by platform/version
+    // — on Windows it shipped wheels at the stale Cargo literal even
+    // when pyproject was bumped. Bumping both keeps the contract
+    // platform-independent.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-with-cargo-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'Cargo.toml'),
+        ['[package]', 'name = "demo"', 'version = "0.1.0"', 'edition = "2021"', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.2.8"');
+      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).toContain('version = "0.2.8"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: static-literal path with no sibling Cargo.toml bumps only pyproject (#276)', async () => {
+    // Pure-python pyproject (no Rust crate alongside) — nothing to bump
+    // on the Cargo side; the pyproject bump alone is correct.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-no-cargo-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.2.8"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: static-literal path tolerates a Cargo.toml with no [package].version (#276)', async () => {
+    // Workspace-root Cargo.toml carries `[workspace]` but no
+    // `[package].version`. Skip it; bumping pyproject is sufficient.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-workspace-cargo-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'Cargo.toml'),
+        ['[workspace]', 'members = ["crates/*"]', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.2.8"');
+      // No [package].version line; Cargo.toml unchanged.
+      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).not.toContain('version');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('write-version: errors when pyproject is dynamic but Cargo.toml is missing (#276)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'write-version-no-cargo-'));
     try {
