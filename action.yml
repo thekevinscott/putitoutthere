@@ -21,8 +21,8 @@ inputs:
   version:
     description: >-
       Planned version string. Required when `command: write-version`
-      (#276); ignored otherwise. The reusable workflow forwards
-      `${{ matrix.version }}` from the build matrix.
+      (#276); ignored otherwise. The reusable workflow forwards the
+      build matrix's `version` row from the planner.
     required: false
     default: ''
   fail_on_error:

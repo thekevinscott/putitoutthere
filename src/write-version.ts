@@ -18,7 +18,7 @@
  * the rewrite, because the build step has no fallback.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -39,13 +39,26 @@ import { replacePyProjectVersion } from './handlers/pypi.js';
  *
  * Throws on missing pyproject.toml, malformed TOML, or a `[project]`
  * table that declares neither a literal nor `dynamic = ["version"]`.
+ *
+ * I/O uses `readFileSync` with `try` / `catch (ENOENT)` instead of an
+ * `existsSync` precheck — the precheck is a TOCTOU race CodeQL flags
+ * (`pull/277` advisories #13, #14), and `pypi.writeVersion` already
+ * uses the same try/catch shape we mirror here.
  */
 export function writeVersionForBuild(pkgDir: string, version: string): string {
   const pyProjectPath = join(pkgDir, 'pyproject.toml');
-  if (!existsSync(pyProjectPath)) {
-    throw new Error(`write-version: pyproject.toml not found at ${pyProjectPath}`);
+  let pyOriginal: string;
+  try {
+    pyOriginal = readFileSync(pyProjectPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`write-version: pyproject.toml not found at ${pyProjectPath}`, {
+        cause: err,
+      });
+    }
+    /* v8 ignore next -- non-ENOENT read errors surface as-is */
+    throw err;
   }
-  const pyOriginal = readFileSync(pyProjectPath, 'utf8');
   let parsed: unknown;
   try {
     parsed = parseToml(pyOriginal);
@@ -62,12 +75,19 @@ export function writeVersionForBuild(pkgDir: string, version: string): string {
 
   if (isDynamicVersion(project)) {
     const cargoPath = join(pkgDir, 'Cargo.toml');
-    if (!existsSync(cargoPath)) {
-      throw new Error(
-        `write-version: pyproject.toml declares dynamic = ["version"] but Cargo.toml is missing at ${cargoPath}. Maturin's dynamic-version mode reads [package].version from Cargo.toml; without it there's nothing to bump.`,
-      );
+    let cargoOriginal: string;
+    try {
+      cargoOriginal = readFileSync(cargoPath, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(
+          `write-version: pyproject.toml declares dynamic = ["version"] but Cargo.toml is missing at ${cargoPath}. Maturin's dynamic-version mode reads [package].version from Cargo.toml; without it there's nothing to bump.`,
+          { cause: err },
+        );
+      }
+      /* v8 ignore next -- non-ENOENT read errors surface as-is */
+      throw err;
     }
-    const cargoOriginal = readFileSync(cargoPath, 'utf8');
     const cargoUpdated = replaceCargoVersion(cargoOriginal, version);
     if (cargoUpdated !== cargoOriginal) writeFileSync(cargoPath, cargoUpdated, 'utf8');
     return cargoPath;
