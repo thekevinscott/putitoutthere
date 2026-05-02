@@ -4,15 +4,25 @@ author: 'Kevin Scott'
 
 inputs:
   command:
-    description: 'Which CLI subcommand to run. Canonical values are `plan` and `publish`.'
+    description: 'Which CLI subcommand to run. Canonical values are `plan`, `publish`, and `write-version`.'
     required: false
     default: 'plan'
   working_directory:
     description: >-
-      Path the CLI runs against (forwarded as `--cwd`). Defaults to the
-      runner working directory. Internal use; the reusable workflow
-      supplies this when invoked against a non-root tree (e.g. e2e
-      fixtures materialized into a subdir).
+      Path the CLI runs against. For `plan` / `publish`, forwarded as
+      `--cwd`. For `write-version` (#276), forwarded as `--path` —
+      the package directory whose pyproject.toml / Cargo.toml gets
+      bumped. Defaults to the runner working directory. Internal use;
+      the reusable workflow supplies this when invoked against a
+      non-root tree (e.g. e2e fixtures materialized into a subdir,
+      or a per-package `matrix.path`).
+    required: false
+    default: ''
+  version:
+    description: >-
+      Planned version string. Required when `command: write-version`
+      (#276); ignored otherwise. The reusable workflow forwards the
+      build matrix's `version` row from the planner.
     required: false
     default: ''
   fail_on_error:

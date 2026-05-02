@@ -112,6 +112,24 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
 
+      # #276: bump the version source on disk to matrix.version BEFORE
+      # maturin reads it. Maturin reads [project].version from
+      # pyproject.toml (or [package].version from a sibling Cargo.toml
+      # when pyproject declares dynamic = ["version"]) at build time,
+      # with no env override. Without this step, wheels ship at
+      # whatever literal is in the consumer's manifest — diverging
+      # from the planned version and tripping PyPI's "file already
+      # exists" rejection at upload. crates / npm bump at publish;
+      # setuptools-scm / hatch-vcs use SETUPTOOLS_SCM_PRETEND_VERSION
+      # below. Maturin is the only build path with no fallback, so
+      # the bump has to live here.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: write-version
+          working_directory: ${{ matrix.path }}
+          version: ${{ matrix.version }}
+
       # Two invocations: `maturin build --sdist` produces wheel AND sdist
       # (the flag is "also build sdist", not "only build sdist"), so the
       # sdist row would emit a wheel artifact that collides with the

@@ -23,6 +23,8 @@ describe('action', () => {
     vi.restoreAllMocks();
     delete process.env.INPUT_COMMAND;
     delete process.env.INPUT_FAIL_ON_ERROR;
+    delete process.env.INPUT_WORKING_DIRECTORY;
+    delete process.env.INPUT_VERSION;
   });
 
   it('fails when INPUT_COMMAND is missing', async () => {
@@ -41,6 +43,19 @@ describe('action', () => {
     process.env.INPUT_COMMAND = 'plan';
     process.env.INPUT_FAIL_ON_ERROR = 'false';
     await expect(main()).rejects.toThrow(/exit:0/);
+  });
+
+  it('write-version: forwards working_directory as --path and version as --version (#276)', async () => {
+    // The reusable workflow's `_matrix.yml` invokes the action with
+    // command: write-version, working_directory: ${{ matrix.path }},
+    // version: ${{ matrix.version }}. Confirm the dispatch arm
+    // forwards both inputs and exits non-zero on a missing pyproject
+    // (the realistic failure shape for the action wrapper).
+    process.env.INPUT_COMMAND = 'write-version';
+    process.env.INPUT_WORKING_DIRECTORY = '/path/that/does/not/exist';
+    process.env.INPUT_VERSION = '0.2.8';
+    await expect(main()).rejects.toThrow(/exit:1/);
+    expect(stderrChunks.join('')).toMatch(/pyproject\.toml/);
   });
 
 });

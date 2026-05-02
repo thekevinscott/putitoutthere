@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { run as runCli } from '../../src/cli.js';
 import { plan } from '../../src/plan.js';
 
 let repo: string;
@@ -111,6 +112,93 @@ describe('#30 rust-in-language fixtures', () => {
     const rows = await plan({ cwd });
     expect(rows).toHaveLength(6);
     expect(rows.filter((r) => r.target === 'main')).toHaveLength(1);
+  });
+});
+
+// #276: artifact-version vs plan-version contract for the build phase.
+//
+// The bug class: the build job produces an artifact whose embedded
+// version disagrees with `matrix.version`. We hit this on maturin —
+// wheels shipped at the literal pyproject.toml version regardless of
+// what plan computed. The same shape could open up in any build path.
+//
+// This is the unit-tier check: against each fixture, confirm the
+// version-source manifest the build phase would read carries the
+// planned version *after* running the bump that the build phase is
+// responsible for. Doesn't run maturin / cargo / npm itself; that's
+// the e2e tier (`.github/workflows/e2e-fixture-job.yml`). What it
+// does cover is the contract that the bump exists, targets the right
+// file, and produces the expected on-disk state.
+describe('#276 build-phase version bump bumps the manifest the build tool reads', () => {
+  it('python-rust-maturin (static [project].version) → pyproject.toml carries the planned version', async () => {
+    const cwd = prepareFixture('python-rust-maturin');
+    // Seed the manifest at a stale version to mirror the consumer
+    // case: pyproject.toml's literal lags the planned version.
+    const pyPath = join(cwd, 'pyproject.toml');
+    const original = readFileSync(pyPath, 'utf8');
+    expect(original).toContain('version = "0.1.0"');
+
+    // Invoke the CLI subcommand the build matrix calls before maturin.
+    const code = await runCli([
+      'node',
+      'putitoutthere',
+      'write-version',
+      '--path',
+      cwd,
+      '--version',
+      '9.9.9',
+    ]);
+    expect(code).toBe(0);
+
+    const after = readFileSync(pyPath, 'utf8');
+    expect(after).toContain('version = "9.9.9"');
+    // Cargo.toml ALSO bumped on the static-version path when a
+    // sibling [package].version is present — maturin's mismatch
+    // resolution varies by platform (PR #277 hit this on Windows;
+    // wheels shipped at the stale Cargo literal). Bumping both
+    // keeps the contract platform-independent.
+    expect(readFileSync(join(cwd, 'Cargo.toml'), 'utf8')).toContain('version = "9.9.9"');
+  });
+
+  it('python-rust-maturin (dynamic version) → Cargo.toml carries the planned version', async () => {
+    const cwd = prepareFixture('python-rust-maturin');
+    // Switch the fixture into maturin's dynamic-version shape: pyproject
+    // declares `dynamic = ["version"]` and the version source moves to
+    // Cargo.toml. The bump must follow.
+    const pyPath = join(cwd, 'pyproject.toml');
+    writeFileSync(
+      pyPath,
+      [
+        '[build-system]',
+        'requires = ["maturin>=1"]',
+        'build-backend = "maturin"',
+        '',
+        '[project]',
+        'name = "piot-fixture-zzz-python-maturin"',
+        'dynamic = ["version"]',
+        'description = "Put It Out There canary fixture. Safe to ignore."',
+        'license = { text = "MIT" }',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const pyBefore = readFileSync(pyPath, 'utf8');
+
+    const code = await runCli([
+      'node',
+      'putitoutthere',
+      'write-version',
+      '--path',
+      cwd,
+      '--version',
+      '9.9.9',
+    ]);
+    expect(code).toBe(0);
+
+    expect(readFileSync(join(cwd, 'Cargo.toml'), 'utf8')).toContain('version = "9.9.9"');
+    // pyproject is the dispatch input only; its content must not change
+    // on the dynamic-version path.
+    expect(readFileSync(pyPath, 'utf8')).toBe(pyBefore);
   });
 });
 

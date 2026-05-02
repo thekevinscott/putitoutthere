@@ -5,14 +5,20 @@
  * not promised externally. See `notes/design-commitments.md`.
  *
  * Commands:
- *   plan       — compute and emit the release plan
- *   publish    — execute the plan against the registries
- *   version    — print CLI version
+ *   plan           — compute and emit the release plan
+ *   publish        — execute the plan against the registries
+ *   write-version  — bump a package's manifest to a planned version
+ *                    (pre-build hook for maturin; #276)
+ *   version        — print CLI version
  *
  * Global flags:
  *   --cwd <path>      working directory (default: process.cwd())
  *   --config <path>   path to putitoutthere.toml
  *   --json            machine-readable output
+ *
+ * `write-version` flags:
+ *   --path <dir>      package directory (where pyproject.toml lives)
+ *   --version <v>     planned version to write
  *
  * `--dry-run` was removed deliberately (#244). The library's job is
  * publishing; a non-publishing mode of the publish command was a
@@ -24,9 +30,10 @@ import { isAbsolute, resolve } from 'node:path';
 
 import { plan } from './plan.js';
 import { publish } from './publish.js';
+import { writeVersionForBuild } from './write-version.js';
 import { VERSION } from './version.js';
 
-const COMMANDS = ['plan', 'publish', 'version'] as const;
+const COMMANDS = ['plan', 'publish', 'write-version', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
 
 function isCommand(value: string): value is Command {
@@ -39,13 +46,16 @@ function printUsage(): void {
       'Usage: putitoutthere <command> [options]',
       '',
       'Commands:',
-      '  plan       Compute and emit the release plan',
-      '  publish    Execute the plan',
-      '  version    Print CLI version',
+      '  plan           Compute and emit the release plan',
+      '  publish        Execute the plan',
+      '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
+      '  version        Print CLI version',
       '',
       'Options:',
       '  --cwd <path>      working directory',
       '  --config <path>   path to putitoutthere.toml',
+      '  --path <dir>      package directory (write-version)',
+      '  --version <v>     planned version (write-version)',
       '  --json            emit machine-readable output',
       '',
       'See https://github.com/thekevinscott/putitoutthere for docs.',
@@ -58,6 +68,11 @@ interface ParsedFlags {
   cwd: string;
   config?: string | undefined;
   json: boolean;
+  // #276 write-version inputs. Optional on the global flags type
+  // because they're only meaningful for that subcommand; the dispatch
+  // arm validates presence before use.
+  path?: string | undefined;
+  version?: string | undefined;
 }
 
 export function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -71,6 +86,8 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     if (a === '--cwd') out.cwd = argv[++i] ?? out.cwd;
     else if (a === '--config') out.config = argv[++i];
     else if (a === '--json') out.json = true;
+    else if (a === '--path') out.path = argv[++i];
+    else if (a === '--version') out.version = argv[++i];
     else if (a === '--dry-run') {
       // Removed in #244. Publishing is the library's only job; a
       // non-publishing flavor of `publish` is a coverage hole, not
@@ -151,6 +168,21 @@ export async function run(argv: readonly string[]): Promise<number> {
             ),
           );
         }
+        return 0;
+      }
+      case 'write-version': {
+        // #276: pre-build hook used by `_matrix.yml`'s maturin steps.
+        // Maturin reads the version from disk at build time with no
+        // env override, so the manifest must match the planned
+        // version before maturin runs. crates / npm bump at publish;
+        // setuptools-scm / hatch-vcs use SETUPTOOLS_SCM_PRETEND_VERSION.
+        if (!flags.path) throw new Error('write-version: --path <pkg-dir> is required');
+        if (!flags.version) throw new Error('write-version: --version <v> is required');
+        const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
+        const written = writeVersionForBuild(target, flags.version);
+        process.stdout.write(
+          `write-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
+        );
         return 0;
       }
       case 'publish': {

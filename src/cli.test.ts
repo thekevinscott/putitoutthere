@@ -207,6 +207,294 @@ globs = ["packages/ts/**"]
     expect(stderrChunks.join('')).toMatch(/--dry-run was removed/);
   });
 
+  it('write-version: rewrites static [project].version in pyproject.toml (#276)', async () => {
+    // Maturin reads [project].version from pyproject.toml at build time.
+    // The build matrix invokes this subcommand to bump the literal to
+    // matrix.version BEFORE calling maturin, so wheels leave the runner
+    // pre-versioned at the planned version.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.2.8"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: bumps Cargo.toml when pyproject declares dynamic = ["version"] (#276)', async () => {
+    // Maturin's dynamic-version mode reads [package].version from the
+    // sibling Cargo.toml. When pyproject opts into that, the bump
+    // target shifts from pyproject to Cargo.toml; pyproject is left
+    // untouched.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-dynamic-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'dynamic = ["version"]', ''].join('\n'),
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'Cargo.toml'),
+        ['[package]', 'name = "demo"', 'version = "0.1.0"', 'edition = "2021"', ''].join('\n'),
+        'utf8',
+      );
+      const before = readFileSync(join(dir, 'pyproject.toml'), 'utf8');
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).toContain('version = "0.2.8"');
+      // pyproject was the dispatch input; its content must not change.
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toBe(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: bumps BOTH pyproject and sibling Cargo.toml on the static-literal path (#276)', async () => {
+    // python-rust-maturin shape: pyproject's [project].version is a
+    // static literal AND a sibling Cargo.toml carries [package].version.
+    // Maturin's mismatch-resolution behavior varies by platform/version
+    // — on Windows it shipped wheels at the stale Cargo literal even
+    // when pyproject was bumped. Bumping both keeps the contract
+    // platform-independent.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-with-cargo-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'Cargo.toml'),
+        ['[package]', 'name = "demo"', 'version = "0.1.0"', 'edition = "2021"', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.2.8"');
+      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).toContain('version = "0.2.8"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: static-literal path with no sibling Cargo.toml bumps only pyproject (#276)', async () => {
+    // Pure-python pyproject (no Rust crate alongside) — nothing to bump
+    // on the Cargo side; the pyproject bump alone is correct.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-no-cargo-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.2.8"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: static-literal path tolerates a Cargo.toml with no [package].version (#276)', async () => {
+    // Workspace-root Cargo.toml carries `[workspace]` but no
+    // `[package].version`. Skip it; bumping pyproject is sufficient.
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-workspace-cargo-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
+        'utf8',
+      );
+      writeFileSync(
+        join(dir, 'Cargo.toml'),
+        ['[workspace]', 'members = ["crates/*"]', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.2.8"');
+      // No [package].version line; Cargo.toml unchanged.
+      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).not.toContain('version');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: errors when pyproject is dynamic but Cargo.toml is missing (#276)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-cargo-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        ['[project]', 'name = "demo"', 'dynamic = ["version"]', ''].join('\n'),
+        'utf8',
+      );
+      const stderrChunks: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/Cargo\.toml/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: errors when pyproject.toml is missing (#276)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-pyproject-'));
+    try {
+      const stderrChunks: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/pyproject\.toml/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: errors when pyproject.toml is malformed (#276)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-malformed-'));
+    try {
+      writeFileSync(join(dir, 'pyproject.toml'), '[project\nbroken = ', 'utf8');
+      const stderrChunks: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/parse|pyproject\.toml/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: errors when pyproject.toml has no [project] table (#276)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-project-'));
+    try {
+      writeFileSync(
+        join(dir, 'pyproject.toml'),
+        '[build-system]\nrequires = ["setuptools"]\n',
+        'utf8',
+      );
+      const stderrChunks: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+        '--version',
+        '0.2.8',
+      ]);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/\[project\]/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-version: errors when --version is missing (#276)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-version-'));
+    try {
+      const stderrChunks: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-version',
+        '--path',
+        dir,
+      ]);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/--version/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('publish exits 1 with PIOT_PUBLISH_EMPTY_PLAN when the plan is empty', async () => {
     // Invariant: if `publish` runs, something publishes. An empty
     // plan at this stage is a workflow-gate / engine-state bug and

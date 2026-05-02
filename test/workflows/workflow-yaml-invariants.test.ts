@@ -16,6 +16,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const workflowsDir = join(repoRoot, '.github/workflows');
@@ -136,5 +137,79 @@ describe('#246 workflow YAML invariants', () => {
   ])('%s gates the publish job on a non-empty matrix', (path, gate) => {
     const text = readFileSync(join(repoRoot, path), 'utf8');
     expect(text).toContain(gate);
+  });
+});
+
+// #276: every PyO3/maturin-action invocation in `_matrix.yml`'s build job
+// must be preceded by a step that bumps the package's version source to
+// `${{ matrix.version }}`. Without this, maturin reads whatever literal
+// is on disk in pyproject.toml and ships wheels at the stale version
+// — the registered package fails to upload because PyPI rejects
+// duplicate filenames.
+//
+// Other build paths bump elsewhere:
+//  - crates: writeVersion runs at publish.
+//  - npm:    writeVersion runs at publish.
+//  - pypi (setuptools-scm/hatch-vcs): SETUPTOOLS_SCM_PRETEND_VERSION env.
+// Maturin is the only build path where the artifact (wheel) leaves the
+// build runner pre-versioned, so the bump must happen here, before the
+// maturin call. See #276.
+describe('#276 _matrix.yml maturin pre-build version bump', () => {
+  interface Step {
+    if?: string;
+    uses?: string;
+    with?: Record<string, unknown>;
+  }
+  interface MatrixYaml {
+    jobs?: { build?: { steps?: Step[] } };
+  }
+
+  const matrixPath = join(repoRoot, '.github/workflows/_matrix.yml');
+  const matrix = parseYaml(readFileSync(matrixPath, 'utf8')) as MatrixYaml;
+  const buildSteps: Step[] = matrix.jobs?.build?.steps ?? [];
+
+  function isMaturinStep(step: Step): boolean {
+    return typeof step.uses === 'string' && step.uses.startsWith('PyO3/maturin-action');
+  }
+
+  function isVersionBumpStep(step: Step): boolean {
+    if (!step.with) return false;
+    const w = step.with as Record<string, unknown>;
+    if (w.command !== 'write-version') return false;
+    const version = typeof w.version === 'string' ? w.version : '';
+    return version.includes('matrix.version');
+  }
+
+  it('build job has at least one maturin step (parser sanity)', () => {
+    const maturinSteps = buildSteps.filter(isMaturinStep);
+    expect(maturinSteps.length).toBeGreaterThan(0);
+  });
+
+  it('every maturin invocation is preceded by a write-version step gated on the same matrix conditions', () => {
+    const offenders: string[] = [];
+    buildSteps.forEach((step, idx) => {
+      if (!isMaturinStep(step)) return;
+      const earlier = buildSteps.slice(0, idx);
+      const matchingBump = earlier.find(
+        (s) =>
+          isVersionBumpStep(s) &&
+          // The bump step must gate on matrix.kind == 'pypi' AND
+          // matrix.build == 'maturin' so it doesn't run for non-maturin
+          // pypi rows (where SETUPTOOLS_SCM_PRETEND_VERSION already
+          // handles the bump) or for any non-pypi row.
+          typeof s.if === 'string' &&
+          s.if.includes("matrix.kind == 'pypi'") &&
+          s.if.includes("matrix.build == 'maturin'"),
+      );
+      if (!matchingBump) {
+        offenders.push(
+          `step #${idx} (uses=${step.uses}, if=${step.if ?? '(none)'}) has no preceding write-version bump step`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `every maturin step must be preceded by a write-version bump:\n${offenders.join('\n')}`,
+    ).toEqual([]);
   });
 });

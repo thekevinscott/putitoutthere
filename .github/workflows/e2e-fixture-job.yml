@@ -141,26 +141,43 @@ jobs:
         shell: bash
         env:
           FIXTURE: ${{ inputs.fixture }}
-          # Build steps for sdist need the same SETUPTOOLS_SCM_PRETEND_VERSION
-          # the publish path expects; bake the version in here so the
-          # filename matches.
-          PLANNED_VERSION: ${{ matrix.version }}
         run: |
           set -euo pipefail
           rm -rf fixture-tree
           cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          # #276: the fixture is materialized at a STALE baseline (0.0.1),
+          # NOT matrix.version. This mirrors a real consumer whose
+          # pyproject.toml / Cargo.toml literal lags the planned version.
+          # `_matrix.yml` is responsible for bumping the manifest to
+          # `matrix.version` before maturin runs; the post-build assertion
+          # below verifies the produced artifacts agree with the plan.
+          # Earlier this step pre-substituted matrix.version, which silently
+          # masked the bug — wheels appeared correctly versioned because we
+          # patched the manifest, not because the build path did.
           # perl -i is portable across GNU sed (Linux) and BSD sed (macOS);
           # `sed -i ""` requires different argument shapes per platform.
           find fixture-tree \
             \( -name putitoutthere.toml -o -name package.json \
                -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
-            | xargs -0 perl -i -pe "s/__VERSION__/${PLANNED_VERSION}/g"
+            | xargs -0 perl -i -pe "s/__VERSION__/0.0.1/g"
 
       # ---- pypi ----
       - if: matrix.kind == 'pypi'
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
+      # #276: bump the version source to matrix.version before maturin
+      # reads it. Maturin reads [project].version from pyproject.toml
+      # (or [package].version from Cargo.toml when pyproject declares
+      # `dynamic = ["version"]`), with no env override. Without this
+      # step, wheels ship at the literal on disk regardless of plan.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
+        uses: ./
+        with:
+          command: write-version
+          working_directory: fixture-tree/${{ matrix.path }}
+          version: ${{ matrix.version }}
 
       # Mirrors release.yml: `maturin build --sdist` produces wheel +
       # sdist; use `command: sdist` for sdist-only.
@@ -177,6 +194,54 @@ jobs:
           working-directory: fixture-tree/${{ matrix.path }}
           command: build
           args: --release --out dist --target ${{ matrix.target }}
+
+      # #276: post-build assertion. The contract is "the build artifact
+      # carries matrix.version." Verify it directly against the
+      # produced files — independent of which mechanism ensured the
+      # manifest was correct. Catches the divergence regardless of
+      # which build path silently regressed.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
+        name: Verify wheel/sdist version matches matrix.version
+        shell: bash
+        env:
+          PLANNED_VERSION: ${{ matrix.version }}
+          PKG_PATH: ${{ matrix.path }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          dist_dir="fixture-tree/${PKG_PATH}/dist"
+          if [ ! -d "$dist_dir" ]; then
+            echo "::error::no dist/ produced under ${dist_dir}"
+            exit 1
+          fi
+          # Use `find -print -quit` not `ls` (SC2012); robust against
+          # non-alphanumeric filenames and avoids parsing `ls` output.
+          if [ "$TARGET" = 'sdist' ]; then
+            sdist=$(find "$dist_dir" -maxdepth 1 -name '*.tar.gz' -print -quit)
+            if [ -z "$sdist" ]; then
+              echo "::error::no sdist produced in ${dist_dir}"
+              exit 1
+            fi
+            case "$(basename "$sdist")" in
+              *-${PLANNED_VERSION}.tar.gz) echo "ok sdist: $(basename "$sdist")" ;;
+              *)
+                echo "::error::sdist filename '$(basename "$sdist")' does not contain planned version '${PLANNED_VERSION}'"
+                exit 1
+                ;;
+            esac
+          else
+            wheel=$(find "$dist_dir" -maxdepth 1 -name '*.whl' -print -quit)
+            if [ -z "$wheel" ]; then
+              echo "::error::no wheel produced in ${dist_dir}"
+              exit 1
+            fi
+            actual=$(unzip -p "$wheel" '*.dist-info/METADATA' | awk '/^Version:/ { print $2; exit }')
+            if [ "$actual" != "$PLANNED_VERSION" ]; then
+              echo "::error::wheel METADATA Version='${actual}' but plan='${PLANNED_VERSION}' (wheel: $(basename "$wheel"))"
+              exit 1
+            fi
+            echo "ok wheel: $(basename "$wheel") METADATA Version=${actual}"
+          fi
 
       - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
         working-directory: fixture-tree/${{ matrix.path }}
