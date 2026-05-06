@@ -24,9 +24,9 @@ features that expand the tool's surface area.
 ## Red/green TDD workflow
 
 Behavior changes — bug fixes and new features alike — land in two
-phases. Phase 1 ships only the failing test; phase 2 ships the
-implementation that turns it green. The two phases are **separate
-commits in separate PRs**, not two commits in one PR. The mechanics:
+phases on the **same PR**, as separate commits. Phase 1 commit
+ships only the failing test; phase 2 commit ships the implementation
+that turns it green. The mechanics:
 
 1. **Write the test first, at the right tier.** Two test tiers exist
    in this repo:
@@ -51,41 +51,44 @@ commits in separate PRs**, not two commits in one PR. The mechanics:
    to test a "publish should refuse" claim, you're at the wrong tier.
 
    Commit the test on a branch.
-2. **Open a PR with that single commit.** PR title prefixes the
+2. **Open the PR with that single commit.** PR title prefixes the
    work with `test:`. PR body explains the bug or missing
    behavior, links the tracking issue, and includes a screenshot or
    paste of the failing CI run so reviewers see the red without
    re-running it locally. Tag with `red-test` so the queue is
    greppable.
-3. **Stop.** Wait for review. The reviewer's job at this stage is
-   to confirm the test exercises the right boundary and would
-   actually catch the bug — not to evaluate any fix. If the test
-   shape is wrong, fixing it now is cheap; fixing it after the
-   implementation lands is not.
-4. **Merge the red test.** CI is red on `main` for the duration of
-   phase 2. That is the point. The red bar is a forcing function —
-   nobody else's branch can land green until the implementation
-   does, which keeps the gap short.
-5. **Open the implementation PR.** Branch off `main` (now red),
-   add the implementation, watch the same test go green. The
-   implementation PR is where `CHANGELOG.md` and `MIGRATIONS.md`
-   updates live (the test-only PR is a test-only change and skips
-   the changelog gate per the policy below).
+3. **Stop.** Wait for review of the test contract. The reviewer's
+   job at this stage is to confirm the test exercises the right
+   boundary and would actually catch the bug — not to evaluate any
+   fix. If the test shape is wrong, fixing it now is cheap; fixing
+   it after the implementation lands is not.
+4. **After the test contract is approved, push the implementation
+   commit on top of the same branch.** Watch the same test go from
+   red to green. The implementation commit is where `CHANGELOG.md`
+   and `MIGRATIONS.md` updates live (the test-only commit is a
+   test-only change and on its own would skip the changelog gate
+   per the policy below; the PR as a whole carries the entries).
+5. **The PR merges with both commits.** Squash-on-merge collapses
+   to one commit on `main`; the two-commit history on the PR
+   itself is what gives the workflow its diagnostic power.
 
 This shape exists because skipping phase 1 is the most common way
 agent-written PRs ship behavior that doesn't actually fix the
 described bug. When the test and the implementation arrive in one
 commit, reviewers cannot distinguish "the test would have caught
 this without the fix" from "the test was written against the
-implementation and passes only because of it." The two-PR
-sequence makes the test's diagnostic power observable.
+implementation and passes only because of it." Two separate
+commits — the test alone, and then the implementation on top —
+make the test's diagnostic power observable: a reviewer can
+check out the test commit, run CI, and see the red without the
+fix being present.
 
-The pattern applies equally to net-new features: the first PR
+The pattern applies equally to net-new features: the first commit
 defines, in test form, the contract the feature must satisfy.
 Reviewers debate the contract before the implementation exists,
 when redirecting is cheapest.
 
-Skip the red-test PR only for changes that have no behavioral
+Skip the red-test commit only for changes that have no behavioral
 contract to test — typo fixes, comment-only edits, dependency
 bumps with no code surface change, internal renames the type
 checker proves are safe. When in doubt, write the test.
