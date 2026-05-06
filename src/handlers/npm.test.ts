@@ -377,6 +377,103 @@ describe('npm.publish', () => {
     delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   });
 
+  // #280: hardening cases the existing inline check misses today.
+  // `assertRepositoryField` does `if (!pkg.repository)` — falsy-only.
+  // An object-form repository without `url`, an empty object, and a
+  // whitespace-only string all read as truthy and slip through; npm
+  // then rejects deep inside `npm publish --provenance`. These cases
+  // pin the contract that the engine refuses *any* unusable shape
+  // before invoking npm, and that the error carries the stable code
+  // (PIOT_NPM_MISSING_REPOSITORY) and the path of the offending file
+  // so foreign agents can fingerprint and so users have something
+  // actionable to grep for in their tree.
+
+  it('rejects an object-form repository without a `url` when OIDC is on (#280)', async () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo-npm', version: '0.1.0', repository: { type: 'git' } }),
+      'utf8',
+    );
+    execMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error('404'), { status: 1 });
+    });
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/PIOT_NPM_MISSING_REPOSITORY/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  });
+
+  it('rejects an empty repository object when OIDC is on (#280)', async () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo-npm', version: '0.1.0', repository: {} }),
+      'utf8',
+    );
+    execMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error('404'), { status: 1 });
+    });
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/PIOT_NPM_MISSING_REPOSITORY/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  });
+
+  it('rejects a whitespace-only repository string when OIDC is on (#280)', async () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo-npm', version: '0.1.0', repository: '   ' }),
+      'utf8',
+    );
+    execMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error('404'), { status: 1 });
+    });
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/PIOT_NPM_MISSING_REPOSITORY/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  });
+
+  it('error message names the package.json path and includes PIOT_NPM_MISSING_REPOSITORY (#280)', async () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo-npm', version: '0.1.0' }),
+      'utf8',
+    );
+    execMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error('404'), { status: 1 });
+    });
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    let caught: Error | undefined;
+    try {
+      await npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      );
+    } catch (err) {
+      caught = err as Error;
+    }
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain('PIOT_NPM_MISSING_REPOSITORY');
+    expect(caught!.message).toContain(join(dir, 'package.json'));
+  });
+
   it('surfaces publish failure stderr', async () => {
     execMock
       .mockImplementationOnce(() => {
