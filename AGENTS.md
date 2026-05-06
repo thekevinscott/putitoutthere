@@ -28,12 +28,29 @@ phases. Phase 1 ships only the failing test; phase 2 ships the
 implementation that turns it green. The two phases are **separate
 commits in separate PRs**, not two commits in one PR. The mechanics:
 
-1. **Write the test first.** Pick the integration boundary that
-   would have caught the bug in the wild (for engine work that's
-   almost always a `*.test.ts` exercising the public seam — `publish`,
-   `plan`, the reusable workflow's `workflow_call` contract — not a
-   unit test against the implementation file you're about to write).
-   Commit on a branch.
+1. **Write the test first, at the right tier.** Two test tiers exist
+   in this repo:
+
+   - **Unit tests** — `src/**/*.test.ts`, run via `pnpm test:unit`.
+     Heavy on mocks (handlers, subprocesses, network) so each suite
+     stays fast. Good for branching/orchestration logic; bad at
+     catching "the engine never called X" bugs because the X is the
+     mock.
+   - **Integration tests** — `test/integration/**/*.integration.test.ts`,
+     run via `pnpm test:integration`. Mock only the subprocess
+     boundary (`execFileSync`, `fetch`). Real config loader, real
+     plan, real preflight, real handler dispatch.
+
+   Behavior bugs that show up in the wild — "consumer published a
+   broken artifact and we didn't catch it" — almost always belong in
+   the integration tier. The bug usually IS that an upstream check
+   missed something the downstream subprocess would otherwise have
+   complained about; a unit test with a mock handler can't observe
+   that miss because the mock handler doesn't perform the check
+   either. If you find yourself writing `handlerFor: () => mockHandler`
+   to test a "publish should refuse" claim, you're at the wrong tier.
+
+   Commit the test on a branch.
 2. **Open a PR with that single commit.** PR title prefixes the
    work with `test:`. PR body explains the bug or missing
    behavior, links the tracking issue, and includes a screenshot or

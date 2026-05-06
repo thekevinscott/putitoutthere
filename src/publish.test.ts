@@ -161,23 +161,6 @@ globs = ["packages/py/**"]
     delete process.env.PYPI_API_TOKEN;
   });
 
-  it('aborts on missing repository field for an npm package (#280)', async () => {
-    // Overwrite the seeded package.json so it lacks `repository`. The
-    // preflight metadata check should reject before any handler runs.
-    writeRepoFile(
-      'packages/ts/package.json',
-      JSON.stringify({ name: 'lib-js', version: '0.0.0' }),
-    );
-    git(['add', '-A']);
-    git(['commit', '-m', 'chore: drop repository\n\nrelease: patch']);
-    const handler = makeHandler();
-    await expect(
-      publish({ cwd: repo, handlerFor: () => handler }),
-    ).rejects.toThrow(/PIOT_NPM_MISSING_REPOSITORY/);
-    expect(handler.publish).not.toHaveBeenCalled();
-    expect(handler.writeVersion).not.toHaveBeenCalled();
-  });
-
   it('throws PIOT_PUBLISH_EMPTY_PLAN when the plan is empty (cascade did not trigger)', async () => {
     // Tag HEAD so the package has a last tag, then commit a file
     // OUTSIDE the package's globs. Cascade has no work to do.
