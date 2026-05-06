@@ -183,6 +183,32 @@ version = 1   # required; only 1 is valid today
 | `build`   | string \| array        | `"napi"` \| `"bundled-cli"` (single mode), or an array of entries (each: a bare mode string or `{ mode, name }` with a [name template](#multi-mode-npm-family)). Omitted = vanilla. See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
 | `targets` | (string \| object)[]   | Required when `build` is set.                        |
 
+> [!IMPORTANT]
+> **`package.json` MUST declare a non-empty `repository` field.** `putitoutthere`
+> publishes npm packages with `npm publish --provenance` on the OIDC
+> trusted-publisher path; the npm CLI hard-requires `repository` so the
+> registry can verify the artifact was built from the repo the trusted
+> publisher declares. Preflight rejects the run with
+> `PIOT_NPM_MISSING_REPOSITORY` when the field is missing or empty.
+>
+> Canonical shape (use this in every npm `package.json` you publish through
+> `putitoutthere`):
+>
+> ```json
+> {
+>   "repository": {
+>     "type": "git",
+>     "url": "git+https://github.com/<owner>/<repo>.git",
+>     "directory": "<path/to/package>"
+>   }
+> }
+> ```
+>
+> `directory` is needed for monorepo packages so npm can locate the source
+> within the repo. The legacy single-string form
+> (`"repository": "git+https://github.com/<owner>/<repo>.git"`) is also
+> accepted.
+
 ### Example: polyglot Rust library
 
 One Rust crate feeds three artifacts:

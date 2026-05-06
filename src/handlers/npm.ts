@@ -21,6 +21,7 @@ import {
   type PlatformPkg,
 } from './npm-platform.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
+import { ErrorCodes } from '../error-codes.js';
 import { USER_AGENT } from '../version.js';
 
 type NpmPkg = {
@@ -120,9 +121,12 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
       nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
   );
 
-  // npm provenance requires a `repository` field in package.json
-  // that matches the git remote. Failing loud here is strictly better
-  // than letting npm publish fail at the end with a confusing error.
+  // npm provenance requires a non-empty `repository` field in
+  // package.json that matches the git remote. The primary check is
+  // `requireProvenanceMetadata` in src/preflight.ts (#280), which
+  // runs before any runner work. This inline assertion is a
+  // defensive backstop for direct handler calls that bypass the
+  // publish pipeline.
   if (hasOidc) {
     assertRepositoryField(pkg.path);
   }
@@ -187,9 +191,23 @@ function assertRepositoryField(path: string): void {
   const pkgJsonPath = join(path, 'package.json');
   const raw = readFileSync(pkgJsonPath, 'utf8');
   const pkg = JSON.parse(raw) as { repository?: unknown };
-  if (!pkg.repository) {
+  const repository = pkg.repository;
+  // Accept either the canonical object form (`{ type, url, … }`) or
+  // the legacy single-string form. Both shapes must carry a non-empty
+  // URL after trimming. `!pkg.repository` would pass `{}` and
+  // `{ type: 'git' }` since both are truthy — that's the bug #280
+  // is closing.
+  let ok = false;
+  if (typeof repository === 'string') {
+    ok = repository.trim().length > 0;
+  } else if (repository !== null && typeof repository === 'object') {
+    const url = (repository as { url?: unknown }).url;
+    ok = typeof url === 'string' && url.trim().length > 0;
+  }
+  if (!ok) {
     throw new Error(
-      'npm publish --provenance requires a `repository` field in package.json',
+      `[${ErrorCodes.NPM_MISSING_REPOSITORY}] npm publish --provenance requires a non-empty \`repository\` field in ${pkgJsonPath}. ` +
+        'See https://github.com/thekevinscott/putitoutthere#kind--npm.',
     );
   }
 }

@@ -30,6 +30,13 @@ export const ErrorCodes = {
    *  prevent this from being reached; if it fires, the gate was
    *  bypassed or the engine is inconsistent. */
   PUBLISH_EMPTY_PLAN: 'PIOT_PUBLISH_EMPTY_PLAN',
+  /** An npm package's `package.json` is missing a non-empty
+   *  `repository` field. `npm publish --provenance` (the OIDC
+   *  trusted-publisher path) requires it so the registry can verify
+   *  the artifact was built from the repo the trusted publisher
+   *  declares. Failing at preflight prevents wasting a build run on
+   *  a precondition checkable in milliseconds. #280. */
+  NPM_MISSING_REPOSITORY: 'PIOT_NPM_MISSING_REPOSITORY',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -41,4 +48,5 @@ export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.AUTH_NO_TOKEN,
   ErrorCodes.PUBLISH_EMPTY_PLAN,
+  ErrorCodes.NPM_MISSING_REPOSITORY,
 ];
