@@ -26,7 +26,7 @@ import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { formatTag } from './tag-template.js';
-import { requireAuth } from './preflight.js';
+import { requireAuth, requireProvenanceMetadata } from './preflight.js';
 import { withRetry } from './retry.js';
 import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
@@ -85,6 +85,12 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //    auth path (OIDC env or env-var token) before any side effects.
   const selectedPackages = [...perPackage.keys()].map((name) => mustGet(config.packages, name));
   requireAuth(selectedPackages);
+
+  // 2b. Pre-flight npm provenance metadata: every selected npm package's
+  //     package.json must carry a non-empty `repository` field. Without
+  //     it, `npm publish --provenance` fails deep inside the npm CLI
+  //     after the runner has spun up — checkable in milliseconds. #280.
+  requireProvenanceMetadata(selectedPackages);
 
   // 3. Artifact completeness.
   const completeness = checkCompleteness(matrix, artifactsRoot(cwd));

@@ -21,6 +21,78 @@ features that expand the tool's surface area.
 
 @notes/design-commitments.md
 
+## Red/green TDD workflow
+
+Behavior changes — bug fixes and new features alike — land in two
+phases on the **same PR**, as separate commits. Phase 1 commit
+ships only the failing test; phase 2 commit ships the implementation
+that turns it green. The mechanics:
+
+1. **Write the test first, at the right tier.** Two test tiers exist
+   in this repo:
+
+   - **Unit tests** — `src/**/*.test.ts`, run via `pnpm test:unit`.
+     Heavy on mocks (handlers, subprocesses, network) so each suite
+     stays fast. Good for branching/orchestration logic; bad at
+     catching "the engine never called X" bugs because the X is the
+     mock.
+   - **Integration tests** — `test/integration/**/*.integration.test.ts`,
+     run via `pnpm test:integration`. Mock only the subprocess
+     boundary (`execFileSync`, `fetch`). Real config loader, real
+     plan, real preflight, real handler dispatch.
+
+   Behavior bugs that show up in the wild — "consumer published a
+   broken artifact and we didn't catch it" — almost always belong in
+   the integration tier. The bug usually IS that an upstream check
+   missed something the downstream subprocess would otherwise have
+   complained about; a unit test with a mock handler can't observe
+   that miss because the mock handler doesn't perform the check
+   either. If you find yourself writing `handlerFor: () => mockHandler`
+   to test a "publish should refuse" claim, you're at the wrong tier.
+
+   Commit the test on a branch.
+2. **Open the PR with that single commit.** PR title prefixes the
+   work with `test:`. PR body explains the bug or missing
+   behavior, links the tracking issue, and includes a screenshot or
+   paste of the failing CI run so reviewers see the red without
+   re-running it locally. Tag with `red-test` so the queue is
+   greppable.
+3. **Stop.** Wait for review of the test contract. The reviewer's
+   job at this stage is to confirm the test exercises the right
+   boundary and would actually catch the bug — not to evaluate any
+   fix. If the test shape is wrong, fixing it now is cheap; fixing
+   it after the implementation lands is not.
+4. **After the test contract is approved, push the implementation
+   commit on top of the same branch.** Watch the same test go from
+   red to green. The implementation commit is where `CHANGELOG.md`
+   and `MIGRATIONS.md` updates live (the test-only commit is a
+   test-only change and on its own would skip the changelog gate
+   per the policy below; the PR as a whole carries the entries).
+5. **The PR merges with both commits.** Squash-on-merge collapses
+   to one commit on `main`; the two-commit history on the PR
+   itself is what gives the workflow its diagnostic power.
+
+This shape exists because skipping phase 1 is the most common way
+agent-written PRs ship behavior that doesn't actually fix the
+described bug. When the test and the implementation arrive in one
+commit, reviewers cannot distinguish "the test would have caught
+this without the fix" from "the test was written against the
+implementation and passes only because of it." Two separate
+commits — the test alone, and then the implementation on top —
+make the test's diagnostic power observable: a reviewer can
+check out the test commit, run CI, and see the red without the
+fix being present.
+
+The pattern applies equally to net-new features: the first commit
+defines, in test form, the contract the feature must satisfy.
+Reviewers debate the contract before the implementation exists,
+when redirecting is cheapest.
+
+Skip the red-test commit only for changes that have no behavioral
+contract to test — typo fixes, comment-only edits, dependency
+bumps with no code surface change, internal renames the type
+checker proves are safe. When in doubt, write the test.
+
 ## Changelog and migration policy
 
 Every PR that changes public API **must** update both `CHANGELOG.md` and
