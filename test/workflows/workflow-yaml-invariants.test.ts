@@ -393,6 +393,8 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
     uses?: string;
     run?: string;
     with?: Record<string, unknown>;
+    env?: Record<string, unknown>;
+    'working-directory'?: string;
   }
   interface MatrixYaml {
     jobs?: { build?: { steps?: Step[] } };
@@ -415,12 +417,24 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
     return condition.includes('matrix.bundle_cli');
   }
 
+  // Concatenate every place a matrix expression can legitimately appear
+  // on a step (run script, with: action inputs, env: vars, working-
+  // directory). Lets the assertions below check "this step references
+  // bundle_cli.bin somewhere" without dictating which subkey — env-var
+  // pattern (matrix expressions in `env:`, used by `$VAR` in run script)
+  // is the established style in `e2e-fixture-job.yml:198-238`.
+  function stepText(step: Step): string {
+    return [
+      step.run ?? '',
+      step['working-directory'] ?? '',
+      JSON.stringify(step.with ?? {}),
+      JSON.stringify(step.env ?? {}),
+    ].join('\n');
+  }
+
   function isCargoBuildStep(step: Step): boolean {
     if (!gatesOnBundleCli(step.if)) return false;
-    const text = [
-      step.run ?? '',
-      JSON.stringify(step.with ?? {}),
-    ].join('\n');
+    const text = stepText(step);
     return text.includes('cargo build')
       && text.includes('matrix.target')
       && text.includes('matrix.bundle_cli.bin');
@@ -428,22 +442,23 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
 
   function isStageStep(step: Step): boolean {
     if (!gatesOnBundleCli(step.if)) return false;
-    const run = step.run ?? '';
-    return run.includes('matrix.bundle_cli.stage_to')
-      && run.includes('matrix.bundle_cli.bin')
-      && run.includes('matrix.path');
+    const text = stepText(step);
+    return text.includes('matrix.bundle_cli.stage_to')
+      && text.includes('matrix.bundle_cli.bin')
+      && text.includes('matrix.path');
   }
 
   function isWheelGuardStep(step: Step): boolean {
     if (!gatesOnBundleCli(step.if)) return false;
     const run = step.run ?? '';
+    const text = stepText(step);
     // The guard opens the wheel and asserts it contains the staged
     // binary at <stage_to>/<bin>. unzip -l is the lightweight check;
     // a CLI subcommand would also satisfy this contract.
     const looksLikeWheelInspection = run.includes('.whl')
       && (run.includes('unzip') || run.includes('verify-bundle-cli'));
-    const referencesBin = run.includes('matrix.bundle_cli.bin')
-      && run.includes('matrix.bundle_cli.stage_to');
+    const referencesBin = text.includes('matrix.bundle_cli.bin')
+      && text.includes('matrix.bundle_cli.stage_to');
     return looksLikeWheelInspection && referencesBin;
   }
 
