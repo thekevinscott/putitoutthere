@@ -546,6 +546,25 @@ Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover
 `my-cli-x86_64-unknown-linux-gnu`).
 
+> [!NOTE]
+> **First-publish lockfile chicken-and-egg.** Some scaffolding will
+> populate `optionalDependencies` in your top-level `package.json`
+> with entries for `my-cli-<triple>@<version>` ahead of the first
+> publish. Those packages don't exist on the registry yet — the
+> engine publishes them as part of *this* run — so a locally-generated
+> `package-lock.json` / `pnpm-lock.yaml` either fails to install or
+> silently drops the entries (pnpm 10 does the silent drop). On the
+> next CI run, the strict installs (`npm ci`,
+> `pnpm install --frozen-lockfile`) refuse because lockfile and
+> `package.json` disagree.
+>
+> The reusable workflow handles this transparently: every strict
+> install in the build matrix and the publish-job rebuild step
+> falls back to its non-strict form on failure (with a
+> `::warning::` line in the run log so the recovery is visible).
+> No consumer-side change is required; you can keep the lockfile
+> committed and the `optionalDependencies` declared.
+
 ### Multi-mode npm family
 
 For a package that is both a napi-rs Node addon (a `.node` library) **and**

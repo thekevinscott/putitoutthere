@@ -270,6 +270,17 @@ jobs:
         working-directory: ${{ matrix.path }}
         # Build matrix can target Windows runners; default shell there is
         # pwsh, but `if [ -f ... ]` is bash. Force bash for portability.
+        #
+        # Strict installs (`npm ci`, `pnpm install --frozen-lockfile`) self-
+        # heal to their non-strict form on failure. Why: bundled-cli / napi
+        # consumers declare `optionalDependencies` for `<name>-<triple>@<version>`
+        # platform packages that this pipeline produces. On the first publish,
+        # those entries 404 on the registry; pnpm 10 silently drops 404'd
+        # optionals from the lockfile when it is regenerated locally, then
+        # `--frozen-lockfile` refuses on the next CI run because the lockfile
+        # and package.json disagree. The `::warning::` makes the fallback
+        # visible in the run log so the consumer understands the recovery.
+        # See README → Recipes → Bundled-CLI npm family.
         shell: bash
         env:
           # #287: bundled-cli / napi consumers' build scripts read TARGET
@@ -286,10 +297,16 @@ jobs:
           BUILD: ${{ matrix.build }}
         run: |
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci || {
+              echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
+              npm install
+            }
           elif [ -f pnpm-lock.yaml ]; then
             npm install -g pnpm@9
-            pnpm install --frozen-lockfile
+            pnpm install --frozen-lockfile || {
+              echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
+              pnpm install --no-frozen-lockfile
+            }
           else
             npm install
           fi
