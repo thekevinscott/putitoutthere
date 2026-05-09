@@ -10,8 +10,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   checkAuth,
+  checkCratesMetadata,
   checkProvenanceMetadata,
   requireAuth,
+  requireCratesMetadata,
   requireProvenanceMetadata,
   type AuthStatus,
 } from './preflight.js';
@@ -355,5 +357,181 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
 
   it('returns silently when there are no npm packages in the cascade', () => {
     expect(() => requireProvenanceMetadata([pkg('crates'), pkg('pypi')])).not.toThrow();
+  });
+});
+
+/* ----------------------- crates.io required metadata ----------------------- */
+
+describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'piot-crates-meta-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function cratesPkg(name: string, path: string): Package {
+    return pkg('crates', { name, path });
+  }
+
+  function writeCargoToml(path: string, body: string): void {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'Cargo.toml'), body, 'utf8');
+  }
+
+  it('passes when description + license are both present', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+description = "A test crate."
+license = "MIT"
+`,
+    );
+    expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    expect(() => requireCratesMetadata([cratesPkg('a', p)])).not.toThrow();
+  });
+
+  it('accepts license-file in place of license', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+description = "A test crate."
+license-file = "LICENSE"
+`,
+    );
+    expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+  });
+
+  it('reports missing description', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+license = "MIT"
+`,
+    );
+    const findings = checkCratesMetadata([cratesPkg('a', p)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ package: 'a', missing: ['description'] });
+  });
+
+  it('reports missing license when neither license nor license-file is set', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+description = "A test crate."
+`,
+    );
+    const findings = checkCratesMetadata([cratesPkg('a', p)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ package: 'a', missing: ['license'] });
+  });
+
+  it('reports both fields together when both are missing', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+`,
+    );
+    const findings = checkCratesMetadata([cratesPkg('a', p)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.missing).toEqual(['description', 'license']);
+  });
+
+  it('treats whitespace-only fields as empty', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+description = "   "
+license = ""
+`,
+    );
+    const findings = checkCratesMetadata([cratesPkg('a', p)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.missing).toEqual(['description', 'license']);
+  });
+
+  it('skips a missing Cargo.toml (the handler surfaces that error)', () => {
+    expect(checkCratesMetadata([cratesPkg('a', join(dir, 'nope'))])).toEqual([]);
+  });
+
+  it('skips a malformed Cargo.toml (cargo surfaces the diagnostic)', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(p, '[[broken\nthis = is not valid toml');
+    expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+  });
+
+  it('skips non-crates packages entirely', () => {
+    expect(checkCratesMetadata([pkg('npm'), pkg('pypi')])).toEqual([]);
+  });
+
+  it('reports every failing crates package, not just the first', () => {
+    const a = join(dir, 'a');
+    const b = join(dir, 'b');
+    writeCargoToml(a, `[package]\nname = "a"\nversion = "0.0.0"\n`);
+    writeCargoToml(b, `[package]\nname = "b"\nversion = "0.0.0"\n`);
+    const findings = checkCratesMetadata([cratesPkg('a', a), cratesPkg('b', b)]);
+    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
+  });
+
+  it('throws with PIOT_CRATES_MISSING_METADATA when any crates package fails', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(p, `[package]\nname = "a"\nversion = "0.0.0"\n`);
+    expect(() => requireCratesMetadata([cratesPkg('a', p)])).toThrow(
+      /PIOT_CRATES_MISSING_METADATA/,
+    );
+  });
+
+  it('error message names every failing package, its Cargo.toml path, and the missing fields', () => {
+    const a = join(dir, 'a');
+    const b = join(dir, 'b');
+    writeCargoToml(a, `[package]\nname = "a"\nversion = "0.0.0"\nlicense = "MIT"\n`);
+    writeCargoToml(b, `[package]\nname = "b"\nversion = "0.0.0"\ndescription = "x"\n`);
+    try {
+      requireCratesMetadata([cratesPkg('a', a), cratesPkg('b', b)]);
+      throw new Error('expected requireCratesMetadata to throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('a');
+      expect(msg).toContain('b');
+      expect(msg).toContain(join(a, 'Cargo.toml'));
+      expect(msg).toContain(join(b, 'Cargo.toml'));
+      expect(msg).toContain('description');
+      expect(msg).toContain('license');
+    }
+  });
+
+  it('error message includes a docs pointer to the cargo manifest reference', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(p, `[package]\nname = "a"\nversion = "0.0.0"\n`);
+    try {
+      requireCratesMetadata([cratesPkg('a', p)]);
+      throw new Error('expected requireCratesMetadata to throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('doc.rust-lang.org/cargo/reference/manifest.html');
+    }
+  });
+
+  it('returns silently when there are no crates packages in the cascade', () => {
+    expect(() => requireCratesMetadata([pkg('npm'), pkg('pypi')])).not.toThrow();
   });
 });
