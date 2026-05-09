@@ -370,3 +370,150 @@ describe('#276 _matrix.yml maturin pre-build version bump', () => {
     ).toEqual([]);
   });
 });
+
+// #282: `[package.bundle_cli]` is parsed by config, attached to per-target
+// wheel rows by the planner, and documented in the README — but
+// `_matrix.yml` never consumes it. Wheels for maturin packages that
+// declare `bundle_cli` ship without the bundled binary, and the
+// consumer's `pip install` flow fails at runtime.
+//
+// MIGRATIONS.md (#217) promised two scaffolded build steps gated on
+// `matrix.kind == 'pypi' && matrix.bundle_cli.bin != '' && matrix.target != 'sdist'`:
+//   - Setup Rust + cross-compile the binary for matrix.target
+//   - Stage the resulting binary into ${{ matrix.path }}/${{ matrix.bundle_cli.stage_to }}/
+// Plus a permanent post-build guard: the maturin-produced wheel must
+// contain the staged binary, or upload-artifact is refused. The guard
+// is independent of staging — it catches any future regression where
+// the cross-compile silently writes to the wrong path, and it stays
+// useful even after the staging step lands.
+describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
+  interface Step {
+    if?: string;
+    name?: string;
+    uses?: string;
+    run?: string;
+    with?: Record<string, unknown>;
+    env?: Record<string, unknown>;
+    'working-directory'?: string;
+  }
+  interface MatrixYaml {
+    jobs?: { build?: { steps?: Step[] } };
+  }
+
+  const matrixPath = join(repoRoot, '.github/workflows/_matrix.yml');
+  const matrix = parseYaml(readFileSync(matrixPath, 'utf8')) as MatrixYaml;
+  const buildSteps: Step[] = matrix.jobs?.build?.steps ?? [];
+
+  function isMaturinWheelStep(step: Step): boolean {
+    if (typeof step.uses !== 'string' || !step.uses.startsWith('PyO3/maturin-action')) return false;
+    // Per-target wheel build (not sdist).
+    return typeof step.if === 'string'
+      && step.if.includes("matrix.build == 'maturin'")
+      && step.if.includes("matrix.target != 'sdist'");
+  }
+
+  function gatesOnBundleCli(condition: string | undefined): boolean {
+    if (typeof condition !== 'string') return false;
+    return condition.includes('matrix.bundle_cli');
+  }
+
+  // Concatenate every place a matrix expression can legitimately appear
+  // on a step (run script, with: action inputs, env: vars, working-
+  // directory). Lets the assertions below check "this step references
+  // bundle_cli.bin somewhere" without dictating which subkey — env-var
+  // pattern (matrix expressions in `env:`, used by `$VAR` in run script)
+  // is the established style in `e2e-fixture-job.yml:198-238`.
+  function stepText(step: Step): string {
+    return [
+      step.run ?? '',
+      step['working-directory'] ?? '',
+      JSON.stringify(step.with ?? {}),
+      JSON.stringify(step.env ?? {}),
+    ].join('\n');
+  }
+
+  function isCargoBuildStep(step: Step): boolean {
+    if (!gatesOnBundleCli(step.if)) return false;
+    const text = stepText(step);
+    return text.includes('cargo build')
+      && text.includes('matrix.target')
+      && text.includes('matrix.bundle_cli.bin');
+  }
+
+  function isStageStep(step: Step): boolean {
+    if (!gatesOnBundleCli(step.if)) return false;
+    const text = stepText(step);
+    return text.includes('matrix.bundle_cli.stage_to')
+      && text.includes('matrix.bundle_cli.bin')
+      && text.includes('matrix.path');
+  }
+
+  function isWheelGuardStep(step: Step): boolean {
+    if (!gatesOnBundleCli(step.if)) return false;
+    const run = step.run ?? '';
+    const text = stepText(step);
+    // The guard opens the wheel and asserts it contains the staged
+    // binary at <stage_to>/<bin>. unzip -l is the lightweight check;
+    // a CLI subcommand would also satisfy this contract.
+    const looksLikeWheelInspection = run.includes('.whl')
+      && (run.includes('unzip') || run.includes('verify-bundle-cli'));
+    const referencesBin = text.includes('matrix.bundle_cli.bin')
+      && text.includes('matrix.bundle_cli.stage_to');
+    return looksLikeWheelInspection && referencesBin;
+  }
+
+  it('build job has at least one maturin per-target wheel step (parser sanity)', () => {
+    expect(buildSteps.filter(isMaturinWheelStep).length).toBeGreaterThan(0);
+  });
+
+  it('every maturin per-target wheel step is preceded by a bundle_cli cargo-build step', () => {
+    const offenders: string[] = [];
+    buildSteps.forEach((step, idx) => {
+      if (!isMaturinWheelStep(step)) return;
+      const earlier = buildSteps.slice(0, idx);
+      if (!earlier.some(isCargoBuildStep)) {
+        offenders.push(
+          `step #${idx} (uses=${step.uses}, if=${step.if ?? '(none)'}) has no preceding bundle_cli cargo-build step`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `each maturin wheel build needs a preceding step gated on matrix.bundle_cli that runs \`cargo build --release --target \${{ matrix.target }} --bin \${{ matrix.bundle_cli.bin }}\`:\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('every maturin per-target wheel step is preceded by a bundle_cli stage step', () => {
+    const offenders: string[] = [];
+    buildSteps.forEach((step, idx) => {
+      if (!isMaturinWheelStep(step)) return;
+      const earlier = buildSteps.slice(0, idx);
+      if (!earlier.some(isStageStep)) {
+        offenders.push(
+          `step #${idx} (uses=${step.uses}, if=${step.if ?? '(none)'}) has no preceding bundle_cli stage step`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `each maturin wheel build needs a preceding step gated on matrix.bundle_cli that copies the cross-compiled binary into \${{ matrix.path }}/\${{ matrix.bundle_cli.stage_to }}/:\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('every maturin per-target wheel step is followed by a wheel-content guard', () => {
+    const offenders: string[] = [];
+    buildSteps.forEach((step, idx) => {
+      if (!isMaturinWheelStep(step)) return;
+      const later = buildSteps.slice(idx + 1);
+      if (!later.some(isWheelGuardStep)) {
+        offenders.push(
+          `step #${idx} (uses=${step.uses}, if=${step.if ?? '(none)'}) has no following wheel-content guard`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `each maturin wheel build needs a following step gated on matrix.bundle_cli that opens the produced .whl and asserts it contains \${{ matrix.bundle_cli.stage_to }}/\${{ matrix.bundle_cli.bin }}:\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+});

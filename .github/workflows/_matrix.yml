@@ -142,12 +142,108 @@ jobs:
           command: sdist
           args: --out dist
 
+      # #282: bundle_cli — cross-compile a Rust CLI per target and stage
+      # it into the package source tree so maturin's [tool.maturin].include
+      # glob picks it up as wheel data. Without these steps, wheels for
+      # consumers who declare `[package.bundle_cli]` ship without the
+      # binary and `pip install <pkg> && <pkg> ...` fails at runtime with
+      # FileNotFoundError. Sdist row is excluded — sdists are source-only.
+      #
+      # Targets resolve to native runners via `defaultRunsOn` in
+      # `src/plan.ts`, so cargo cross-compile linkers are not needed:
+      # x86_64-linux on ubuntu-latest, aarch64-linux on ubuntu-24.04-arm,
+      # darwin on macos-latest, windows on windows-latest. Rust is
+      # pre-installed on all GHA runners; we only `rustup target add`
+      # to make the triple known.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
+        name: bundle_cli — add Rust target
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
+
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
+        name: bundle_cli — cargo build for ${{ matrix.target }} (${{ matrix.bundle_cli.bin }})
+        shell: bash
+        working-directory: ${{ matrix.bundle_cli.crate_path }}
+        env:
+          TARGET: ${{ matrix.target }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+        run: cargo build --release --target "$TARGET" --bin "$BIN"
+
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
+        name: bundle_cli — stage binary into ${{ matrix.path }}/${{ matrix.bundle_cli.stage_to }}
+        shell: bash
+        env:
+          CRATE_PATH: ${{ matrix.bundle_cli.crate_path }}
+          PKG_PATH: ${{ matrix.path }}
+          STAGE_TO: ${{ matrix.bundle_cli.stage_to }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          src="${CRATE_PATH}/target/${TARGET}/release/${BIN}${ext}"
+          dst_dir="${PKG_PATH}/${STAGE_TO}"
+          if [ ! -f "$src" ]; then
+            echo "::error::cargo build did not produce ${src}"
+            ls -la "${CRATE_PATH}/target/${TARGET}/release/" || true
+            exit 1
+          fi
+          mkdir -p "$dst_dir"
+          cp "$src" "$dst_dir/"
+          echo "staged: $src -> $dst_dir/${BIN}${ext}"
+
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
         uses: PyO3/maturin-action@v1
         with:
           working-directory: ${{ matrix.path }}
           command: build
           args: --release --out dist --target ${{ matrix.target }}
+
+      # #282: wheel-content guard. Permanent defense-in-depth — the
+      # produced wheel must contain the staged binary at <stage_to>/<bin>.
+      # Catches the bug shape this issue tracks (no staging happened) and
+      # any future regression where the cross-compile silently routes the
+      # binary to the wrong path. Runs before upload-artifact, so a
+      # broken wheel never leaves the build runner.
+      #
+      # Path-inside-wheel notes: maturin rewrites paths from the package
+      # source root into the wheel's distribution layout. The exact path
+      # depends on the consumer's pyproject layout (`python/<pkg>/...`
+      # vs `src/<pkg>/...`), so we can't assert against a fully qualified
+      # in-wheel path. We assert that *some* directory inside the wheel
+      # ends in the consumer's `stage_to` and contains the named bin —
+      # which is the strongest cross-layout assertion that still catches
+      # "binary missing entirely."
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
+        name: bundle_cli — verify wheel contains ${{ matrix.bundle_cli.stage_to }}/${{ matrix.bundle_cli.bin }}
+        shell: bash
+        env:
+          PKG_PATH: ${{ matrix.path }}
+          STAGE_TO: ${{ matrix.bundle_cli.stage_to }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          dist_dir="${PKG_PATH}/dist"
+          wheel=$(find "$dist_dir" -maxdepth 1 -name '*.whl' -print -quit)
+          if [ -z "${wheel:-}" ]; then
+            echo "::error::no wheel produced under ${dist_dir}"
+            exit 1
+          fi
+          # Strip leading ./ if present, accept any in-wheel directory
+          # ending in <stage_to>'s suffix.
+          stage_suffix="${STAGE_TO#./}"
+          expected="${BIN}${ext}"
+          if ! unzip -l "$wheel" | awk '{print $NF}' \
+               | grep -qE "(^|/)${stage_suffix}/${expected}\$"; then
+            echo "::error::wheel $(basename "$wheel") missing bundle_cli binary at ${stage_suffix}/${expected}"
+            echo "wheel contents:"
+            unzip -l "$wheel"
+            exit 1
+          fi
+          echo "ok bundle_cli: ${stage_suffix}/${expected} present in $(basename "$wheel")"
 
       - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
         # hatch-vcs / setuptools-scm derive the version from the latest git
