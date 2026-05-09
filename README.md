@@ -301,23 +301,48 @@ releases without fighting registry-immutable-publish semantics.
 
 ## Trusted publishers
 
-OIDC trusted publishers — the only auth path supported. Long-lived
-registry tokens are not reachable through the workflow.
+OIDC trusted publishers are the default and recommended auth path.
+The reusable workflow also accepts a long-lived `CARGO_REGISTRY_TOKEN`
+via `secrets:` for cases where Trusted Publishing isn't reachable —
+most commonly the very first publish of a brand-new crate, since
+Trusted Publishing on crates.io binds to an *already-published* crate
+and there's no pending-publisher equivalent. When set, the OIDC
+exchange is skipped and the caller-provided token is used instead.
+Drop the secret once Trusted Publishing is registered against the
+existing crate.
 
-For all three registries the fields are the same: **your** repository
-owner/name, **your** workflow filename (`release.yml`), and optionally
-a GitHub environment name. Note: you register against your *own*
-repository, not against `thekevinscott/putitoutthere` — see "How
-auth flows" below for the why.
+For all three registries the OIDC fields are the same: **your**
+repository owner/name, **your** workflow filename (`release.yml`),
+and optionally a GitHub environment name. Note: you register against
+your *own* repository, not against `thekevinscott/putitoutthere` —
+see "How auth flows" below for the why.
 
 ### crates.io
 
-1. Publish your crate once through the normal `cargo` flow so the crate
-   exists. (Trusted publishing needs a crate owner record.)
+1. **First publish (brand-new crate).** Trusted Publishing binds to
+   an existing crate, so the first `cargo publish` has no OIDC path.
+   Either run `cargo publish` once locally with your account's API
+   token, or pass `CARGO_REGISTRY_TOKEN` to the reusable workflow via
+   `secrets:` to bootstrap through this workflow:
+
+   ```yaml
+   jobs:
+     release:
+       uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
+       secrets:
+         CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+   ```
+
+   When `CARGO_REGISTRY_TOKEN` is set, the OIDC step
+   (`rust-lang/crates-io-auth-action`) is skipped and the caller-
+   provided token is exported to the publish step's environment.
 2. Go to `https://crates.io/crates/<crate>/settings` → **Trusted Publishing**
    → **Add**.
 3. Fill in: your repo owner, your repo name, workflow filename
    (`release.yml`), environment (optional).
+4. Drop the `CARGO_REGISTRY_TOKEN` secret from the workflow once
+   Trusted Publishing is registered; subsequent publishes are
+   zero-secret on the OIDC path.
 
 ### PyPI
 
