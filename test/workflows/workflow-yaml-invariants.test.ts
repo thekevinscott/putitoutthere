@@ -140,6 +140,123 @@ describe('#246 workflow YAML invariants', () => {
   });
 });
 
+// #283: the reusable workflow must accept a caller-provided
+// `CARGO_REGISTRY_TOKEN` via `secrets:` and prefer it over OIDC when
+// present. Trusted Publishing on crates.io is configured per-crate
+// against an *already-published* crate, so the very first publish
+// has no OIDC path available — without this fallback, every Rust
+// consumer's first release through `putitoutthere` is blocked at
+// `rust-lang/crates-io-auth-action@v1`. The contract this test pins:
+//
+//  1. `on.workflow_call.secrets.CARGO_REGISTRY_TOKEN` is declared and
+//     optional (no `required: true`); callers without a token still
+//     get the OIDC path unchanged.
+//  2. The OIDC step (`rust-lang/crates-io-auth-action`) is skipped
+//     when the secret is provided. Running both paths would clobber
+//     the caller's token in `$GITHUB_ENV` with the OIDC-minted one.
+//  3. A step exports the caller-provided secret to `$GITHUB_ENV` as
+//     `CARGO_REGISTRY_TOKEN`, gated on the secret being non-empty,
+//     so the engine's crates handler (which reads the env var) sees
+//     it without caring which path produced it.
+describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => {
+  interface Step {
+    name?: string;
+    if?: string;
+    uses?: string;
+    run?: string;
+    env?: Record<string, string>;
+  }
+  interface ReleaseYaml {
+    on?: {
+      workflow_call?: {
+        secrets?: Record<string, { required?: boolean; description?: string } | null>;
+      };
+    };
+    jobs?: { publish?: { steps?: Step[] } };
+  }
+
+  const releasePath = join(repoRoot, '.github/workflows/release.yml');
+  const release = parseYaml(readFileSync(releasePath, 'utf8')) as ReleaseYaml;
+  const publishSteps: Step[] = release.jobs?.publish?.steps ?? [];
+
+  it('declares CARGO_REGISTRY_TOKEN under workflow_call.secrets', () => {
+    const secrets = release.on?.workflow_call?.secrets;
+    expect(
+      secrets,
+      'workflow_call must declare a `secrets:` block (issue #283)',
+    ).toBeDefined();
+    expect(
+      secrets,
+      'workflow_call.secrets must declare CARGO_REGISTRY_TOKEN (issue #283)',
+    ).toHaveProperty('CARGO_REGISTRY_TOKEN');
+  });
+
+  it('CARGO_REGISTRY_TOKEN is optional (callers without a token keep the OIDC path)', () => {
+    const entry = release.on?.workflow_call?.secrets?.CARGO_REGISTRY_TOKEN;
+    // YAML `SECRET:` (no value) parses to null; `SECRET: { required: false }`
+    // is also acceptable. The thing that would break the contract is
+    // `required: true`, which would force every caller — including
+    // OIDC-only ones — to wire a token they don't have.
+    if (entry && typeof entry === 'object') {
+      expect(
+        entry.required,
+        'CARGO_REGISTRY_TOKEN must not be `required: true` (issue #283)',
+      ).not.toBe(true);
+    }
+  });
+
+  it('the crates-io-auth-action step is skipped when the secret is provided', () => {
+    const oidcStep = publishSteps.find(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('rust-lang/crates-io-auth-action'),
+    );
+    expect(
+      oidcStep,
+      'expected a `rust-lang/crates-io-auth-action` step in the publish job',
+    ).toBeDefined();
+    expect(
+      oidcStep?.if,
+      'the OIDC step must be conditional (issue #283)',
+    ).toBeDefined();
+    // The `if:` must reference `secrets.CARGO_REGISTRY_TOKEN` so the
+    // step is skipped when the caller supplied a token. We don't pin
+    // exact expression syntax — `secrets.X == ''`, `!secrets.X`, etc.
+    // all satisfy the contract — only that the gate references the
+    // secret name.
+    expect(
+      oidcStep?.if ?? '',
+      "the OIDC step's `if:` must reference secrets.CARGO_REGISTRY_TOKEN (issue #283)",
+    ).toMatch(/secrets\.CARGO_REGISTRY_TOKEN/);
+  });
+
+  it('a step exports the caller-provided secret to GITHUB_ENV as CARGO_REGISTRY_TOKEN', () => {
+    // Look for a `run:` step that writes CARGO_REGISTRY_TOKEN to
+    // $GITHUB_ENV, sourcing it from `secrets.CARGO_REGISTRY_TOKEN`
+    // (either via the step's env: block or directly inlined). The
+    // OIDC export step (which sources from `steps.crates-auth.outputs.token`)
+    // does not satisfy this contract — it can't run when the OIDC
+    // step itself has been skipped.
+    const exportSteps = publishSteps.filter((s) => {
+      if (typeof s.run !== 'string') return false;
+      if (!s.run.includes('CARGO_REGISTRY_TOKEN') || !s.run.includes('GITHUB_ENV')) return false;
+      const envBlock = s.env ?? {};
+      const inlinedFromSecret = Object.values(envBlock).some(
+        (v) => typeof v === 'string' && v.includes('secrets.CARGO_REGISTRY_TOKEN'),
+      );
+      const directlyFromSecret = s.run.includes('secrets.CARGO_REGISTRY_TOKEN');
+      return inlinedFromSecret || directlyFromSecret;
+    });
+    expect(
+      exportSteps,
+      'expected a publish-job step that exports secrets.CARGO_REGISTRY_TOKEN to $GITHUB_ENV (issue #283)',
+    ).not.toEqual([]);
+    const step = exportSteps[0]!;
+    expect(
+      step.if ?? '',
+      "the token-export step must gate on secrets.CARGO_REGISTRY_TOKEN being non-empty (issue #283)",
+    ).toMatch(/secrets\.CARGO_REGISTRY_TOKEN/);
+  });
+});
+
 // #276: every PyO3/maturin-action invocation in `_matrix.yml`'s build job
 // must be preceded by a step that bumps the package's version source to
 // `${{ matrix.version }}`. Without this, maturin reads whatever literal
