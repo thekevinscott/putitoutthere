@@ -61,6 +61,18 @@ before `job_workflow_ref` is even checked. Running `pypa/gh-action-pypi-publish`
 in your workflow context aligns the claims with your TP registration.
 The job is skipped automatically for repos that don't publish to PyPI.
 
+> [!IMPORTANT]
+> **Don't run anything else on `push: branches: [main]`.** If you have
+> per-language CI workflows (`rust.yml`, `node.yml`, `python.yml`,
+> etc.), keep them on `pull_request:` only — drop any `push: branches: [main]`
+> trigger they may carry. Branch protection plus PR-required CI already
+> covered the merge commit's contents on the PR build; firing the lane
+> workflows a second time on the push to `main` is duplicate work that
+> contends for runners with `release.yml` and delays the release. A repo
+> with three lane workflows + paths filters that all match the merge
+> commit will fire four workflows where one was wanted. Fix: keep
+> `release.yml` as the only `push: branches: [main]` workflow.
+
 Optional inputs — `with:` block at the call site:
 
 | Input            | Default      | Use when                                                                 |
@@ -69,10 +81,13 @@ Optional inputs — `with:` block at the call site:
 | `node_version`   | `24`         | You need a specific Node version for `kind = "npm"` build steps.         |
 | `python_version` | `3.12`       | You need a specific Python version for `kind = "pypi"` build steps.      |
 
-### 1b. Optional: drop in `.github/workflows/build-check.yml`
+### 1b. Recommended: drop in `.github/workflows/build-check.yml`
 
 Run the same plan + build matrix on every PR, with the publish step
-structurally absent:
+structurally absent. This is the cheapest way to catch a malformed
+`putitoutthere.toml`, missing `repository` field, or per-target build
+break **before** the merge — by the time the release workflow runs,
+the merge has already happened and the only recourse is a fix-up PR.
 
 ```yaml
 name: Build check
@@ -111,6 +126,18 @@ tag_format = "v{version}"   # single-package repos often want this
 
 `globs` are the path globs that trigger a release. Any commit touching a
 matching file makes the package a candidate.
+
+> [!CAUTION]
+> **Four schema gotchas, one per line.** Every one of these has tripped a
+> consumer at least once; the engine throws a hint when it sees them but
+> they're cheaper to avoid than to debug.
+>
+> | Wrong                              | Right                          |
+> |------------------------------------|--------------------------------|
+> | `version = 1` at file root         | `[putitoutthere]` table with `version = 1` inside |
+> | `[[packages]]` (plural)            | `[[package]]` (singular, one block per package)   |
+> | `registry = "crates"`              | `kind = "crates"`              |
+> | `files = ["src/**"]`               | `globs = ["src/**"]`           |
 
 More config patterns are in [Configuration](#configuration) below.
 
