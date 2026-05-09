@@ -248,6 +248,78 @@ build = "maturin"
   });
 });
 
+describe('parseConfig: friendly hints for common mistakes', () => {
+  // The integration failure that motivates these hints (#integration-2026-05):
+  // a consumer wrote `version = 1` at the file root, used `[[packages]]`
+  // (plural), `registry =` instead of `kind =`, and `files =` instead of
+  // `globs =`. The raw zod errors ("Invalid input: expected object, received
+  // undefined; ...; Unrecognized keys: \"version\", \"packages\"") were too
+  // opaque to recover from without reading the schema source. Each hint here
+  // names the mistake and the fix in one breath.
+
+  it('hints when [putitoutthere] table is missing entirely', () => {
+    // No `[putitoutthere]` table, just a raw `version = 1` at the file root
+    // alongside `[[packages]]` (plural). Reproduction of the exact integration
+    // failure from #integration-2026-05.
+    expect(() =>
+      parseConfig(`
+version = 1
+
+[[packages]]
+name = "x"
+kind = "crates"
+path = "."
+globs = ["**"]
+`),
+    ).toThrow(/missing \[putitoutthere\] table/i);
+  });
+
+  it('hints "did you mean [[package]]?" when [[packages]] is used', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+
+[[packages]]
+name = "x"
+kind = "crates"
+path = "."
+globs = ["**"]
+`),
+    ).toThrow(/\[\[packages\]\].+\[\[package\]\]/);
+  });
+
+  it('hints "did you mean kind?" when registry= is used', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name     = "x"
+registry = "crates"
+path     = "."
+globs    = ["**"]
+`),
+    ).toThrow(/registry.+kind/i);
+  });
+
+  it('hints "did you mean globs?" when files= is used', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "x"
+kind  = "crates"
+path  = "."
+files = ["**"]
+`),
+    ).toThrow(/files.+globs/i);
+  });
+});
+
 describe('parseConfig: kind validation', () => {
   it('rejects unknown kind', () => {
     expect(() =>
