@@ -271,6 +271,19 @@ jobs:
         # Build matrix can target Windows runners; default shell there is
         # pwsh, but `if [ -f ... ]` is bash. Force bash for portability.
         shell: bash
+        env:
+          # #287: bundled-cli / napi consumers' build scripts read TARGET
+          # to know which triple to cross-compile and stage under
+          # `build/<triple>/<bin>`. Multi-mode (napi + bundled-cli)
+          # consumers also read BUILD so a single script can dispatch
+          # on the mode. Vanilla / `target == 'main'` rows ignore both.
+          # Mirrors what `e2e-fixture-job.yml` passes to the same step
+          # for the `js-bundled-cli` / `js-napi` fixtures; without this
+          # block, the reusable workflow's contract diverged from the
+          # fixture and consumers' first publish produced empty
+          # `build/<triple>/` artifacts.
+          TARGET: ${{ matrix.target }}
+          BUILD: ${{ matrix.build }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci

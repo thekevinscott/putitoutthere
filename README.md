@@ -483,6 +483,65 @@ const result = spawnSync(binary, process.argv.slice(2), { stdio: 'inherit' });
 process.exit(result.status ?? 1);
 ```
 
+You also author a `build` script in `package.json` that does the
+cross-compile. The reusable workflow runs the build matrix once
+per `(target × main)` row, sets `TARGET=<triple>` /
+`BUILD=bundled-cli` on the build step, and expects the script to
+stage the compiled binary under `build/<triple>/<bin-name>` (with
+`.exe` suffix on Windows). For every per-target row the engine
+then packages `build/<triple>/` as the platform sub-package's
+artifact; the `main` row is a no-op for the build script (the
+launcher above is committed source). A minimal `package.json`:
+
+```json
+{
+  "name": "my-cli",
+  "scripts": {
+    "build": "node scripts/build.cjs"
+  },
+  "bin": { "my-cli": "bin/my-cli.js" }
+}
+```
+
+`scripts/build.cjs`:
+
+```js
+const { execFileSync, spawnSync } = require('node:child_process');
+const { mkdirSync, copyFileSync } = require('node:fs');
+const { join } = require('node:path');
+const pkg = require('../package.json');
+
+const target = process.env.TARGET;
+// `target === 'main'` is the top-level row: nothing to compile,
+// the launcher is committed source.
+if (!target || target === 'main' || target === 'noarch') process.exit(0);
+
+const binName = Object.keys(pkg.bin || {})[0] || pkg.name;
+const ext = target.includes('windows') ? '.exe' : '';
+
+execFileSync('rustup', ['target', 'add', target], { stdio: 'inherit' });
+execFileSync(
+  'cargo',
+  ['build', '--release', '--target', target, '--bin', binName],
+  { cwd: '../../crates/my-cli', stdio: 'inherit' },
+);
+
+const dir = join('build', target);
+mkdirSync(dir, { recursive: true });
+copyFileSync(
+  join('../../crates/my-cli/target', target, 'release', binName + ext),
+  join(dir, binName + ext),
+);
+```
+
+The build is consumer-owned because `cargo build` flags
+(`--features`, env vars, alternate manifests, Zig-cc cross
+toolchains) vary too much across crates to bake into the
+workflow. For the simple "single workspace member, default
+features" case the script above is the entire integration; tweak
+it as your crate demands. `TARGET` and `BUILD` are the only env
+vars the workflow guarantees.
+
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover
 `my-cli-x86_64-unknown-linux-gnu`).
