@@ -255,6 +255,21 @@ describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => 
       "the token-export step must gate on secrets.CARGO_REGISTRY_TOKEN being non-empty (issue #283)",
     ).toMatch(/secrets\.CARGO_REGISTRY_TOKEN/);
   });
+
+  // The secret *name* is part of the workflow's public API: a consumer
+  // copy-pasting from the README has to spell it exactly to wire the
+  // fallback. Lock the documented name to the workflow-declared name
+  // so a future rename can't slip through with the docs left stale —
+  // mirrors the `reusable workflow path matches README` invariant
+  // above. See AGENTS.md > "Where to put what" — README is the single
+  // user-facing surface.
+  it('CARGO_REGISTRY_TOKEN secret name is documented in README', () => {
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    expect(
+      readme,
+      'README must mention CARGO_REGISTRY_TOKEN by name so consumers can wire the secret (issue #283)',
+    ).toMatch(/CARGO_REGISTRY_TOKEN/);
+  });
 });
 
 // #276: every PyO3/maturin-action invocation in `_matrix.yml`'s build job
