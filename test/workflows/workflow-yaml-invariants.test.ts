@@ -172,12 +172,14 @@ describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => 
         secrets?: Record<string, { required?: boolean; description?: string } | null>;
       };
     };
-    jobs?: { publish?: { steps?: Step[] } };
+    jobs?: { publish?: { env?: Record<string, string>; steps?: Step[] } };
   }
 
   const releasePath = join(repoRoot, '.github/workflows/release.yml');
-  const release = parseYaml(readFileSync(releasePath, 'utf8')) as ReleaseYaml;
-  const publishSteps: Step[] = release.jobs?.publish?.steps ?? [];
+  const releaseText = readFileSync(releasePath, 'utf8');
+  const release = parseYaml(releaseText) as ReleaseYaml;
+  const publishJob = release.jobs?.publish;
+  const publishSteps: Step[] = publishJob?.steps ?? [];
 
   it('declares CARGO_REGISTRY_TOKEN under workflow_call.secrets', () => {
     const secrets = release.on?.workflow_call?.secrets;
@@ -205,7 +207,26 @@ describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => 
     }
   });
 
-  it('the crates-io-auth-action step is skipped when the secret is provided', () => {
+  it('the publish job wires secrets.CARGO_REGISTRY_TOKEN into its env so step-level conditions can read it', () => {
+    // GitHub Actions doesn't allow the `secrets` context inside
+    // step-level `if:` (only `env`, `inputs`, `needs`, etc — see
+    // https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability).
+    // The workflow therefore has to promote the optional caller-provided
+    // secret to the job's env block; the step `if:` then reads through
+    // that env var. Pin the wiring so a future edit can't drop the
+    // promotion and silently break the gate (the OIDC step would then
+    // run unconditionally and clobber any caller token in $GITHUB_ENV).
+    const env = publishJob?.env ?? {};
+    const wired = Object.values(env).filter(
+      (v) => typeof v === 'string' && v.includes('secrets.CARGO_REGISTRY_TOKEN'),
+    );
+    expect(
+      wired.length,
+      'publish job must expose secrets.CARGO_REGISTRY_TOKEN via its `env:` block (issue #283)',
+    ).toBeGreaterThan(0);
+  });
+
+  it('the crates-io-auth-action step is skipped when the caller supplied a token', () => {
     const oidcStep = publishSteps.find(
       (s) => typeof s.uses === 'string' && s.uses.startsWith('rust-lang/crates-io-auth-action'),
     );
@@ -217,24 +238,27 @@ describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => 
       oidcStep?.if,
       'the OIDC step must be conditional (issue #283)',
     ).toBeDefined();
-    // The `if:` must reference `secrets.CARGO_REGISTRY_TOKEN` so the
-    // step is skipped when the caller supplied a token. We don't pin
-    // exact expression syntax — `secrets.X == ''`, `!secrets.X`, etc.
-    // all satisfy the contract — only that the gate references the
-    // secret name.
+    // The gate must reference CARGO_REGISTRY_TOKEN — either the secret
+    // name directly (where allowed) or the env var the workflow defines
+    // to expose it. We don't pin exact expression syntax beyond that.
     expect(
       oidcStep?.if ?? '',
-      "the OIDC step's `if:` must reference secrets.CARGO_REGISTRY_TOKEN (issue #283)",
-    ).toMatch(/secrets\.CARGO_REGISTRY_TOKEN/);
+      "the OIDC step's `if:` must reference CARGO_REGISTRY_TOKEN (directly or via the env-var promotion) (issue #283)",
+    ).toMatch(/CARGO_REGISTRY_TOKEN/);
   });
 
   it('a step exports the caller-provided secret to GITHUB_ENV as CARGO_REGISTRY_TOKEN', () => {
     // Look for a `run:` step that writes CARGO_REGISTRY_TOKEN to
-    // $GITHUB_ENV, sourcing it from `secrets.CARGO_REGISTRY_TOKEN`
-    // (either via the step's env: block or directly inlined). The
-    // OIDC export step (which sources from `steps.crates-auth.outputs.token`)
-    // does not satisfy this contract — it can't run when the OIDC
-    // step itself has been skipped.
+    // $GITHUB_ENV, sourcing it from secrets.CARGO_REGISTRY_TOKEN —
+    // either inlined as ${{ secrets.X }} in the step's env: / run:,
+    // or via the job-level env-var promotion (env.CALLER_X-style),
+    // since step-level `if:` can't reference `secrets` directly.
+    // The OIDC export step (which sources from
+    // `steps.crates-auth.outputs.token`) does not satisfy this
+    // contract — it can't run when the OIDC step itself was skipped.
+    const jobEnvKeys = Object.entries(publishJob?.env ?? [])
+      .filter(([, v]) => typeof v === 'string' && v.includes('secrets.CARGO_REGISTRY_TOKEN'))
+      .map(([k]) => k);
     const exportSteps = publishSteps.filter((s) => {
       if (typeof s.run !== 'string') return false;
       if (!s.run.includes('CARGO_REGISTRY_TOKEN') || !s.run.includes('GITHUB_ENV')) return false;
@@ -243,17 +267,18 @@ describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => 
         (v) => typeof v === 'string' && v.includes('secrets.CARGO_REGISTRY_TOKEN'),
       );
       const directlyFromSecret = s.run.includes('secrets.CARGO_REGISTRY_TOKEN');
-      return inlinedFromSecret || directlyFromSecret;
+      const fromJobEnv = jobEnvKeys.some((k) => s.run!.includes(`$${k}`) || s.run!.includes(`\${${k}}`));
+      return inlinedFromSecret || directlyFromSecret || fromJobEnv;
     });
     expect(
       exportSteps,
-      'expected a publish-job step that exports secrets.CARGO_REGISTRY_TOKEN to $GITHUB_ENV (issue #283)',
+      'expected a publish-job step that exports the caller-provided crates.io token to $GITHUB_ENV (issue #283)',
     ).not.toEqual([]);
     const step = exportSteps[0]!;
     expect(
       step.if ?? '',
-      "the token-export step must gate on secrets.CARGO_REGISTRY_TOKEN being non-empty (issue #283)",
-    ).toMatch(/secrets\.CARGO_REGISTRY_TOKEN/);
+      "the token-export step must gate on CARGO_REGISTRY_TOKEN being non-empty (issue #283)",
+    ).toMatch(/CARGO_REGISTRY_TOKEN/);
   });
 
   // The secret *name* is part of the workflow's public API: a consumer

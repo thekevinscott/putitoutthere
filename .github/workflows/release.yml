@@ -98,6 +98,14 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      # Promote the optional caller-provided crates.io token to a job-
+      # level env var so step `if:` conditions can gate on it. The
+      # `secrets` context isn't available in step-level `if:` (only
+      # `env`, `inputs`, `needs`, etc), so the OIDC vs caller-token
+      # branching has to read through this var. Empty string when the
+      # caller didn't wire the secret; non-empty when they did.
+      CALLER_CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -132,7 +140,7 @@ jobs:
       # publisher on crates.io; callers passing a long-lived token
       # also skip it so the OIDC-minted token doesn't clobber theirs.
       - name: Authenticate with crates.io (OIDC)
-        if: contains(needs.build.outputs.matrix, '"kind":"crates"') && secrets.CARGO_REGISTRY_TOKEN == ''
+        if: contains(needs.build.outputs.matrix, '"kind":"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN == ''
         id: crates-auth
         uses: rust-lang/crates-io-auth-action@v1.0.4
 
@@ -147,12 +155,12 @@ jobs:
       # publish of a brand-new crate has no OIDC path; this step lets
       # the caller supply a long-lived token via `secrets:` and have
       # the engine's crates handler pick it up through $GITHUB_ENV
-      # exactly as it would the OIDC-minted one.
+      # exactly as it would the OIDC-minted one. The secret is read
+      # through the job-level `CALLER_CARGO_REGISTRY_TOKEN` env var
+      # because step-level `if:` cannot reference the `secrets` context.
       - name: Export CARGO_REGISTRY_TOKEN (caller-provided)
-        if: contains(needs.build.outputs.matrix, '"kind":"crates"') && secrets.CARGO_REGISTRY_TOKEN != ''
-        env:
-          CRATES_IO_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
+        if: contains(needs.build.outputs.matrix, '"kind":"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN != ''
+        run: echo "CARGO_REGISTRY_TOKEN=$CALLER_CARGO_REGISTRY_TOKEN" >> "$GITHUB_ENV"
 
       # Build npm packages from source before `npm publish` runs.
       # The build job's `dist/` is not carried through as an artifact

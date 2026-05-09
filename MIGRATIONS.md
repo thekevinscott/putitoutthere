@@ -61,10 +61,14 @@ the now-existing crate; subsequent publishes are zero-secret.
 **Behavior changes without code changes.** None when the secret
 is unset (OIDC path unchanged). When the secret is set, the
 publish job's "Authenticate with crates.io (OIDC)" step is
-conditionally skipped via the `secrets.CARGO_REGISTRY_TOKEN ==
-''` clause on its `if:`, and a new "Export CARGO_REGISTRY_TOKEN
+conditionally skipped and a new "Export CARGO_REGISTRY_TOKEN
 (caller-provided)" step writes the secret to `$GITHUB_ENV`
-gated on the secret being non-empty.
+gated on the same condition. The gate reads the secret through a
+job-level `CALLER_CARGO_REGISTRY_TOKEN` env var because GitHub
+Actions does not allow the `secrets` context inside step-level
+`if:` conditions ([context availability](https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability));
+this is an internal mechanism — consumers don't see or set
+`CALLER_CARGO_REGISTRY_TOKEN` themselves.
 
 **Verification.** Wire `CARGO_REGISTRY_TOKEN` to a valid
 crates.io API token in the caller repo and trigger a release.
