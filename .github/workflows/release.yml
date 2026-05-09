@@ -190,7 +190,18 @@ jobs:
             else
               npm install
             fi
-            npm run build --if-present
+            # #287: export TARGET / BUILD so consumer build scripts that
+            # dispatch on them (bundled-cli / napi) see a defined value
+            # rather than `undefined`. The publish-time rebuild only runs
+            # for the *main* package row (per-platform sub-packages stage
+            # from artifacts/ via the engine's npm-platform handler and
+            # are unaffected here), so TARGET is fixed at "main" — build
+            # scripts written against the documented contract no-op on
+            # TARGET=main and run vanilla TS/JS compilation otherwise.
+            # BUILD is left empty because there is no single matrix-row
+            # `build` mode at this point: a multi-mode package is both
+            # napi and bundled-cli; the rebuild is the union view.
+            TARGET=main BUILD= npm run build --if-present
             popd > /dev/null
             echo "::endgroup::"
           done
