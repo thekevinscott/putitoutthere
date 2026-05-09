@@ -201,7 +201,7 @@ jobs:
             # BUILD is left empty because there is no single matrix-row
             # `build` mode at this point: a multi-mode package is both
             # napi and bundled-cli; the rebuild is the union view.
-            TARGET=main BUILD= npm run build --if-present
+            TARGET=main BUILD='' npm run build --if-present
             popd > /dev/null
             echo "::endgroup::"
           done
