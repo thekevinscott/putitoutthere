@@ -652,6 +652,12 @@ depends_on = ["my-rust"]
 bin        = "my-cli"
 stage_to   = "src/my_py/_binary"
 crate_path = "crates/my-rust"
+# Optional. Forwarded to `cargo build` when the binary lives behind
+# `[[bin]] required-features = ["cli"]` (the lib-with-optional-CLI shape:
+# ruff / uv / pydantic-core / biome / swc). Empty list = no `--features`
+# flag, identical to omitting the key.
+features            = ["cli"]
+no_default_features = false
 ```
 
 The reusable workflow cross-compiles the binary per target and stages it

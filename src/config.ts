@@ -106,6 +106,16 @@ const BUNDLE_CLI = z
     // which works for most workspace Cargo.toml layouts. Override when
     // the crate lives outside a workspace (e.g. `crates/my-tool`).
     crate_path: z.string().min(1).default('.'),
+    // #300: forwarded to `cargo build --features <list>`. The lib-with-
+    // optional-CLI shape (ruff/uv/pydantic-core/biome/swc/dirsql) gates
+    // the binary behind `[[bin]] required-features = ["cli"]`; without
+    // a way to pass `--features`, those crates' binaries fail to build.
+    // Empty list = no `--features` flag.
+    features: z.array(z.string().min(1)).default([]),
+    // #300: forwarded to `cargo build --no-default-features`. Pairs with
+    // `features` for crates that want a minimal CLI binary built from a
+    // disjoint feature set than the library's defaults.
+    no_default_features: z.boolean().default(false),
   })
   .strict();
 

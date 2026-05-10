@@ -759,11 +759,13 @@ crate_path = "crates/my-rust"
 
   it('accepts a complete [package.bundle_cli] block', () => {
     const cfg = parseConfig(WITH_BUNDLE);
-    const pkg = cfg.packages[0] as { bundle_cli?: { bin: string; stage_to: string; crate_path: string } };
+    const pkg = cfg.packages[0] as { bundle_cli?: { bin: string; stage_to: string; crate_path: string; features: string[]; no_default_features: boolean } };
     expect(pkg.bundle_cli).toEqual({
       bin: 'my-cli',
       stage_to: 'src/my_py/_binary',
       crate_path: 'crates/my-rust',
+      features: [],
+      no_default_features: false,
     });
   });
 

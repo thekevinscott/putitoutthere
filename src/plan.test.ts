@@ -823,6 +823,8 @@ crate_path = "crates/my-rust"
         bin: 'my-cli',
         stage_to: 'src/my_py/_binary',
         crate_path: 'crates/my-rust',
+        features: [],
+        no_default_features: false,
       });
     }
 
