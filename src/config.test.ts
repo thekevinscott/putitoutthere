@@ -822,6 +822,67 @@ stage_to = "bin"
   });
 });
 
+/* --------------------- #300: bundle_cli features --------------------- */
+
+describe('parseConfig: bundle_cli features (#300)', () => {
+  const WITH_BUNDLE = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-py"
+kind = "pypi"
+path = "py/my-py"
+globs = ["py/my-py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+stage_to = "src/my_py/_binary"
+crate_path = "crates/my-rust"
+`;
+
+  it('accepts features and no_default_features inside bundle_cli', () => {
+    const cfg = parseConfig(
+      WITH_BUNDLE +
+        `features = ["cli"]
+no_default_features = true
+`,
+    );
+    const pkg = cfg.packages[0] as {
+      bundle_cli?: { features: string[]; no_default_features: boolean };
+    };
+    expect(pkg.bundle_cli?.features).toEqual(['cli']);
+    expect(pkg.bundle_cli?.no_default_features).toBe(true);
+  });
+
+  it('defaults features to [] and no_default_features to false', () => {
+    const cfg = parseConfig(WITH_BUNDLE);
+    const pkg = cfg.packages[0] as {
+      bundle_cli?: { features: string[]; no_default_features: boolean };
+    };
+    expect(pkg.bundle_cli?.features).toEqual([]);
+    expect(pkg.bundle_cli?.no_default_features).toBe(false);
+  });
+
+  it('rejects empty-string entries in features', () => {
+    const bad =
+      WITH_BUNDLE +
+      `features = ["cli", ""]
+`;
+    expect(() => parseConfig(bad)).toThrow();
+  });
+
+  it('rejects non-string entries in features', () => {
+    const bad =
+      WITH_BUNDLE +
+      `features = ["cli", 1]
+`;
+    expect(() => parseConfig(bad)).toThrow();
+  });
+});
+
 // #230: actions/upload-artifact@v4 forbids `/` and several other characters
 // in artifact names. The planner encodes `/` to `__` (the only realistically
 // usable forbidden char in piot identifiers); the rest are rejected at
