@@ -297,6 +297,152 @@ describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => 
   });
 });
 
+// #302: mirror of #283 for npm. Trusted Publishing on npm binds to an
+// *already-published* package, so the very first publish of a brand-new
+// package has no OIDC path available — consumers were forced to hand-publish
+// `0.0.0-bootstrap` stubs of every per-platform sub-package with a
+// long-lived NODE_AUTH_TOKEN before they could register Trusted Publishers
+// and use this workflow. Hit in the wild on the maintainer's own dirsql
+// project (`@dirsql/cli-linux-x64-gnu` first version on npm is
+// `0.0.0-bootstrap`, 2026-04-30; real `0.2.8` lands the next day) and on
+// `darkfactory`'s first publish. The contract this test pins:
+//
+//  1. `on.workflow_call.secrets.NPM_TOKEN` is declared and optional
+//     (no `required: true`); callers without a token still get the
+//     OIDC path unchanged.
+//  2. The publish job promotes `secrets.NPM_TOKEN` to a job-level
+//     env var so step-level `if:` conditions can gate on it (the
+//     `secrets` context isn't available in step-level `if:`).
+//  3. A step exports the caller-provided secret to `$GITHUB_ENV` as
+//     `NODE_AUTH_TOKEN`, gated on the secret being non-empty and the
+//     planned matrix containing at least one `kind = "npm"` row, so
+//     the engine's npm handler (and the npm CLI itself) sees it
+//     instead of attempting OIDC.
+//
+// Mirror of #283 in shape, byte-for-byte. The npm side has no separate
+// OIDC step to "skip" (npm CLI handles OIDC internally via the runner's
+// id-token); presence of NODE_AUTH_TOKEN in the env makes the CLI prefer
+// the long-lived token over the OIDC path.
+describe('#302 release.yml accepts caller-provided NPM_TOKEN', () => {
+  interface Step {
+    name?: string;
+    if?: string;
+    uses?: string;
+    run?: string;
+    env?: Record<string, string>;
+  }
+  interface ReleaseYaml {
+    on?: {
+      workflow_call?: {
+        secrets?: Record<string, { required?: boolean; description?: string } | null>;
+      };
+    };
+    jobs?: { publish?: { env?: Record<string, string>; steps?: Step[] } };
+  }
+
+  const releasePath = join(repoRoot, '.github/workflows/release.yml');
+  const releaseText = readFileSync(releasePath, 'utf8');
+  const release = parseYaml(releaseText) as ReleaseYaml;
+  const publishJob = release.jobs?.publish;
+  const publishSteps: Step[] = publishJob?.steps ?? [];
+
+  it('declares NPM_TOKEN under workflow_call.secrets', () => {
+    const secrets = release.on?.workflow_call?.secrets;
+    expect(
+      secrets,
+      'workflow_call must declare a `secrets:` block (issue #302)',
+    ).toBeDefined();
+    expect(
+      secrets,
+      'workflow_call.secrets must declare NPM_TOKEN (issue #302)',
+    ).toHaveProperty('NPM_TOKEN');
+  });
+
+  it('NPM_TOKEN is optional (callers without a token keep the OIDC path)', () => {
+    const entry = release.on?.workflow_call?.secrets?.NPM_TOKEN;
+    // YAML `SECRET:` (no value) parses to null; `SECRET: { required: false }`
+    // is also acceptable. `required: true` would force every caller —
+    // including OIDC-only ones — to wire a token they don't have.
+    if (entry && typeof entry === 'object') {
+      expect(
+        entry.required,
+        'NPM_TOKEN must not be `required: true` (issue #302)',
+      ).not.toBe(true);
+    }
+  });
+
+  it('the publish job wires secrets.NPM_TOKEN into its env so step-level conditions can read it', () => {
+    // GitHub Actions doesn't allow the `secrets` context inside
+    // step-level `if:` (only `env`, `inputs`, `needs`, etc — see
+    // https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability).
+    // The workflow therefore has to promote the optional caller-provided
+    // secret to the job's env block; the step `if:` then reads through
+    // that env var. Pin the wiring so a future edit can't drop the
+    // promotion and silently break the gate. Mirrors the #283 invariant.
+    const env = publishJob?.env ?? {};
+    const wired = Object.values(env).filter(
+      (v) => typeof v === 'string' && v.includes('secrets.NPM_TOKEN'),
+    );
+    expect(
+      wired.length,
+      'publish job must expose secrets.NPM_TOKEN via its `env:` block (issue #302)',
+    ).toBeGreaterThan(0);
+  });
+
+  it('a step exports the caller-provided secret to GITHUB_ENV as NODE_AUTH_TOKEN', () => {
+    // Look for a `run:` step that writes NODE_AUTH_TOKEN to $GITHUB_ENV,
+    // sourcing it from secrets.NPM_TOKEN — either inlined as
+    // ${{ secrets.X }} in the step's env: / run:, or via the job-level
+    // env-var promotion (env.CALLER_X-style), since step-level `if:`
+    // can't reference `secrets` directly.
+    const jobEnvKeys = Object.entries(publishJob?.env ?? [])
+      .filter(([, v]) => typeof v === 'string' && v.includes('secrets.NPM_TOKEN'))
+      .map(([k]) => k);
+    const exportSteps = publishSteps.filter((s) => {
+      if (typeof s.run !== 'string') return false;
+      if (!s.run.includes('NODE_AUTH_TOKEN') || !s.run.includes('GITHUB_ENV')) return false;
+      const envBlock = s.env ?? {};
+      const inlinedFromSecret = Object.values(envBlock).some(
+        (v) => typeof v === 'string' && v.includes('secrets.NPM_TOKEN'),
+      );
+      const directlyFromSecret = s.run.includes('secrets.NPM_TOKEN');
+      const fromJobEnv = jobEnvKeys.some(
+        (k) => s.run!.includes(`$${k}`) || s.run!.includes(`\${${k}}`),
+      );
+      return inlinedFromSecret || directlyFromSecret || fromJobEnv;
+    });
+    expect(
+      exportSteps,
+      'expected a publish-job step that exports the caller-provided npm token to $GITHUB_ENV as NODE_AUTH_TOKEN (issue #302)',
+    ).not.toEqual([]);
+    const step = exportSteps[0]!;
+    // The export must gate on the secret being non-empty AND the matrix
+    // containing at least one npm row. Without the matrix gate, every
+    // crates/pypi-only release run would still export a NODE_AUTH_TOKEN
+    // the run never uses; with it, the step is a no-op for non-npm repos
+    // exactly like the OIDC path is.
+    expect(
+      step.if ?? '',
+      "the token-export step must gate on NPM_TOKEN being non-empty (issue #302)",
+    ).toMatch(/NPM_TOKEN/);
+    expect(
+      step.if ?? '',
+      "the token-export step must gate on the planned matrix containing an npm row (issue #302)",
+    ).toMatch(/"kind":"npm"|kind == 'npm'/);
+  });
+
+  // The secret *name* is part of the workflow's public API: a consumer
+  // copy-pasting from the README has to spell it exactly to wire the
+  // fallback. Mirrors the #283 invariant.
+  it('NPM_TOKEN secret name is documented in README', () => {
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    expect(
+      readme,
+      'README must mention NPM_TOKEN by name so consumers can wire the secret (issue #302)',
+    ).toMatch(/NPM_TOKEN/);
+  });
+});
+
 // #276: every PyO3/maturin-action invocation in `_matrix.yml`'s build job
 // must be preceded by a step that bumps the package's version source to
 // `${{ matrix.version }}`. Without this, maturin reads whatever literal

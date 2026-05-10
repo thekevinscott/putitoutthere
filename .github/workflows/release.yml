@@ -21,8 +21,9 @@ name: putitoutthere release
 # PyPI, npm) are the default and recommended path. Trusted Publishing
 # binds to an *already-published* package on crates.io and npm, so the
 # very first publish has no OIDC path available; callers can pass a
-# long-lived `CARGO_REGISTRY_TOKEN` via `secrets:` and the OIDC
-# exchange is skipped when present. See README → "Trusted publishers".
+# long-lived `CARGO_REGISTRY_TOKEN` (crates.io) or `NPM_TOKEN` (npm)
+# via `secrets:` and the OIDC exchange is skipped when present. See
+# README → "Trusted publishers".
 #
 # This file delegates the plan + build matrix to `_matrix.yml`
 # (`uses: thekevinscott/putitoutthere/.github/workflows/_matrix.yml@v0`)
@@ -68,6 +69,18 @@ on:
       # for the engine's crates handler.
       CARGO_REGISTRY_TOKEN:
         required: false
+      # Optional fallback for the very first publish of a brand-new npm
+      # package (Trusted Publishing on npm binds to an already-published
+      # package, so first-publish has no OIDC path). When set AND the
+      # planned matrix contains an npm row, this token is exported to
+      # $GITHUB_ENV as NODE_AUTH_TOKEN; the npm CLI then prefers the
+      # long-lived token over the OIDC path. For bundled-cli / napi
+      # families the same secret authenticates publishes of all per-
+      # platform sub-packages on first publish; once those exist, each
+      # one needs its own TP registration. Drop the secret once Trusted
+      # Publishing is registered. See #302.
+      NPM_TOKEN:
+        required: false
     outputs:
       has_pypi:
         description: >-
@@ -106,6 +119,8 @@ jobs:
       # branching has to read through this var. Empty string when the
       # caller didn't wire the secret; non-empty when they did.
       CALLER_CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      # Same shape as CALLER_CARGO_REGISTRY_TOKEN, for npm. See #302.
+      CALLER_NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -161,6 +176,25 @@ jobs:
       - name: Export CARGO_REGISTRY_TOKEN (caller-provided)
         if: contains(needs.build.outputs.matrix, '"kind":"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN != ''
         run: echo "CARGO_REGISTRY_TOKEN=$CALLER_CARGO_REGISTRY_TOKEN" >> "$GITHUB_ENV"
+
+      # Caller-provided npm token path (issue #302). Mirror of the
+      # CARGO_REGISTRY_TOKEN fallback above. Trusted Publishing on npm
+      # binds to an already-published package, so the first publish of
+      # a brand-new package has no OIDC path; this step lets the caller
+      # supply a long-lived token via `secrets:` and have the npm CLI
+      # pick it up through $GITHUB_ENV (setup-node@v6 already wires
+      # NODE_AUTH_TOKEN into the .npmrc auth template). The secret is
+      # read through the job-level `CALLER_NPM_TOKEN` env var because
+      # step-level `if:` cannot reference the `secrets` context. When
+      # NODE_AUTH_TOKEN is set, the npm CLI prefers it over the OIDC
+      # path — there's no separate OIDC step to skip, just the env-var
+      # presence that switches the CLI's auth mode. Drop the secret
+      # once Trusted Publishing is registered against the (now-existing)
+      # package; for bundled-cli / napi families each per-platform sub-
+      # package needs its own TP registration.
+      - name: Export NODE_AUTH_TOKEN (caller-provided)
+        if: contains(needs.build.outputs.matrix, '"kind":"npm"') && env.CALLER_NPM_TOKEN != ''
+        run: echo "NODE_AUTH_TOKEN=$CALLER_NPM_TOKEN" >> "$GITHUB_ENV"
 
       # Build npm packages from source before `npm publish` runs.
       # The build job's `dist/` is not carried through as an artifact
