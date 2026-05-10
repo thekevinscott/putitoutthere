@@ -37,6 +37,14 @@ export const ErrorCodes = {
    *  declares. Failing at preflight prevents wasting a build run on
    *  a precondition checkable in milliseconds. #280. */
   NPM_MISSING_REPOSITORY: 'PIOT_NPM_MISSING_REPOSITORY',
+  /** A crates package's `Cargo.toml` is missing one or more
+   *  required `[package]` metadata fields (`description` and
+   *  `license`/`license-file`). crates.io rejects the publish with
+   *  `400 Bad Request: missing or empty metadata fields: ...` after
+   *  cargo's verification build has compiled the crate and every
+   *  transitive dep. Failing at preflight catches the precondition
+   *  in milliseconds. #290. */
+  CRATES_MISSING_METADATA: 'PIOT_CRATES_MISSING_METADATA',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -49,4 +57,5 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.AUTH_NO_TOKEN,
   ErrorCodes.PUBLISH_EMPTY_PLAN,
   ErrorCodes.NPM_MISSING_REPOSITORY,
+  ErrorCodes.CRATES_MISSING_METADATA,
 ];
