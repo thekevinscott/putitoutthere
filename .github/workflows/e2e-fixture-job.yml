@@ -355,7 +355,6 @@ jobs:
           - 8000:8000
         env:
           KELLNR_REGISTRY__AUTH_REQUIRED: 'false'
-          KELLNR_REGISTRY__REQUIRED_CRATE_FIELDS: ''
     steps:
       - uses: actions/checkout@v6
         with:
@@ -455,24 +454,47 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Kellnr container can take a few seconds to bind. Wait until
-          # the / endpoint is reachable before declaring it provisioned.
-          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-            if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
-              echo "Kellnr up (attempt ${attempt})"
+          # Kellnr container can take 20-30s to bind on a cold start.
+          # Wait until the /api/v1/crates/config.json sparse-index entry
+          # point is reachable before declaring it provisioned -- a bare
+          # `/` response isn't enough because cargo's first call is
+          # against that JSON config endpoint.
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/v1/crates/config.json > /dev/null 2>&1; then
+              echo "Kellnr sparse-index up (attempt ${attempt})"
+              ready=1
               break
-            fi
-            if [ "$attempt" -eq 15 ]; then
-              echo "::warning::Kellnr / unreachable after 15 attempts; fallback will be unavailable this run"
-              exit 0
             fi
             sleep 2
           done
+          if [ "$ready" -eq 0 ]; then
+            echo "::warning::Kellnr sparse-index unreachable after 60 attempts; fallback will be unavailable this run"
+            exit 0
+          fi
           mkdir -p "${HOME}/.cargo"
+          # Register the alt-registry by name so cargo's `--index <url>`
+          # flag matches it by URL and picks up the credentials.toml
+          # entry below (cargo's `--index` looks the index URL up in
+          # config.toml first, then falls back to CARGO_REGISTRY_TOKEN
+          # if no match -- which would be the real-crates.io OIDC token,
+          # wrong for Kellnr).
           cat >> "${HOME}/.cargo/config.toml" <<'EOF'
 
           [registries.piot-fallback]
           index = "sparse+http://localhost:8000/api/v1/crates/"
+          EOF
+          # Kellnr is started with `auth_required = false` (see services:
+          # block above) so it skips all token validation. Cargo still
+          # refuses to invoke `publish` without *some* token configured,
+          # so write a dummy one keyed by the registry name. Per-job
+          # ephemeral; never leaves the runner.
+          touch "${HOME}/.cargo/credentials.toml"
+          chmod 600 "${HOME}/.cargo/credentials.toml"
+          cat >> "${HOME}/.cargo/credentials.toml" <<'EOF'
+
+          [registries.piot-fallback]
+          token = "Bearer piot-e2e-fallback-dummy-token"
           EOF
 
       # Mirrors release.yml: rebuild npm packages from source before
