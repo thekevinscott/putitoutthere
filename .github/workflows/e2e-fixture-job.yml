@@ -322,12 +322,13 @@ jobs:
           BIN: ${{ matrix.bundle_cli.bin }}
           FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
           NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
+        # See _matrix.yml's twin step for the bash-3.2-on-macOS rationale.
         run: |
           set -euo pipefail
-          extra=()
-          if [ -n "$FEATURES" ]; then extra+=(--features "$FEATURES"); fi
-          if [ "$NO_DEFAULT_FEATURES" = "true" ]; then extra+=(--no-default-features); fi
-          cargo build --release --target "$TARGET" --bin "$BIN" "${extra[@]}"
+          cmd=(cargo build --release --target "$TARGET" --bin "$BIN")
+          if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
+          if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
+          "${cmd[@]}"
 
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
