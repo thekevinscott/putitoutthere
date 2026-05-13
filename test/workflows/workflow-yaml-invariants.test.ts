@@ -664,6 +664,197 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
   });
 });
 
+// #298: mirror of #282 for npm. `[package.bundle_cli]` should be parsed
+// by config and attached to per-target npm bundled-cli rows by the
+// planner, then consumed by `_matrix.yml` — same shape as the maturin
+// wiring landed in #282. Without this, npm bundled-cli consumers are
+// still required to author `scripts/build.cjs` that performs the
+// cross-compile (rustup target add / cargo build / cp into
+// build/<triple>/<bin>); every consumer of this recipe to date has
+// written essentially the same script, and every one has hit bugs at
+// the seam between their script and the engine (#287 was the most
+// recent). Absorbing the script into the workflow closes the largest
+// remaining piece of consumer integration surface that exists for no
+// architectural reason.
+//
+// Expected wiring, for every per-target row with
+// `matrix.kind == 'npm' && matrix.build == 'bundled-cli' &&
+//  matrix.bundle_cli && matrix.target != 'main'`:
+//   - `rustup target add ${{ matrix.target }}`
+//   - `cargo build --release --target ${{ matrix.target }} --bin ${{ matrix.bundle_cli.bin }}`
+//     against `crate_path`
+//   - copy binary (with `.exe` on Windows) to
+//     `${{ matrix.artifact_path }}/${{ matrix.bundle_cli.bin }}`
+//     (which is `${{ matrix.path }}/build/<triple>` for single-mode rows
+//     and `${{ matrix.path }}/build/<mode>-<triple>` for multi-mode rows;
+//     plan.ts already encodes the right directory in `artifact_path`)
+//   - defense-in-depth: assert the staged binary exists before
+//     `actions/upload-artifact` runs, so a broken row never leaves the
+//     build runner
+//
+// The post-build guard mirrors the wheel-content guard in #282: it
+// stays useful after the staging step lands, catching any future
+// regression where the cross-compile silently routes the binary to
+// the wrong path.
+describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => {
+  interface Step {
+    if?: string;
+    name?: string;
+    uses?: string;
+    run?: string;
+    with?: Record<string, unknown>;
+    env?: Record<string, unknown>;
+    'working-directory'?: string;
+  }
+  interface MatrixYaml {
+    jobs?: { build?: { steps?: Step[] } };
+  }
+
+  const matrixPath = join(repoRoot, '.github/workflows/_matrix.yml');
+  const matrix = parseYaml(readFileSync(matrixPath, 'utf8')) as MatrixYaml;
+  const buildSteps: Step[] = matrix.jobs?.build?.steps ?? [];
+
+  // The npm consumer-build step in `_matrix.yml` is the single
+  // consolidated `if: matrix.kind == 'npm'` step that runs
+  // `npm install` + `npm run build --if-present`. Bundle_cli staging
+  // must precede it so `npm run build` (when present) sees the
+  // already-populated `build/<triple>/` directory rather than racing
+  // to produce its contents.
+  function isNpmConsumerBuildStep(step: Step): boolean {
+    if (typeof step.if !== 'string') return false;
+    if (!step.if.includes("matrix.kind == 'npm'")) return false;
+    const run = step.run ?? '';
+    return run.includes('npm run build');
+  }
+
+  function gatesOnNpmBundleCli(condition: string | undefined): boolean {
+    if (typeof condition !== 'string') return false;
+    return (
+      condition.includes('matrix.bundle_cli') &&
+      condition.includes("matrix.kind == 'npm'") &&
+      condition.includes("matrix.build == 'bundled-cli'") &&
+      // 'main' is the noarch top-level row; it has no per-target
+      // binary to cross-compile.
+      condition.includes("matrix.target != 'main'")
+    );
+  }
+
+  // Concatenate every place a matrix expression can legitimately appear
+  // on a step (run script, with: action inputs, env: vars, working-
+  // directory). Lets the assertions below check "this step references
+  // bundle_cli.bin somewhere" without dictating which subkey — env-var
+  // pattern (matrix expressions in `env:`, used by `$VAR` in run script)
+  // is the established style in `_matrix.yml` bundle_cli pypi steps.
+  function stepText(step: Step): string {
+    return [
+      step.run ?? '',
+      step['working-directory'] ?? '',
+      JSON.stringify(step.with ?? {}),
+      JSON.stringify(step.env ?? {}),
+    ].join('\n');
+  }
+
+  function isCargoBuildStep(step: Step): boolean {
+    if (!gatesOnNpmBundleCli(step.if)) return false;
+    const text = stepText(step);
+    return text.includes('cargo build')
+      && text.includes('matrix.target')
+      && text.includes('matrix.bundle_cli.bin');
+  }
+
+  function isStageStep(step: Step): boolean {
+    if (!gatesOnNpmBundleCli(step.if)) return false;
+    if (isCargoBuildStep(step)) return false;
+    const text = stepText(step);
+    // The stage step copies the cross-compiled binary into the
+    // directory plan.ts encoded in matrix.artifact_path. We accept
+    // either `matrix.artifact_path` directly or the equivalent
+    // composed path (matrix.path + the per-target subdir), but the
+    // step must reference both the bin name and the destination
+    // sufficient to identify it as the stage step.
+    const referencesBin = text.includes('matrix.bundle_cli.bin');
+    const referencesDest =
+      text.includes('matrix.artifact_path') ||
+      (text.includes('matrix.path') && text.includes('matrix.target'));
+    return referencesBin && referencesDest;
+  }
+
+  function isUploadArtifactStep(step: Step): boolean {
+    return typeof step.uses === 'string' && step.uses.startsWith('actions/upload-artifact');
+  }
+
+  function isBuildGuardStep(step: Step): boolean {
+    if (!gatesOnNpmBundleCli(step.if)) return false;
+    const run = step.run ?? '';
+    const text = stepText(step);
+    // The guard asserts the staged binary exists at the expected
+    // path before upload-artifact runs. `test -f`, `[ -f ... ]`, or
+    // a CLI subcommand all satisfy this contract; what matters is
+    // that the step references the bin and fails if it's missing.
+    const looksLikeFsCheck =
+      run.includes('test -f') ||
+      run.includes('[ -f') ||
+      run.includes('verify-bundle-cli');
+    const referencesBin = text.includes('matrix.bundle_cli.bin');
+    return looksLikeFsCheck && referencesBin;
+  }
+
+  it('build job has at least one npm consumer-build step (parser sanity)', () => {
+    expect(buildSteps.filter(isNpmConsumerBuildStep).length).toBeGreaterThan(0);
+  });
+
+  it('every npm consumer-build step is preceded by a bundle_cli cargo-build step', () => {
+    const offenders: string[] = [];
+    buildSteps.forEach((step, idx) => {
+      if (!isNpmConsumerBuildStep(step)) return;
+      const earlier = buildSteps.slice(0, idx);
+      if (!earlier.some(isCargoBuildStep)) {
+        offenders.push(
+          `step #${idx} (if=${step.if ?? '(none)'}) has no preceding bundle_cli cargo-build step`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `each npm consumer-build step needs a preceding step gated on \`matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'\` that runs \`cargo build --release --target \${{ matrix.target }} --bin \${{ matrix.bundle_cli.bin }}\`:\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('every npm consumer-build step is preceded by a bundle_cli stage step', () => {
+    const offenders: string[] = [];
+    buildSteps.forEach((step, idx) => {
+      if (!isNpmConsumerBuildStep(step)) return;
+      const earlier = buildSteps.slice(0, idx);
+      if (!earlier.some(isStageStep)) {
+        offenders.push(
+          `step #${idx} (if=${step.if ?? '(none)'}) has no preceding bundle_cli stage step`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `each npm consumer-build step needs a preceding step gated on the same condition that copies the cross-compiled binary into \${{ matrix.artifact_path }}/ (i.e. matrix.path + build/<triple> for single-mode or build/<mode>-<triple> for multi-mode):\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('every upload-artifact step is preceded by a bundle_cli build-content guard', () => {
+    const offenders: string[] = [];
+    buildSteps.forEach((step, idx) => {
+      if (!isUploadArtifactStep(step)) return;
+      const earlier = buildSteps.slice(0, idx);
+      if (!earlier.some(isBuildGuardStep)) {
+        offenders.push(
+          `upload-artifact step #${idx} (if=${step.if ?? '(none)'}) has no preceding bundle_cli build-content guard`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `upload-artifact must be preceded by a step gated on the same npm bundle_cli condition that asserts the staged binary exists at \${{ matrix.artifact_path }}/\${{ matrix.bundle_cli.bin }} (defense-in-depth — catches a future regression where the cross-compile routes the binary to the wrong path):\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+});
+
 // #317: pre-merge `check.yml` reusable workflow. Pins the file's shape
 // so it stays consumable in one line by a downstream PR-CI workflow:
 //
