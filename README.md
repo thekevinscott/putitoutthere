@@ -242,6 +242,7 @@ version = 1   # required; only 1 is valid today
 | `tag`     | string                 | dist-tag. Default `latest`.                          |
 | `build`   | string \| array        | `"napi"` \| `"bundled-cli"` (single mode), or an array of entries (each: a bare mode string or `{ mode, name }` with a [name template](#multi-mode-npm-family)). Omitted = vanilla. See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
 | `targets` | (string \| object)[]   | Required when `build` is set.                        |
+| `[package.bundle_cli]` | sub-table | Declarative cross-compile for `build = "bundled-cli"` rows. Fields: `bin` (required), `crate_path` (default `"."`), `features` (default `[]`), `no_default_features` (default `false`). See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
 
 > [!IMPORTANT]
 > **`package.json` MUST declare a non-empty `repository` field.** `putitoutthere`
@@ -537,64 +538,35 @@ const result = spawnSync(binary, process.argv.slice(2), { stdio: 'inherit' });
 process.exit(result.status ?? 1);
 ```
 
-You also author a `build` script in `package.json` that does the
-cross-compile. The reusable workflow runs the build matrix once
-per `(target × main)` row, sets `TARGET=<triple>` /
-`BUILD=bundled-cli` on the build step, and expects the script to
-stage the compiled binary under `build/<triple>/<bin-name>` (with
-`.exe` suffix on Windows). For every per-target row the engine
-then packages `build/<triple>/` as the platform sub-package's
-artifact; the `main` row is a no-op for the build script (the
-launcher above is committed source). A minimal `package.json`:
+Declare `[package.bundle_cli]` so the reusable workflow runs the
+cross-compile for you:
 
-```json
-{
-  "name": "my-cli",
-  "scripts": {
-    "build": "node scripts/build.cjs"
-  },
-  "bin": { "my-cli": "bin/my-cli.js" }
-}
+```toml
+[package.bundle_cli]
+bin        = "my-cli"            # `cargo build --bin <this>`
+crate_path = "crates/my-cli"     # `cargo build` runs from here; defaults to `.`
+# Optional, for crates that gate the CLI behind a Cargo feature
+# (the `[[bin]] required-features = ["cli"]` shape):
+# features            = ["cli"]
+# no_default_features = false
 ```
 
-`scripts/build.cjs`:
+For every per-target row the workflow runs `rustup target add
+<triple>`, then `cargo build --release --target <triple> --bin
+<bin>` from `crate_path`, and copies the resulting binary
+(with `.exe` suffix on Windows) into the per-target staging
+directory. The engine then packages that directory as the
+platform sub-package's artifact. The `main` row carries no
+per-target binary (the launcher above is committed source).
 
-```js
-const { execFileSync, spawnSync } = require('node:child_process');
-const { mkdirSync, copyFileSync } = require('node:fs');
-const { join } = require('node:path');
-const pkg = require('../package.json');
-
-const target = process.env.TARGET;
-// `target === 'main'` is the top-level row: nothing to compile,
-// the launcher is committed source.
-if (!target || target === 'main' || target === 'noarch') process.exit(0);
-
-const binName = Object.keys(pkg.bin || {})[0] || pkg.name;
-const ext = target.includes('windows') ? '.exe' : '';
-
-execFileSync('rustup', ['target', 'add', target], { stdio: 'inherit' });
-execFileSync(
-  'cargo',
-  ['build', '--release', '--target', target, '--bin', binName],
-  { cwd: '../../crates/my-cli', stdio: 'inherit' },
-);
-
-const dir = join('build', target);
-mkdirSync(dir, { recursive: true });
-copyFileSync(
-  join('../../crates/my-cli/target', target, 'release', binName + ext),
-  join(dir, binName + ext),
-);
-```
-
-The build is consumer-owned because `cargo build` flags
-(`--features`, env vars, alternate manifests, Zig-cc cross
-toolchains) vary too much across crates to bake into the
-workflow. For the simple "single workspace member, default
-features" case the script above is the entire integration; tweak
-it as your crate demands. `TARGET` and `BUILD` are the only env
-vars the workflow guarantees.
+> [!NOTE]
+> **Constraint.** The binary must build with a vanilla
+> `cargo build --release --target <triple> --bin <bin>` from
+> `crate_path`, optionally with `--features` /
+> `--no-default-features`. Crates that need env vars, alternate
+> manifests, Zig-cc cross toolchains, or other cargo flags
+> don't fit the recipe — write your own release workflow
+> instead.
 
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover

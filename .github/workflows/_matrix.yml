@@ -300,6 +300,73 @@ jobs:
           node-version: ${{ inputs.node_version }}
           registry-url: 'https://registry.npmjs.org'
 
+      # #298: bundle_cli — cross-compile a Rust CLI per target and stage
+      # it under `${{ matrix.artifact_path }}` so the engine's npm-platform
+      # handler packages it into the per-platform tarball. Same shape as
+      # the maturin/pypi block above. Without these steps, npm bundled-cli
+      # consumers are still required to author a `scripts/build.cjs` that
+      # cargo-builds the binary themselves; absorbing the script removes
+      # the largest remaining piece of consumer integration surface for
+      # this recipe (#287 documented the seam between consumer scripts
+      # and the engine env contract; #298 closes the seam entirely).
+      #
+      # Targets resolve to native runners via `defaultRunsOn` in
+      # `src/plan.ts`, so cargo cross-compile linkers are not needed.
+      # The `main` target row is the noarch top-level package — it has
+      # no per-target binary to compile.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — add Rust target
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
+
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — cargo build for ${{ matrix.target }} (${{ matrix.bundle_cli.bin }})
+        shell: bash
+        working-directory: ${{ matrix.bundle_cli.crate_path }}
+        env:
+          TARGET: ${{ matrix.target }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+          # Mirror of the pypi shape (#300). Empty `features` and
+          # `no_default_features = false` (schema defaults) leave the
+          # cargo invocation byte-identical to its `--features`-less form.
+          FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
+          NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
+        # Build the cargo invocation in a single non-empty array, mirroring
+        # the pypi cargo-build step above. `cmd=()` followed by
+        # `"${cmd[@]}"` on an empty array errors out under bash 3.2 + set
+        # -u ("unbound variable") — and macOS runners ship bash 3.2 by
+        # default. The array always starts with `(cargo build --release
+        # ...)`, so the expansion is safe on every runner.
+        run: |
+          set -euo pipefail
+          cmd=(cargo build --release --target "$TARGET" --bin "$BIN")
+          if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
+          if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
+          "${cmd[@]}"
+
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
+        shell: bash
+        env:
+          CRATE_PATH: ${{ matrix.bundle_cli.crate_path }}
+          DEST_DIR: ${{ matrix.artifact_path }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          src="${CRATE_PATH}/target/${TARGET}/release/${BIN}${ext}"
+          if [ ! -f "$src" ]; then
+            echo "::error::cross-compile did not produce ${src}"
+            ls -la "${CRATE_PATH}/target/${TARGET}/release/" || true
+            exit 1
+          fi
+          mkdir -p "$DEST_DIR"
+          cp "$src" "$DEST_DIR/"
+          echo "staged: $src -> $DEST_DIR/${BIN}${ext}"
+
       - if: matrix.kind == 'npm'
         working-directory: ${{ matrix.path }}
         # Build matrix can target Windows runners; default shell there is
@@ -349,6 +416,31 @@ jobs:
       # ---- crates ----
       # cargo publish builds on the registry side; no artifact needed
       # at build time. The publish job invokes cargo directly.
+
+      # #298: build-content guard. Permanent defense-in-depth — the
+      # staged binary must exist at the path the engine's npm-platform
+      # handler reads. Catches the bug shape this issue tracks (no
+      # staging happened, the binary lives in the wrong directory)
+      # and any future regression where the cross-compile silently
+      # routes the binary elsewhere. Runs before upload-artifact, so
+      # a broken per-platform tarball never leaves the build runner.
+      # Mirror of the wheel-content guard added in #282 for pypi.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — verify ${{ matrix.artifact_path }}/${{ matrix.bundle_cli.bin }}
+        shell: bash
+        env:
+          DEST_DIR: ${{ matrix.artifact_path }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          expected="${DEST_DIR}/${BIN}${ext}"
+          if ! [ -f "$expected" ]; then
+            echo "::error::bundle_cli staged binary missing at ${expected}"
+            ls -la "${DEST_DIR}" || true
+            exit 1
+          fi
+          echo "ok bundle_cli: ${expected} present"
 
       - if: matrix.kind != 'crates'
         uses: actions/upload-artifact@v7
