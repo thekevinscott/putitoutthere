@@ -35,14 +35,21 @@ export interface MatrixRow {
   artifact_path: string;
   path: string;          // package working dir
   build?: string;        // handler-specific build mode
-  // #217: per-target bundle-a-Rust-CLI-into-the-wheel recipe. Set on
-  // maturin per-target rows when `[package.bundle_cli]` is declared;
-  // NOT set on the sdist row (source-only, no cross-compile happens).
-  // Scaffolded build job branches on this to emit the cargo build +
-  // stage step before maturin.
+  // #217 (pypi) / #298 (npm): per-target bundle-a-Rust-CLI recipe.
+  // Set on maturin per-target wheel rows AND on npm per-target
+  // bundled-cli rows when `[package.bundle_cli]` is declared on the
+  // package. NOT set on the sdist row (pypi, source-only), the main
+  // row (npm, top-level launcher only), or napi rows in a multi-mode
+  // npm package. The scaffolded build job branches on this to emit
+  // the cargo build + stage step before the build tool runs.
+  //
+  // `stage_to` is pypi-only — npm staging target is fully determined
+  // by `artifact_path` and so is left unset on npm rows. The optional
+  // field carries the union of both shapes; pypi rows always supply
+  // it, npm rows always omit it.
   bundle_cli?: {
     bin: string;
-    stage_to: string;
+    stage_to?: string;
     crate_path: string;
     features: string[];
     no_default_features: boolean;
@@ -249,6 +256,10 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
       const rawBuild = (pkg as { build?: NpmBuildField }).build;
       const buildEntries = normalizeBuild(rawBuild);
       const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
+      // #298: bundle_cli attaches to bundled-cli per-target rows only.
+      // Schema guarantees the block is only present when at least one
+      // bundled-cli entry exists in `build` AND `targets` is non-empty.
+      const bundleCli = (pkg as { bundle_cli?: MatrixRow['bundle_cli'] }).bundle_cli;
       if (buildEntries.length > 0) {
         // Plan-time guard: bail before a CI matrix runs on an unmapped
         // triple. Handler-time validation remains as belt-and-suspenders.
@@ -269,7 +280,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
             const artifactPath = isMulti
               ? at(`build/${bEntry.mode}-${triple}`)
               : at(`build/${triple}`);
-            out.push({
+            const row: MatrixRow = {
               name: pkg.name,
               kind: 'npm',
               version,
@@ -279,7 +290,16 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
               artifact_path: artifactPath,
               path: pkg.path,
               build: bEntry.mode,
-            });
+            };
+            // #298: bundled-cli per-target rows carry the cross-compile
+            // metadata. napi rows in a multi-mode package don't — napi
+            // has its own toolchain and stages `.node` files differently.
+            // The main row also doesn't carry bundle_cli (no per-target
+            // binary to compile at the top-level).
+            if (bundleCli !== undefined && bEntry.mode === 'bundled-cli') {
+              row.bundle_cli = bundleCli;
+            }
+            out.push(row);
           }
         }
         // Plus the main package row. The main row's `build` is informational

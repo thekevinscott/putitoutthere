@@ -18,3 +18,12 @@ first_version = "__VERSION__"
 # See test/fixtures/js-vanilla/putitoutthere.toml for why e2e
 # fixtures publish to a dedicated dist-tag instead of `latest`.
 tag = "e2e"
+
+# #298: the reusable workflow cross-compiles and stages this binary
+# itself. The fixture's previous `scripts/build.cjs` (which stubbed
+# a fake binary because the e2e runner had no Rust) is no longer
+# needed — `src/main.rs` is real and `cargo build --bin
+# piot-fixture-zzz` works against `crate_path = "."`.
+[package.bundle_cli]
+bin = "piot-fixture-zzz"
+crate_path = "."

@@ -178,6 +178,36 @@ const PYPI_PKG = z
     { message: 'bundle_cli requires at least one entry in `targets`' },
   );
 
+// #298: opt-in "cross-compile a Rust CLI into every per-platform tarball"
+// recipe for `kind = "npm" && build = "bundled-cli"`. Mirror of the pypi
+// `[package.bundle_cli]` block — same shape minus `stage_to`. The npm
+// staging directory is fully determined by plan.ts via the matrix row's
+// `artifact_path` (`<pkg.path>/build/<triple>` for single-mode rows or
+// `<pkg.path>/build/<mode>-<triple>` for multi-mode rows), so there's
+// no consumer-visible knob analogous to maturin's `[tool.maturin].include`
+// path that `stage_to` aligns against.
+const NPM_BUNDLE_CLI = z
+  .object({
+    // `cargo build --bin <this>`. Required — the binary name is the
+    // one thing piot can't infer.
+    bin: z.string().min(1),
+    // Directory to run `cargo build` from. Defaults to repo root ("."),
+    // which works for most workspace Cargo.toml layouts. Override when
+    // the crate lives outside a workspace (e.g. `crates/my-cli`).
+    crate_path: z.string().min(1).default('.'),
+    // Forwarded to `cargo build --features <list>` (mirror of the pypi
+    // shape added in #300). Required for crates that gate the CLI
+    // behind a Cargo feature (`[[bin]] required-features = ["cli"]`).
+    // Empty list = no `--features` flag.
+    features: z.array(z.string().min(1)).default([]),
+    // Forwarded to `cargo build --no-default-features` (mirror of the
+    // pypi shape added in #300). Pairs with `features` for crates that
+    // want a minimal CLI binary built from a disjoint feature set than
+    // the library's defaults.
+    no_default_features: z.boolean().default(false),
+  })
+  .strict();
+
 const NPM_BUILD_MODE = z.enum(['napi', 'bundled-cli']);
 
 // #dirsql: must mirror ALLOWED_NAME_VARIABLES in src/handlers/npm-platform.ts.
@@ -235,6 +265,7 @@ const NPM_PKG = z
     tag: z.string().optional(),
     build: NPM_BUILD.optional(),
     targets: z.array(TARGET_ENTRY).optional(),
+    bundle_cli: NPM_BUNDLE_CLI.optional(),
   })
   .strict()
   .superRefine((p, ctx) => {
@@ -286,6 +317,37 @@ const NPM_PKG = z
           code: z.ZodIssueCode.custom,
           message: `build entries must have distinct platform-package name templates; ${collisions.join('; ')}`,
           path: ['build'],
+        });
+      }
+    }
+    // #298: bundle_cli only applies to bundled-cli rows. Allowed shapes:
+    //   build = "bundled-cli"
+    //   build = ["bundled-cli", ...] / [{ mode = "bundled-cli", ... }, ...]
+    // Disallowed: bundle_cli with build = "napi" / undefined / array
+    // without a bundled-cli entry. The reusable workflow's cross-compile
+    // step gates on `matrix.build == 'bundled-cli'`, so a block declared
+    // on a non-bundled-cli package would be silently inert.
+    if (p.bundle_cli !== undefined) {
+      const hasBundledCli =
+        p.build === 'bundled-cli' ||
+        (Array.isArray(p.build) &&
+          p.build.some((e) => (typeof e === 'string' ? e : e.mode) === 'bundled-cli'));
+      if (!hasBundledCli) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'bundle_cli is only valid when build = "bundled-cli" (or a build array containing a bundled-cli entry) on npm packages',
+          path: ['bundle_cli'],
+        });
+      }
+      // #298: bundle_cli implies per-target compilation. An npm package
+      // without `targets` would produce only the main (noarch) row, and
+      // the staged binary would have nowhere to land.
+      if (p.targets === undefined || p.targets.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'bundle_cli requires at least one entry in `targets`',
+          path: ['bundle_cli'],
         });
       }
     }
