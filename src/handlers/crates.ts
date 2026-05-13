@@ -147,7 +147,19 @@ async function publishImpl(
   const fallbackUrl = nonEmpty(ctx.env.PIOT_CRATES_REGISTRY_FALLBACK);
 
   const runPublish = (registryUrl?: string): void => {
-    const args = registryUrl ? [...baseArgs, '--index', registryUrl] : baseArgs;
+    // cargo refuses to invoke `publish --index <url>` without an
+    // explicit `--token` argument at the CLI parser level — neither
+    // CARGO_REGISTRY_TOKEN nor credentials.toml entries unblock it.
+    // The alt-registry this workflow ships with (cargo-http-registry,
+    // see e2e-fixture-job.yml) is configured `--no-auth` so any token
+    // string is accepted; the value here is a placeholder for the CLI
+    // to be willing to dispatch, not a secret. The primary path
+    // (registryUrl undefined) leaves CARGO_REGISTRY_TOKEN handling
+    // alone — that's the real-crates.io OIDC token exported by the
+    // `rust-lang/crates-io-auth-action` workflow step.
+    const args = registryUrl
+      ? [...baseArgs, '--index', registryUrl, '--token', 'piot-alt-registry-placeholder']
+      : baseArgs;
     execFileSync('cargo', args, {
       cwd: ctx.cwd,
       // #138: minimal env. The parent process.env leaks unrelated
