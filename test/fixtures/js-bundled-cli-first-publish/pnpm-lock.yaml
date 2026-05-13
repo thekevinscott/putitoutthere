@@ -1,13 +1,24 @@
 # #288 reproduction. Deliberately-stale lockfile: package.json declares
-# optionalDependencies for five per-triple platform packages, but this
-# lockfile omits them entirely — the exact shape pnpm 10 produces after
-# silently dropping 404'd optionalDependencies. `pnpm install
-# --frozen-lockfile` must refuse against this; the engine's #288 fallback
-# (in _matrix.yml / release.yml; mirrored to e2e-fixture-job.yml in #305)
-# is what makes the workflow recover via `pnpm install --no-frozen-lockfile`.
+# devDependencies + optionalDependencies (five per-triple platform
+# packages), but this lockfile's `.` importer is empty — the analogue
+# of the shape pnpm 10 leaves behind after silently dropping 404'd
+# optionalDependencies during regeneration (any drift between
+# importers and package.json triggers `--frozen-lockfile` refusal,
+# which is what we want).
+#
+# `pnpm install --frozen-lockfile` against this fixture must refuse
+# with ERR_PNPM_OUTDATED_LOCKFILE; the engine's #288 fallback (in
+# _matrix.yml / release.yml; mirrored to e2e-fixture-job.yml in #305)
+# is what makes the workflow recover via `pnpm install
+# --no-frozen-lockfile` — that fallback resolves typescript fresh
+# from the registry, silently excludes the 404'd platform optionalDeps,
+# and lets the build proceed.
 #
 # Hand-written rather than `pnpm install`-generated so the drift is
-# reproducible and inspectable; do not regenerate.
+# reproducible and inspectable; do not regenerate. An earlier draft
+# pinned typescript@5.6.0 with a placeholder integrity, but 5.6.0
+# isn't published on npm (the line starts at 5.6.2) so the fallback
+# 404'd. The empty importer leaves resolution to the fallback.
 lockfileVersion: '9.0'
 
 settings:
@@ -15,20 +26,4 @@ settings:
   excludeLinksFromLockfile: false
 
 importers:
-
-  .:
-    devDependencies:
-      typescript:
-        specifier: ^5.6.0
-        version: 5.6.0
-
-packages:
-
-  typescript@5.6.0:
-    resolution: {integrity: sha512-7zEQTGwlpAOIv1Ie4WjmwOGE5jSpVTOZRbobv4OY6kJ8usadolLrFLDS9pPjepWeFCWP/PhA9aPMHQTjMbDvUw==}
-    engines: {node: '>=14.17'}
-    hasBin: true
-
-snapshots:
-
-  typescript@5.6.0: {}
+  .: {}
