@@ -396,9 +396,16 @@ stage_to  = "py_lib/bin"
 crate_path = "crates/cli"
 `);
     write('packages/py/pyproject.toml', `
+[build-system]
+requires = ["maturin>=1"]
+build-backend = "maturin"
+
 [project]
 name = "py-lib"
 dynamic = ["version"]
+
+[tool.maturin]
+include = ["py_lib/bin/*"]
 `);
     write('crates/cli/Cargo.toml', `
 [package]

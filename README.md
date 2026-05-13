@@ -89,7 +89,11 @@ duplicate package name, a `depends_on` cycle, a missing
 `[[package]].path` directory, globs that match no tracked files,
 a `tag_format` collision, a missing `repository` field on an
 `npm` package, missing `description` / `license` on a `crates`
-package, or a `bundle_cli` binary the crate doesn't declare — a
+package, a `bundle_cli` binary the crate doesn't declare, a
+`pyproject.toml` whose `[project].name` or `[build-system].build-backend`
+disagrees with the configured `name` / `build`, a `Cargo.toml` whose
+`[package].name` disagrees with the configured `name` / `crate`, or a
+`features` list referencing a feature the crate doesn't declare — a
 couple of seconds per PR, no per-target build, no `setup-python`
 / `setup-rust`. Findings are aggregated into one report so you
 fix everything in one push instead of chasing errors across re-
@@ -224,6 +228,24 @@ version = 1   # required; only 1 is valid today
 | `features`            | string[] | Pass through to `cargo publish --features`.                |
 | `no_default_features` | bool     | Pass `--no-default-features` to `cargo publish` when true. |
 
+> [!IMPORTANT]
+> **`Cargo.toml` MUST match the configured shape.** Preflight verifies
+> these at PR time (via `check.yml`) and again before any publish side
+> effect:
+>
+> - `[package].name` matches `[[package]].name` (or the `crate` override) —
+>   `PIOT_CRATES_NAME_MISMATCH`.
+> - `[package].description` and `[package].license` (or `license-file`) are
+>   set — `PIOT_CRATES_MISSING_METADATA`.
+> - Every entry in `features` (and in `bundle_cli.features`, when set) is
+>   declared in `[features]` — `PIOT_CRATES_FEATURE_NOT_DECLARED`.
+> - When `bundle_cli.bin` is set, the target `Cargo.toml` declares a
+>   `[[bin]]` with that name (or the implicit binary derived from
+>   `[package].name`) — `PIOT_CRATES_MISSING_BIN`.
+> - When `[package].version.workspace = true`, an ancestor `Cargo.toml`
+>   declares `[workspace.package].version` —
+>   `PIOT_CRATES_WORKSPACE_VERSION_MISMATCH`.
+
 ### `kind = "pypi"`
 
 | Field        | Type                   | Notes                                              |
@@ -232,6 +254,23 @@ version = 1   # required; only 1 is valid today
 | `build`      | enum                   | `maturin` \| `setuptools` \| `hatch`. Required.    |
 | `targets`    | (string \| object)[]   | Required when `build = "maturin"`. Triples or `{ triple, runner }` objects. |
 | `bundle_cli` | table                  | Opt-in: cross-compile a Rust CLI per target and stage it into each wheel. Only valid with `build = "maturin"`. See [Recipes → Rust CLI inside a PyPI wheel](#rust-cli-inside-a-pypi-wheel). |
+
+> [!IMPORTANT]
+> **`pyproject.toml` MUST match the configured shape.** Preflight verifies
+> these at PR time (via `check.yml`) and again before any publish side
+> effect:
+>
+> - `[project].name` matches `[[package]].name` (or the `pypi` override) —
+>   `PIOT_PYPI_NAME_MISMATCH`.
+> - `[build-system].build-backend`, when set, matches the configured
+>   `build` mode (`maturin` → `maturin`, `setuptools` →
+>   `setuptools.build_meta`, `hatch` → `hatchling.build`) —
+>   `PIOT_PYPI_BUILD_BACKEND_MISMATCH`.
+> - When `[project].dynamic` contains `"version"`, either
+>   `[tool.hatch.version]` or `[tool.setuptools_scm]` declares the version
+>   source — `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND`.
+> - When `bundle_cli` is set, `[tool.maturin].include` covers
+>   `bundle_cli.stage_to` — `PIOT_PYPI_MATURIN_INCLUDE_MISSING`.
 
 ### `kind = "npm"`
 
