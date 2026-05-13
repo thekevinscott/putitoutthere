@@ -21,6 +21,7 @@ jobs:
       matrix:
         fixture:
           - js-vanilla
+          - js-vanilla-first-publish
           - js-napi
           - js-bundled-cli
           - js-python-no-rust

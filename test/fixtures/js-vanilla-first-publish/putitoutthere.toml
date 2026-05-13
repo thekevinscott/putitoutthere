@@ -1,0 +1,18 @@
+[putitoutthere]
+version = 1
+
+# First-publish e2e variant. Publishes to a per-job Verdaccio service
+# (see .github/workflows/e2e-fixture-job.yml) under a uniquified package
+# name so each run exercises the empty-packument path (`npm view` 404
+# pre-publish). NOT a consumer-facing example; do not link from README.
+#
+# The `__NAME_SUFFIX__` placeholder is rewritten by the e2e workflow's
+# uniquification step to `-${unix_seconds}-${run_attempt}`. `__VERSION__`
+# is rewritten by the materialize step to a throwaway `0.0.${unix_seconds}`.
+
+[[package]]
+name = "@putitoutthere/piot-fixture-zzz-js-vanilla-first-publish__NAME_SUFFIX__"
+kind = "npm"
+path = "."
+globs = ["src/**", "tsconfig.json", "package.json"]
+first_version = "__VERSION__"
