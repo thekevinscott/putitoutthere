@@ -1,0 +1,29 @@
+# #288 reproduction. Deliberately-stale lockfile: package.json declares
+# devDependencies + optionalDependencies (five per-triple platform
+# packages), but this lockfile's `.` importer is empty — the analogue
+# of the shape pnpm 10 leaves behind after silently dropping 404'd
+# optionalDependencies during regeneration (any drift between
+# importers and package.json triggers `--frozen-lockfile` refusal,
+# which is what we want).
+#
+# `pnpm install --frozen-lockfile` against this fixture must refuse
+# with ERR_PNPM_OUTDATED_LOCKFILE; the engine's #288 fallback (in
+# _matrix.yml / release.yml; mirrored to e2e-fixture-job.yml in #305)
+# is what makes the workflow recover via `pnpm install
+# --no-frozen-lockfile` — that fallback resolves typescript fresh
+# from the registry, silently excludes the 404'd platform optionalDeps,
+# and lets the build proceed.
+#
+# Hand-written rather than `pnpm install`-generated so the drift is
+# reproducible and inspectable; do not regenerate. An earlier draft
+# pinned typescript@5.6.0 with a placeholder integrity, but 5.6.0
+# isn't published on npm (the line starts at 5.6.2) so the fallback
+# 404'd. The empty importer leaves resolution to the fallback.
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .: {}

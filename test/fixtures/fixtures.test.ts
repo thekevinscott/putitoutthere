@@ -128,6 +128,19 @@ describe('#30 rust-in-language fixtures', () => {
     expect(rows).toHaveLength(6);
     expect(rows.filter((r) => r.target === 'main')).toHaveLength(1);
   });
+
+  // #305: js-bundled-cli-first-publish is the first-publish variant
+  // of js-bundled-cli. Same plan shape (the fixture's contribution is
+  // a deliberately-stale pnpm-lock.yaml that exercises the #288
+  // fallback in CI, not a different plan). Plan-shape assertion lives
+  // here so any drift in row count surfaces at the unit tier; the
+  // lockfile-drift recovery is e2e-tier (see e2e-fixture-job.yml).
+  it('js-bundled-cli-first-publish → 5 platform rows + 1 main (#288 repro fixture)', async () => {
+    const cwd = prepareFixture('js-bundled-cli-first-publish');
+    const rows = await plan({ cwd });
+    expect(rows).toHaveLength(6);
+    expect(rows.filter((r) => r.target === 'main')).toHaveLength(1);
+  });
 });
 
 // #276: artifact-version vs plan-version contract for the build phase.

@@ -1,0 +1,23 @@
+{
+  "name": "@putitoutthere/piot-fixture-zzz-js-bundled-first-publish-placeholder",
+  "version": "__VERSION__",
+  "description": "Put It Out There first-publish bundled-cli canary. Reproduces #288 pnpm-10 lockfile drift. Publishes to Verdaccio under a uniquified name. Safe to ignore.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
+  "type": "module",
+  "bin": { "piot-fixture-zzz-firstpub": "./dist/shim.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "optionalDependencies": {
+    "@putitoutthere/piot-fixture-zzz-js-bundled-first-publish-placeholder-x86_64-unknown-linux-gnu": "0.0.0",
+    "@putitoutthere/piot-fixture-zzz-js-bundled-first-publish-placeholder-aarch64-unknown-linux-gnu": "0.0.0",
+    "@putitoutthere/piot-fixture-zzz-js-bundled-first-publish-placeholder-x86_64-apple-darwin": "0.0.0",
+    "@putitoutthere/piot-fixture-zzz-js-bundled-first-publish-placeholder-aarch64-apple-darwin": "0.0.0",
+    "@putitoutthere/piot-fixture-zzz-js-bundled-first-publish-placeholder-x86_64-pc-windows-msvc": "0.0.0"
+  }
+}

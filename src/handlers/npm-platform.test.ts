@@ -70,6 +70,21 @@ function basePkg(over: Partial<PlatformPkg> = {}): PlatformPkg {
   };
 }
 
+// #305: `npm publish` for platform packages receives the synthesized
+// staging directory as a positional `<folder>` arg (last non-flag arg
+// in `args`). Helper extracts it so tests can inspect the staged
+// package.json without depending on `cwd` (which now points at the
+// consumer's pkg.path so npm honors the local .npmrc).
+function stagingDirArg(args: string[]): string | undefined {
+  if (args[0] !== 'publish') return undefined;
+  // Skip args[0]='publish'; folder is the lone trailing non-flag arg.
+  for (let i = args.length - 1; i >= 1; i -= 1) {
+    const a = args[i]!;
+    if (!a.startsWith('-')) return a;
+  }
+  return undefined;
+}
+
 beforeEach(() => {
   execMock.mockReset();
   repo = mkdtempSync(join(tmpdir(), 'npm-plat-test-'));
@@ -313,13 +328,15 @@ describe('publishPlatforms (bundled-cli)', () => {
     writeFileSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('#!/bin/bash\n'));
 
     const stagingPkgJsons: Record<string, unknown>[] = [];
-    execMock.mockImplementation((_cmd, args, opts) => {
+    execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
-      // Inspect the staging dir's package.json before npm publish.
-      const cwd = (opts as { cwd?: string } | undefined)?.cwd;
-      if (cwd) {
-        stagingPkgJsons.push(JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as Record<string, unknown>);
+      // #305: `npm publish <folder>` — staging dir is the last positional
+      // arg; cwd is the consumer's pkg.path (so npm finds the consumer's
+      // .npmrc for auth). Inspect package.json by parsing the folder arg.
+      const folder = stagingDirArg(a);
+      if (folder) {
+        stagingPkgJsons.push(JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>);
       }
       return Buffer.from('');
     });
@@ -353,12 +370,12 @@ describe('publishPlatforms (bundled-cli)', () => {
     writeFileSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('x'));
 
     const stagingPkgJsons: Record<string, unknown>[] = [];
-    execMock.mockImplementation((_cmd, args, opts) => {
+    execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
-      const cwd = (opts as { cwd?: string } | undefined)?.cwd;
-      if (cwd) {
-        stagingPkgJsons.push(JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as Record<string, unknown>);
+      const folder = stagingDirArg(a);
+      if (folder) {
+        stagingPkgJsons.push(JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>);
       }
       return Buffer.from('');
     });
@@ -374,6 +391,54 @@ describe('publishPlatforms (bundled-cli)', () => {
       type: 'git',
       url: 'git+https://github.com/acme/demo-cli.git',
     });
+  });
+});
+
+// #305: regression for the platform publish auth-lookup bug. Earlier
+// versions ran `npm publish` with `cwd: stagingDir` and no folder arg —
+// npm reads `.npmrc` from cwd upward, so the consumer's local `.npmrc`
+// (which the e2e workflow writes alongside the fixture to authenticate
+// against Verdaccio, and the analogue real consumers write for the
+// NPM_TOKEN-bootstrap shape) was never seen, and the platform PUTs went
+// out unauthenticated. The fix runs `npm publish <stagingDir>` with
+// `cwd: pkg.path` so npm finds the same `.npmrc` the main-package
+// publish (npm.ts:publishImpl) honors.
+describe('publishPlatforms — cwd is pkg.path so npm finds the consumer .npmrc (#305)', () => {
+  it('runs `npm publish <stagingDir>` from cwd=pkg.path', async () => {
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('x'));
+    const publishCalls: {
+      cwd: string | undefined;
+      folder: string | undefined;
+      folderExisted: boolean;
+      folderHadPackageJson: boolean;
+    }[] = [];
+    execMock.mockImplementation((_cmd, args, opts) => {
+      const a = args as string[];
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'publish') {
+        // Capture staging-dir state at call time — `publishPlatforms` cleans
+        // up the tempdir in a `finally` after each publish, so post-hoc
+        // existsSync would always fail regardless of correctness.
+        const folder = stagingDirArg(a);
+        publishCalls.push({
+          cwd: (opts as { cwd?: string } | undefined)?.cwd,
+          folder,
+          folderExisted: folder !== undefined && existsSync(folder),
+          folderHadPackageJson:
+            folder !== undefined && existsSync(join(folder, 'package.json')),
+        });
+      }
+      return Buffer.from('');
+    });
+
+    const pkg: PlatformPkg = basePkg({ targets: ['linux-x64-gnu'] });
+    await publishPlatforms(pkg, '0.2.0', makeCtx());
+
+    expect(publishCalls).toHaveLength(1);
+    expect(publishCalls[0]!.cwd).toBe(pkg.path);
+    expect(publishCalls[0]!.folder).toBeDefined();
+    expect(publishCalls[0]!.folderExisted).toBe(true);
+    expect(publishCalls[0]!.folderHadPackageJson).toBe(true);
   });
 });
 
@@ -552,12 +617,12 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
     writeFileSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('x'));
 
     const stagingByName = new Map<string, Record<string, unknown>>();
-    execMock.mockImplementation((_cmd, args, opts) => {
+    execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
-      const cwd = (opts as { cwd?: string } | undefined)?.cwd;
-      if (cwd) {
-        const json = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as Record<string, unknown>;
+      const folder = stagingDirArg(a);
+      if (folder) {
+        const json = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>;
         stagingByName.set(String(json.name), json);
       }
       return Buffer.from('');

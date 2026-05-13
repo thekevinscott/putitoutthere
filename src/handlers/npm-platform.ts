@@ -284,10 +284,21 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
   if (pkg.tag) args.push(`--tag=${pkg.tag}`);
   if (hasOidc) args.push('--provenance');
   if (registryOverride) args.push(`--registry=${registryOverride}`);
+  // #305: pass the synthesized package directory as a positional <folder>
+  // arg to `npm publish`, not as the cwd. npm reads `.npmrc` from cwd
+  // upward, and any auth the consumer wrote alongside their package
+  // (e.g. the `_authToken` entries the e2e workflow writes into
+  // `fixture-tree/.npmrc` to authenticate against Verdaccio, and the
+  // analogous NPM_TOKEN-bootstrap shape consumers use against real npm)
+  // lives at `pkg.path`. Running with `cwd: stagingDir` (a tempdir) lost
+  // that auth — the platform PUTs went out unauthenticated, registry
+  // returned 4xx, the engine reported "npm publish (platform) failed".
+  // Mirrors what npm.ts:publishImpl already does for the main package.
+  args.push(stagingDir);
 
   try {
     execFileSync('npm', args, {
-      cwd: stagingDir,
+      cwd: pkg.path,
       // #138: minimal env; don't leak parent process.env to npm.
       env: buildSubprocessEnv(ctx.env),
       stdio: ['ignore', 'pipe', 'pipe'],
