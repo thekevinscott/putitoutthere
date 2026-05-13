@@ -8,7 +8,7 @@
  * engine's completeness check assumes; see `src/completeness.ts`).
  *
  * Consumers whose plan emits exactly one expected artifact — the
- * canonical case being a pure-Python package with `build = "hatch"`
+ * canonical case being a pure-Python package with `build = "setuptools"`
  * (sdist row only) — therefore hit the bug: the publish job downloads
  * artifacts, gets `artifacts/<file>.tar.gz` with no subdir, and the
  * completeness check aborts with `missing artifact directory
@@ -19,7 +19,9 @@
  * pypi handler. Today it fails with the completeness error; after the
  * fix it succeeds.
  *
- * Issue #311.
+ * Issue #311. (#324 split hatch into sdist + wheel-any, so this test
+ * uses setuptools — still single-artifact — to keep the
+ * single-artifact-normalize codepath exercised.)
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -77,9 +79,11 @@ function writeRepoFile(rel: string, body: string): void {
   writeFileSync(full, body, 'utf8');
 }
 
-// Single pypi package, hatch build → plan emits exactly one row
+// Single pypi package, setuptools build → plan emits exactly one row
 // (sdist). This is the minimal config that reproduces the v8
-// single-artifact dump.
+// single-artifact dump. (Hatch was the original repro per #311, but
+// #324 split hatch into sdist + wheel-any; setuptools remains the
+// canonical single-artifact case.)
 const TOML = `
 [putitoutthere]
 version = 1
@@ -89,13 +93,13 @@ name  = "single-pkg"
 kind  = "pypi"
 path  = "."
 globs = ["src/**", "pyproject.toml"]
-build = "hatch"
+build = "setuptools"
 `;
 
 const PYPROJECT = `
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "single-pkg"

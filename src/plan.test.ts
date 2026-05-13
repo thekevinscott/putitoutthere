@@ -882,3 +882,66 @@ no_default_features = true
     });
   });
 });
+
+// #324: pure-Python hatch packages used to plan only an sdist row, so PyPI
+// received no wheel and downstream `uvx` / `pip install` had to provision
+// hatchling and run `python -m build` on a cold cache. `pypa/build`'s
+// default behavior on a pure-Python tree is to produce both sdist AND
+// wheel, so the planner must ask for both.
+describe('plan: hatch emits sdist + wheel-any (#324)', () => {
+  const TOML = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-hatch"
+kind  = "pypi"
+path  = "py"
+globs = ["py/**"]
+build = "hatch"
+`;
+
+  it('emits an sdist row AND a wheel-any row for a pure-Python hatch package', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', { 'py/lib.py': '# python' });
+
+    const matrix = await plan({ cwd: repo });
+    const targets = matrix.map((r) => r.target).sort();
+    expect(targets).toEqual(['any', 'sdist']);
+  });
+
+  it('wheel-any row uses artifact_name `<safe>-wheel-any` and carries build = "hatch"', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', { 'py/lib.py': '# python' });
+
+    const matrix = await plan({ cwd: repo });
+    const wheel = matrix.find((r) => r.target === 'any');
+    expect(wheel).toBeDefined();
+    expect(wheel!.artifact_name).toBe('py-hatch-wheel-any');
+    expect(wheel!.artifact_path).toBe('py/dist');
+    expect(wheel!.runs_on).toBe('ubuntu-latest');
+    expect(wheel!.build).toBe('hatch');
+  });
+
+  it('setuptools still emits only an sdist row (no wheel-any)', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-setup"
+kind  = "pypi"
+path  = "py"
+globs = ["py/**"]
+build = "setuptools"
+`,
+      'utf8',
+    );
+    commit('feat: initial', { 'py/lib.py': '# python' });
+
+    const matrix = await plan({ cwd: repo });
+    expect(matrix.map((r) => r.target)).toEqual(['sdist']);
+  });
+});
