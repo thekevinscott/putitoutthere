@@ -277,6 +277,17 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --sdist --outdir dist
 
+      # #324: hatch wheel-any row. Mirrors the matching step in
+      # _matrix.yml (consumer-facing reusable workflow) so the e2e
+      # fixture suite exercises the same build path real consumers do.
+      - if: matrix.kind == 'pypi' && matrix.build == 'hatch' && matrix.target == 'any'
+        working-directory: fixture-tree/${{ matrix.path }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ matrix.version }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
       # ---- npm ----
       - if: matrix.kind == 'npm'
         uses: actions/setup-node@v6
