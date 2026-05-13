@@ -25,7 +25,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
@@ -323,19 +323,61 @@ function listTrackedFiles(cwd: string): string[] | null {
 }
 
 function readDeclaredBins(cargoTomlPath: string): string[] {
+  const parsed = parseCargoToml(cargoTomlPath);
+  if (parsed === null) return [];
+  const result = collectBinsFromManifest(parsed);
+  // Workspace manifests delegate [[bin]] declarations to member crates
+  // (#337). `cargo build --bin X` from anywhere in the workspace
+  // resolves X transparently, so a check that only reads the
+  // workspace-root manifest reports bins as missing even when they
+  // exist in a member. Walk `[workspace].members` so `crate_path = "."`
+  // (the default) satisfies the standard cargo-workspace shape.
+  // parseCargoToml returns null for missing / malformed manifests, so
+  // unexpanded glob entries and stray entries silently drop out —
+  // cargo's own diagnostics own surfacing those.
+  for (const memberManifest of workspaceMemberManifests(parsed, cargoTomlPath)) {
+    const memberParsed = parseCargoToml(memberManifest);
+    if (memberParsed === null) continue;
+    for (const b of collectBinsFromManifest(memberParsed)) {
+      if (!result.includes(b)) result.push(b);
+    }
+  }
+  return result;
+}
+
+function workspaceMemberManifests(
+  parsed: Record<string, unknown>,
+  cargoTomlPath: string,
+): string[] {
+  const workspace = parsed.workspace;
+  if (typeof workspace !== 'object' || workspace === null) return [];
+  const members = (workspace as { members?: unknown }).members;
+  if (!Array.isArray(members)) return [];
+  const workspaceDir = dirname(cargoTomlPath);
+  const out: string[] = [];
+  for (const m of members) {
+    if (typeof m === 'string') {
+      out.push(join(workspaceDir, m, 'Cargo.toml'));
+    }
+  }
+  return out;
+}
+
+function parseCargoToml(path: string): Record<string, unknown> | null {
   let raw: string;
   try {
-    raw = readFileSync(cargoTomlPath, 'utf8');
-    /* v8 ignore next 3 -- existsSync gated the read above */
+    raw = readFileSync(path, 'utf8');
   } catch {
-    return [];
+    return null;
   }
-  let parsed: Record<string, unknown>;
   try {
-    parsed = parseToml(raw);
+    return parseToml(raw);
   } catch {
-    return [];
+    return null;
   }
+}
+
+function collectBinsFromManifest(parsed: Record<string, unknown>): string[] {
   const result: string[] = [];
   const bins = parsed.bin;
   if (Array.isArray(bins)) {

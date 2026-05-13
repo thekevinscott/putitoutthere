@@ -467,6 +467,125 @@ dynamic = ["version"]
     ).toBe(true);
   });
 
+  it("accepts maturin+bundle_cli when the bin lives in a workspace member crate (crate_path is the workspace root)", () => {
+    // Cargo-workspace layout (this is `thekevinscott/dirsql`'s shape):
+    // - `/Cargo.toml`      = `[workspace]` table, no `[[bin]]`
+    // - `/crates/cli/Cargo.toml` = `[package]` with `[[bin]] my-cli`
+    //
+    // `cargo build --bin my-cli` from the workspace root resolves the
+    // bin transparently. The check must do the same — walking the
+    // workspace's `members` and aggregating each member's `[[bin]]`
+    // entries — otherwise `crate_path = "."` (the default) is
+    // unsatisfiable for the standard cargo-workspace shape: any value
+    // that makes the check pass breaks the build's stage step (which
+    // reads from `<crate_path>/target/...`, but cargo writes to the
+    // workspace-rooted target dir).
+    write('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+# crate_path defaults to "." (the workspace root).
+`);
+    write('packages/py/pyproject.toml', `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`);
+    // Workspace root Cargo.toml — no [package], no [[bin]].
+    write('Cargo.toml', `
+[workspace]
+members = ["crates/cli"]
+resolver = "2"
+`);
+    // Member crate carries the [[bin]].
+    write('crates/cli/Cargo.toml', `
+[package]
+name = "cli-crate"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[[bin]]
+name = "my-cli"
+path = "src/main.rs"
+`);
+    write('crates/cli/src/main.rs', 'fn main(){}');
+    commit();
+    const findings = runChecks({ cwd });
+    expect(
+      findings.filter(
+        (f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message),
+      ),
+    ).toEqual([]);
+  });
+
+  it("walks past a workspace member entry whose Cargo.toml is missing", () => {
+    // Defensive path in the workspace walk: cargo's `members` array can
+    // point at glob patterns or stale entries that don't resolve to a
+    // real manifest. The check silently skips those (cargo's own
+    // diagnostics own surfacing them) and still resolves bins from the
+    // members that do exist.
+    write('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+`);
+    write('packages/py/pyproject.toml', `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`);
+    write('Cargo.toml', `
+[workspace]
+members = ["crates/missing", "crates/cli"]
+resolver = "2"
+`);
+    // Only the second member exists. The first ("crates/missing")
+    // points at a path with no Cargo.toml — parseCargoToml returns
+    // null and the walk continues to the next member.
+    write('crates/cli/Cargo.toml', `
+[package]
+name = "cli-crate"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[[bin]]
+name = "my-cli"
+path = "src/main.rs"
+`);
+    write('crates/cli/src/main.rs', 'fn main(){}');
+    commit();
+    const findings = runChecks({ cwd });
+    expect(
+      findings.filter(
+        (f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message),
+      ),
+    ).toEqual([]);
+  });
+
   it("flags npm targets containing a triple that's not in TRIPLE_MAP", () => {
     write('putitoutthere.toml', `
 [putitoutthere]

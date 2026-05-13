@@ -816,7 +816,7 @@ function collectBundleCliCrateFindings(
   if (parsed === null) return;
 
   // CRATES_MISSING_BIN
-  const declaredBins = readDeclaredBinNames(parsed);
+  const declaredBins = readDeclaredBinNames(parsed, cargoTomlPath);
   if (!declaredBins.includes(bundleCli.bin)) {
     findings.push({
       package: p.name,
@@ -860,7 +860,45 @@ function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
   return new Set(Object.keys(features));
 }
 
-function readDeclaredBinNames(cargoToml: Record<string, unknown>): string[] {
+function readDeclaredBinNames(
+  cargoToml: Record<string, unknown>,
+  cargoTomlPath: string,
+): string[] {
+  const result = collectBinsFromManifest(cargoToml);
+  // Workspace manifests delegate [[bin]] declarations to member crates
+  // (#337). `cargo build --bin X` from anywhere in the workspace
+  // resolves X transparently, so a check that only reads the
+  // workspace-root manifest reports bins as missing even when they
+  // exist in a member.
+  for (const memberManifest of workspaceMemberManifests(cargoToml, cargoTomlPath)) {
+    const memberParsed = readToml(memberManifest);
+    if (memberParsed === null) continue;
+    for (const b of collectBinsFromManifest(memberParsed)) {
+      if (!result.includes(b)) result.push(b);
+    }
+  }
+  return result;
+}
+
+function workspaceMemberManifests(
+  cargoToml: Record<string, unknown>,
+  cargoTomlPath: string,
+): string[] {
+  const workspace = cargoToml.workspace;
+  if (typeof workspace !== 'object' || workspace === null) return [];
+  const members = (workspace as { members?: unknown }).members;
+  if (!Array.isArray(members)) return [];
+  const workspaceDir = dirname(cargoTomlPath);
+  const out: string[] = [];
+  for (const m of members) {
+    if (typeof m === 'string') {
+      out.push(join(workspaceDir, m, 'Cargo.toml'));
+    }
+  }
+  return out;
+}
+
+function collectBinsFromManifest(cargoToml: Record<string, unknown>): string[] {
   const result: string[] = [];
   const bins = cargoToml.bin;
   if (Array.isArray(bins)) {
