@@ -658,6 +658,15 @@ jobs:
           # first-publish rows. Empty for steady-state rows so the handler
           # falls through to its normal real-npm + OIDC-TP path.
           PIOT_NPM_REGISTRY: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://localhost:4873' || '' }}
+          # #334: routes the engine's crates handler EXCLUSIVELY at the
+          # in-job alt-registry for `*-first-publish` rows. Symmetric
+          # with PIOT_NPM_REGISTRY above. Empty (and therefore unset
+          # post-handler) for steady-state rows so they go through the
+          # normal real-crates.io + OIDC-TP path. When PRIMARY is set
+          # the handler routes the publish exclusively at the override
+          # — no real-crates.io attempt, no FALLBACK retry on 429 (the
+          # PRIMARY contract is "first-publish goes here, full stop").
+          PIOT_CRATES_REGISTRY_PRIMARY: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://127.0.0.1:35503/git' || '' }}
           # #331: routes the engine's crates handler at Kellnr ONLY on a
           # 429 from real crates.io ("published too many versions of this
           # crate in the last 24 hours"). Steady-state happy path still

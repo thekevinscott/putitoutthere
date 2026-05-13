@@ -1,0 +1,7 @@
+[package]
+name = "piot-fixture-zzz-rust-vanilla-first-publish-placeholder"
+version = "__VERSION__"
+edition = "2021"
+license = "MIT"
+description = "Put It Out There first-publish canary fixture. Publishes to an in-job alt-registry under a uniquified name. Safe to ignore."
+repository = "https://github.com/thekevinscott/putitoutthere"

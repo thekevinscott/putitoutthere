@@ -1,0 +1,30 @@
+[putitoutthere]
+version = 1
+
+# #334: first-publish e2e variant for the crates handler. Publishes to a
+# per-job in-container cargo alt-registry (see
+# .github/workflows/e2e-fixture-job.yml) under a uniquified package name
+# so each run exercises the empty-index path (crates.io would treat
+# `cargo publish` against a never-seen-before name as a first publish;
+# the alt-registry has no `crates.io` prior state at all, which is
+# strictly the same property). Symmetric with #315's
+# `js-vanilla-first-publish` for the npm handler.
+#
+# The `-placeholder` suffix on the package name is rewritten by the
+# e2e workflow's uniquification step to `-${run_id}-${run_attempt}`
+# (.github/workflows/e2e-fixture-job.yml's Materialize step). The
+# rewrite gives each run a name the alt-registry has truly never
+# served, so no leftover state from prior runs can produce a
+# false-green publish.
+#
+# `__VERSION__` is rewritten by the materialize step to
+# `0.0.${unix_seconds}`.
+#
+# NOT a consumer-facing example; do not link from README.
+
+[[package]]
+name = "piot-fixture-zzz-rust-vanilla-first-publish-placeholder"
+kind = "crates"
+path = "."
+globs = ["src/**", "Cargo.toml"]
+first_version = "__VERSION__"
