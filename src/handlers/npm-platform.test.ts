@@ -439,6 +439,30 @@ describe('publishPlatforms: publish flags', () => {
     expect(publishCall).toContain('--provenance');
   });
 
+  it('forwards --registry and suppresses --provenance when PIOT_NPM_REGISTRY is set (#304)', async () => {
+    makeArtifact('linux-x64-gnu', 'demo.node', Buffer.from('x'));
+    const calls: string[][] = [];
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      calls.push(a);
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      return Buffer.from('');
+    });
+    await publishPlatforms(
+      basePkg({ targets: ['linux-x64-gnu'] }),
+      '0.1.0',
+      makeCtx({
+        env: {
+          PIOT_NPM_REGISTRY: 'http://verdaccio:4873',
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present',
+        },
+      }),
+    );
+    const publishCall = calls.find((c) => c[0] === 'publish');
+    expect(publishCall).toContain('--registry=http://verdaccio:4873');
+    expect(publishCall).not.toContain('--provenance');
+  });
+
   it('merges onto existing optionalDependencies rather than replacing', async () => {
     makeArtifact('linux-x64-gnu', 'demo.node', Buffer.from('x'));
     writeFileSync(

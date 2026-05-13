@@ -25,6 +25,17 @@ on:
         description: 'Fixture directory under test/fixtures/ to exercise.'
         type: string
         required: true
+      simulate_no_dist:
+        description: >-
+          #304 / #256 repro toggle. When true, the publish job clobbers
+          `dist/` after build but before publish on first-publish rows,
+          producing a tarball whose `files[]`-declared `dist/` directory
+          is empty. The post-publish tarball-verify step is expected to
+          fail on this — that's the demonstration that the assertion
+          catches the cachetta 0.3.x failure mode. Off by default.
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: e2e-${{ github.ref }}-${{ inputs.fixture }}
@@ -63,6 +74,8 @@ jobs:
       - name: Materialize fixture
         env:
           FIXTURE: ${{ inputs.fixture }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           rm -rf fixture-tree
@@ -76,6 +89,19 @@ jobs:
             \( -name putitoutthere.toml -o -name package.json \
                -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
             | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
+          # #304: first-publish fixtures carry a `-placeholder` suffix on
+          # the package name. Rewrite to a per-run unique suffix so each
+          # scenario publishes against a packument that's truly 404 on
+          # the empty Verdaccio (no false-greens from leftover state in
+          # the service container, no collisions across PR pushes).
+          case "${FIXTURE}" in
+            *-first-publish)
+              SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
+              find fixture-tree \
+                \( -name putitoutthere.toml -o -name package.json \) -print0 \
+                | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
+              ;;
+          esac
           # Init a throwaway git repo so the engine's tag-creation path
           # doesn't trip on a missing HEAD.
           cd fixture-tree
@@ -297,6 +323,20 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    # #304: Verdaccio service for first-publish e2e variants. Runs on
+    # every publish job (always-on instead of conditional — GitHub Actions
+    # doesn't support `if:` on `services:`, and the idle cost is ~3s of
+    # container startup with no other side-effects). Steady-state fixtures
+    # never resolve `localhost:4873` so the service has no influence on
+    # their publish path. Per-job isolation gives us per-scenario wipe
+    # implicitly: each fixture's publish job spawns its own service
+    # container with empty volume state, so `npm view <name>@<version>`
+    # is guaranteed 404 before publish without an explicit reset step.
+    services:
+      verdaccio:
+        image: verdaccio/verdaccio:5
+        ports:
+          - 4873:4873
     steps:
       - uses: actions/checkout@v6
         with:
@@ -333,6 +373,8 @@ jobs:
       - name: Materialize fixture
         env:
           FIXTURE: ${{ inputs.fixture }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           rm -rf fixture-tree
@@ -345,6 +387,16 @@ jobs:
             \( -name putitoutthere.toml -o -name package.json \
                -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
             | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
+          # #304: mirror the plan job's name-uniquification so package
+          # name on disk in publish matches what the matrix references.
+          case "${FIXTURE}" in
+            *-first-publish)
+              SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
+              find fixture-tree \
+                \( -name putitoutthere.toml -o -name package.json \) -print0 \
+                | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
+              ;;
+          esac
           cd fixture-tree
           git init -q -b main
           git config user.email 'e2e@putitoutthere.dev'
@@ -445,7 +497,84 @@ jobs:
           done <<< "$rows"
           exit "$fail"
 
+      # #304 / #256: opt-in repro that clobbers dist/ between build and
+      # publish on first-publish rows. The post-publish tarball-verify
+      # step is expected to fail when this runs — that's the
+      # demonstration that the assertion catches missing build output
+      # against an empty registry. Skipped by default.
+      - name: '#256 repro: clobber dist/ before publish (opt-in)'
+        if: inputs.simulate_no_dist && endsWith(inputs.fixture, '-first-publish')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
+          for path in $paths; do
+            target="fixture-tree/${path}/dist"
+            if [ -d "$target" ]; then
+              echo "::warning::#256 repro: clobbering ${target}"
+              find "$target" -mindepth 1 -delete
+            fi
+          done
+
+      # #304: configure Verdaccio auth for first-publish rows. Creates an
+      # `e2e` user via Verdaccio's user-create endpoint, captures the
+      # returned auth token, writes it into a per-package `.npmrc` so the
+      # subsequent `npm publish --registry=http://localhost:4873` honors
+      # it. The handler's PIOT_NPM_REGISTRY seam reads from `ctx.env`
+      # (npm.ts / npm-platform.ts); we set it on the publish action step
+      # below, gated to first-publish rows.
+      - name: Configure Verdaccio auth (first-publish)
+        if: endsWith(inputs.fixture, '-first-publish')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          # Verdaccio service can take a few seconds to bind. Wait until
+          # the /-/ping endpoint is reachable before issuing the user PUT.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://localhost:4873/-/ping > /dev/null 2>&1; then
+              echo "Verdaccio up (attempt ${attempt})"
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "::error::Verdaccio /-/ping unreachable after 10 attempts"
+              exit 1
+            fi
+            sleep 1
+          done
+          response=$(curl -fsS -X PUT \
+            -H 'Content-Type: application/json' \
+            --data '{"name":"e2e","password":"e2e","email":"e2e@piot.dev"}' \
+            'http://localhost:4873/-/user/org.couchdb.user:e2e')
+          TOKEN=$(printf '%s' "$response" | jq -r '.token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = 'null' ]; then
+            echo "::error::Verdaccio user-create did not return a token. Response: ${response}"
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          # Write .npmrc into every npm package dir so `npm publish` in
+          # that cwd resolves both the registry and auth correctly.
+          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
+          for path in $paths; do
+            # Write .npmrc with no YAML-indentation contamination. Each
+            # echo emits one config line; the file is the union.
+            {
+              echo "registry=http://localhost:4873/"
+              echo "//localhost:4873/:_authToken=${TOKEN}"
+              echo "always-auth=true"
+            } > "fixture-tree/${path}/.npmrc"
+            echo "Wrote fixture-tree/${path}/.npmrc"
+          done
+
       - uses: ./
+        env:
+          # #304: routes the engine's npm handler at Verdaccio for
+          # first-publish rows. Empty for steady-state rows so the handler
+          # falls through to its normal real-npm + OIDC-TP path.
+          PIOT_NPM_REGISTRY: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://localhost:4873' || '' }}
         with:
           command: publish
           working_directory: fixture-tree
@@ -463,12 +592,33 @@ jobs:
         shell: bash
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
+          # #304: route the verify step's `npm view` at the same registry
+          # the engine just published to. Empty string for steady-state
+          # rows so the script falls back to its default (real npm + the
+          # CDN-propagation backoff schedule).
+          REGISTRY_URL: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://localhost:4873' || '' }}
         run: |
           set -euo pipefail
           rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
           if [ -z "$rows" ]; then
             echo "No npm main/noarch rows; nothing to verify."
             exit 0
+          fi
+          # #304: select retry schedule based on which registry we're
+          # hitting. Real npm propagates packument metadata across its
+          # CDN asynchronously, so verify-immediately-after-publish needs
+          # generous backoff (~140s total). Verdaccio runs as a same-host
+          # service container — once `npm publish` returns, `npm view` is
+          # immediately consistent. Tight backoff there both shortens the
+          # e2e cycle and surfaces real failures faster.
+          if [ -n "${REGISTRY_URL:-}" ]; then
+            sleeps=(1 2 5 10)
+            registry_label="${REGISTRY_URL}"
+            view_flags=(--registry "${REGISTRY_URL}")
+          else
+            sleeps=(5 15 30 90)
+            registry_label='registry.npmjs.org'
+            view_flags=()
           fi
           fail=0
           while IFS= read -r row; do
@@ -484,18 +634,10 @@ jobs:
               echo "[$pkg_name@$version] no directory entries in files[]; skipping."
               continue
             fi
-            echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
-            # Retry npm view: the registry packument metadata that
-            # `npm view <pkg>@<version>` reads is updated asynchronously
-            # after a successful publish. Verify runs immediately after
-            # publish, so the first call usually 404s while the tarball
-            # itself is already live on the CDN. Backoff schedule:
-            # 5s, 15s, 30s, 90s — total ~140s. First publishes of a
-            # brand-new package name can be on the slow end of that.
+            echo "[$pkg_name@$version] verifying tarball at ${registry_label} contains: ${dirs[*]}"
             tarball_url=""
-            sleeps=(5 15 30 90)
             for attempt in 1 2 3 4 5; do
-              tarball_url=$(npm view "$pkg_name@$version" dist.tarball 2>/dev/null || true)
+              tarball_url=$(npm view "${view_flags[@]}" "$pkg_name@$version" dist.tarball 2>/dev/null || true)
               if [ -n "$tarball_url" ]; then break; fi
               if [ "$attempt" -lt 5 ]; then
                 sleep_for="${sleeps[$((attempt - 1))]}"
@@ -504,7 +646,7 @@ jobs:
               fi
             done
             if [ -z "$tarball_url" ]; then
-              echo "::error::[$pkg_name@$version] npm view never returned a tarball URL after 5 attempts (~140s of backoff). Either the publish didn't actually publish, or registry packument propagation is much slower than expected."
+              echo "::error::[$pkg_name@$version] npm view at ${registry_label} never returned a tarball URL after 5 attempts. Either the publish didn't actually publish, or packument propagation is much slower than expected."
               fail=1
               continue
             fi

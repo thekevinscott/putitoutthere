@@ -269,14 +269,21 @@ function synthesizePlatformPackage(
 }
 
 function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
-  const hasOidc = Boolean(
-    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
-      nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
-  );
+  // See src/handlers/npm.ts for the PIOT_NPM_REGISTRY rationale (#304):
+  // internal e2e seam, suppresses provenance + assumes `.npmrc`-supplied
+  // auth at the override registry.
+  const registryOverride = nonEmpty(ctx.env.PIOT_NPM_REGISTRY) ?? nonEmpty(process.env.PIOT_NPM_REGISTRY);
+  const hasOidc =
+    !registryOverride &&
+    Boolean(
+      nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
+        nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
+    );
   const access = pkg.access ?? 'public';
   const args: string[] = ['publish', `--access=${access}`];
   if (pkg.tag) args.push(`--tag=${pkg.tag}`);
   if (hasOidc) args.push('--provenance');
+  if (registryOverride) args.push(`--registry=${registryOverride}`);
 
   try {
     execFileSync('npm', args, {

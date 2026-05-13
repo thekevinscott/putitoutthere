@@ -116,10 +116,22 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     await publishPlatforms(platformPkg, version, ctx);
   }
 
-  const hasOidc = Boolean(
-    nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
-      nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
-  );
+  // Internal e2e seam: PIOT_NPM_REGISTRY routes publish at a non-default
+  // registry (Verdaccio in the first-publish e2e variant; #304). Not a
+  // consumer-facing affordance and not documented in README. Auth at the
+  // override registry flows through `.npmrc` (`_authToken` etc.) which
+  // the e2e workflow writes alongside the fixture; this handler only
+  // needs to (a) tell npm which registry to talk to, and (b) suppress
+  // the public-npm-specific provenance + bootstrap-hint logic that
+  // assumes registry.npmjs.org semantics.
+  const registryOverride = nonEmpty(ctx.env.PIOT_NPM_REGISTRY) ?? nonEmpty(process.env.PIOT_NPM_REGISTRY);
+
+  const hasOidc =
+    !registryOverride &&
+    Boolean(
+      nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
+        nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
+    );
 
   // npm provenance requires a non-empty `repository` field in
   // package.json that matches the git remote. The primary check is
@@ -135,6 +147,7 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   const args: string[] = ['publish', `--access=${access}`];
   if (pkg.tag) args.push(`--tag=${pkg.tag}`);
   if (hasOidc) args.push('--provenance');
+  if (registryOverride) args.push(`--registry=${registryOverride}`);
 
   try {
     execFileSync('npm', args, {
@@ -181,7 +194,9 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
 
   return {
     status: 'published',
-    url: `https://www.npmjs.com/package/${npmNameFor(pkg)}/v/${version}`,
+    url: registryOverride
+      ? `${registryOverride.replace(/\/$/, '')}/${npmNameFor(pkg)}/-/${version}`
+      : `https://www.npmjs.com/package/${npmNameFor(pkg)}/v/${version}`,
   };
 }
 
