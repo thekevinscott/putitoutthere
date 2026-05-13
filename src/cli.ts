@@ -35,10 +35,11 @@ import { isAbsolute, resolve } from 'node:path';
 import { runChecks } from './check.js';
 import { plan } from './plan.js';
 import { publish } from './publish.js';
+import { writeLauncherFromConfig } from './write-launcher.js';
 import { writeVersionForBuild } from './write-version.js';
 import { VERSION } from './version.js';
 
-const COMMANDS = ['plan', 'publish', 'check', 'write-version', 'version'] as const;
+const COMMANDS = ['plan', 'publish', 'check', 'write-version', 'write-launcher', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
 
 function isCommand(value: string): value is Command {
@@ -55,6 +56,7 @@ function printUsage(): void {
       '  publish        Execute the plan',
       '  check          Pre-merge configuration validation (#319)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
+      '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
       '  version        Print CLI version',
       '',
       'Options:',
@@ -200,6 +202,27 @@ export async function run(argv: readonly string[]): Promise<number> {
           }
         }
         return findings.length === 0 ? 0 : 1;
+      }
+      case 'write-launcher': {
+        // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli
+        // main row. Authors `bin/<bin>.js` + `package.json#bin` in
+        // place; consumer overrides are preserved. No-op for non-npm
+        // packages and for npm packages without a bundled-cli build
+        // entry, so the build job can invoke this on every main row.
+        if (!flags.path) throw new Error('write-launcher: --path <pkg-dir> is required');
+        const written = writeLauncherFromConfig({
+          cwd: flags.cwd,
+          packagePath: flags.path,
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+        });
+        if (written.length === 0) {
+          process.stdout.write(`write-launcher: ${flags.path}: no-op (not a bundled-cli npm package, or files exist)\n`);
+        } else {
+          process.stdout.write(
+            `write-launcher: ${flags.path}: wrote ${written.join(', ')}\n`,
+          );
+        }
+        return 0;
       }
       case 'write-version': {
         // #276: pre-build hook used by `_matrix.yml`'s maturin steps.

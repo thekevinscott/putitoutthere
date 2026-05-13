@@ -473,6 +473,99 @@ globs = ["packages/ts/**"]
     }
   });
 
+  it('write-launcher: writes bin/<bin>.js + updates package.json#bin for a bundled-cli npm package (#299)', async () => {
+    // The matrix's main row invokes `command: write-launcher` so the
+    // engine authors the per-platform launcher consumers used to have
+    // to write by hand. Mirrors the write-version invocation shape:
+    // `working_directory: ${{ matrix.path }}` flows through as `--path`.
+    const tree = mkdtempSync(join(tmpdir(), 'cli-write-launcher-'));
+    try {
+      mkdirSync(join(tree, 'packages/ts'), { recursive: true });
+      writeFileSync(
+        join(tree, 'packages/ts/package.json'),
+        JSON.stringify({ name: 'demo-cli', version: '0.0.0' }, null, 2),
+      );
+      writeFileSync(
+        join(tree, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name = "demo-cli"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+[package.bundle_cli]
+bin = "demo-cli"
+crate_path = "."
+`,
+      );
+
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-launcher',
+        '--cwd',
+        tree,
+        '--path',
+        'packages/ts',
+      ]);
+      expect(code).toBe(0);
+      const launcher = readFileSync(
+        join(tree, 'packages/ts/bin/demo-cli.js'),
+        'utf8',
+      );
+      expect(launcher).toContain('`demo-cli-${triple}`');
+      const pkg = JSON.parse(
+        readFileSync(join(tree, 'packages/ts/package.json'), 'utf8'),
+      ) as { bin?: Record<string, string> };
+      expect(pkg.bin).toEqual({ 'demo-cli': 'bin/demo-cli.js' });
+    } finally {
+      rmSync(tree, { recursive: true, force: true });
+    }
+  });
+
+  it('write-launcher: no-op for an npm vanilla package (no bundled-cli entry) (#299)', async () => {
+    const tree = mkdtempSync(join(tmpdir(), 'cli-write-launcher-noop-'));
+    try {
+      mkdirSync(join(tree, 'packages/ts'), { recursive: true });
+      writeFileSync(
+        join(tree, 'packages/ts/package.json'),
+        JSON.stringify({ name: 'demo', version: '0.0.0' }, null, 2),
+      );
+      writeFileSync(
+        join(tree, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name = "demo"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+`,
+      );
+
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-launcher',
+        '--cwd',
+        tree,
+        '--path',
+        'packages/ts',
+      ]);
+      expect(code).toBe(0);
+      // No launcher was authored; no `bin` field was added.
+      const pkg = JSON.parse(
+        readFileSync(join(tree, 'packages/ts/package.json'), 'utf8'),
+      ) as { bin?: unknown };
+      expect(pkg.bin).toBeUndefined();
+    } finally {
+      rmSync(tree, { recursive: true, force: true });
+    }
+  });
+
   it('publish exits 1 with PIOT_PUBLISH_EMPTY_PLAN when the plan is empty', async () => {
     // Invariant: if `publish` runs, something publishes. An empty
     // plan at this stage is a workflow-gate / engine-state bug and

@@ -340,6 +340,20 @@ jobs:
           node-version: ${{ inputs.node_version }}
           registry-url: 'https://registry.npmjs.org'
 
+      # #299: bundled-cli launcher — author `bin/<bin>.js` +
+      # `package.json#bin` for the main package before `npm run build`
+      # runs. The launcher is templated on (pkg name, configured
+      # targets) and identical across consumers; the engine writes it
+      # in place, only if absent (so consumers can override either
+      # piece). Same `working_directory` → `--path` plumbing as the
+      # pypi write-version step above.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.target == 'main'
+        name: write-launcher — generate bundled-cli launcher for ${{ matrix.name }}
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: write-launcher
+          working_directory: ${{ matrix.path }}
+
       # #298: bundle_cli — cross-compile a Rust CLI per target and stage
       # it under `${{ matrix.artifact_path }}` so the engine's npm-platform
       # handler packages it into the per-platform tarball. Same shape as

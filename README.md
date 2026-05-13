@@ -540,42 +540,12 @@ The engine publishes a per-platform sub-package per target
 at the published version. npm's resolver installs exactly one sub-package
 at consumer install time.
 
-You author the launcher script that picks the right per-platform binary
-once. `package.json`:
-
-```json
-{
-  "name": "my-cli",
-  "bin": { "my-cli": "bin/my-cli.js" }
-}
-```
-
-`bin/my-cli.js`:
-
-```js
-#!/usr/bin/env node
-const { spawnSync } = require('node:child_process');
-const { platform, arch } = process;
-
-const triples = {
-  'linux-x64':    'x86_64-unknown-linux-gnu',
-  'linux-arm64':  'aarch64-unknown-linux-gnu',
-  'darwin-x64':   'x86_64-apple-darwin',
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'win32-x64':    'x86_64-pc-windows-msvc',
-};
-
-const triple = triples[`${platform}-${arch}`];
-if (!triple) {
-  console.error(`my-cli: unsupported platform ${platform}-${arch}`);
-  process.exit(1);
-}
-
-const pkg = `my-cli-${triple}`;
-const binary = require.resolve(`${pkg}/bin/my-cli${platform === 'win32' ? '.exe' : ''}`);
-const result = spawnSync(binary, process.argv.slice(2), { stdio: 'inherit' });
-process.exit(result.status ?? 1);
-```
+The reusable workflow generates the per-platform launcher and the
+matching `package.json#bin` entry for you at build time — both writes
+are skipped when the consumer already has either piece committed, so
+overrides remain trivial. To override, commit your own
+`bin/<bundle_cli.bin>.js` at the package root (or set `package.json#bin`
+explicitly); the workflow leaves both alone when present.
 
 Declare `[package.bundle_cli]` so the reusable workflow runs the
 cross-compile for you:
