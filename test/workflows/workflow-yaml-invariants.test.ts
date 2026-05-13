@@ -663,3 +663,48 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
     ).toEqual([]);
   });
 });
+
+// Post-publish tarball-verify step (#304) retries `npm view` to handle
+// npm packument-metadata propagation lag across CDN edges, but until
+// this fix the `curl` that fetched the tarball blob itself had no
+// retry. npm's packument index and tarball blobs propagate
+// independently — `npm view` can mint a tarball URL at the origin
+// before that blob reaches the CloudFlare edge a runner happens to
+// route to, so `curl --fail` would 404 even though the publish
+// succeeded and the metadata claimed the artifact was available.
+//
+// Reproduced empirically on PR #322 (commit 0ceb36c): two consecutive
+// `e2e (polyglot-everything) / publish` runs failed at this exact
+// step with `curl` exit 22, while the very same tarball URL returned
+// HTTP 200 (cf-cache-status: HIT) on a probe a few minutes later. The
+// `npm view` retry guard was correctly handling the packument race;
+// the tarball-fetch race was a separate gap.
+describe('e2e-fixture-job.yml verify step: tarball-fetch retry', () => {
+  const path = join(repoRoot, '.github/workflows/e2e-fixture-job.yml');
+  const text = readFileSync(path, 'utf8');
+
+  it('the curl that fetches the tarball retries on 4xx (not just connection errors)', () => {
+    // curl's default `--retry` only kicks in on connection errors,
+    // DNS failures, and 5xx — the tarball-blob 404 during CDN
+    // propagation is a 4xx. `--retry-all-errors` is what makes the
+    // retry actually apply to the race we hit. Pin both flags on the
+    // curl line that consumes $tarball_url so a future edit can't
+    // quietly drop either half and reintroduce the race.
+    const offenders: string[] = [];
+    text.split('\n').forEach((line, idx) => {
+      if (!/\bcurl\b/.test(line)) return;
+      if (!line.includes('tarball_url')) return;
+      const hasRetryCount = /--retry\b/.test(line);
+      const hasRetryAll = /--retry-all-errors\b/.test(line);
+      if (!hasRetryCount || !hasRetryAll) {
+        offenders.push(
+          `  line ${idx + 1} (--retry=${hasRetryCount}, --retry-all-errors=${hasRetryAll}): ${line.trim()}`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `every \`curl\` that fetches a tarball blob must carry both \`--retry N\` AND \`--retry-all-errors\` so a transient 4xx from a cold CDN edge is retried. Curl's default --retry covers connection errors and 5xx only; the tarball race surfaces as 4xx during CDN propagation:\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+});
