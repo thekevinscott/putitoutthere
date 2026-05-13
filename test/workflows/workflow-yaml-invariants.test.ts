@@ -663,3 +663,163 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
     ).toEqual([]);
   });
 });
+
+// #317: pre-merge `check.yml` reusable workflow. Pins the file's shape
+// so it stays consumable in one line by a downstream PR-CI workflow:
+//
+//   jobs:
+//     putitoutthere-check:
+//       uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0
+//
+// Acceptance from the issue:
+//   - the file exists,
+//   - it is a reusable workflow (`on: workflow_call`),
+//   - it drives the engine through the same JS action `release.yml`
+//     uses (no new step-level action shape — non-goal #10 from #316's
+//     reframe), with `command: check`,
+//   - the README documents it the same way `release.yml` is documented.
+//
+// What's deliberately NOT pinned here: the set of checks the workflow
+// runs. Those are #319's contract and get their own integration tests.
+// This test guards the shell only.
+describe('#317 check.yml reusable workflow shape', () => {
+  interface Step {
+    name?: string;
+    uses?: string;
+    with?: Record<string, unknown>;
+  }
+  interface CheckYaml {
+    on?: {
+      workflow_call?: {
+        inputs?: Record<string, unknown>;
+      };
+    };
+    permissions?: Record<string, string>;
+    jobs?: Record<string, { steps?: Step[]; uses?: string; with?: Record<string, unknown>; permissions?: Record<string, string> }>;
+  }
+
+  const checkPath = join(repoRoot, '.github/workflows/check.yml');
+
+  it('the file exists at .github/workflows/check.yml', () => {
+    expect(
+      existsSync(checkPath),
+      'check.yml must exist (issue #317 acceptance)',
+    ).toBe(true);
+  });
+
+  it('declares `on: workflow_call` so consumers can call it via `uses:`', () => {
+    const parsed = parseYaml(readFileSync(checkPath, 'utf8')) as CheckYaml;
+    expect(
+      parsed.on?.workflow_call,
+      'check.yml must be a reusable workflow (on: workflow_call) — issue #317',
+    ).toBeDefined();
+  });
+
+  it('runs the engine via the JS action with `command: check`', () => {
+    // The issue forbids forking validation logic across two surfaces.
+    // The release.yml path drives the engine via
+    // `uses: thekevinscott/putitoutthere@v0` with `command: <name>`;
+    // check.yml must do the same so both surfaces invoke the same
+    // CLI entry point and share the same validation code path.
+    const parsed = parseYaml(readFileSync(checkPath, 'utf8')) as CheckYaml;
+    const jobs = parsed.jobs ?? {};
+    const allSteps: Step[] = [];
+    for (const job of Object.values(jobs)) {
+      for (const step of job?.steps ?? []) allSteps.push(step);
+    }
+    const engineStep = allSteps.find(
+      (s) =>
+        typeof s.uses === 'string' &&
+        /^thekevinscott\/putitoutthere(?:\/[^@]+)?@v0$/.test(s.uses) &&
+        // The top-level repo ref is the JS action wrapper; the
+        // path-suffixed refs are the other reusable workflows
+        // (release.yml, build.yml, _matrix.yml). The action is the
+        // one that takes a `command:` input.
+        !s.uses.includes('/.github/workflows/'),
+    );
+    expect(
+      engineStep,
+      'check.yml must invoke `uses: thekevinscott/putitoutthere@v0` to drive the engine (issue #317)',
+    ).toBeDefined();
+    expect(
+      engineStep?.with?.command,
+      'the JS-action step must pass `command: check` so the same engine entry point as plan/publish/write-version runs (issue #317)',
+    ).toBe('check');
+  });
+
+  it('requests minimal permissions (no `id-token: write`)', () => {
+    // Mirror of build.yml's structural guarantee: a PR-time surface
+    // must not carry the OIDC publish capability. A configuration
+    // check that can mint a registry token is a parallel diagnostic
+    // surface masquerading as a check (non-goal #8 again). Strip
+    // YAML comments before matching so the header documentation
+    // (which legitimately names the forbidden permission to explain
+    // why it isn't there) doesn't trip the regex.
+    const text = readFileSync(checkPath, 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/(^|[^"'])#.*$/, '$1'))
+      .join('\n');
+    expect(
+      text,
+      'check.yml must not request id-token: write — PR-time surface cannot mint publish tokens (issue #317)',
+    ).not.toMatch(/id-token:\s*write/);
+  });
+
+  it('README documents the check.yml integration line', () => {
+    // The reusable workflow path is consumer-facing: a copy-paste
+    // from the README is the integration surface, so a drift between
+    // the file's actual path and the documented path breaks every
+    // adopter silently. Mirror of the release.yml invariant above.
+    const expected = 'thekevinscott/putitoutthere/.github/workflows/check.yml@v0';
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    expect(
+      readme,
+      'README must document the check.yml integration line so consumers can wire it in one line (issue #317 acceptance)',
+    ).toContain(expected);
+  });
+});
+
+// Post-publish tarball-verify step (#304) retries `npm view` to handle
+// npm packument-metadata propagation lag across CDN edges, but until
+// this fix the `curl` that fetched the tarball blob itself had no
+// retry. npm's packument index and tarball blobs propagate
+// independently — `npm view` can mint a tarball URL at the origin
+// before that blob reaches the CloudFlare edge a runner happens to
+// route to, so `curl --fail` would 404 even though the publish
+// succeeded and the metadata claimed the artifact was available.
+//
+// Reproduced empirically on PR #322 (commit 0ceb36c): two consecutive
+// `e2e (polyglot-everything) / publish` runs failed at this exact
+// step with `curl` exit 22, while the very same tarball URL returned
+// HTTP 200 (cf-cache-status: HIT) on a probe a few minutes later. The
+// `npm view` retry guard was correctly handling the packument race;
+// the tarball-fetch race was a separate gap.
+describe('e2e-fixture-job.yml verify step: tarball-fetch retry', () => {
+  const path = join(repoRoot, '.github/workflows/e2e-fixture-job.yml');
+  const text = readFileSync(path, 'utf8');
+
+  it('the curl that fetches the tarball retries on 4xx (not just connection errors)', () => {
+    // curl's default `--retry` only kicks in on connection errors,
+    // DNS failures, and 5xx — the tarball-blob 404 during CDN
+    // propagation is a 4xx. `--retry-all-errors` is what makes the
+    // retry actually apply to the race we hit. Pin both flags on the
+    // curl line that consumes $tarball_url so a future edit can't
+    // quietly drop either half and reintroduce the race.
+    const offenders: string[] = [];
+    text.split('\n').forEach((line, idx) => {
+      if (!/\bcurl\b/.test(line)) return;
+      if (!line.includes('tarball_url')) return;
+      const hasRetryCount = /--retry\b/.test(line);
+      const hasRetryAll = /--retry-all-errors\b/.test(line);
+      if (!hasRetryCount || !hasRetryAll) {
+        offenders.push(
+          `  line ${idx + 1} (--retry=${hasRetryCount}, --retry-all-errors=${hasRetryAll}): ${line.trim()}`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `every \`curl\` that fetches a tarball blob must carry both \`--retry N\` AND \`--retry-all-errors\` so a transient 4xx from a cold CDN edge is retried. Curl's default --retry covers connection errors and 5xx only; the tarball race surfaces as 4xx during CDN propagation:\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+});

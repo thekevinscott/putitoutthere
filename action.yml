@@ -4,7 +4,7 @@ author: 'Kevin Scott'
 
 inputs:
   command:
-    description: 'Which CLI subcommand to run. Canonical values are `plan`, `publish`, and `write-version`.'
+    description: 'Which CLI subcommand to run. Canonical values are `plan`, `publish`, `write-version`, and `check`.'
     required: false
     default: 'plan'
   working_directory:

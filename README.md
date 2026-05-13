@@ -81,13 +81,46 @@ Optional inputs — `with:` block at the call site:
 | `node_version`   | `24`         | You need a specific Node version for `kind = "npm"` build steps.         |
 | `python_version` | `3.12`       | You need a specific Python version for `kind = "pypi"` build steps.      |
 
-### 1b. Recommended: drop in `.github/workflows/build-check.yml`
+### 1b. Recommended: drop in `.github/workflows/check.yml`
+
+Run every pre-merge config check the engine knows about on every
+PR. The fastest gate against a malformed `putitoutthere.toml`, a
+duplicate package name, a `depends_on` cycle, a missing
+`[[package]].path` directory, globs that match no tracked files,
+a `tag_format` collision, a missing `repository` field on an
+`npm` package, missing `description` / `license` on a `crates`
+package, or a `bundle_cli` binary the crate doesn't declare — a
+couple of seconds per PR, no per-target build, no `setup-python`
+/ `setup-rust`. Findings are aggregated into one report so you
+fix everything in one push instead of chasing errors across re-
+runs.
+
+```yaml
+name: putitoutthere check
+
+on:
+  pull_request: {}
+
+jobs:
+  putitoutthere-check:
+    uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0
+```
+
+Green here = "a release run from this commit would not surface
+configuration-level surprises." `check.yml` does not build anything,
+does not run `setup-node` against your sources, and never holds a
+publishable artifact in memory; its `permissions:` block is
+`contents: read` only.
+
+### 1c. Recommended: drop in `.github/workflows/build-check.yml`
 
 Run the same plan + build matrix on every PR, with the publish step
-structurally absent. This is the cheapest way to catch a malformed
-`putitoutthere.toml`, missing `repository` field, or per-target build
-break **before** the merge — by the time the release workflow runs,
-the merge has already happened and the only recourse is a fix-up PR.
+structurally absent. Slower than `check.yml` (it actually compiles
+every per-target wheel and binary) but catches the bugs `check.yml`
+can't observe — a per-target build break, a missing `repository`
+field that the build process surfaces, an `aarch64-apple-darwin`
+linker incompatibility. Wire both: `check.yml` catches the cheap
+mistakes in seconds, `build.yml` catches the rest before the merge.
 
 ```yaml
 name: Build check

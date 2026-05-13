@@ -1,0 +1,59 @@
+name: putitoutthere check
+
+# Reusable workflow for PR-time config validation.
+#
+# Consumer integration (their own .github/workflows/check.yml):
+#
+#   on:
+#     pull_request: {}
+#
+#   jobs:
+#     putitoutthere-check:
+#       uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0
+#
+# Green = "a release run from this commit would not surface
+# configuration-level surprises." Runs every check that's knowable
+# from the consumer's repo state alone (TOML parse, schema, common-
+# mistakes detector, duplicate-name guard, depends_on cycle / dangling-
+# ref detection). The complete pre-merge check list lives in #319;
+# this file is the workflow shell (#317).
+#
+# Cheap: a couple of seconds per PR, no per-target build, no setup-
+# python / setup-rust. The sibling `build.yml` runs the full plan +
+# build matrix and is the heavier PR gate; `check.yml` is the
+# config-sanity gate that catches `putitoutthere.toml` mistakes the
+# build matrix wouldn't (since the build matrix only runs if the
+# config parses far enough to produce a plan).
+#
+# Permissions: contents: read only. The PR-time surface must not be
+# able to mint a publish token; emitting `id-token: write` here would
+# turn this workflow into a parallel diagnostic surface that can act,
+# which `notes/design-commitments.md` non-goal #8 forbids.
+
+on:
+  workflow_call: {}
+
+# Ref-keyed concurrency: a new push on the same PR branch supersedes
+# the in-flight check run. Mirrors `build.yml`. Releases (`release.yml`)
+# use a repository-keyed group with cancel-in-progress: false, so PR
+# checks and release runs never contend for the same slot.
+concurrency:
+  group: putitoutthere-check-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - uses: thekevinscott/putitoutthere@v0
+        with:
+          command: check
