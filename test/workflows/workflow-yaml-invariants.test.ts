@@ -662,6 +662,49 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
       `each maturin wheel build needs a following step gated on matrix.bundle_cli that opens the produced .whl and asserts it contains \${{ matrix.bundle_cli.stage_to }}/\${{ matrix.bundle_cli.bin }}:\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
+
+  // #338: the wheel-content guard's regex asserts a literal
+  // `<stage_to>/<bin>` suffix inside the produced wheel — but maturin
+  // strips `[tool.maturin].python-source` from on-disk paths when it
+  // rewrites them into the wheel's distribution layout. For consumers
+  // with `python-source = "python"` (the layout `maturin new --mixed`
+  // generates), the binary on disk lives at
+  // `<pkg.path>/<stage_to>/<bin>` = `packages/python/python/dirsql/_binary/dirsql`
+  // but in the wheel ends up at `dirsql/_binary/dirsql` — `python/`
+  // stripped. The guard's regex `(^|/)python/dirsql/_binary/dirsql$`
+  // never matches, so the guard fires red on every per-target build
+  // row even though the binary is correctly bundled.
+  //
+  // The guard step must read the consumer's pyproject and subtract the
+  // `[tool.maturin].python-source` prefix from `stage_to` before
+  // constructing the regex. When unset/empty the behaviour is
+  // identical to today.
+  it('wheel-content guard accounts for [tool.maturin].python-source path stripping', () => {
+    const guardSteps = buildSteps.filter(isWheelGuardStep);
+    expect(guardSteps.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    guardSteps.forEach((step, idx) => {
+      const text = stepText(step);
+      // Either form of the key is acceptable — TOML allows both
+      // `python-source` and `python_source` and maturin honors both
+      // across versions. The guard either parses the consumer's
+      // pyproject (look for the substring) or delegates to a CLI
+      // subcommand whose name implies the same responsibility.
+      const readsPyprojectKey = text.includes('python-source')
+        || text.includes('python_source');
+      const delegatesToVerifierCli = text.includes('verify-bundle-cli')
+        || text.includes('verify-wheel');
+      if (!readsPyprojectKey && !delegatesToVerifierCli) {
+        offenders.push(
+          `wheel-content guard step #${idx} neither reads [tool.maturin].python-source from the consumer's pyproject nor delegates to a CLI subcommand that owns the stripping responsibility`,
+        );
+      }
+    });
+    expect(
+      offenders,
+      `the wheel-content guard must subtract [tool.maturin].python-source from stage_to before asserting the in-wheel path, otherwise it fails red for every consumer that uses the standard mixed-project layout (maturin new --mixed). See https://github.com/thekevinscott/putitoutthere/issues/338.\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
 });
 
 // #298: mirror of #282 for npm. `[package.bundle_cli]` should be parsed
