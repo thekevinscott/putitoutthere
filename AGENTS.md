@@ -92,6 +92,39 @@ If green CI is genuinely unattainable on this PR's timeline (e.g.
 external service is down for hours and the fix requires their action),
 the move is to stop and ask. Not to merge red.
 
+## Never rename a release-path workflow file
+
+**Do not rename `.github/workflows/*.yml` files that participate in
+the release path** (the canonical caller workflow, the reusable
+publish workflow it invokes, anything else whose filename is
+inscribed in a registry's Trusted Publisher record). This includes:
+
+- `e2e-fixture.yml` (top-level caller; named in npm TP records)
+- `e2e-fixture-job.yml` (reusable publish workflow)
+- `release.yml`, `release-rust.yml`, `release-npm.yml`, etc.
+- Any other workflow filename that a Trusted Publisher record on
+  npm, crates.io, PyPI, or any other registry currently encodes
+
+Trusted Publisher records on **every published fixture and every
+real package** encode the workflow filename. Renaming the file
+silently invalidates trust on a registry-specific schedule (some
+registries cache for hours; some validate at PUT time; the failure
+surface looks like a 400/401/403 with no actionable message). The
+cost to recover is per-package, manual, and proportional to the
+number of fixtures and platform sub-packages — often dozens of
+records to update across npmjs.com's per-package UI.
+
+If a workflow refactor genuinely requires a rename, treat it the
+same as a registry-credentials rotation: surface the cost
+explicitly, plan the per-package record updates ahead of the
+merge, and stage the rename + the record updates so they land in
+the same window. Do not split this into "rename now, fix records
+later" — the gap is where releases break.
+
+Refactor without renaming. Extracting a job into a reusable
+workflow is fine; extracting it into a *renamed* workflow file
+that the TP records don't recognize is not.
+
 ## Pull requests
 
 When working in a remote agent environment (Claude Code on the web, Codex
