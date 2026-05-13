@@ -5,6 +5,17 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      simulate_no_dist:
+        description: >-
+          #304 / #256 repro toggle. When true, first-publish fixtures clobber
+          their `dist/` directory after build but before publish, so the
+          post-publish tarball-verify step fails. Use to demonstrate that
+          the verify step actually catches missing build output against
+          the empty Verdaccio. Off by default.
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -21,6 +32,7 @@ jobs:
       matrix:
         fixture:
           - js-vanilla
+          - js-vanilla-first-publish
           - js-napi
           - js-bundled-cli
           - js-python-no-rust
@@ -32,6 +44,7 @@ jobs:
     secrets: inherit
     with:
       fixture: ${{ matrix.fixture }}
+      simulate_no_dist: ${{ inputs.simulate_no_dist || false }}
 
   # pypa/gh-action-pypi-publish aborts inside reusable workflows
   # (warehouse#11096), so PyPI upload has to live at the caller level.

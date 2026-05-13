@@ -357,6 +357,54 @@ describe('npm.publish', () => {
     delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   });
 
+  // #304: PIOT_NPM_REGISTRY is an internal e2e seam routing publish at a
+  // non-default registry (Verdaccio in the first-publish e2e variant).
+  // Default behavior (env unset) is covered by every other test in this
+  // suite; the two cases here pin the override semantics.
+
+  it('forwards --registry when PIOT_NPM_REGISTRY is set (#304)', async () => {
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockReturnValueOnce(Buffer.from(''));
+    process.env.PIOT_NPM_REGISTRY = 'http://verdaccio:4873';
+    await npm.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { PIOT_NPM_REGISTRY: 'http://verdaccio:4873' } }),
+    );
+    expect(execMock.mock.calls[1]![1]).toContain('--registry=http://verdaccio:4873');
+    delete process.env.PIOT_NPM_REGISTRY;
+  });
+
+  it('omits --provenance when PIOT_NPM_REGISTRY is set even with OIDC present (#304)', async () => {
+    // Verdaccio doesn't implement Trusted Publishers; forwarding the
+    // OIDC token would fail the publish. The override path treats this
+    // as "not the public-npm flow" and suppresses provenance.
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockReturnValueOnce(Buffer.from(''));
+    process.env.PIOT_NPM_REGISTRY = 'http://verdaccio:4873';
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await npm.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({
+        cwd: dir,
+        env: {
+          PIOT_NPM_REGISTRY: 'http://verdaccio:4873',
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present',
+        },
+      }),
+    );
+    expect(execMock.mock.calls[1]![1]).not.toContain('--provenance');
+    delete process.env.PIOT_NPM_REGISTRY;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  });
+
   it('requires the repository field in package.json when OIDC is on', async () => {
     writeFileSync(
       join(dir, 'package.json'),
