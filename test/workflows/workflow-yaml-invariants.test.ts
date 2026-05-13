@@ -751,8 +751,14 @@ describe('#317 check.yml reusable workflow shape', () => {
     // Mirror of build.yml's structural guarantee: a PR-time surface
     // must not carry the OIDC publish capability. A configuration
     // check that can mint a registry token is a parallel diagnostic
-    // surface masquerading as a check (non-goal #8 again).
-    const text = readFileSync(checkPath, 'utf8');
+    // surface masquerading as a check (non-goal #8 again). Strip
+    // YAML comments before matching so the header documentation
+    // (which legitimately names the forbidden permission to explain
+    // why it isn't there) doesn't trip the regex.
+    const text = readFileSync(checkPath, 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/(^|[^"'])#.*$/, '$1'))
+      .join('\n');
     expect(
       text,
       'check.yml must not request id-token: write — PR-time surface cannot mint publish tokens (issue #317)',
