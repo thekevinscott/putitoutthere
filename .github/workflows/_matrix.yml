@@ -176,9 +176,16 @@ jobs:
           # cargo invocation byte-identical to its pre-#300 form.
           FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
           NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
+        # #337: pin `--target-dir target` so the produced binary lands at
+        # `${CRATE_PATH}/target/<triple>/release/<bin>` regardless of
+        # whether `crate_path` points at a workspace root or a member
+        # crate. cargo's default target-dir is workspace-rooted; without
+        # the explicit pin, the stage step below (which reads from
+        # `${CRATE_PATH}/target/...`) can't find the binary whenever
+        # the crate participates in a `[workspace]`.
         run: |
           set -euo pipefail
-          args=(build --release --target "$TARGET" --bin "$BIN")
+          args=(build --release --target "$TARGET" --bin "$BIN" --target-dir target)
           if [ -n "$FEATURES" ]; then args+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then args+=(--no-default-features); fi
           cargo "${args[@]}"

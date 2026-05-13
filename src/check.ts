@@ -25,7 +25,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
@@ -294,19 +294,65 @@ function listTrackedFiles(cwd: string): string[] | null {
 }
 
 function readDeclaredBins(cargoTomlPath: string): string[] {
+  const parsed = parseCargoToml(cargoTomlPath);
+  if (parsed === null) return [];
+  const result = collectBinsFromManifest(parsed);
+  // Workspace manifests delegate [[bin]] declarations to member crates
+  // (#337). `cargo build --bin X` from anywhere in the workspace
+  // resolves X transparently, so a check that only reads the
+  // workspace-root manifest reports bins as missing even when they
+  // exist in a member. Walk `[workspace].members` (and inherited
+  // values from `[workspace].package`) so `crate_path = "."` (the
+  // default) satisfies the standard cargo-workspace shape.
+  const workspace = parsed.workspace as
+    | { members?: unknown; package?: { name?: unknown } }
+    | undefined;
+  if (workspace && Array.isArray(workspace.members)) {
+    const workspaceDir = dirname(cargoTomlPath);
+    for (const m of workspace.members) {
+      if (typeof m !== 'string') continue;
+      // `members` entries can be glob patterns ("crates/*") in cargo,
+      // but the standard polyglot shape is explicit per-member paths
+      // ("packages/rust"). Resolve literal paths; non-existent ones
+      // (including unexpanded globs) are silently skipped — the build
+      // would surface those with a real cargo diagnostic.
+      const memberManifest = join(workspaceDir, m, 'Cargo.toml');
+      if (!existsSync(memberManifest)) continue;
+      const memberParsed = parseCargoToml(memberManifest);
+      if (memberParsed === null) continue;
+      // Apply `[workspace.package].name` inheritance for the implicit-
+      // binary rule when the member's [package].name is `{ workspace = true }`.
+      const memberBins = collectBinsFromManifest(
+        memberParsed,
+        workspace.package?.name,
+      );
+      for (const b of memberBins) {
+        if (!result.includes(b)) result.push(b);
+      }
+    }
+  }
+  return result;
+}
+
+function parseCargoToml(path: string): Record<string, unknown> | null {
   let raw: string;
   try {
-    raw = readFileSync(cargoTomlPath, 'utf8');
-    /* v8 ignore next 3 -- existsSync gated the read above */
+    raw = readFileSync(path, 'utf8');
+    /* v8 ignore next 3 -- existsSync gates reads in every caller */
   } catch {
-    return [];
+    return null;
   }
-  let parsed: Record<string, unknown>;
   try {
-    parsed = parseToml(raw);
+    return parseToml(raw);
   } catch {
-    return [];
+    return null;
   }
+}
+
+function collectBinsFromManifest(
+  parsed: Record<string, unknown>,
+  workspacePackageName?: unknown,
+): string[] {
   const result: string[] = [];
   const bins = parsed.bin;
   if (Array.isArray(bins)) {
@@ -324,7 +370,18 @@ function readDeclaredBins(cargoTomlPath: string): string[] {
   // doesn't spuriously fail this check.
   if (result.length === 0) {
     const pkg = parsed.package as { name?: unknown } | undefined;
-    if (pkg && typeof pkg.name === 'string') result.push(pkg.name);
+    if (pkg) {
+      if (typeof pkg.name === 'string') {
+        result.push(pkg.name);
+      } else if (
+        typeof pkg.name === 'object' &&
+        pkg.name !== null &&
+        (pkg.name as { workspace?: unknown }).workspace === true &&
+        typeof workspacePackageName === 'string'
+      ) {
+        result.push(workspacePackageName);
+      }
+    }
   }
   return result;
 }
