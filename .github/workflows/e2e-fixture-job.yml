@@ -350,7 +350,7 @@ jobs:
       # ephemeral and the fallback is by design only reachable when
       # provisioned by this workflow.
       kellnr:
-        image: ghcr.io/kellnr/kellnr:5
+        image: ghcr.io/kellnr/kellnr:5.3.0
         ports:
           - 8000:8000
         env:
@@ -491,10 +491,14 @@ jobs:
           # ephemeral; never leaves the runner.
           touch "${HOME}/.cargo/credentials.toml"
           chmod 600 "${HOME}/.cargo/credentials.toml"
+          # cargo prepends `Bearer ` to the token itself when constructing
+          # the Authorization header. Store the bare token here, not a
+          # Bearer-prefixed one, or the wire shape is "Bearer Bearer ..."
+          # and a strict server rejects.
           cat >> "${HOME}/.cargo/credentials.toml" <<'EOF'
 
           [registries.piot-fallback]
-          token = "Bearer piot-e2e-fallback-dummy-token"
+          token = "piot-e2e-fallback-dummy-token-1234567890abcdef"
           EOF
 
       # Mirrors release.yml: rebuild npm packages from source before
@@ -663,6 +667,42 @@ jobs:
         with:
           command: publish
           working_directory: fixture-tree
+
+      # #331: diagnostic dump for the Kellnr alt-crates-registry fallback.
+      # Runs on every crates-bearing job regardless of publish outcome
+      # so the root cause is visible in the log when the fallback fires
+      # AND fails. Cheap on the happy path (a few `docker logs` + `curl`
+      # calls). Strip once the fallback path has been stable in CI for
+      # ~10 polyglot runs.
+      - name: Diagnostic dump (Kellnr fallback)
+        if: always() && contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        shell: bash
+        run: |
+          set +e
+          echo "::group::docker ps"
+          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+          echo "::endgroup::"
+          echo "::group::Kellnr container logs"
+          kellnr_cid=$(docker ps -a --filter "ancestor=ghcr.io/kellnr/kellnr:5.3.0" --format '{{.ID}}' | head -1)
+          if [ -n "${kellnr_cid}" ]; then
+            docker logs --tail 200 "${kellnr_cid}" 2>&1 || true
+          else
+            echo "(no Kellnr container found via ancestor filter)"
+          fi
+          echo "::endgroup::"
+          echo "::group::Kellnr endpoint probes"
+          curl -sS -o /tmp/kellnr-root.txt -w 'GET /  -> %{http_code}\n' http://localhost:8000/ || true
+          curl -sS -o /tmp/kellnr-cfg.txt -w 'GET /api/v1/crates/config.json  -> %{http_code}\n' http://localhost:8000/api/v1/crates/config.json || true
+          echo "--- /api/v1/crates/config.json body (first 500 bytes):"
+          head -c 500 /tmp/kellnr-cfg.txt 2>/dev/null || true
+          echo
+          echo "::endgroup::"
+          echo "::group::~/.cargo/config.toml"
+          cat "${HOME}/.cargo/config.toml" 2>/dev/null || echo "(no config.toml)"
+          echo "::endgroup::"
+          echo "::group::~/.cargo/credentials.toml (token redacted)"
+          sed 's/token = .*/token = "[REDACTED]"/' "${HOME}/.cargo/credentials.toml" 2>/dev/null || echo "(no credentials.toml)"
+          echo "::endgroup::"
 
       # Post-publish: download every main npm tarball from the registry and
       # assert that directory entries declared in package.json `files` are
