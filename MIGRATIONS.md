@@ -73,6 +73,44 @@ in a red `plan` step. With `check.yml` wired, the PR fails red at
 review time with the same diagnosable error message, before the
 merge.
 
+### Internal Kellnr fallback for crates e2e
+
+**Summary.** Internal change with no consumer-observable impact. Adds a
+Kellnr alt-crates-registry service container (`ghcr.io/kellnr/kellnr:5`)
+to `e2e-fixture-job.yml`'s publish job alongside the existing
+Verdaccio service. `PIOT_CRATES_REGISTRY_FALLBACK` is an internal e2e
+seam (`src/handlers/crates.ts`) that retries `cargo publish` against
+the fallback URL on a 429-rate-limit from real crates.io ("You have
+published too many versions of this crate in the last 24 hours") and
+emits a `::warning::` workflow command so reviewers see the fallback
+engaged. A symmetric `PIOT_CRATES_REGISTRY_PRIMARY` seam routes the
+publish *only* at the override registry (no real-crates.io attempt,
+no fallback); reserved for any future `*-first-publish` crates
+fixture. The reusable consumer workflow (`release.yml`),
+`putitoutthere.toml` schema, trailer grammar, the dogfood
+`release-rust.yml`, and consumer-facing docs are untouched. #331.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None for consumers. For
+contributors running e2e locally: the publish job in
+`e2e-fixture-job.yml` now spins up a Kellnr service container per
+job (~3s startup cost) in addition to the existing Verdaccio one.
+Steady-state crates fixtures keep their real-crates.io OIDC-TP path
+unchanged on the happy path; the fallback only fires when real
+crates.io returns a 429.
+
+**Verification.** A successful CI run on a PR that hits the
+crates.io 24h-per-crate quota (the polyglot fixture's
+`piot-fixture-zzz-poly-rust` row) goes green via Kellnr fallback
+with a `::warning::` in the run log naming the fallback URL,
+instead of failing red on the 429. When the quota is fresh, the
+`e2e (polyglot-everything)` row continues to publish to real
+crates.io and the warning does not fire — visible diagnostic
+distinction between the two paths.
+
 ### Internal Verdaccio e2e coverage
 
 **Summary.** Internal change with no consumer-observable impact. Adds a

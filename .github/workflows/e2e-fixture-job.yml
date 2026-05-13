@@ -337,6 +337,25 @@ jobs:
         image: verdaccio/verdaccio:5
         ports:
           - 4873:4873
+      # #331: Kellnr alt-crates-registry, mirror shape of the Verdaccio
+      # service above. Used by the crates handler's
+      # `PIOT_CRATES_REGISTRY_FALLBACK` seam as a 429 retry target when
+      # real crates.io rate-limits routine PR-cadence e2e traffic
+      # ("published too many versions of this crate in the last 24
+      # hours"). Always-on for the same reason Verdaccio is: GH Actions
+      # forbids `if:` on `services:`, idle cost is ~3s container
+      # startup, and steady-state crates fixtures never resolve
+      # `localhost:8000` so the service has no influence on their
+      # publish path. Auth disabled because Kellnr is per-job
+      # ephemeral and the fallback is by design only reachable when
+      # provisioned by this workflow.
+      kellnr:
+        image: ghcr.io/kellnr/kellnr:5
+        ports:
+          - 8000:8000
+        env:
+          KELLNR_REGISTRY__AUTH_REQUIRED: 'false'
+          KELLNR_REGISTRY__REQUIRED_CRATE_FIELDS: ''
     steps:
       - uses: actions/checkout@v6
         with:
@@ -420,6 +439,41 @@ jobs:
         env:
           CRATES_IO_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
+
+      # #331: configure the Kellnr alt-crates-registry as a named entry
+      # in `~/.cargo/config.toml` so `cargo publish --index <url>`
+      # resolves to it without prompting for a token. The container
+      # itself runs with `KELLNR_REGISTRY__AUTH_REQUIRED=false`
+      # (declared in services: above); this step exists so the cargo
+      # CLI matches the URL the handler will pass via `--index` to a
+      # known registry entry instead of treating it as an anonymous
+      # one. Per-job-isolated: each publish job spawns its own Kellnr
+      # container with empty volume state, so the publish target
+      # is implicitly 404-on-first-PUT.
+      - name: Configure Kellnr alt-crates-registry (fallback)
+        if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Kellnr container can take a few seconds to bind. Wait until
+          # the / endpoint is reachable before declaring it provisioned.
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
+              echo "Kellnr up (attempt ${attempt})"
+              break
+            fi
+            if [ "$attempt" -eq 15 ]; then
+              echo "::warning::Kellnr / unreachable after 15 attempts; fallback will be unavailable this run"
+              exit 0
+            fi
+            sleep 2
+          done
+          mkdir -p "${HOME}/.cargo"
+          cat >> "${HOME}/.cargo/config.toml" <<'EOF'
+
+          [registries.piot-fallback]
+          index = "sparse+http://localhost:8000/api/v1/crates/"
+          EOF
 
       # Mirrors release.yml: rebuild npm packages from source before
       # the engine's `npm publish` runs. The build job's dist/ is not
@@ -575,6 +629,15 @@ jobs:
           # first-publish rows. Empty for steady-state rows so the handler
           # falls through to its normal real-npm + OIDC-TP path.
           PIOT_NPM_REGISTRY: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://localhost:4873' || '' }}
+          # #331: routes the engine's crates handler at Kellnr ONLY on a
+          # 429 from real crates.io ("published too many versions of this
+          # crate in the last 24 hours"). Steady-state happy path still
+          # hits real crates.io via the OIDC-TP exchange exported above;
+          # the fallback is opt-in (handler only retries when this env
+          # var is non-empty) and emits a `::warning::` in the log so a
+          # reviewer sees the path was taken. Empty for non-crates
+          # fixtures so unset stays unset.
+          PIOT_CRATES_REGISTRY_FALLBACK: ${{ contains(needs.plan.outputs.matrix, '"kind":"crates"') && 'sparse+http://localhost:8000/api/v1/crates/' || '' }}
         with:
           command: publish
           working_directory: fixture-tree
