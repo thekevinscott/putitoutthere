@@ -20,6 +20,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type Package } from './config.js';
 import { checkCompleteness } from './completeness.js';
+import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ErrorCodes } from './error-codes.js';
 import { createTag, headCommit, pushTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
@@ -100,6 +101,10 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   requireCratesMetadata(selectedPackages);
 
   // 3. Artifact completeness.
+  // First normalize the layout in case actions/download-artifact@v8
+  // dumped a single artifact directly into `artifacts/` rather than
+  // creating `artifacts/<name>/`. #311.
+  normalizeArtifactLayout(matrix, artifactsRoot(cwd));
   const completeness = checkCompleteness(matrix, artifactsRoot(cwd));
   const incomplete = [...completeness.entries()].filter(([, r]) => !r.ok);
   if (incomplete.length > 0) {

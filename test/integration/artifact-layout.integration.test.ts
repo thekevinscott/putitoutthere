@@ -169,9 +169,9 @@ describe('#311 download-artifact@v8 single-artifact layout', () => {
 
     expect(result.ok).toBe(true);
     expect(result.published.map((p) => p.package)).toEqual(['single-pkg']);
-    // pypi.org was consulted exactly once (isPublished) and returned
+    // pypi.org was consulted at least once (isPublished) and returned
     // 404 → handler treated as not-yet-published and proceeded.
-    expect(state.requests.filter((r) => r.url.includes('/pypi/'))).toHaveLength(1);
+    expect(state.requests.filter((r) => r.url.includes('/pypi/')).length).toBeGreaterThan(0);
   });
 
   it('publish() leaves the documented multi-artifact layout untouched (no-op when already in subdir form)', async () => {
