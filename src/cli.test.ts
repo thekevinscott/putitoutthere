@@ -64,6 +64,72 @@ describe('cli', () => {
     expect(stderrChunks.join('')).toMatch(/unknown command/);
   });
 
+  it('`check` exits 1 with a finding list when config is missing (#319)', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-check-'));
+    try {
+      const code = await run(['node', 'putitoutthere', 'check', '--cwd', tmp]);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/check: 1 finding/);
+      expect(stderrChunks.join('')).toMatch(/putitoutthere\.toml not found/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('`check` exits 0 with a "no findings" line when config is well-formed', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-check-ok-'));
+    try {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp });
+      execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: tmp });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: tmp });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
+      mkdirSync(join(tmp, 'pkg'), { recursive: true });
+      writeFileSync(join(tmp, 'pkg/index.ts'), 'x');
+      writeFileSync(
+        join(tmp, 'pkg/package.json'),
+        JSON.stringify({
+          name: 'lib',
+          version: '0.0.0',
+          repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
+        }),
+      );
+      writeFileSync(
+        join(tmp, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "npm"
+path  = "pkg"
+globs = ["pkg/**"]
+`,
+      );
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmp });
+
+      const code = await run(['node', 'putitoutthere', 'check', '--cwd', tmp]);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/no findings/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('`check --json` emits the findings array on stdout', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-check-json-'));
+    try {
+      const code = await run(['node', 'putitoutthere', 'check', '--cwd', tmp, '--json']);
+      expect(code).toBe(1);
+      const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+        findings: Array<{ message: string }>;
+      };
+      expect(parsed.findings.length).toBeGreaterThan(0);
+      expect(parsed.findings[0]!.message).toMatch(/putitoutthere\.toml/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('surfaces errors with a non-zero exit and a friendly message', async () => {
     const code = await run(['node', 'putitoutthere', 'plan', '--cwd', '/path/that/does/not/exist']);
     expect(code).toBe(1);
