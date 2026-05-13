@@ -235,6 +235,16 @@ jobs:
       # ends in the consumer's `stage_to` and contains the named bin —
       # which is the strongest cross-layout assertion that still catches
       # "binary missing entirely."
+      #
+      # #338: when `[tool.maturin].python-source` is set (the standard
+      # `maturin new --mixed` layout), maturin strips that prefix from
+      # on-disk paths when rewriting them into the wheel's distribution
+      # layout. A binary that lives on disk at
+      # `<pkg.path>/<stage_to>/<bin>` = e.g. `packages/python/python/dirsql/_binary/dirsql`
+      # ends up in the wheel at `dirsql/_binary/dirsql` — `python/`
+      # stripped. The guard reads `python-source` from the consumer's
+      # pyproject and subtracts it from `stage_to` before constructing
+      # the regex; when unset/empty the behaviour is identical.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — verify wheel contains ${{ matrix.bundle_cli.stage_to }}/${{ matrix.bundle_cli.bin }}
         shell: bash
@@ -251,9 +261,39 @@ jobs:
             echo "::error::no wheel produced under ${dist_dir}"
             exit 1
           fi
-          # Strip leading ./ if present, accept any in-wheel directory
-          # ending in <stage_to>'s suffix.
+          # Read `[tool.maturin].python-source` (or the legacy
+          # `python_source` spelling). Either form is accepted by maturin
+          # across versions. An unset/empty value resolves to "" and
+          # leaves stage_suffix == stage_to.
+          python_source=$(python3 - "$PKG_PATH" <<'PY'
+          import sys, tomllib, pathlib
+          path = pathlib.Path(sys.argv[1]) / "pyproject.toml"
+          try:
+              cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+          except FileNotFoundError:
+              print("")
+              sys.exit(0)
+          tm = cfg.get("tool", {}).get("maturin", {})
+          # Both spellings appear across maturin releases; honor either.
+          src = tm.get("python-source", tm.get("python_source", "")) or ""
+          # Normalize: drop any leading `./` and a trailing `/`.
+          src = src.removeprefix("./").rstrip("/")
+          print(src)
+          PY
+          )
+          # Strip leading ./ if present, then subtract any python-source
+          # prefix that maturin will strip from the wheel layout.
           stage_suffix="${STAGE_TO#./}"
+          if [ -n "${python_source}" ]; then
+            # Strip exact-prefix match plus its trailing slash. Leave
+            # stage_suffix unchanged when python-source is set but isn't
+            # actually a prefix of stage_to — that combination is the
+            # consumer's misconfiguration to surface, not the workflow's.
+            stripped="${stage_suffix#"${python_source}"/}"
+            if [ "${stripped}" != "${stage_suffix}" ]; then
+              stage_suffix="${stripped}"
+            fi
+          fi
           expected="${BIN}${ext}"
           if ! unzip -l "$wheel" | awk '{print $NF}' \
                | grep -qE "(^|/)${stage_suffix}/${expected}\$"; then
