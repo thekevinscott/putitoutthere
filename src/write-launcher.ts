@@ -19,7 +19,6 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type NpmPackage } from './config.js';
 import { normalizeBuild } from './handlers/npm-platform.js';
-import { normalizeTarget } from './types.js';
 
 export interface WriteLauncherOptions {
   /** Absolute path to the main package directory. */
@@ -171,7 +170,7 @@ export function writeLauncherFromConfig(
   // contract.
   const targets = npmPkg.targets!;
   const bundleCli = npmPkg.bundle_cli!;
-  const triples = targets.map((t) => normalizeTarget(t).triple);
+  const triples = targets.map((t) => (typeof t === 'string' ? t : t.triple));
   const npmName = npmPkg.npm ?? npmPkg.name;
   return writeLauncher({
     pkgDir: resolve(opts.cwd, npmPkg.path),
