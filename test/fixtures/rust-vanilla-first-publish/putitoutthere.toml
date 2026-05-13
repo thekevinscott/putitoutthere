@@ -1,0 +1,25 @@
+[putitoutthere]
+version = 1
+
+# First-publish e2e variant for crates (#334). Publishes to a per-job
+# cargo-http-registry service (see .github/workflows/e2e-fixture-job.yml)
+# routed via PIOT_CRATES_REGISTRY_PRIMARY under a uniquified package
+# name so each run exercises the brand-new-crate path against a
+# guaranteed 404-on-the-alt-registry name. NOT a consumer-facing
+# example; do not link from README.
+#
+# The `-placeholder` suffix on the package name is rewritten by the
+# e2e workflow's uniquification step to `-${RUN_ID}-${RUN_ATTEMPT}`.
+# `__VERSION__` is rewritten by the materialize step to
+# `0.0.${unix_seconds}`.
+#
+# The crates analogue of test/fixtures/js-vanilla-first-publish (#315),
+# wiring the symmetric counterpart of the npm `PIOT_NPM_REGISTRY` seam
+# (#304) on the cargo handler side (#331).
+
+[[package]]
+name = "piot-fixture-zzz-rust-vanilla-first-publish-placeholder"
+kind = "crates"
+path = "."
+globs = ["src/**", "Cargo.toml"]
+first_version = "__VERSION__"

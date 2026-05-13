@@ -92,13 +92,17 @@ jobs:
           # #304: first-publish fixtures carry a `-placeholder` suffix on
           # the package name. Rewrite to a per-run unique suffix so each
           # scenario publishes against a packument that's truly 404 on
-          # the empty Verdaccio (no false-greens from leftover state in
-          # the service container, no collisions across PR pushes).
+          # the empty Verdaccio / cargo-http-registry (no false-greens
+          # from leftover state in the service container, no collisions
+          # across PR pushes). #334: Cargo.toml is included in the rewrite
+          # so the rust-vanilla-first-publish fixture's [package].name
+          # tracks putitoutthere.toml.
           case "${FIXTURE}" in
             *-first-publish)
               SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
               find fixture-tree \
-                \( -name putitoutthere.toml -o -name package.json \) -print0 \
+                \( -name putitoutthere.toml -o -name package.json \
+                   -o -name Cargo.toml \) -print0 \
                 | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
               ;;
           esac
@@ -389,11 +393,14 @@ jobs:
             | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
           # #304: mirror the plan job's name-uniquification so package
           # name on disk in publish matches what the matrix references.
+          # #334: Cargo.toml included for the rust-vanilla-first-publish
+          # fixture (cargo reads [package].name from the manifest).
           case "${FIXTURE}" in
             *-first-publish)
               SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
               find fixture-tree \
-                \( -name putitoutthere.toml -o -name package.json \) -print0 \
+                \( -name putitoutthere.toml -o -name package.json \
+                   -o -name Cargo.toml \) -print0 \
                 | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
               ;;
           esac
@@ -658,18 +665,79 @@ jobs:
           # first-publish rows. Empty for steady-state rows so the handler
           # falls through to its normal real-npm + OIDC-TP path.
           PIOT_NPM_REGISTRY: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://localhost:4873' || '' }}
-          # #331: routes the engine's crates handler at Kellnr ONLY on a
-          # 429 from real crates.io ("published too many versions of this
-          # crate in the last 24 hours"). Steady-state happy path still
-          # hits real crates.io via the OIDC-TP exchange exported above;
-          # the fallback is opt-in (handler only retries when this env
-          # var is non-empty) and emits a `::warning::` in the log so a
-          # reviewer sees the path was taken. Empty for non-crates
-          # fixtures so unset stays unset.
+          # #334: routes the engine's crates handler exclusively at
+          # cargo-http-registry for first-publish crates fixtures
+          # (rust-vanilla-first-publish today). The PRIMARY seam
+          # short-circuits the real-crates.io publish path entirely
+          # (no fallback, no 429-retry) — the symmetric counterpart of
+          # PIOT_NPM_REGISTRY for the cargo handler. Empty for
+          # non-first-publish or non-crates fixtures so the steady-state
+          # OIDC-TP path through real crates.io is preserved.
+          PIOT_CRATES_REGISTRY_PRIMARY: ${{ endsWith(inputs.fixture, '-first-publish') && contains(needs.plan.outputs.matrix, '"kind":"crates"') && 'http://127.0.0.1:35503/git' || '' }}
+          # #331: routes the engine's crates handler at the alt-registry
+          # ONLY on a 429 from real crates.io ("published too many
+          # versions of this crate in the last 24 hours"). Steady-state
+          # happy path still hits real crates.io via the OIDC-TP
+          # exchange exported above; the fallback is opt-in (handler
+          # only retries when this env var is non-empty) and emits a
+          # `::warning::` in the log so a reviewer sees the path was
+          # taken. Empty for non-crates fixtures so unset stays unset.
+          # When PRIMARY is set above (first-publish crates fixtures),
+          # the handler's PRIMARY branch is authoritative and ignores
+          # FALLBACK on 429 — see src/handlers/crates.ts.
           PIOT_CRATES_REGISTRY_FALLBACK: ${{ contains(needs.plan.outputs.matrix, '"kind":"crates"') && 'http://127.0.0.1:35503/git' || '' }}
         with:
           command: publish
           working_directory: fixture-tree
+
+      # #334: post-publish .crate tarball-verify gate for first-publish
+      # crates fixtures. Symmetric with the npm "Verify published npm
+      # tarballs honor package.json files" step below: download the
+      # published artifact back from the registry it was just pushed to
+      # and assert it contains what the engine planned to ship. The
+      # diagnostic property the rust-vanilla-first-publish fixture
+      # exists to give — without this, a publish step that no-op'd
+      # silently (or produced an empty .crate) would still go green.
+      #
+      # cargo-http-registry stores published .crate files on disk under
+      # the registry root. We assert the tarball exists, is non-empty,
+      # and that extracting it surfaces the fixture's source tree
+      # (src/lib.rs). No HTTP fetch needed — same host, same job.
+      - name: Verify published .crate tarballs honor expected files
+        if: endsWith(inputs.fixture, '-first-publish') && contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          REG_ROOT="${RUNNER_TEMP}/piot-alt-registry"
+          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "crates")')
+          fail=0
+          while IFS= read -r row; do
+            name=$(printf '%s' "$row" | jq -r '.name')
+            version=$(printf '%s' "$row" | jq -r '.version')
+            crate_file=$(find "$REG_ROOT" -name "${name}-${version}.crate" -type f -print -quit 2>/dev/null || true)
+            if [ -z "$crate_file" ] || [ ! -s "$crate_file" ]; then
+              echo "::error::[${name}@${version}] no .crate file found (or empty) under ${REG_ROOT}"
+              fail=1
+              continue
+            fi
+            tmp=$(mktemp -d)
+            tar -xzf "$crate_file" -C "$tmp"
+            # cargo packs into <name>-<version>/{Cargo.toml,src/...}.
+            # Heuristic: assert src/lib.rs OR src/main.rs surfaces; this
+            # is the analogue of the npm verify step's "files[] dir is
+            # populated" check.
+            if find "$tmp" -type f \( -path '*/src/lib.rs' -o -path '*/src/main.rs' \) | grep -q .; then
+              echo "ok: ${crate_file} contains src/lib.rs or src/main.rs"
+            else
+              listing=$(find "$tmp" -type f | tr '\n' ' ')
+              echo "::error::[${name}@${version}] .crate tarball missing src/lib.rs and src/main.rs. Tarball contents: ${listing}"
+              fail=1
+            fi
+            rm -rf "$tmp"
+          done <<< "$rows"
+          exit "$fail"
 
       # #331: diagnostic dump for the cargo-http-registry alt-registry.
       # Runs on every crates-bearing job regardless of publish outcome
