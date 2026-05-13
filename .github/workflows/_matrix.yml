@@ -282,7 +282,7 @@ jobs:
             # stage_suffix unchanged when python-source is set but isn't
             # actually a prefix of stage_to — that combination is the
             # consumer's misconfiguration to surface, not the workflow's.
-            stripped="${stage_suffix#${python_source}/}"
+            stripped="${stage_suffix#"${python_source}"/}"
             if [ "${stripped}" != "${stage_suffix}" ]; then
               stage_suffix="${stripped}"
             fi
