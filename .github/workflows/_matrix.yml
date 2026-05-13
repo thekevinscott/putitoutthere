@@ -271,6 +271,21 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --sdist --outdir dist
 
+      # #324: pure-Python hatch packages also produce an any-platform
+      # wheel so PyPI ends up with both sdist and wheel. Without this,
+      # downstream `pip install` / `uvx ...` had to provision hatchling
+      # and run `python -m build` on a cold cache instead of doing a
+      # sub-second download-and-extract. The wheel row is hatch-only
+      # (see plan.ts); setuptools stays sdist-only, maturin keeps its
+      # per-target wheel rows.
+      - if: matrix.kind == 'pypi' && matrix.build == 'hatch' && matrix.target == 'any'
+        working-directory: ${{ matrix.path }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ matrix.version }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
       # ---- npm ----
       - if: matrix.kind == 'npm'
         uses: actions/setup-node@v6

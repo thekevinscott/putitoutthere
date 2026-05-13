@@ -69,11 +69,12 @@ function rewritePlaceholders(root: string, version: string): void {
 }
 
 describe('#29 pure-language fixtures', () => {
-  it('python-pure-hatch → 1 pypi sdist row', async () => {
+  it('python-pure-hatch → 1 pypi sdist + 1 pypi wheel-any row (#324)', async () => {
     const cwd = prepareFixture('python-pure-hatch');
     const rows = await plan({ cwd });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.kind).toBe('pypi');
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.kind === 'pypi')).toBe(true);
+    expect(rows.map((r) => r.target).sort()).toEqual(['any', 'sdist']);
   });
 
   it('python-pure-sdist-only → 1 pypi sdist row', async () => {
@@ -203,13 +204,13 @@ describe('#276 build-phase version bump bumps the manifest the build tool reads'
 });
 
 describe('#31 polyglot fixtures', () => {
-  it('js-python-no-rust → 1 pypi sdist + 1 npm noarch', async () => {
+  it('js-python-no-rust → 2 pypi (sdist + wheel-any) + 1 npm noarch', async () => {
     const cwd = prepareFixture('js-python-no-rust');
     const rows = await plan({ cwd });
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     const byKind = new Map<string, number>();
     for (const r of rows) byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1);
-    expect(byKind.get('pypi')).toBe(1);
+    expect(byKind.get('pypi')).toBe(2);
     expect(byKind.get('npm')).toBe(1);
   });
 

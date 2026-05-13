@@ -8,8 +8,8 @@
  * with no `<artifact_name>/` subdir. The completeness check
  * (`src/completeness.ts`) and every downstream handler reach for
  * `artifacts/<artifact_name>/...`, so consumers whose plan emits one
- * row — canonical case: pure-Python + `build = "hatch"`, sdist only —
- * fail before any side effect runs.
+ * row — canonical case: pure-Python + `build = "setuptools"`, sdist
+ * only — fail before any side effect runs.
  *
  * Rather than fight the action's per-count behavior in YAML (where the
  * subdir-vs-flat decision lives in upstream code we don't control),

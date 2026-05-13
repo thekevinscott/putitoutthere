@@ -222,6 +222,26 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
         path: pkg.path,
         ...(build !== undefined ? { build } : {}),
       });
+      // #324: pure-Python hatch packages also emit a `wheel-any` row.
+      // `pypa/build`'s default on a pure-Python tree produces both an
+      // sdist and an any-platform wheel; sdist-only meant downstream
+      // `pip install` / `uvx ...` had to provision hatchling and run
+      // `python -m build` on a cold cache. Scoped to hatch per the
+      // issue — setuptools stays sdist-only, maturin keeps its
+      // per-target wheel rows.
+      if (build === 'hatch') {
+        out.push({
+          name: pkg.name,
+          kind: 'pypi',
+          version,
+          target: 'any',
+          runs_on: 'ubuntu-latest',
+          artifact_name: `${safe}-wheel-any`,
+          artifact_path: at('dist'),
+          path: pkg.path,
+          build,
+        });
+      }
       return out;
     }
 
