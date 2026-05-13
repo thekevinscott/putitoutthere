@@ -277,6 +277,18 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --sdist --outdir dist
 
+      # #324: pure-Python wheel for hatch/setuptools. Mirrors `_matrix.yml`.
+      # Without this step, the wheel-any matrix row builds nothing and
+      # upload-artifact ships an empty dist/, which the publish job's
+      # artifact-completeness check then rejects.
+      - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'wheel-any'
+        working-directory: fixture-tree/${{ matrix.path }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ matrix.version }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
       # ---- npm ----
       - if: matrix.kind == 'npm'
         uses: actions/setup-node@v6
