@@ -299,6 +299,57 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # #298: mirror of the _matrix.yml bundle_cli steps. The e2e fixture
+      # job carries its own copy of the build steps (parallel to the
+      # consumer-facing _matrix.yml); these three steps cross-compile
+      # the Rust binary the same way before the consumer's `npm run build`
+      # runs. Without these, the js-bundled-cli fixture (which migrated
+      # off `scripts/build.cjs` in #298) uploads an empty `build/<triple>/`
+      # and the publish job fails downstream.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — add Rust target
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
+
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — cargo build for ${{ matrix.target }} (${{ matrix.bundle_cli.bin }})
+        shell: bash
+        working-directory: fixture-tree/${{ matrix.bundle_cli.crate_path }}
+        env:
+          TARGET: ${{ matrix.target }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+          FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
+          NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ -n "$FEATURES" ]; then extra+=(--features "$FEATURES"); fi
+          if [ "$NO_DEFAULT_FEATURES" = "true" ]; then extra+=(--no-default-features); fi
+          cargo build --release --target "$TARGET" --bin "$BIN" "${extra[@]}"
+
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
+        shell: bash
+        env:
+          CRATE_PATH: fixture-tree/${{ matrix.bundle_cli.crate_path }}
+          DEST_DIR: fixture-tree/${{ matrix.artifact_path }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          src="${CRATE_PATH}/target/${TARGET}/release/${BIN}${ext}"
+          if [ ! -f "$src" ]; then
+            echo "::error::cross-compile did not produce ${src}"
+            ls -la "${CRATE_PATH}/target/${TARGET}/release/" || true
+            exit 1
+          fi
+          mkdir -p "$DEST_DIR"
+          cp "$src" "$DEST_DIR/"
+          echo "staged: $src -> $DEST_DIR/${BIN}${ext}"
+
       - if: matrix.kind == 'npm'
         working-directory: fixture-tree/${{ matrix.path }}
         shell: bash
@@ -319,6 +370,23 @@ jobs:
             npm install
           fi
           npm run build --if-present
+
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — verify ${{ matrix.artifact_path }}/${{ matrix.bundle_cli.bin }}
+        shell: bash
+        env:
+          DEST_DIR: fixture-tree/${{ matrix.artifact_path }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          expected="${DEST_DIR}/${BIN}${ext}"
+          if ! [ -f "$expected" ]; then
+            echo "::error::bundle_cli staged binary missing at ${expected}"
+            ls -la "${DEST_DIR}" || true
+            exit 1
+          fi
+          echo "ok bundle_cli: ${expected} present"
 
       # ---- crates ----
       # cargo publish builds on the registry side; no artifact needed
