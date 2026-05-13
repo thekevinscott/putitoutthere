@@ -1,0 +1,41 @@
+[putitoutthere]
+version = 1
+
+# First-publish e2e variant of js-bundled-cli. Reproduces #288 (pnpm-10
+# lockfile drift): on the very first publish of a bundled-cli family,
+# package.json declares optionalDependencies for per-triple platform
+# packages that 404 on the registry; pnpm 10 silently drops the 404'd
+# entries from the committed pnpm-lock.yaml, after which the next
+# `pnpm install --frozen-lockfile` run refuses because the lockfile no
+# longer matches package.json. See package.json + pnpm-lock.yaml in
+# this fixture: package.json declares per-triple optionalDeps; the
+# committed lockfile omits them. CI must engage the `--no-frozen-lockfile`
+# fallback (#288) and recover.
+#
+# The `-placeholder` suffix on the package name is rewritten by the
+# e2e workflow's uniquification step to `-${run_id}-${run_attempt}`.
+# (Plain hyphen-separated tokens because the engine's config validator
+# rejects `__` in names — it encodes `/` as `__` for artifact slots.)
+# `__VERSION__` is rewritten by the materialize step to `0.0.${unix_seconds}`.
+
+[[package]]
+name = "@putitoutthere/piot-fixture-zzz-js-bundled-first-publish-placeholder"
+kind = "npm"
+path = "."
+globs = ["src/**", "shim.ts", "tsconfig.json", "Cargo.toml", "package.json", "pnpm-lock.yaml"]
+build = "bundled-cli"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+first_version = "__VERSION__"
+# See test/fixtures/js-vanilla/putitoutthere.toml for why e2e
+# fixtures publish to a dedicated dist-tag instead of `latest`.
+tag = "e2e"
+
+[package.bundle_cli]
+bin = "piot-fixture-zzz-firstpub"
+crate_path = "."

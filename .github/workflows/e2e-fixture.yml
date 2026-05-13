@@ -35,6 +35,7 @@ jobs:
           - js-vanilla-first-publish
           - js-napi
           - js-bundled-cli
+          - js-bundled-cli-first-publish
           - js-python-no-rust
           - python-pure-hatch
           - python-pure-sdist-only
