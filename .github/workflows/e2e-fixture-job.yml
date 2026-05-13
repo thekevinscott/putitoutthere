@@ -361,12 +361,25 @@ jobs:
           # BUILD so the same script can stage either family.
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
+        # #305: mirror the #288 strict-install fallback from _matrix.yml
+        # (the consumer-facing reusable workflow) into the e2e harness.
+        # Without this, the e2e job's install step diverges from what
+        # consumers actually run — and the js-bundled-cli-first-publish
+        # variant (whose pnpm-lock.yaml is deliberately drifted to
+        # reproduce #288) fails the build job at strict-install, even
+        # though production's _matrix.yml would recover via fallback.
         run: |
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci || {
+              echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
+              npm install
+            }
           elif [ -f pnpm-lock.yaml ]; then
             npm install -g pnpm@9
-            pnpm install --frozen-lockfile
+            pnpm install --frozen-lockfile || {
+              echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
+              pnpm install --no-frozen-lockfile
+            }
           else
             npm install
           fi
@@ -599,6 +612,12 @@ jobs:
         shell: bash
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
+        # #305: mirror the #288 strict-install fallback from release.yml
+        # (the consumer-facing reusable workflow's publish job). Same
+        # rationale as the build job's step above — the e2e harness has
+        # to track the production install behavior or first-publish
+        # bundled-cli/napi families fail in e2e while passing for
+        # consumers.
         run: |
           set -euo pipefail
           paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
@@ -606,10 +625,16 @@ jobs:
             echo "::group::npm install + build at fixture-tree/${path}"
             pushd "fixture-tree/${path}" > /dev/null
             if [ -f package-lock.json ]; then
-              npm ci
+              npm ci || {
+                echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
+                npm install
+              }
             elif [ -f pnpm-lock.yaml ]; then
               npm install -g pnpm@9
-              pnpm install --frozen-lockfile
+              pnpm install --frozen-lockfile || {
+                echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
+                pnpm install --no-frozen-lockfile
+              }
             else
               npm install
             fi
