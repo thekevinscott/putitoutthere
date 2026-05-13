@@ -980,6 +980,33 @@ bin = "my-cli"
     expect(pkg.bundle_cli?.bin).toBe('my-cli');
   });
 
+  it('accepts bundle_cli when build is an array containing a bare bundled-cli string', () => {
+    // The build array accepts both bare mode strings (`"bundled-cli"`)
+    // and `{ mode, name }` object entries; the refine's
+    // `typeof e === 'string'` branch handles the bare-string form.
+    // This is the shape polyglot-everything's #dirsql fixture uses.
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "packages/ts"
+globs = ["packages/ts/**"]
+build = [
+  "bundled-cli",
+  { mode = "napi", name = "{name}-napi-{triple}" },
+]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+`);
+    const pkg = cfg.packages[0] as { bundle_cli?: { bin: string } };
+    expect(pkg.bundle_cli?.bin).toBe('my-cli');
+  });
+
   it('rejects bundle_cli when build is "napi" (no bundled-cli entry)', () => {
     const bad = `
 [putitoutthere]
