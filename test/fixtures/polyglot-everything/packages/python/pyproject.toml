@@ -4,4 +4,4 @@ build-backend = "maturin"
 
 [project]
 name = "piot-fixture-zzz-python"
-version = "__VERSION__"
+dynamic = ["version"]

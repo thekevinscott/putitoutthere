@@ -741,18 +741,57 @@ def entrypoint():
     os.execv(binary, [str(binary), *sys.argv[1:]])
 ```
 
-## Dynamic-version PyPI gotcha
+## Python version source — required shape
 
-If your `pyproject.toml` uses `[project].dynamic = ["version"]` with
-`hatch-vcs` or `setuptools-scm`, the build backend derives the version from
-the latest git tag at build time — which is still the **previous** release
-when the build runs. Without a handoff, the sdist ships as
-`<pkg>-X.Y.Z.devN.tar.gz` instead of `<pkg>-X.Y.Z.tar.gz`.
+Every `kind = "pypi"` package **must** declare `[project].dynamic = ["version"]`
+in its `pyproject.toml`. Static `[project].version = "..."` literals are
+rejected at PR time by `putitoutthere check` (error code
+`PIOT_PYPI_STATIC_VERSION`) and again at publish time before any side effect.
 
-The reusable workflow sets `SETUPTOOLS_SCM_PRETEND_VERSION` to the planned
-version on the build step, which both `setuptools-scm` and `hatch-vcs`
-honor. Per-package variants like `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG>`
-are silently ignored by `hatch-vcs`; only the global form works.
+Why the requirement exists: putitoutthere does not edit `pyproject.toml`
+at release time (per the "no version computation" design commitment) — a
+static literal silently ships the previous release's wheel/sdist because
+the build backend reads whatever is on disk. The fix is the same across
+all supported Python build backends: declare the version as dynamic and
+let the backend derive it.
+
+### Recommended: `hatch-vcs`
+
+The blessed path for new Python packages. The version comes from the
+latest git tag at build time, so no manual `pyproject.toml` edit is ever
+needed.
+
+```toml
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "your-package"
+dynamic = ["version"]
+
+[tool.hatch.version]
+source = "vcs"
+```
+
+The reusable workflow sets `SETUPTOOLS_SCM_PRETEND_VERSION` on the build
+step to the planned version, which `hatch-vcs` honors. Per-package
+variants like `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG>` are silently
+ignored by `hatch-vcs`; only the global form works.
+
+### Also accepted
+
+- **`setuptools-scm`** (for setuptools-backed projects): same idea, same
+  env-var handoff. Add `setuptools-scm` to `[build-system].requires`,
+  declare `dynamic = ["version"]`, and the workflow's
+  `SETUPTOOLS_SCM_PRETEND_VERSION` injection covers the build step.
+- **Maturin** (for Python packages built from a Rust crate): pyproject
+  declares `dynamic = ["version"]`; the version source is the sibling
+  `Cargo.toml`'s `[package].version`. putitoutthere bumps `Cargo.toml`
+  before `maturin build` runs.
+
+If a Python package can't fit any of these three shapes, it's outside
+putitoutthere's scope — write your own release workflow.
 
 ## Project layout
 

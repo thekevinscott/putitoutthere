@@ -407,7 +407,7 @@ crate_path = "crates/cli"
     writeRepoFile('packages/py/pyproject.toml', `
 [project]
 name = "py-lib"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     // Cargo.toml exists but declares a different binary name.
     writeRepoFile('crates/cli/Cargo.toml', `
@@ -508,9 +508,16 @@ license = "MIT"
 `);
     writeRepoFile('packages/rs/src/lib.rs', '');
     writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [project]
 name = "lib-py"
-version = "0.0.0"
+dynamic = ["version"]
+
+[tool.hatch.version]
+source = "vcs"
 `);
     writeRepoFile('packages/py/lib_py/__init__.py', '');
     commitAll();

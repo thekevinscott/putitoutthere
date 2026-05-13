@@ -34,7 +34,11 @@ import { loadConfig, type Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { matchesAny } from './glob.js';
 import { assertTripleSupported } from './handlers/npm-platform.js';
-import { checkCratesMetadata, checkProvenanceMetadata } from './preflight.js';
+import {
+  checkCratesMetadata,
+  checkProvenanceMetadata,
+  checkPypiVersionSource,
+} from './preflight.js';
 import { formatTag } from './tag-template.js';
 import { normalizeTarget, type TargetEntry } from './types.js';
 
@@ -97,6 +101,7 @@ export function runChecks(opts: CheckOptions): CheckFinding[] {
   checkNpmRepository(packages, findings);
   checkCratesPackageMetadata(packages, findings);
   checkPyprojectAndBundleCli(packages, cwd, findings);
+  checkPypiVersion(packages, findings);
   checkNpmTargetTriples(packages, findings);
 
   return findings;
@@ -236,6 +241,18 @@ function checkPyprojectAndBundleCli(
         message: `bundle_cli.bin "${bundleCli.bin}" is not declared as a [[bin]] in ${cargoTomlPath}. Declared bins: ${declaredBins.length === 0 ? '(none)' : declaredBins.join(', ')}.`,
       });
     }
+  }
+}
+
+function checkPypiVersion(
+  packages: readonly Package[],
+  findings: CheckFinding[],
+): void {
+  for (const f of checkPypiVersionSource(packages)) {
+    findings.push({
+      package: f.package,
+      message: `[${ErrorCodes.PYPI_STATIC_VERSION}] ${f.pyprojectPath} declares a static \`[project].version\` literal. Use \`[project].dynamic = ["version"]\` with hatch-vcs (recommended), setuptools-scm, or the maturin Cargo.toml-driven path — putitoutthere does not edit pyproject.toml at release time, so a literal silently ships the previous release.`,
+    });
   }
 }
 

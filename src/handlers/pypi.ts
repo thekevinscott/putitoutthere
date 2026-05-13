@@ -35,16 +35,19 @@
  * Issue #17. Plan: §6.4, §12.2, §12.3, §13.1, §14.5, §16.1.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
+import { ErrorCodes } from '../error-codes.js';
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
 import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://pypi.org';
+const DYNAMIC_VERSION_DOC_POINTER =
+  'https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions';
 
 async function isPublishedImpl(
   pkg: { name: string; pypi?: string },
@@ -82,9 +85,6 @@ function writeVersionImpl(
     /* v8 ignore next -- non-ENOENT read errors surface as-is */
     return Promise.reject(err instanceof Error ? err : new Error(String(err)));
   }
-  // Single TOML parse site: distinguishes (a) malformed TOML, (b) no [project]
-  // table, (c) [project] present but without static or dynamic version.
-  // The regex rewrite below only runs for case (c)-that-resolves-successfully.
   let parsed: unknown;
   try {
     parsed = parseToml(original);
@@ -92,45 +92,53 @@ function writeVersionImpl(
     const msg = err instanceof Error ? err.message : String(err);
     return Promise.reject(new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${msg}`));
   }
-  const project = (parsed as { project?: { dynamic?: unknown } })?.project;
+  const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } })?.project;
   if (!project) {
     return Promise.reject(
       new Error(
-        'pyproject.toml has no [project] table -- declare [project].version or [project].dynamic = ["version"]',
+        `pyproject.toml has no [project] table -- declare [project].dynamic = ["version"] with hatch-vcs (or setuptools-scm / maturin Cargo.toml). See ${DYNAMIC_VERSION_DOC_POINTER}.`,
       ),
     );
   }
-  // Dynamic-version projects (hatch-vcs, setuptools-scm, maturin reading
-  // Cargo.toml, etc) have `dynamic = [..., "version", ...]` under [project]
-  // and no literal version line to rewrite. The build backend derives the
-  // version itself. Per design-commitment #1 (no version computation),
-  // skip the rewrite -- the consumer's build system handles propagation.
-  // Surface an actionable guidance line so adopters aren't left guessing
-  // how the planned version reaches the build backend. See #207.
   if (projectDynamicIncludesVersion(project)) {
+    // Dynamic-version: hatch-vcs / setuptools-scm read the version
+    // from a git tag or `SETUPTOOLS_SCM_PRETEND_VERSION`; maturin
+    // reads it from `Cargo.toml`'s `[package].version`. In every case
+    // pyproject.toml is the wrong file to rewrite; the build job is
+    // responsible for setting the version source before `python -m
+    // build` / `maturin build` runs. Per design-commitment #1 (no
+    // version computation), we surface guidance and exit.
     const who = pkg.name ? `pypi: ${pkg.name}` : 'pypi';
     const envSuffix = pkg.name ? scmEnvSuffix(pkg.name) : '<PKG>';
     ctx.log.info(
       [
-        `${who}: detected dynamic version; skipping pyproject.toml rewrite.`,
+        `${who}: detected dynamic version; nothing to rewrite in pyproject.toml.`,
         `  Planned version: ${version}. Pass it to the build backend via one of:`,
         `    - SETUPTOOLS_SCM_PRETEND_VERSION_FOR_${envSuffix}=${version}  (hatch-vcs / setuptools-scm)`,
         `    - Update [package].version in Cargo.toml                ${' '.repeat(Math.max(0, envSuffix.length - 12))}  (maturin reading Cargo)`,
         `  Set the env var on the build job, before \`python -m build\` / \`maturin build\` runs.`,
-        `  See https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions`,
+        `  See ${DYNAMIC_VERSION_DOC_POINTER}`,
       ].join('\n'),
     );
     return Promise.resolve([]);
   }
-  let updated: string;
-  try {
-    updated = replacePyProjectVersion(original, version);
-  } catch (err) {
-    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+  // Static literal — not allowed. Preflight should have rejected this
+  // already (`requirePypiVersionSource` runs before any writeVersion
+  // call on the publish path), but the CLI `write-version` subcommand
+  // can be invoked directly; guard here so the failure mode is the
+  // same actionable error rather than a silent rewrite. See #333.
+  if (typeof project.version === 'string') {
+    return Promise.reject(
+      new Error(
+        `[${ErrorCodes.PYPI_STATIC_VERSION}] pyproject.toml at ${pyProjectPath} declares a static \`[project].version\` literal. Use \`[project].dynamic = ["version"]\` with hatch-vcs (recommended), setuptools-scm, or the maturin Cargo.toml-driven path — putitoutthere does not edit pyproject.toml at release time. See ${DYNAMIC_VERSION_DOC_POINTER}.`,
+      ),
+    );
   }
-  if (updated === original) return Promise.resolve([]);
-  writeFileSync(pyProjectPath, updated, 'utf8');
-  return Promise.resolve([pyProjectPath]);
+  return Promise.reject(
+    new Error(
+      `pyproject.toml at ${pyProjectPath}: [project] table declares no version source -- add \`dynamic = ["version"]\`. See ${DYNAMIC_VERSION_DOC_POINTER}.`,
+    ),
+  );
 }
 
 async function publishImpl(
@@ -171,32 +179,11 @@ function pypiNameFor(pkg: { name: string; pypi?: string }): string {
 }
 
 /**
- * Rewrites the first `version = "x.y.z"` inside the `[project]` table.
- *
- * Precondition: the caller has already confirmed a `[project]` table exists
- * and does not declare `dynamic = ["version"]`. Throws when no literal
- * `version = "..."` line can be located inside `[project]`.
- */
-export function replacePyProjectVersion(source: string, version: string): string {
-  const re = /(\[project\][\s\S]*?)(^\s*version\s*=\s*")([^"]*)(")/m;
-  const m = re.exec(source);
-  if (!m) {
-    throw new Error(
-      'pyproject.toml: [project] is present but declares neither a static version nor dynamic = ["version"]',
-    );
-  }
-  const [, pre, prefix, old, suffix] = m as unknown as [string, string, string, string, string];
-  if (old === version) return source;
-  const start = m.index + pre.length;
-  const end = start + prefix.length + old.length + suffix.length;
-  return source.slice(0, start) + prefix + version + suffix + source.slice(end);
-}
-
-/**
  * Returns true when a parsed `[project].dynamic` is an array containing
- * `"version"`. Used to detect hatch-vcs / setuptools-scm / maturin setups
- * where the build backend computes the version and no literal
- * `version = "..."` line exists to rewrite.
+ * `"version"`. The only accepted version-source shape after #333: the
+ * build backend derives the version (hatch-vcs / setuptools-scm read a
+ * git tag or `SETUPTOOLS_SCM_PRETEND_VERSION`; maturin reads
+ * `Cargo.toml`'s `[package].version`).
  */
 function projectDynamicIncludesVersion(project: { dynamic?: unknown }): boolean {
   const { dynamic } = project;

@@ -145,7 +145,7 @@ path  = "packages/py"
 globs = ["packages/py/**"]
 `,
     );
-    writeRepoFile('packages/py/pyproject.toml', '[project]\nname = "lib-py"\nversion = "0.0.0"\n');
+    writeRepoFile('packages/py/pyproject.toml', '[project]\nname = "lib-py"\ndynamic = ["version"]\n');
     writeRepoFile('packages/py/lib_py/__init__.py', '');
     git(['add', '-A']);
     git(['commit', '-m', 'pypi setup\n\nrelease: patch']);
