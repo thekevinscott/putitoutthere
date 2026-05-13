@@ -14,11 +14,12 @@
  * and the workflow respects it.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { loadConfig } from './config.js';
-import { DEFAULT_NAME_TEMPLATE, normalizeBuild } from './handlers/npm-platform.js';
+import { loadConfig, type NpmPackage } from './config.js';
+import { normalizeBuild } from './handlers/npm-platform.js';
+import { normalizeTarget } from './types.js';
 
 export interface WriteLauncherOptions {
   /** Absolute path to the main package directory. */
@@ -100,10 +101,16 @@ export function generateLauncherSource(opts: WriteLauncherOptions): string {
 export function writeLauncher(opts: WriteLauncherOptions): string[] {
   const written: string[] = [];
   const launcherPath = join(opts.pkgDir, 'bin', `${opts.bin}.js`);
-  if (!existsSync(launcherPath)) {
-    mkdirSync(dirname(launcherPath), { recursive: true });
-    writeFileSync(launcherPath, generateLauncherSource(opts), 'utf8');
+  // CodeQL TOCTOU: use `wx` (write-exclusive) rather than `existsSync`
+  // precheck so the "absent only" guarantee is atomic. EEXIST means a
+  // consumer-authored launcher (or a concurrent write) won this race —
+  // exactly the override path we want to respect.
+  mkdirSync(dirname(launcherPath), { recursive: true });
+  try {
+    writeFileSync(launcherPath, generateLauncherSource(opts), { encoding: 'utf8', flag: 'wx' });
     written.push(launcherPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
   }
 
   const pkgJsonPath = join(opts.pkgDir, 'package.json');
@@ -154,33 +161,23 @@ export function writeLauncherFromConfig(
   }
   if (pkg.kind !== 'npm') return [];
 
-  const npmPkg = pkg as {
-    name: string;
-    path: string;
-    npm?: string;
-    build?: Parameters<typeof normalizeBuild>[0];
-    targets?: readonly (string | { triple: string })[];
-    bundle_cli?: { bin: string };
-  };
+  const npmPkg: NpmPackage = pkg;
   const buildEntries = normalizeBuild(npmPkg.build);
   const bundledCli = buildEntries.find((e) => e.mode === 'bundled-cli');
   if (!bundledCli) return [];
-  // Schema (config.ts) guarantees these when a bundled-cli entry exists:
-  // `targets` is non-empty AND `[package.bundle_cli]` is declared.
-  /* v8 ignore start -- config schema enforces both invariants */
-  if (!npmPkg.targets || npmPkg.targets.length === 0) return [];
-  if (!npmPkg.bundle_cli) return [];
-  /* v8 ignore stop */
-
-  const triples = npmPkg.targets.map((t) => (typeof t === 'string' ? t : t.triple));
+  // Schema (config.ts) guarantees `targets` is non-empty AND
+  // `[package.bundle_cli]` is declared when at least one bundled-cli
+  // entry exists in `build`; the non-null assertions document that
+  // contract.
+  const targets = npmPkg.targets!;
+  const bundleCli = npmPkg.bundle_cli!;
+  const triples = targets.map((t) => normalizeTarget(t).triple);
   const npmName = npmPkg.npm ?? npmPkg.name;
   return writeLauncher({
     pkgDir: resolve(opts.cwd, npmPkg.path),
     npmName,
-    bin: npmPkg.bundle_cli.bin,
-    platformNameTemplate: bundledCli.name === DEFAULT_NAME_TEMPLATE
-      ? DEFAULT_NAME_TEMPLATE
-      : bundledCli.name,
+    bin: bundleCli.bin,
+    platformNameTemplate: bundledCli.name,
     triples,
   });
 }
@@ -204,16 +201,13 @@ function extractBase(npmName: string): string {
  *
  * Mirrors the TRIPLE_MAP in `src/handlers/npm-platform.ts`, but
  * collapses `os`/`cpu`/`libc` into the `<node-platform>-<node-arch>`
- * key Node exposes at install time. Unmapped triples surface here as
- * an exception because the build step would otherwise emit a launcher
- * that 404s on the consumer's machine for that triple.
- *
- * Plan-time guard (`assertTripleSupported`) already rejects unmapped
- * triples before the matrix runs, so reaching this branch implies a
- * map drift between the two files. Throw a vocabulary-matching error
- * to make the drift obvious.
+ * key Node exposes at install time. Unmapped triples throw — plan-
+ * time guard (`assertTripleSupported`) already rejects them before the
+ * matrix runs, so reaching the throw implies map drift between the
+ * two files; the vocabulary matches `targetToOsCpu` so the drift is
+ * obvious.
  */
-function nodePlatformKey(triple: string): string {
+export function nodePlatformKey(triple: string): string {
   const t = triple.toLowerCase();
   // napi-rs short form (`linux-x64-gnu`) already starts with the Node
   // platform + arch; lop off the libc suffix if present.
@@ -222,7 +216,6 @@ function nodePlatformKey(triple: string): string {
   }
   // Rust target triples — explicit lookup.
   const rust = RUST_TARGET_KEYS[t];
-  /* v8 ignore next 4 -- plan-time guard rejects unmapped triples; this is defensive */
   if (rust === undefined) {
     throw new Error(
       `write-launcher: target triple "${triple}" is not mapped to Node platform+arch`,
@@ -259,9 +252,8 @@ function jsString(s: string): string {
 }
 
 /** 2 / 4 / tab. Defaults to 2 when undetectable. Mirrors npm.ts. */
-function detectIndent(source: string): number | string {
+export function detectIndent(source: string): number | string {
   const m = /^(?<indent>[ \t]+)"/m.exec(source);
-  /* v8 ignore next -- JSON.parse of valid JSON always has at least one indented line when pretty-printed */
   if (!m?.groups?.indent) return 2;
   const indent = m.groups.indent;
   if (indent.includes('\t')) return '\t';
