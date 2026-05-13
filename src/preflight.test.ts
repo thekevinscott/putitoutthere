@@ -534,4 +534,130 @@ license = ""
   it('returns silently when there are no crates packages in the cascade', () => {
     expect(() => requireCratesMetadata([pkg('npm'), pkg('pypi')])).not.toThrow();
   });
+
+  /*
+   * `[workspace.package]` inheritance (#328).
+   *
+   * `cargo publish` resolves `license.workspace = true` against the
+   * workspace root before upload, so crates.io receives the literal
+   * value. The check must do the same — otherwise repos following
+   * Cargo's recommended centralized-metadata pattern can't adopt
+   * `check` without inlining redundant fields into every crate.
+   */
+  describe('workspace.package inheritance (#328)', () => {
+    function writeWorkspaceRoot(rootDir: string, workspacePackageBody: string): void {
+      writeFileSync(
+        join(rootDir, 'Cargo.toml'),
+        `[workspace]\nmembers = ["a"]\n\n[workspace.package]\n${workspacePackageBody}`,
+        'utf8',
+      );
+    }
+
+    it('resolves license inherited via `license.workspace = true`', () => {
+      writeWorkspaceRoot(dir, `license = "MIT"\n`);
+      const p = join(dir, 'a');
+      writeCargoToml(
+        p,
+        `[package]
+name = "a"
+version = "0.0.0"
+description = "A test crate."
+license.workspace = true
+`,
+      );
+      expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    });
+
+    it('resolves description inherited via `description.workspace = true`', () => {
+      writeWorkspaceRoot(dir, `description = "Inherited description."\n`);
+      const p = join(dir, 'a');
+      writeCargoToml(
+        p,
+        `[package]
+name = "a"
+version = "0.0.0"
+description.workspace = true
+license = "MIT"
+`,
+      );
+      expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    });
+
+    it('resolves both fields when both inherit from `[workspace.package]`', () => {
+      writeWorkspaceRoot(
+        dir,
+        `description = "Shared."\nlicense = "Apache-2.0"\n`,
+      );
+      const p = join(dir, 'a');
+      writeCargoToml(
+        p,
+        `[package]
+name = "a"
+version = "0.0.0"
+description.workspace = true
+license.workspace = true
+`,
+      );
+      expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    });
+
+    it('accepts license-file inherited from `[workspace.package]`', () => {
+      writeWorkspaceRoot(dir, `license-file = "LICENSE"\n`);
+      const p = join(dir, 'a');
+      writeCargoToml(
+        p,
+        `[package]
+name = "a"
+version = "0.0.0"
+description = "A test crate."
+license-file.workspace = true
+`,
+      );
+      expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    });
+
+    it('still reports missing when the crate inherits but the workspace root omits the field', () => {
+      // Workspace declares `description` but not `license`. The crate
+      // tries to inherit both, so `license` remains unresolved and
+      // crates.io would reject the publish.
+      writeWorkspaceRoot(dir, `description = "Only description shared."\n`);
+      const p = join(dir, 'a');
+      writeCargoToml(
+        p,
+        `[package]
+name = "a"
+version = "0.0.0"
+description.workspace = true
+license.workspace = true
+`,
+      );
+      const findings = checkCratesMetadata([cratesPkg('a', p)]);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({ package: 'a', missing: ['license'] });
+    });
+
+    it('still reports missing when there is no `[workspace.package]` table to inherit from', () => {
+      // Workspace root exists (a Cargo.toml with `[workspace]`) but
+      // has no `[workspace.package]` block. Inherited fields resolve
+      // to nothing, so the publish would fail.
+      writeFileSync(
+        join(dir, 'Cargo.toml'),
+        `[workspace]\nmembers = ["a"]\n`,
+        'utf8',
+      );
+      const p = join(dir, 'a');
+      writeCargoToml(
+        p,
+        `[package]
+name = "a"
+version = "0.0.0"
+description.workspace = true
+license.workspace = true
+`,
+      );
+      const findings = checkCratesMetadata([cratesPkg('a', p)]);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.missing).toEqual(['description', 'license']);
+    });
+  });
 });
