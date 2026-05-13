@@ -29,9 +29,11 @@ import { plan, type MatrixRow } from './plan.js';
 import { formatTag } from './tag-template.js';
 import {
   requireAuth,
+  requireCargoShape,
   requireCratesMetadata,
-  requirePypiVersionSource,
   requireProvenanceMetadata,
+  requirePyprojectShape,
+  requirePypiVersionSource,
 } from './preflight.js';
 import { withRetry } from './retry.js';
 import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
@@ -111,6 +113,13 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     literal at release time (design-commitment #1), so a literal
   //     would silently ship the previous release's wheel/sdist.
   requirePypiVersionSource(selectedPackages);
+
+  // 2e. Pre-flight pyproject.toml + Cargo.toml shape: catch the
+  //     {pypi/crates}-manifest mismatches that would otherwise surface
+  //     10-20 minutes into a release run when maturin / setuptools /
+  //     hatchling / cargo finally tripped on them. #301.
+  requirePyprojectShape(selectedPackages);
+  requireCargoShape(selectedPackages, { cwd });
 
   // 3. Artifact completeness.
   // First normalize the layout in case actions/download-artifact@v8

@@ -1,0 +1,52 @@
+name: Patch coverage
+
+# Per-PR diff coverage gate. Aggregate coverage thresholds (vitest.config.ts)
+# pass as long as the overall numbers stay above 95/95/94/95 — but a PR can
+# add new code without tests as long as it doesn't drag the aggregate below
+# the floor. This gate closes that hole: every line and branch *introduced
+# by this PR's diff* in src/**/*.ts must be exercised by the unit suite, no
+# escape hatches.
+#
+# Strict 100%: no `/* v8 ignore */` markers may be introduced. Existing
+# markers in unchanged code are grandfathered; touching their region is
+# treated as a new introduction.
+#
+# Aggregator (CI Gate) automatically requires this job once it appears, so
+# branch protection doesn't need updating to make it a merge prerequisite.
+
+on:
+  pull_request:
+
+concurrency:
+  group: patch-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  patch-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests with coverage
+        run: pnpm run test:unit:coverage
+
+      - name: Diff-coverage check (100% on new src/ lines, no escape hatches)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/workflows/patch-coverage.mjs

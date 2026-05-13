@@ -492,6 +492,7 @@ name  = "lib-py"
 kind  = "pypi"
 path  = "packages/py"
 globs = ["packages/py/**"]
+build = "hatch"
 `);
     writeRepoFile('packages/ts/package.json', JSON.stringify({
       name: 'lib-js',
@@ -523,5 +524,247 @@ source = "vcs"
     commitAll();
     const findings = runChecks({ cwd: repo });
     expect(findings).toEqual([]);
+  });
+});
+
+/* ------------------------------ pyproject + cargo shape (#301) ------------------------------ */
+
+describe('runChecks: pyproject + cargo shape (#301)', () => {
+  it("flags PIOT_PYPI_NAME_MISMATCH when [project].name disagrees with configured name", () => {
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+`);
+    writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "not-the-same"
+version = "0.0.0"
+`);
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'py-lib' &&
+          /PIOT_PYPI_NAME_MISMATCH/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("flags PIOT_PYPI_BUILD_BACKEND_MISMATCH when build = \"maturin\" but pyproject declares hatchling", () => {
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+`);
+    writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "py-lib"
+version = "0.0.0"
+`);
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'py-lib' &&
+          /PIOT_PYPI_BUILD_BACKEND_MISMATCH/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("flags PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND when dynamic = [\"version\"] has no version source block", () => {
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "hatch"
+`);
+    writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`);
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'py-lib' &&
+          /PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("flags PIOT_PYPI_MATURIN_INCLUDE_MISSING when bundle_cli.stage_to is not covered by [tool.maturin].include", () => {
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+crate_path = "crates/cli"
+`);
+    writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["maturin>=1"]
+build-backend = "maturin"
+
+[project]
+name = "py-lib"
+version = "0.0.0"
+
+[tool.maturin]
+include = ["docs/*"]
+`);
+    writeRepoFile('crates/cli/Cargo.toml', `
+[package]
+name = "my-cli"
+version = "0.0.0"
+`);
+    writeRepoFile('crates/cli/src/main.rs', 'fn main(){}');
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'py-lib' &&
+          /PIOT_PYPI_MATURIN_INCLUDE_MISSING/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("flags PIOT_CRATES_NAME_MISMATCH when [package].name differs from configured name", () => {
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "rust-lib"
+kind  = "crates"
+path  = "packages/rs"
+globs = ["packages/rs/**"]
+`);
+    writeRepoFile('packages/rs/Cargo.toml', `
+[package]
+name = "different-name"
+version = "0.0.0"
+description = "x"
+license = "MIT"
+`);
+    writeRepoFile('packages/rs/src/lib.rs', '');
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'rust-lib' &&
+          /PIOT_CRATES_NAME_MISMATCH/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("flags PIOT_CRATES_FEATURE_NOT_DECLARED when a configured feature is missing from [features]", () => {
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name     = "rust-lib"
+kind     = "crates"
+path     = "packages/rs"
+globs    = ["packages/rs/**"]
+features = ["nope"]
+`);
+    writeRepoFile('packages/rs/Cargo.toml', `
+[package]
+name = "rust-lib"
+version = "0.0.0"
+description = "x"
+license = "MIT"
+
+[features]
+default = []
+`);
+    writeRepoFile('packages/rs/src/lib.rs', '');
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'rust-lib' &&
+          /PIOT_CRATES_FEATURE_NOT_DECLARED/.test(f.message) &&
+          /nope/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("flags PIOT_CRATES_WORKSPACE_VERSION_MISMATCH when version.workspace = true has no ancestor [workspace.package].version", () => {
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "rust-lib"
+kind  = "crates"
+path  = "packages/rs"
+globs = ["packages/rs/**"]
+`);
+    writeRepoFile('packages/rs/Cargo.toml', `
+[package]
+name = "rust-lib"
+version.workspace = true
+description = "x"
+license = "MIT"
+`);
+    writeRepoFile('packages/rs/src/lib.rs', '');
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'rust-lib' &&
+          /PIOT_CRATES_WORKSPACE_VERSION_MISMATCH/.test(f.message),
+      ),
+    ).toBe(true);
   });
 });

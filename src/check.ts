@@ -35,8 +35,10 @@ import { ErrorCodes } from './error-codes.js';
 import { matchesAny } from './glob.js';
 import { assertTripleSupported } from './handlers/npm-platform.js';
 import {
+  checkCargoShape,
   checkCratesMetadata,
   checkProvenanceMetadata,
+  checkPyprojectShape,
   checkPypiVersionSource,
 } from './preflight.js';
 import { formatTag } from './tag-template.js';
@@ -102,9 +104,36 @@ export function runChecks(opts: CheckOptions): CheckFinding[] {
   checkCratesPackageMetadata(packages, findings);
   checkPyprojectAndBundleCli(packages, cwd, findings);
   checkPypiVersion(packages, findings);
+  checkPyprojectShapeFindings(packages, findings);
+  checkCargoShapeFindings(packages, cwd, findings);
   checkNpmTargetTriples(packages, findings);
 
   return findings;
+}
+
+function checkPyprojectShapeFindings(
+  packages: readonly Package[],
+  findings: CheckFinding[],
+): void {
+  for (const f of checkPyprojectShape(packages)) {
+    findings.push({
+      package: f.package,
+      message: `[${f.code}] ${f.pyprojectPath}: ${f.detail}`,
+    });
+  }
+}
+
+function checkCargoShapeFindings(
+  packages: readonly Package[],
+  cwd: string,
+  findings: CheckFinding[],
+): void {
+  for (const f of checkCargoShape(packages, { cwd })) {
+    findings.push({
+      package: f.package,
+      message: `[${f.code}] ${f.cargoTomlPath}: ${f.detail}`,
+    });
+  }
 }
 
 /* ----------------------------- internals ----------------------------- */
