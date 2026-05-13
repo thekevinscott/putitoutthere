@@ -421,6 +421,89 @@ jobs:
           CRATES_IO_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
 
+      # #331: start an off-the-shelf cargo alt-registry that explicitly
+      # accepts any token (and therefore needs no auth setup) as a
+      # background process. Used both as the *primary* publish target
+      # for any `*-first-publish` crates fixture (set
+      # `PIOT_CRATES_REGISTRY_PRIMARY`, symmetric with how Verdaccio
+      # backs npm first-publish) and as the *fallback* target on a
+      # real-crates.io 429 (set `PIOT_CRATES_REGISTRY_FALLBACK`).
+      # One registry serves both roles because the engine's seam
+      # (`src/handlers/crates.ts`) distinguishes them via different env
+      # vars.
+      #
+      # Tool: `cargo-http-registry` <https://github.com/d-e-s-o/cargo-http-registry>.
+      # Per its README: "The created registry does not require any token
+      # checks. As such, if being asked to cargo login to the registry,
+      # any string may be used." That's the "Verdaccio for cargo"
+      # property we need. A prior iteration on this issue wired Kellnr
+      # (the production-grade self-hosted registry); three CI rounds
+      # all 403'd because Kellnr deliberately rejects fixture-style
+      # unrecognized identities. cargo-http-registry, alexandrie, ktra,
+      # cratery, meuse were all surveyed; cargo-http-registry is the
+      # only one that matches the no-auth-fixture shape and is
+      # actively maintained (v0.1.8, Feb 2025).
+      #
+      # Cost: ~1-3 min `cargo install` cold (lightweight dep tree --
+      # tokio rt-only + warp no-default-features + git2 + structopt,
+      # no openssl-sys / sqlite-sys / aws-lc-sys). Acceptable in the
+      # context of an e2e job that already runs 5-10 min; can be cached
+      # in follow-up via Swatinem/rust-cache if the cost becomes
+      # noticeable in practice.
+      - name: Install cargo-http-registry (#331)
+        if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        run: cargo install --locked cargo-http-registry@0.1.8
+
+      - name: Start cargo-http-registry (#331)
+        if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        shell: bash
+        run: |
+          set -euo pipefail
+          REG_ROOT="${RUNNER_TEMP}/piot-alt-registry"
+          mkdir -p "${REG_ROOT}"
+          # Bind to a fixed port (default is an ephemeral one) so the
+          # `PIOT_CRATES_REGISTRY_FALLBACK` env value passed to the
+          # engine step below can be statically known. nohup + & +
+          # disown keeps the process alive across step boundaries;
+          # the workflow runner reaps it when the job ends.
+          nohup cargo-http-registry --addr 127.0.0.1:35503 "${REG_ROOT}" \
+            > "${RUNNER_TEMP}/cargo-http-registry.log" 2>&1 &
+          echo "CARGO_HTTP_REGISTRY_PID=$!" >> "$GITHUB_ENV"
+          disown
+          # Poll until the registry's git-smart-http endpoint responds.
+          # `GET /git/info/refs?service=git-upload-pack` is the first
+          # call cargo makes; on Bare `GET /git` cargo-http-registry
+          # returns 405 (method-not-allowed) which is healthy but a
+          # confusing readiness signal.
+          ready=0
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            if curl -fsS -o /dev/null 'http://127.0.0.1:35503/git/info/refs?service=git-upload-pack'; then
+              echo "cargo-http-registry up (attempt ${attempt})"
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -eq 0 ]; then
+            echo "::error::cargo-http-registry never came up; dumping log:"
+            cat "${RUNNER_TEMP}/cargo-http-registry.log" || true
+            exit 1
+          fi
+          # Configure cargo so its libgit2 stops choking on the
+          # alt-registry's `application/octet-stream` content-type.
+          # cargo-http-registry serves valid git-smart-http packs but
+          # libgit2 enforces strict `application/x-git-*` content-type
+          # checking; the system `git` binary doesn't and works fine.
+          # Verified locally: without this, every `cargo publish --index
+          # http://127.0.0.1:35503/git` fails with
+          # `invalid content-type: 'application/octet-stream'`.
+          mkdir -p "${HOME}/.cargo"
+          cat >> "${HOME}/.cargo/config.toml" <<'EOF'
+
+          [net]
+          git-fetch-with-cli = true
+          EOF
+
       # Mirrors release.yml: rebuild npm packages from source before
       # the engine's `npm publish` runs. The build job's dist/ is not
       # carried through as an artifact for vanilla npm rows.
@@ -575,9 +658,40 @@ jobs:
           # first-publish rows. Empty for steady-state rows so the handler
           # falls through to its normal real-npm + OIDC-TP path.
           PIOT_NPM_REGISTRY: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://localhost:4873' || '' }}
+          # #331: routes the engine's crates handler at Kellnr ONLY on a
+          # 429 from real crates.io ("published too many versions of this
+          # crate in the last 24 hours"). Steady-state happy path still
+          # hits real crates.io via the OIDC-TP exchange exported above;
+          # the fallback is opt-in (handler only retries when this env
+          # var is non-empty) and emits a `::warning::` in the log so a
+          # reviewer sees the path was taken. Empty for non-crates
+          # fixtures so unset stays unset.
+          PIOT_CRATES_REGISTRY_FALLBACK: ${{ contains(needs.plan.outputs.matrix, '"kind":"crates"') && 'http://127.0.0.1:35503/git' || '' }}
         with:
           command: publish
           working_directory: fixture-tree
+
+      # #331: diagnostic dump for the cargo-http-registry alt-registry.
+      # Runs on every crates-bearing job regardless of publish outcome
+      # so the root cause is visible in the log if the engine's
+      # fallback ever fires AND fails. Cheap on the happy path. Strip
+      # once the alt-registry path has been stable in CI for ~10
+      # polyglot runs.
+      - name: Diagnostic dump (cargo-http-registry)
+        if: always() && contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        shell: bash
+        run: |
+          set +e
+          echo "::group::cargo-http-registry log"
+          cat "${RUNNER_TEMP}/cargo-http-registry.log" 2>/dev/null || echo "(no log)"
+          echo "::endgroup::"
+          echo "::group::endpoint probe"
+          curl -sS -o /dev/null -w 'GET /git/info/refs?service=git-upload-pack -> %{http_code}\n' \
+            'http://127.0.0.1:35503/git/info/refs?service=git-upload-pack'
+          echo "::endgroup::"
+          echo "::group::~/.cargo/config.toml"
+          cat "${HOME}/.cargo/config.toml" 2>/dev/null || echo "(no config.toml)"
+          echo "::endgroup::"
 
       # Post-publish: download every main npm tarball from the registry and
       # assert that directory entries declared in package.json `files` are

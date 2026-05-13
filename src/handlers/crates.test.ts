@@ -435,6 +435,221 @@ describe('crates.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  describe('alt-registry fallback (#331)', () => {
+    function expectCargoPublish(
+      args: readonly string[],
+      flag: string,
+    ): string | undefined {
+      const idx = args.indexOf(flag);
+      return idx >= 0 ? args[idx + 1] : undefined;
+    }
+
+    it('retries against PIOT_CRATES_REGISTRY_FALLBACK on a 429 from real crates.io', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          throw Object.assign(new Error('exit 1'), {
+            stderr: Buffer.from(
+              'error: failed to publish demo-crate v0.1.0 to registry at https://crates.io\n\n' +
+                'Caused by:\n' +
+                '  the remote server responded with an error (status 429 Too Many Requests):\n' +
+                '  You have published too many versions of this crate in the last 24 hours\n',
+            ),
+          });
+        }
+        return Buffer.from('ok');
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      const result = await crates.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({
+          cwd: dir,
+          env: {
+            CARGO_REGISTRY_TOKEN: 'tok',
+            PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+          },
+        }),
+      );
+
+      expect(result.status).toBe('published');
+      const cargoInvocations = execMock.mock.calls.filter((c) => c[0] === 'cargo');
+      expect(cargoInvocations).toHaveLength(2);
+      // First call is the steady-state attempt; no --index flag (real crates.io).
+      const firstArgs = cargoInvocations[0]![1] as string[];
+      expect(firstArgs).not.toContain('--index');
+      // Second call is the fallback; routes at the fallback URL via --index.
+      const secondArgs = cargoInvocations[1]![1] as string[];
+      expect(expectCargoPublish(secondArgs, '--index')).toBe('http://localhost:8000');
+      fetchSpy.mockRestore();
+    });
+
+    it('emits a ::warning:: workflow command when the fallback engages', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          throw Object.assign(new Error('exit 1'), {
+            stderr: Buffer.from('status 429 Too Many Requests\nrate-limited'),
+          });
+        }
+        return Buffer.from('ok');
+      });
+      const writes: string[] = [];
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(
+        (chunk: string | Uint8Array): boolean => {
+          writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+          return true;
+        },
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await crates.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({
+          cwd: dir,
+          env: {
+            CARGO_REGISTRY_TOKEN: 'tok',
+            PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+          },
+        }),
+      );
+
+      const joined = writes.join('');
+      expect(joined).toMatch(/::warning::/);
+      expect(joined).toContain('http://localhost:8000');
+      stdoutSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it('does NOT retry on 429 when PIOT_CRATES_REGISTRY_FALLBACK is unset (consumer prod path unchanged)', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        throw Object.assign(new Error('exit 1'), {
+          stderr: Buffer.from('status 429 Too Many Requests'),
+        });
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        ),
+      ).rejects.toThrow(/429|Too Many Requests/);
+      const cargoInvocations = execMock.mock.calls.filter((c) => c[0] === 'cargo');
+      expect(cargoInvocations).toHaveLength(1);
+      fetchSpy.mockRestore();
+    });
+
+    it('does NOT retry on non-429 failures even when PIOT_CRATES_REGISTRY_FALLBACK is set', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        throw Object.assign(new Error('exit 1'), {
+          stderr: Buffer.from('error: authentication required'),
+        });
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        ),
+      ).rejects.toThrow(/authentication required|cargo publish/);
+      const cargoInvocations = execMock.mock.calls.filter((c) => c[0] === 'cargo');
+      expect(cargoInvocations).toHaveLength(1);
+      fetchSpy.mockRestore();
+    });
+
+    it('routes publish at PIOT_CRATES_REGISTRY_PRIMARY when set (no real-crates.io attempt, no fallback)', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        return Buffer.from('ok');
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      const result = await crates.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({
+          cwd: dir,
+          env: {
+            CARGO_REGISTRY_TOKEN: 'tok',
+            PIOT_CRATES_REGISTRY_PRIMARY: 'http://localhost:8000',
+            PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+          },
+        }),
+      );
+
+      expect(result.status).toBe('published');
+      const cargoInvocations = execMock.mock.calls.filter((c) => c[0] === 'cargo');
+      expect(cargoInvocations).toHaveLength(1);
+      const args = cargoInvocations[0]![1] as string[];
+      expect(expectCargoPublish(args, '--index')).toBe('http://localhost:8000');
+      fetchSpy.mockRestore();
+    });
+
+    it('does NOT retry on 429 when PIOT_CRATES_REGISTRY_PRIMARY is set (primary is authoritative)', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        throw Object.assign(new Error('exit 1'), {
+          stderr: Buffer.from('status 429 Too Many Requests'),
+        });
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_PRIMARY: 'http://localhost:8000',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        ),
+      ).rejects.toThrow(/429|Too Many Requests/);
+      const cargoInvocations = execMock.mock.calls.filter((c) => c[0] === 'cargo');
+      expect(cargoInvocations).toHaveLength(1);
+      fetchSpy.mockRestore();
+    });
+  });
+
   it('reports cargo publish failure', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),

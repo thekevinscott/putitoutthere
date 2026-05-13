@@ -33,7 +33,7 @@ import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
-import { buildSubprocessEnv } from '../env.js';
+import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://crates.io';
@@ -125,15 +125,41 @@ async function publishImpl(
   // #169: thread configured features through so cargo's publish-time
   // verification build exercises the same gates users will pull in.
   // Without this, a crate with a broken `cli` feature ships regardless.
-  const args = ['publish', '--allow-dirty', '--verbose', '--manifest-path', join(pkg.path, 'Cargo.toml')];
+  const baseArgs = ['publish', '--allow-dirty', '--verbose', '--manifest-path', join(pkg.path, 'Cargo.toml')];
   if (pkg.features && pkg.features.length > 0) {
-    args.push('--features', pkg.features.join(','));
+    baseArgs.push('--features', pkg.features.join(','));
   }
   if (pkg.no_default_features === true) {
-    args.push('--no-default-features');
+    baseArgs.push('--no-default-features');
   }
 
-  try {
+  // #331: internal e2e seams. `PIOT_CRATES_REGISTRY_PRIMARY` forces all
+  // publish traffic at an alt-registry (the symmetric counterpart of
+  // npm's `PIOT_NPM_REGISTRY`, for any future `*-first-publish` crates
+  // fixture). `PIOT_CRATES_REGISTRY_FALLBACK` is a 429-only retry seam:
+  // when real crates.io rate-limits routine PR-cadence e2e traffic
+  // ("You have published too many versions of this crate in the last 24
+  // hours"), retry once against the alt-registry so the run goes green.
+  // Both are workflow-only — consumer production releases set neither
+  // env var, so the publish path through this handler is byte-identical
+  // to today's real-crates.io-only behavior in that case.
+  const primaryOverride = nonEmpty(ctx.env.PIOT_CRATES_REGISTRY_PRIMARY);
+  const fallbackUrl = nonEmpty(ctx.env.PIOT_CRATES_REGISTRY_FALLBACK);
+
+  const runPublish = (registryUrl?: string): void => {
+    // cargo refuses to invoke `publish --index <url>` without an
+    // explicit `--token` argument at the CLI parser level — neither
+    // CARGO_REGISTRY_TOKEN nor credentials.toml entries unblock it.
+    // The alt-registry this workflow ships with (cargo-http-registry,
+    // see e2e-fixture-job.yml) is configured `--no-auth` so any token
+    // string is accepted; the value here is a placeholder for the CLI
+    // to be willing to dispatch, not a secret. The primary path
+    // (registryUrl undefined) leaves CARGO_REGISTRY_TOKEN handling
+    // alone — that's the real-crates.io OIDC token exported by the
+    // `rust-lang/crates-io-auth-action` workflow step.
+    const args = registryUrl
+      ? [...baseArgs, '--index', registryUrl, '--token', 'piot-alt-registry-placeholder']
+      : baseArgs;
     execFileSync('cargo', args, {
       cwd: ctx.cwd,
       // #138: minimal env. The parent process.env leaks unrelated
@@ -143,16 +169,67 @@ async function publishImpl(
       env: buildSubprocessEnv(ctx.env, { CARGO_TERM_VERBOSE: 'true' }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+  };
+
+  try {
+    runPublish(primaryOverride);
   } catch (err) {
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    // 429-only fallback. Predicate scoped narrowly to rate-limit prose
+    // so non-rate-limit failures (auth, network, validation) surface
+    // verbatim. Only fires when the workflow provisioned a fallback AND
+    // a primary override isn't already in effect (primary is
+    // authoritative for first-publish fixtures).
+    if (
+      primaryOverride === undefined &&
+      fallbackUrl !== undefined &&
+      isRateLimited(stderr)
+    ) {
+      // Surface the fallback engaging as a GH annotation so a reviewer
+      // sees the real crates.io path was NOT exercised on this run and
+      // isn't misled by the green check.
+      process.stdout.write(
+        `::warning::crates.io returned 429; falling back to ${fallbackUrl} (real OIDC-TP path not exercised this run)\n`,
+      );
+      try {
+        runPublish(fallbackUrl);
+      } catch (retryErr) {
+        const retryStderr = (retryErr as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+        const retryBase = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        throw new Error(
+          `cargo publish (fallback ${fallbackUrl}) failed${retryStderr ? `:\n${retryStderr}` : `: ${retryBase}`}`,
+          { cause: retryErr },
+        );
+      }
+      return {
+        status: 'published',
+        url: `${fallbackUrl.replace(/\/$/, '')}/api/v1/crates/${crateNameFor(pkg)}/${version}`,
+      };
+    }
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(`cargo publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
   }
 
   return {
     status: 'published',
-    url: `${REGISTRY}/crates/${crateNameFor(pkg)}/${version}`,
+    url: primaryOverride
+      ? `${primaryOverride.replace(/\/$/, '')}/api/v1/crates/${crateNameFor(pkg)}/${version}`
+      : `${REGISTRY}/crates/${crateNameFor(pkg)}/${version}`,
   };
+}
+
+/**
+ * Match cargo's 429 stderr shape. crates.io renders this verbatim under
+ * a `Caused by:` block:
+ *   the remote server responded with an error (status 429 Too Many Requests):
+ *   You have published too many versions of this crate in the last 24 hours
+ * The two-anchor match (status + 429) keeps false positives out: an
+ * unrelated "429 in 10 minutes" string in some other failure mode
+ * wouldn't trigger the fallback.
+ */
+function isRateLimited(stderr: string | undefined): boolean {
+  if (!stderr) return false;
+  return /status\s+429\b/i.test(stderr) || /429\s+Too\s+Many\s+Requests/i.test(stderr);
 }
 
 /* ------------------------------ internals ------------------------------ */

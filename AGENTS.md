@@ -49,6 +49,82 @@ features that expand the tool's surface area.
 
 @notes/design-commitments.md
 
+## Never merge red CI
+
+**Red CI is a hard line.** Do not merge a PR with any failing required
+check. Do not suggest merging one — not "admin-merge anyway," not
+"continue-on-error on the failing row," not "skip the test," not
+"this is unrelated to the PR." If CI is red, fix it. The bar is
+green CI, not "green except for things you've decided don't count."
+
+This includes failures that look external (a registry 4xx, a third-
+party action outage, a flake). External-looking failures often mask
+real regressions, and even when they don't, merging on red trains
+the team to ignore red — which guarantees a real regression slips
+through the next time.
+
+Rules in support of this:
+
+- **Never propose merging on red.** Not as a question, not as an
+  option in a menu of choices, not as a "pragmatic" fallback when
+  iteration is slow. If you don't know how to fix it, ask for
+  diagnostic information (logs, configs the user can read that you
+  cannot) rather than offer to merge through it.
+- **Never delete or skip a failing test to make CI green.** If a
+  test is asserting wrong behavior, fix the assertion (and explain
+  in the PR what the correct behavior is). If a test is genuinely
+  flaky at the framework level, root-cause the flake; don't paper
+  over it with `.skip`, `xit`, `continue-on-error`, retry-until-pass
+  loops, or selective `if:` exclusions.
+- **Never disable a CI job, gate, or matrix row to dodge red.** Same
+  reasoning: the gate exists because something it caught matters.
+  Removing the gate doesn't remove the problem, it just removes the
+  alarm. If a check is genuinely obsolete, that's a separate PR with
+  its own justification.
+- **Treat external-looking failures with the same seriousness as
+  code-level ones.** "It's an npm 4xx" / "GHCR was flaky" / "the
+  trusted publisher record is misconfigured" are diagnoses, not
+  excuses. Investigate, fix the underlying cause (config, secret,
+  trust record, etc.), confirm green, then merge. If the fix is in
+  someone else's hands, surface it and wait — don't merge through.
+
+If green CI is genuinely unattainable on this PR's timeline (e.g.
+external service is down for hours and the fix requires their action),
+the move is to stop and ask. Not to merge red.
+
+## Never rename a release-path workflow file
+
+**Do not rename `.github/workflows/*.yml` files that participate in
+the release path** (the canonical caller workflow, the reusable
+publish workflow it invokes, anything else whose filename is
+inscribed in a registry's Trusted Publisher record). This includes:
+
+- `e2e-fixture.yml` (top-level caller; named in npm TP records)
+- `e2e-fixture-job.yml` (reusable publish workflow)
+- `release.yml`, `release-rust.yml`, `release-npm.yml`, etc.
+- Any other workflow filename that a Trusted Publisher record on
+  npm, crates.io, PyPI, or any other registry currently encodes
+
+Trusted Publisher records on **every published fixture and every
+real package** encode the workflow filename. Renaming the file
+silently invalidates trust on a registry-specific schedule (some
+registries cache for hours; some validate at PUT time; the failure
+surface looks like a 400/401/403 with no actionable message). The
+cost to recover is per-package, manual, and proportional to the
+number of fixtures and platform sub-packages — often dozens of
+records to update across npmjs.com's per-package UI.
+
+If a workflow refactor genuinely requires a rename, treat it the
+same as a registry-credentials rotation: surface the cost
+explicitly, plan the per-package record updates ahead of the
+merge, and stage the rename + the record updates so they land in
+the same window. Do not split this into "rename now, fix records
+later" — the gap is where releases break.
+
+Refactor without renaming. Extracting a job into a reusable
+workflow is fine; extracting it into a *renamed* workflow file
+that the TP records don't recognize is not.
+
 ## Pull requests
 
 When working in a remote agent environment (Claude Code on the web, Codex
