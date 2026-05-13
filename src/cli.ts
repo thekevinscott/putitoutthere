@@ -7,6 +7,10 @@
  * Commands:
  *   plan           — compute and emit the release plan
  *   publish        — execute the plan against the registries
+ *   check          — pre-merge configuration validation (#319). Runs every
+ *                    check knowable from the consumer's repo state alone.
+ *                    Internal — invoked by the pre-merge reusable workflow;
+ *                    not surfaced in user-facing docs per non-goal #7.
  *   write-version  — bump a package's manifest to a planned version
  *                    (pre-build hook for maturin; #276)
  *   version        — print CLI version
@@ -28,12 +32,13 @@
 
 import { isAbsolute, resolve } from 'node:path';
 
+import { runChecks } from './check.js';
 import { plan } from './plan.js';
 import { publish } from './publish.js';
 import { writeVersionForBuild } from './write-version.js';
 import { VERSION } from './version.js';
 
-const COMMANDS = ['plan', 'publish', 'write-version', 'version'] as const;
+const COMMANDS = ['plan', 'publish', 'check', 'write-version', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
 
 function isCommand(value: string): value is Command {
@@ -48,6 +53,7 @@ function printUsage(): void {
       'Commands:',
       '  plan           Compute and emit the release plan',
       '  publish        Execute the plan',
+      '  check          Pre-merge configuration validation (#319)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  version        Print CLI version',
       '',
@@ -169,6 +175,31 @@ export async function run(argv: readonly string[]): Promise<number> {
           );
         }
         return 0;
+      }
+      case 'check': {
+        // #319: pre-merge config validation. Aggregates every finding
+        // in one round-trip rather than failing on the first so a
+        // consumer fixes the whole config in one push. Exits non-zero
+        // when any finding lands; CI surfaces the same vocabulary the
+        // publish-phase `require*` helpers use.
+        const findings = runChecks({
+          cwd: flags.cwd,
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+        });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify({ findings }) + '\n');
+        } else if (findings.length === 0) {
+          process.stdout.write('check: no findings\n');
+        } else {
+          process.stderr.write(
+            `putitoutthere check: ${findings.length} finding${findings.length === 1 ? '' : 's'}.\n\n`,
+          );
+          for (const f of findings) {
+            const prefix = f.package ? `  - ${f.package}: ` : '  - ';
+            process.stderr.write(`${prefix}${f.message}\n`);
+          }
+        }
+        return findings.length === 0 ? 0 : 1;
       }
       case 'write-version': {
         // #276: pre-build hook used by `_matrix.yml`'s maturin steps.
