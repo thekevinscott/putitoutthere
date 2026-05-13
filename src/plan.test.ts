@@ -945,3 +945,153 @@ build = "setuptools"
     expect(matrix.map((r) => r.target)).toEqual(['sdist']);
   });
 });
+
+describe('plan: npm bundle_cli passthrough (#298)', () => {
+  it('attaches bundle_cli to per-target bundled-cli rows but NOT to the main row', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "packages/ts-cli"
+globs = ["packages/ts-cli/**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+
+[package.bundle_cli]
+bin = "my-cli"
+crate_path = "crates/my-cli"
+`,
+      'utf8',
+    );
+    commit('seed', { 'packages/ts-cli/package.json': '{}' });
+
+    const matrix = await plan({ cwd: repo });
+    const perTarget = matrix.filter((r) => r.target !== 'main');
+    const mainRow = matrix.find((r) => r.target === 'main');
+
+    // Every per-target row carries bundle_cli.
+    expect(perTarget.length).toBe(2);
+    for (const r of perTarget) {
+      expect(r.bundle_cli).toEqual({
+        bin: 'my-cli',
+        crate_path: 'crates/my-cli',
+        features: [],
+        no_default_features: false,
+      });
+    }
+
+    // The noarch top-level (main) row carries no per-target binary.
+    expect(mainRow).toBeDefined();
+    expect(mainRow!.bundle_cli).toBeUndefined();
+  });
+
+  it('attaches bundle_cli only to bundled-cli rows in a multi-mode (napi + bundled-cli) build', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+build = [
+  { mode = "napi",        name = "@my-cli/lib-{triple}" },
+  { mode = "bundled-cli", name = "@my-cli/cli-{triple}" },
+]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+crate_path = "crates/my-cli"
+`,
+      'utf8',
+    );
+    commit('seed', { 'packages/ts/package.json': '{}' });
+
+    const matrix = await plan({ cwd: repo });
+    const napiRow = matrix.find((r) => r.build === 'napi' && r.target !== 'main');
+    const bundledRow = matrix.find((r) => r.build === 'bundled-cli' && r.target !== 'main');
+    const mainRow = matrix.find((r) => r.target === 'main');
+
+    expect(napiRow).toBeDefined();
+    expect(napiRow!.bundle_cli).toBeUndefined();
+
+    expect(bundledRow).toBeDefined();
+    expect(bundledRow!.bundle_cli).toEqual({
+      bin: 'my-cli',
+      crate_path: 'crates/my-cli',
+      features: [],
+      no_default_features: false,
+    });
+
+    expect(mainRow).toBeDefined();
+    expect(mainRow!.bundle_cli).toBeUndefined();
+  });
+
+  it('passes features and no_default_features through to per-target bundled-cli rows', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "."
+globs = ["**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+features = ["cli"]
+no_default_features = true
+`,
+      'utf8',
+    );
+    commit('seed', { 'package.json': '{}' });
+
+    const matrix = await plan({ cwd: repo });
+    const perTarget = matrix.find((r) => r.target !== 'main');
+    expect(perTarget?.bundle_cli).toEqual({
+      bin: 'my-cli',
+      crate_path: '.',
+      features: ['cli'],
+      no_default_features: true,
+    });
+  });
+
+  it('omits bundle_cli entirely on bundled-cli rows when the package does not declare one', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "."
+globs = ["**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu"]
+`,
+      'utf8',
+    );
+    commit('seed', { 'package.json': '{}' });
+
+    const matrix = await plan({ cwd: repo });
+    for (const r of matrix) {
+      expect(r.bundle_cli).toBeUndefined();
+    }
+  });
+});
