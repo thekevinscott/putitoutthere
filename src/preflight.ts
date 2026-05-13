@@ -22,7 +22,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { dirname, join, parse as parsePath } from 'node:path';
+import { dirname, isAbsolute, join, parse as parsePath, resolve } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
@@ -534,6 +534,406 @@ export function requireCratesMetadata(packages: readonly Package[]): void {
     '  license = "MIT OR Apache-2.0"',
     '',
     `See ${CARGO_DOC_POINTER}.`,
+  );
+  throw new Error(lines.join('\n'));
+}
+
+/* ----------------------- pyproject.toml + Cargo.toml shape (#301) ----------------------- */
+//
+// Mirrors the #280 / #290 pattern for pypi + crates shape gates that
+// would otherwise surface 10-20 minutes into a release run when the
+// build tool finally tripped on them. Each check fingerprints a
+// confusing tail-end error with a stable PIOT_ code so foreign-agent
+// debugging can grep the run log.
+
+export type PypiShapeCode =
+  | 'PIOT_PYPI_NAME_MISMATCH'
+  | 'PIOT_PYPI_BUILD_BACKEND_MISMATCH'
+  | 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND'
+  | 'PIOT_PYPI_MATURIN_INCLUDE_MISSING';
+
+export interface PyprojectShapeFinding {
+  package: string;
+  pyprojectPath: string;
+  code: PypiShapeCode;
+  detail: string;
+}
+
+export type CratesShapeCode =
+  | 'PIOT_CRATES_NAME_MISMATCH'
+  | 'PIOT_CRATES_MISSING_BIN'
+  | 'PIOT_CRATES_FEATURE_NOT_DECLARED'
+  | 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH';
+
+export interface CargoShapeFinding {
+  package: string;
+  cargoTomlPath: string;
+  code: CratesShapeCode;
+  detail: string;
+}
+
+export interface CargoShapeOptions {
+  /** Used to resolve `bundle_cli.crate_path` (documented as relative
+   *  to the repo root) and to bound the workspace-version walk.
+   *  Defaults to `process.cwd()`. */
+  cwd?: string;
+}
+
+// Each PYPI_BUILD mode maps to the prefix(es) the upstream build
+// backend identifier should start with. The check is intentionally
+// loose: maturin / setuptools / hatchling all ship multiple backend
+// identifiers across versions, and the failure mode this gate exists
+// to catch is the *kind* mismatch (e.g. `build = "maturin"` but the
+// pyproject declares hatchling), not a backend-version drift.
+const PYPI_BACKEND_PREFIX: Record<'maturin' | 'setuptools' | 'hatch', readonly string[]> = {
+  maturin: ['maturin'],
+  setuptools: ['setuptools'],
+  hatch: ['hatchling', 'hatch'],
+};
+
+export function checkPyprojectShape(
+  packages: readonly Package[],
+): PyprojectShapeFinding[] {
+  const findings: PyprojectShapeFinding[] = [];
+  for (const p of packages) {
+    if (p.kind !== 'pypi') continue;
+    const pyprojectPath = join(p.path, 'pyproject.toml');
+    let raw: string;
+    try {
+      raw = readFileSync(pyprojectPath, 'utf8');
+    } catch {
+      // Missing pyproject.toml is a different failure surface (the
+      // build tool surfaces it with a clear error, and `check.ts`
+      // catches it at PR time). Skip.
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = parseToml(raw);
+    } catch {
+      // Malformed TOML — let the build tool surface its own diagnostic.
+      continue;
+    }
+
+    const project = (parsed.project ?? {}) as Record<string, unknown>;
+    const buildSystem = (parsed['build-system'] ?? {}) as Record<string, unknown>;
+    const tool = (parsed.tool ?? {}) as Record<string, unknown>;
+    const expectedName = p.pypi ?? p.name;
+
+    // PYPI_NAME_MISMATCH
+    if (typeof project.name === 'string' && project.name !== expectedName) {
+      findings.push({
+        package: p.name,
+        pyprojectPath,
+        code: 'PIOT_PYPI_NAME_MISMATCH',
+        detail: `[project].name = "${project.name}" but configured name is "${expectedName}"`,
+      });
+    }
+
+    // PYPI_BUILD_BACKEND_MISMATCH — only fires when the field is set
+    // *and* disagrees. A missing [build-system] table is technically
+    // allowed (pip falls back to setuptools); flagging it here would
+    // create noise on packages this gate is not meant to police.
+    const backend = buildSystem['build-backend'];
+    if (typeof backend === 'string' && backend.length > 0) {
+      const allowed = PYPI_BACKEND_PREFIX[p.build];
+      const ok = allowed.some((prefix) => backend.startsWith(prefix));
+      if (!ok) {
+        findings.push({
+          package: p.name,
+          pyprojectPath,
+          code: 'PIOT_PYPI_BUILD_BACKEND_MISMATCH',
+          detail: `[build-system].build-backend = "${backend}" but build = "${p.build}" expects ${allowed.map((a) => `"${a}*"`).join(' or ')}`,
+        });
+      }
+    }
+
+    // PYPI_DYNAMIC_VERSION_NO_BACKEND — only checks setuptools / hatch.
+    // Maturin sources its version from Cargo.toml's [package].version
+    // when `dynamic = ["version"]`, so requiring a `[tool.hatch.version]`
+    // or `[tool.setuptools_scm]` block would surface false positives on
+    // every maturin pypi package.
+    if (p.build !== 'maturin') {
+      const dynamic = project.dynamic;
+      const dynamicHasVersion =
+        Array.isArray(dynamic) && dynamic.some((v) => v === 'version');
+      if (dynamicHasVersion) {
+        const hatchVersion = ((tool.hatch ?? {}) as Record<string, unknown>).version;
+        const setuptoolsScm = tool.setuptools_scm;
+        const hasHatchSource = typeof hatchVersion === 'object' && hatchVersion !== null;
+        const hasSetuptoolsScm = typeof setuptoolsScm === 'object' && setuptoolsScm !== null;
+        if (!hasHatchSource && !hasSetuptoolsScm) {
+          findings.push({
+            package: p.name,
+            pyprojectPath,
+            code: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
+            detail:
+              '[project].dynamic includes "version" but neither [tool.hatch.version] nor [tool.setuptools_scm] is present; the build backend has no way to compute a version',
+          });
+        }
+      }
+    }
+
+    // PYPI_MATURIN_INCLUDE_MISSING
+    if (p.bundle_cli !== undefined) {
+      const stageTo = p.bundle_cli.stage_to;
+      const maturin = (tool.maturin ?? {}) as Record<string, unknown>;
+      const include = maturin.include;
+      const includes = Array.isArray(include) ? include : [];
+      if (!maturinIncludeCovers(includes, stageTo)) {
+        findings.push({
+          package: p.name,
+          pyprojectPath,
+          code: 'PIOT_PYPI_MATURIN_INCLUDE_MISSING',
+          detail: `bundle_cli.stage_to = "${stageTo}" is not covered by any [tool.maturin].include entry; the cross-compiled binary will not be packed into the wheel`,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
+function maturinIncludeCovers(includes: readonly unknown[], stageTo: string): boolean {
+  for (const entry of includes) {
+    const path = extractIncludePath(entry);
+    if (path === undefined) continue;
+    // Strip trailing glob segments so `a/bin/*` and `a/bin/**` both
+    // cover `a/bin`.
+    const normalized = path.replace(/\/?\*+$/, '').replace(/\/$/, '');
+    if (normalized === stageTo) return true;
+    if (normalized.length > 0 && stageTo.startsWith(normalized + '/')) return true;
+    if (path.startsWith(stageTo + '/') || path === stageTo) return true;
+  }
+  return false;
+}
+
+function extractIncludePath(entry: unknown): string | undefined {
+  if (typeof entry === 'string') return entry;
+  if (typeof entry === 'object' && entry !== null) {
+    const path = (entry as { path?: unknown }).path;
+    if (typeof path === 'string') return path;
+  }
+  return undefined;
+}
+
+export function requirePyprojectShape(packages: readonly Package[]): void {
+  const findings = checkPyprojectShape(packages);
+  if (findings.length === 0) return;
+  const lines: string[] = [
+    'Pre-flight pyproject.toml shape check failed:',
+    '',
+  ];
+  for (const f of findings) {
+    lines.push(`  [${f.code}] ${f.package}: ${f.pyprojectPath}`);
+    lines.push(`    ${f.detail}`);
+  }
+  lines.push(
+    '',
+    'Why: these mismatches would otherwise surface 10-20 minutes into a release run',
+    'when the build backend (maturin / setuptools / hatchling) finally tripped on them.',
+    'Fix the pyproject.toml + putitoutthere.toml fields in this list, then re-run.',
+  );
+  throw new Error(lines.join('\n'));
+}
+
+export function checkCargoShape(
+  packages: readonly Package[],
+  options: CargoShapeOptions = {},
+): CargoShapeFinding[] {
+  const findings: CargoShapeFinding[] = [];
+  const cwd = options.cwd ?? process.cwd();
+  for (const p of packages) {
+    if (p.kind === 'crates') {
+      collectCratesPackageFindings(p, cwd, findings);
+    } else if (p.kind === 'pypi' && p.bundle_cli !== undefined) {
+      collectBundleCliCrateFindings(p, p.bundle_cli, cwd, findings);
+    }
+  }
+  return findings;
+}
+
+function collectCratesPackageFindings(
+  p: Package & { kind: 'crates' },
+  cwd: string,
+  findings: CargoShapeFinding[],
+): void {
+  const cargoTomlPath = join(p.path, 'Cargo.toml');
+  const parsed = readToml(cargoTomlPath);
+  if (parsed === null) return;
+  const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
+  const expectedName = p.crate ?? p.name;
+
+  // CRATES_NAME_MISMATCH
+  if (typeof pkgTable.name === 'string' && pkgTable.name !== expectedName) {
+    findings.push({
+      package: p.name,
+      cargoTomlPath,
+      code: 'PIOT_CRATES_NAME_MISMATCH',
+      detail: `[package].name = "${pkgTable.name}" but configured name is "${expectedName}"`,
+    });
+  }
+
+  // CRATES_FEATURE_NOT_DECLARED — only when features is set on the
+  // configured package.
+  if (p.features !== undefined && p.features.length > 0) {
+    const declared = declaredFeatures(parsed);
+    const missing = p.features.filter((f) => !declared.has(f));
+    if (missing.length > 0) {
+      findings.push({
+        package: p.name,
+        cargoTomlPath,
+        code: 'PIOT_CRATES_FEATURE_NOT_DECLARED',
+        detail: `features = ${JSON.stringify(p.features)} references undeclared feature(s) ${JSON.stringify(missing)}; Cargo.toml [features] declares ${JSON.stringify([...declared])}`,
+      });
+    }
+  }
+
+  // CRATES_WORKSPACE_VERSION_MISMATCH
+  if (versionInheritsWorkspace(pkgTable.version)) {
+    if (!workspaceVersionDeclared(cargoTomlPath, cwd)) {
+      findings.push({
+        package: p.name,
+        cargoTomlPath,
+        code: 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH',
+        detail:
+          '[package].version.workspace = true but no ancestor Cargo.toml declares [workspace.package].version',
+      });
+    }
+  }
+}
+
+function collectBundleCliCrateFindings(
+  p: Package & { kind: 'pypi' },
+  bundleCli: NonNullable<(Package & { kind: 'pypi' })['bundle_cli']>,
+  cwd: string,
+  findings: CargoShapeFinding[],
+): void {
+  const cratePathAbs = isAbsolute(bundleCli.crate_path)
+    ? bundleCli.crate_path
+    : resolve(cwd, bundleCli.crate_path);
+  const cargoTomlPath = join(cratePathAbs, 'Cargo.toml');
+  const parsed = readToml(cargoTomlPath);
+  if (parsed === null) return;
+
+  // CRATES_MISSING_BIN
+  const declaredBins = readDeclaredBinNames(parsed);
+  if (!declaredBins.includes(bundleCli.bin)) {
+    findings.push({
+      package: p.name,
+      cargoTomlPath,
+      code: 'PIOT_CRATES_MISSING_BIN',
+      detail: `bundle_cli.bin = "${bundleCli.bin}" is not declared as a [[bin]] in ${cargoTomlPath}; declared bins: ${declaredBins.length === 0 ? '(none)' : declaredBins.join(', ')}`,
+    });
+  }
+
+  // CRATES_FEATURE_NOT_DECLARED — bundle_cli.features path
+  if (bundleCli.features.length > 0) {
+    const declared = declaredFeatures(parsed);
+    const missing = bundleCli.features.filter((f) => !declared.has(f));
+    if (missing.length > 0) {
+      findings.push({
+        package: p.name,
+        cargoTomlPath,
+        code: 'PIOT_CRATES_FEATURE_NOT_DECLARED',
+        detail: `bundle_cli.features = ${JSON.stringify(bundleCli.features)} references undeclared feature(s) ${JSON.stringify(missing)}; Cargo.toml [features] declares ${JSON.stringify([...declared])}`,
+      });
+    }
+  }
+}
+
+function readToml(path: string): Record<string, unknown> | null {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  try {
+    return parseToml(raw);
+  } catch {
+    return null;
+  }
+}
+
+function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
+  const features = (cargoToml.features ?? {}) as Record<string, unknown>;
+  return new Set(Object.keys(features));
+}
+
+function readDeclaredBinNames(cargoToml: Record<string, unknown>): string[] {
+  const result: string[] = [];
+  const bins = cargoToml.bin;
+  if (Array.isArray(bins)) {
+    for (const entry of bins) {
+      if (typeof entry === 'object' && entry !== null) {
+        const name = (entry as { name?: unknown }).name;
+        if (typeof name === 'string') result.push(name);
+      }
+    }
+  }
+  // Cargo's implicit-binary rule: a crate without any [[bin]] table
+  // ships a binary named after `[package].name` when `src/main.rs`
+  // exists. We can't observe the filesystem here without extra reads,
+  // but treating the implicit name as a candidate avoids false
+  // positives on the common single-bin shape.
+  if (result.length === 0) {
+    const pkg = cargoToml.package as { name?: unknown } | undefined;
+    if (pkg && typeof pkg.name === 'string') result.push(pkg.name);
+  }
+  return result;
+}
+
+function versionInheritsWorkspace(version: unknown): boolean {
+  return (
+    typeof version === 'object' &&
+    version !== null &&
+    (version as { workspace?: unknown }).workspace === true
+  );
+}
+
+function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): boolean {
+  // Walk parents until we find a Cargo.toml carrying a [workspace]
+  // table; bound the walk at `cwd` so we never escape the repo.
+  const cwdAbs = resolve(cwd);
+  let cur = dirname(resolve(cargoTomlPath));
+  // Step out of the package's own directory first — the package's own
+  // Cargo.toml never declares its own workspace root.
+  cur = dirname(cur);
+  while (true) {
+    const candidate = join(cur, 'Cargo.toml');
+    const parsed = readToml(candidate);
+    if (parsed !== null) {
+      const workspace = (parsed.workspace ?? null) as Record<string, unknown> | null;
+      if (workspace !== null) {
+        const wsPkg = (workspace.package ?? {}) as Record<string, unknown>;
+        return nonEmptyString(wsPkg.version);
+      }
+    }
+    if (cur === cwdAbs || cur === dirname(cur)) return false;
+    cur = dirname(cur);
+  }
+}
+
+export function requireCargoShape(
+  packages: readonly Package[],
+  options: CargoShapeOptions = {},
+): void {
+  const findings = checkCargoShape(packages, options);
+  if (findings.length === 0) return;
+  const lines: string[] = [
+    'Pre-flight Cargo.toml shape check failed:',
+    '',
+  ];
+  for (const f of findings) {
+    lines.push(`  [${f.code}] ${f.package}: ${f.cargoTomlPath}`);
+    lines.push(`    ${f.detail}`);
+  }
+  lines.push(
+    '',
+    'Why: these mismatches would otherwise surface mid-`cargo build` or mid-`cargo',
+    'publish` after the verification build has compiled the crate and every transitive',
+    'dep — wasting the publish job on a precondition checkable in milliseconds.',
+    'Fix the Cargo.toml + putitoutthere.toml fields in this list, then re-run.',
   );
   throw new Error(lines.join('\n'));
 }
