@@ -90,6 +90,20 @@ describe('#29 pure-language fixtures', () => {
     expect(rows[0]!.kind).toBe('npm');
     expect(rows[0]!.target).toBe('noarch');
   });
+
+  // #334: rust-vanilla-first-publish exercises the
+  // `PIOT_CRATES_REGISTRY_PRIMARY` engine seam end-to-end (the crates
+  // analogue of #315's js-vanilla-first-publish for npm). The plan
+  // shape is the same as a steady-state vanilla crates fixture: a
+  // single crates row, no targets. This unit-tier assertion keeps the
+  // fixture's plan contract observable independently of the e2e job
+  // that publishes against the in-job alt-registry.
+  it('rust-vanilla-first-publish → 1 crates row', async () => {
+    const cwd = prepareFixture('rust-vanilla-first-publish');
+    const rows = await plan({ cwd });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe('crates');
+  });
 });
 
 describe('#30 rust-in-language fixtures', () => {
