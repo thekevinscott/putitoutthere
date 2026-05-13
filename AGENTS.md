@@ -49,6 +49,49 @@ features that expand the tool's surface area.
 
 @notes/design-commitments.md
 
+## Never merge red CI
+
+**Red CI is a hard line.** Do not merge a PR with any failing required
+check. Do not suggest merging one — not "admin-merge anyway," not
+"continue-on-error on the failing row," not "skip the test," not
+"this is unrelated to the PR." If CI is red, fix it. The bar is
+green CI, not "green except for things you've decided don't count."
+
+This includes failures that look external (a registry 4xx, a third-
+party action outage, a flake). External-looking failures often mask
+real regressions, and even when they don't, merging on red trains
+the team to ignore red — which guarantees a real regression slips
+through the next time.
+
+Rules in support of this:
+
+- **Never propose merging on red.** Not as a question, not as an
+  option in a menu of choices, not as a "pragmatic" fallback when
+  iteration is slow. If you don't know how to fix it, ask for
+  diagnostic information (logs, configs the user can read that you
+  cannot) rather than offer to merge through it.
+- **Never delete or skip a failing test to make CI green.** If a
+  test is asserting wrong behavior, fix the assertion (and explain
+  in the PR what the correct behavior is). If a test is genuinely
+  flaky at the framework level, root-cause the flake; don't paper
+  over it with `.skip`, `xit`, `continue-on-error`, retry-until-pass
+  loops, or selective `if:` exclusions.
+- **Never disable a CI job, gate, or matrix row to dodge red.** Same
+  reasoning: the gate exists because something it caught matters.
+  Removing the gate doesn't remove the problem, it just removes the
+  alarm. If a check is genuinely obsolete, that's a separate PR with
+  its own justification.
+- **Treat external-looking failures with the same seriousness as
+  code-level ones.** "It's an npm 4xx" / "GHCR was flaky" / "the
+  trusted publisher record is misconfigured" are diagnoses, not
+  excuses. Investigate, fix the underlying cause (config, secret,
+  trust record, etc.), confirm green, then merge. If the fix is in
+  someone else's hands, surface it and wait — don't merge through.
+
+If green CI is genuinely unattainable on this PR's timeline (e.g.
+external service is down for hours and the fix requires their action),
+the move is to stop and ask. Not to merge red.
+
 ## Pull requests
 
 When working in a remote agent environment (Claude Code on the web, Codex
