@@ -537,9 +537,15 @@ license = "MIT"
 `);
     write('packages/rs/src/lib.rs', '');
     write('packages/py/pyproject.toml', `
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "lib-py"
 dynamic = ["version"]
+
+[tool.setuptools_scm]
 `);
     write('packages/py/lib_py/__init__.py', '');
     commit();

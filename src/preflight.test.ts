@@ -855,6 +855,26 @@ path = "a/__init__.py"
     expect(findings.filter((f) => f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND')).toEqual([]);
   });
 
+  it('accepts dynamic version on a maturin package without [tool.hatch.version] / [tool.setuptools_scm]', () => {
+    // maturin sources its version from Cargo.toml's [package].version, so a
+    // dynamic = ["version"] maturin pyproject is well-formed without either
+    // setuptools-scm or hatch-vcs declared — exercise that path so the
+    // gate doesn't fire false positives on the maturin recipe.
+    const p = join(dir, 'a');
+    writePyproject(
+      p,
+      `[build-system]
+build-backend = "maturin"
+
+[project]
+name = "a"
+dynamic = ["version"]
+`,
+    );
+    const findings = checkPyprojectShape([pypiPkg('a', p, { build: 'maturin', targets: ['x86_64-unknown-linux-gnu'] })]);
+    expect(findings.filter((f) => f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND')).toEqual([]);
+  });
+
   it('accepts dynamic version when [tool.setuptools_scm] is present', () => {
     const p = join(dir, 'a');
     writePyproject(

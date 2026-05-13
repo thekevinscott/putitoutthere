@@ -145,7 +145,10 @@ path  = "packages/py"
 globs = ["packages/py/**"]
 `,
     );
-    writeRepoFile('packages/py/pyproject.toml', '[project]\nname = "lib-py"\ndynamic = ["version"]\n');
+    writeRepoFile(
+      'packages/py/pyproject.toml',
+      '[build-system]\nrequires = ["setuptools>=64", "setuptools-scm>=8"]\nbuild-backend = "setuptools.build_meta"\n[project]\nname = "lib-py"\ndynamic = ["version"]\n[tool.setuptools_scm]\n',
+    );
     writeRepoFile('packages/py/lib_py/__init__.py', '');
     git(['add', '-A']);
     git(['commit', '-m', 'pypi setup\n\nrelease: patch']);
