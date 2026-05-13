@@ -339,9 +339,15 @@ jobs:
         # -u ("unbound variable") — and macOS runners ship bash 3.2 by
         # default. The array always starts with `(cargo build --release
         # ...)`, so the expansion is safe on every runner.
+        #
+        # #337: pin `--target-dir target` so the produced binary lands at
+        # `${CRATE_PATH}/target/<triple>/release/<bin>` regardless of
+        # whether `crate_path` points at a workspace root or a member
+        # crate. Mirrors the pypi cargo-build step's fix; same workspace
+        # target-dir bug shape, same resolution.
         run: |
           set -euo pipefail
-          cmd=(cargo build --release --target "$TARGET" --bin "$BIN")
+          cmd=(cargo build --release --target "$TARGET" --bin "$BIN" --target-dir target)
           if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
