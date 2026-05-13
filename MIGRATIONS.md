@@ -52,6 +52,112 @@ contract, trigger `E2E` via `workflow_dispatch` with
 `simulate_no_dist: true` — the `js-vanilla-first-publish` row should
 go red on `tarball missing 'dist'`.
 
+### Single-artifact publish layout normalization
+
+**Summary.** The reusable workflow's publish job downloads build
+artifacts with `actions/download-artifact@v8` configured as `path:
+artifacts` and no `name`/`pattern` filter. That action is
+count-sensitive: multiple artifacts land in `artifacts/<name>/...`
+subdirs (the documented multi-case the engine's completeness check
+and every handler are written against), but a *single* artifact
+extracts directly into `artifacts/` with no per-artifact subdir.
+Consumers whose plan emits exactly one expected artifact — pure-Python
+packages with `build = "hatch"` (sdist row only) being the canonical
+case — therefore failed at the completeness check with `missing
+artifact directory <pkg>-sdist/` before the pypi handler ever ran.
+Multi-artifact consumers (pypi+npm, sdist+wheels, polyglot) were
+unaffected. The publish job now normalizes the layout in-process
+before completeness: when the plan expects one staged artifact and
+`artifacts/<artifact_name>/` is absent, files in `artifacts/` are
+moved into that subdir so the engine's contract holds. Fully a
+fix-in-place; no input shape, output shape, or config key changed.
+Tracked in #311.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+- Pypi-only consumers with `build = "hatch"` (or any other
+  `[[package]]` whose plan emits a single artifact row) that
+  previously failed publish with `Artifact completeness check
+  failed: ... missing artifact directory <pkg>-sdist/` now reach the
+  pypi handler successfully and tag as expected. The wider release
+  flow — version-rewrite, tag creation, GitHub Release, caller-side
+  `pypi-publish` upload — was already correct; only the engine's
+  pre-publish completeness check was upstream of the bug.
+- Multi-artifact plans (≥2 staged artifacts), crates-only plans, and
+  vanilla-npm plans (`[[package]] kind = "npm"` with no `build` /
+  `build = []`) see no observable difference. The normalization is
+  scoped to the exact case `download-artifact@v8` dumps into the
+  root.
+
+**Verification.** A release-please / release-plz cascade against a
+pure-Python `[[package]]` with `build = "hatch"` should:
+
+1. Surface the planned matrix as a single row,
+   `target = sdist artifact = <pkg>-sdist`.
+2. Reach the `pypi: <pkg>@<version> delegated to caller-side upload
+   step.` log line in the publish job.
+3. Push a `<pkg>-v<version>` tag, kick off the caller's
+   `pypi-publish` job, and produce a GitHub Release. No
+   `missing artifact directory` error appears in the run log.
+
+### `[package.bundle_cli]` features and `no_default_features`
+
+**Summary.** `[package.bundle_cli]` previously only worked for crates
+whose CLI binary built with a vanilla `cargo build --release --target
+<triple> --bin <bin>` — no feature flags, no env. The standard shape
+for libraries that ship an optional CLI (ruff, uv, pydantic-core,
+biome, swc, dirsql) is `[[bin]] required-features = ["cli"]`, so the
+binary's deps don't pollute `cargo add <name>`. Without a way to pass
+`--features`, `cargo build --bin <bin>` exits with `target ... requires
+the features: cli` and the recipe was inert for the consumers it was
+designed for. The schema now exposes:
+
+- `features: list[string]` — forwarded to `cargo build --features
+  <comma-list>` when non-empty. Defaults to `[]`.
+- `no_default_features: bool` — adds `--no-default-features` when
+  true. Defaults to `false`.
+
+Both keys are optional; the schema defaults preserve byte-identical
+cargo invocations for existing `[package.bundle_cli]` blocks. Empty
+strings inside the `features` list are rejected at config load. The
+caveat under [`bundle_cli` now actually stages the binary](#packagebundle_cli-now-actually-stages-the-binary)
+that named this gap as "not currently supported" has been corrected.
+Tracked in #300.
+
+**Required changes.** None for consumers whose binary builds without
+feature flags. Consumers whose `Cargo.toml` declares `required-features
+= ["cli"]` (or who otherwise need a non-default feature set on the CLI
+binary) add the new keys:
+
+```diff
+ [package.bundle_cli]
+ bin        = "my-cli"
+ stage_to   = "src/my_py/_binary"
+ crate_path = "crates/my-rust"
++features            = ["cli"]
++no_default_features = false
+```
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None. The new keys default
+to the equivalent of "no extra cargo flags," matching pre-#300
+behavior.
+
+**Verification.** Trigger a release on a maturin pypi package whose
+crate uses `[[bin]] required-features = ["cli"]` and that now declares
+`features = ["cli"]` in its `[package.bundle_cli]` block. The
+`bundle_cli — cargo build for <triple> (<bin>)` step in the build job's
+log emits `cargo build --release --target <triple> --bin <bin>
+--features cli` and exits zero; the wheel-content guard step that
+follows confirms `<stage_to>/<bin>` is present in the produced `.whl`.
+
+---
+
 ### Crates Cargo.toml must declare `description` and `license`
 
 **Summary.** Every cascaded `kind = "crates"` package's `Cargo.toml`
@@ -253,13 +359,12 @@ remove the workaround.
 
 **Constraint not previously documented.** The cross-compile
 assumes the binary is buildable with a vanilla
-`cargo build --release --bin <bin>` — no `--features`, no env
-vars, no special build config. Crates that gate the CLI behind
-a Cargo feature (e.g., `--features cli`) are not currently
-supported; restructure the crate so the binary is built by
-default, or wait for a future `bundle_cli.features` schema
-expansion. The bug reporter's config in #282 does not use
-features, so the basic case is unblocked.
+`cargo build --release --bin <bin>` — no env vars, no special
+build config. Crates that gate the CLI behind a Cargo feature
+(e.g., `--features cli`) are now supported via
+`[package.bundle_cli].features` and
+`[package.bundle_cli].no_default_features`; see
+[`bundle_cli` features and `no_default_features`](#packagebundle_cli-features-and-no_default_features).
 
 **Deprecations removed.** None.
 
@@ -334,6 +439,85 @@ configs that pass validation are all unchanged.
 above will now contain the words `did you mean` in its CI log
 output. Repos with valid configs see no change in any release
 or build-check run.
+
+---
+
+### npm token fallback
+
+**Summary.** The reusable workflow now accepts an optional
+`NPM_TOKEN` via `secrets:`. Trusted Publishing on npm binds to
+an *already-published* package, so the very first publish of a
+brand-new npm package has no OIDC path available; without this
+fallback every first-time bundled-cli / napi consumer hit a 6+
+package manual `0.0.0-bootstrap` stub bootstrap, documented
+nowhere, only discoverable by reading commit history of dirsql
+or by hitting the failure. OIDC trusted publishers remain the
+default and recommended path — when the secret is unset,
+behavior is byte-for-byte unchanged. When the secret is set
+AND the planned matrix contains an npm row, the secret is
+exported to `$GITHUB_ENV` as `NODE_AUTH_TOKEN`; the npm CLI
+then prefers the long-lived token over the OIDC path. Mirror
+of #283 (crates) in shape, byte-for-byte. Hit in the wild on
+the maintainer's own dirsql project (first version of
+`@dirsql/cli-linux-x64-gnu` on npm is `0.0.0-bootstrap`,
+2026-04-30; real `0.2.8` lands the next day) and on
+`darkfactory`'s first publish. #302.
+
+**Required changes.** None for consumers already on the OIDC
+path. To bootstrap a brand-new npm package or to use the
+workflow on an account where Trusted Publishing isn't
+available, wire the secret in the caller's `release.yml`:
+
+| Before                                                                                 | After                                                                                                                                                                |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0`                   | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0`<br>`secrets:`<br>`  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}`                                         |
+
+The repo-level secret holding the npm automation token can be
+named anything; the *workflow* secret it gets passed as must be
+`NPM_TOKEN` exactly — the reusable workflow keys on that name.
+Drop the `secrets:` block from the caller's `release.yml` once
+Trusted Publishing is registered against the (now-existing)
+package; subsequent publishes are zero-secret. For bundled-cli
+/ napi families each per-platform sub-package needs its own
+Trusted Publisher registration after the first publish — the
+secret-bypass is a one-time bootstrap, not a permanent path.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None when the secret
+is unset (OIDC path unchanged). When the secret is set, a new
+"Export NODE_AUTH_TOKEN (caller-provided)" step writes
+`NODE_AUTH_TOKEN` to `$GITHUB_ENV` gated on the secret being
+non-empty AND the planned matrix containing an npm row. The
+gate reads the secret through a job-level `CALLER_NPM_TOKEN`
+env var because GitHub Actions does not allow the `secrets`
+context inside step-level `if:` conditions ([context
+availability](https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability));
+this is an internal mechanism — consumers don't see or set
+`CALLER_NPM_TOKEN` themselves. Unlike #283 (crates), there is
+no separate OIDC step to "skip" — the npm CLI handles OIDC
+internally via the runner's id-token, and the presence of
+`NODE_AUTH_TOKEN` in the env is what switches the CLI's auth
+mode.
+
+**Verification.** Wire `NPM_TOKEN` to a valid npm automation
+token in the caller repo and trigger a release of a brand-new
+package. The publish-job logs should show "Export
+NODE_AUTH_TOKEN (caller-provided)" as `success`; `npm publish`
+authenticates with the long-lived token rather than via OIDC,
+and every per-platform sub-package in a bundled-cli / napi
+family lands on the registry in a single run. Once first
+publish succeeds, register Trusted Publishers against each
+package URL, drop the `secrets:` block, and re-run a release
+— the OIDC path covers the steady state from there.
+
+Verified end-to-end against existing seeded fixtures and a
+real first-publish on a canary repo. The Verdaccio
+first-publish fixture coverage for the same path is tracked
+separately at #293; until that lands this fallback is verified
+by composition (mirror of #283) plus consumer-side observation
+on real first publishes rather than by an automated
+fresh-state fixture in this repo's CI.
 
 ---
 

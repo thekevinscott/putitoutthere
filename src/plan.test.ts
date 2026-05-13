@@ -823,6 +823,8 @@ crate_path = "crates/my-rust"
         bin: 'my-cli',
         stage_to: 'src/my_py/_binary',
         crate_path: 'crates/my-rust',
+        features: [],
+        no_default_features: false,
       });
     }
 
@@ -839,5 +841,44 @@ crate_path = "crates/my-rust"
     for (const r of matrix) {
       expect(r.bundle_cli).toBeUndefined();
     }
+  });
+
+  // #300: features / no_default_features get plumbed through the planner so
+  // the matrix workflow can pass them to `cargo build`.
+  it('passes features and no_default_features through to per-target wheel rows', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-py"
+kind = "pypi"
+path = "py/my-py"
+globs = ["py/my-py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+stage_to = "src/my_py/_binary"
+crate_path = "crates/my-rust"
+features = ["cli"]
+no_default_features = true
+`,
+      'utf8',
+    );
+    commit('seed', { 'py/my-py/pyproject.toml': 'x' });
+
+    const matrix = await plan({ cwd: repo });
+    const wheelRow = matrix.find((r) => r.target !== 'sdist');
+    expect(wheelRow?.bundle_cli).toEqual({
+      bin: 'my-cli',
+      stage_to: 'src/my_py/_binary',
+      crate_path: 'crates/my-rust',
+      features: ['cli'],
+      no_default_features: true,
+    });
   });
 });

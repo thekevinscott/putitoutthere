@@ -169,7 +169,19 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           BIN: ${{ matrix.bundle_cli.bin }}
-        run: cargo build --release --target "$TARGET" --bin "$BIN"
+          # #300: support the lib-with-optional-CLI shape (ruff/uv/
+          # pydantic-core/biome/swc/dirsql) where the binary lives behind
+          # `[[bin]] required-features = ["cli"]`. Empty `features` and
+          # `no_default_features = false` (the schema defaults) leave the
+          # cargo invocation byte-identical to its pre-#300 form.
+          FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
+          NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
+        run: |
+          set -euo pipefail
+          args=(build --release --target "$TARGET" --bin "$BIN")
+          if [ -n "$FEATURES" ]; then args+=(--features "$FEATURES"); fi
+          if [ "$NO_DEFAULT_FEATURES" = "true" ]; then args+=(--no-default-features); fi
+          cargo "${args[@]}"
 
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — stage binary into ${{ matrix.path }}/${{ matrix.bundle_cli.stage_to }}

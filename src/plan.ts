@@ -44,6 +44,8 @@ export interface MatrixRow {
     bin: string;
     stage_to: string;
     crate_path: string;
+    features: string[];
+    no_default_features: boolean;
   };
 }
 

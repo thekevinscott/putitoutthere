@@ -329,14 +329,15 @@ releases without fighting registry-immutable-publish semantics.
 ## Trusted publishers
 
 OIDC trusted publishers are the default and recommended auth path.
-The reusable workflow also accepts a long-lived `CARGO_REGISTRY_TOKEN`
-via `secrets:` for cases where Trusted Publishing isn't reachable —
-most commonly the very first publish of a brand-new crate, since
-Trusted Publishing on crates.io binds to an *already-published* crate
-and there's no pending-publisher equivalent. When set, the OIDC
-exchange is skipped and the caller-provided token is used instead.
-Drop the secret once Trusted Publishing is registered against the
-existing crate.
+The reusable workflow also accepts long-lived `CARGO_REGISTRY_TOKEN`
+(crates.io) and `NPM_TOKEN` (npm) values via `secrets:` for cases
+where Trusted Publishing isn't reachable — most commonly the very
+first publish of a brand-new crate or npm package, since Trusted
+Publishing on both registries binds to an *already-published*
+package and neither has a pending-publisher equivalent. When set,
+the OIDC exchange is skipped and the caller-provided token is used
+instead. Drop the secret once Trusted Publishing is registered
+against the existing package.
 
 For all three registries the OIDC fields are the same: **your**
 repository owner/name, **your** workflow filename (`release.yml`),
@@ -382,14 +383,34 @@ see "How auth flows" below for the why.
 
 ### npm
 
-1. Publish at least one version of your package with a classic
-   `NODE_AUTH_TOKEN` so the package exists on the registry. (npm's trusted
-   publisher requires an existing package.)
+1. **First publish (brand-new package).** Trusted Publishing on npm
+   binds to an existing package, so the first `npm publish` has no
+   OIDC path. Pass `NPM_TOKEN` to the reusable workflow via
+   `secrets:` to bootstrap through this workflow:
+
+   ```yaml
+   jobs:
+     release:
+       uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
+       secrets:
+         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+   ```
+
+   When `NPM_TOKEN` is set, it is exported to the publish step's
+   environment as `NODE_AUTH_TOKEN` and the npm CLI prefers it over
+   the OIDC path. For bundled-cli / napi families the same secret
+   authenticates publishes of all per-platform sub-packages on first
+   publish — once those exist, each one needs its own Trusted
+   Publisher registration (the bypass is a one-time bootstrap, not
+   a permanent path).
 2. Go to `https://www.npmjs.com/package/<name>/access` → **Require trusted
    publisher**.
 3. Fill in: your repository, workflow filename (`release.yml`),
-   environment (optional).
-4. Delete the bootstrap token.
+   environment (optional). Repeat for every per-platform sub-package
+   for bundled-cli / napi families.
+4. Drop the `NPM_TOKEN` secret from the workflow once Trusted
+   Publishing is registered; subsequent publishes are zero-secret on
+   the OIDC path.
 
 ### How auth flows
 
@@ -652,6 +673,12 @@ depends_on = ["my-rust"]
 bin        = "my-cli"
 stage_to   = "src/my_py/_binary"
 crate_path = "crates/my-rust"
+# Optional. Forwarded to `cargo build` when the binary lives behind
+# `[[bin]] required-features = ["cli"]` (the lib-with-optional-CLI shape:
+# ruff / uv / pydantic-core / biome / swc). Empty list = no `--features`
+# flag, identical to omitting the key.
+features            = ["cli"]
+no_default_features = false
 ```
 
 The reusable workflow cross-compiles the binary per target and stages it
