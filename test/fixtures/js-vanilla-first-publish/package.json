@@ -1,5 +1,5 @@
 {
-  "name": "@putitoutthere/piot-fixture-zzz-js-vanilla-first-publish__NAME_SUFFIX__",
+  "name": "@putitoutthere/piot-fixture-zzz-js-vanilla-first-publish-placeholder",
   "version": "__VERSION__",
   "description": "Put It Out There first-publish canary fixture. Publishes to Verdaccio under a uniquified name. Safe to ignore.",
   "license": "MIT",
