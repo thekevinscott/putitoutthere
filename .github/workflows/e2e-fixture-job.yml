@@ -651,7 +651,15 @@ jobs:
               continue
             fi
             tmp=$(mktemp -d)
-            curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
+            # `--retry 5 --retry-all-errors --retry-delay 5`: npm's
+            # packument index and tarball blobs propagate across
+            # CloudFlare edges on independent schedules. The `npm view`
+            # retry above absorbs the packument race; this retry
+            # absorbs the tarball-blob race. `--retry-all-errors` is
+            # required because curl's default `--retry` ignores 4xx,
+            # but a cold-edge tarball miss surfaces as HTTP 404 — see
+            # PR #323 for the reproduction.
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$tmp/pkg.tgz" "$tarball_url"
             mkdir "$tmp/extracted"
             tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
             for d in "${dirs[@]}"; do
