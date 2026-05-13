@@ -885,6 +885,204 @@ no_default_features = true
   });
 });
 
+/* --------------------- #298: bundle_cli on npm --------------------- */
+
+describe('parseConfig: bundle_cli on npm (#298)', () => {
+  const WITH_NPM_BUNDLE = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "packages/ts-cli"
+globs = ["packages/ts-cli/**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+crate_path = "crates/my-cli"
+`;
+
+  it('accepts a complete [package.bundle_cli] block on npm + build = "bundled-cli"', () => {
+    const cfg = parseConfig(WITH_NPM_BUNDLE);
+    const pkg = cfg.packages[0] as {
+      bundle_cli?: {
+        bin: string;
+        crate_path: string;
+        features: string[];
+        no_default_features: boolean;
+      };
+    };
+    expect(pkg.bundle_cli).toEqual({
+      bin: 'my-cli',
+      crate_path: 'crates/my-cli',
+      features: [],
+      no_default_features: false,
+    });
+  });
+
+  it('defaults crate_path to "." when omitted', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "."
+globs = ["**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+`);
+    const pkg = cfg.packages[0] as { bundle_cli?: { crate_path: string } };
+    expect(pkg.bundle_cli?.crate_path).toBe('.');
+  });
+
+  it('accepts features and no_default_features (mirror of pypi shape)', () => {
+    const cfg = parseConfig(
+      WITH_NPM_BUNDLE +
+        `features = ["cli"]
+no_default_features = true
+`,
+    );
+    const pkg = cfg.packages[0] as {
+      bundle_cli?: { features: string[]; no_default_features: boolean };
+    };
+    expect(pkg.bundle_cli?.features).toEqual(['cli']);
+    expect(pkg.bundle_cli?.no_default_features).toBe(true);
+  });
+
+  it('accepts bundle_cli when build is an array containing a bundled-cli entry', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "packages/ts"
+globs = ["packages/ts/**"]
+build = [
+  { mode = "napi",        name = "@my-cli/lib-{triple}" },
+  { mode = "bundled-cli", name = "@my-cli/cli-{triple}" },
+]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+`);
+    const pkg = cfg.packages[0] as { bundle_cli?: { bin: string } };
+    expect(pkg.bundle_cli?.bin).toBe('my-cli');
+  });
+
+  it('rejects bundle_cli when build is "napi" (no bundled-cli entry)', () => {
+    const bad = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "."
+globs = ["**"]
+build = "napi"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+`;
+    expect(() => parseConfig(bad)).toThrow(/bundle_cli is only valid when build = "bundled-cli"/);
+  });
+
+  it('rejects bundle_cli when build is undefined (vanilla npm)', () => {
+    const bad = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "."
+globs = ["**"]
+
+[package.bundle_cli]
+bin = "my-cli"
+`;
+    expect(() => parseConfig(bad)).toThrow(/bundle_cli is only valid when build = "bundled-cli"/);
+  });
+
+  it('rejects bundle_cli when build is an array without a bundled-cli entry', () => {
+    const bad = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "."
+globs = ["**"]
+build = [
+  { mode = "napi", name = "@my-cli/lib-{triple}" },
+]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+`;
+    expect(() => parseConfig(bad)).toThrow(/bundle_cli is only valid when build = "bundled-cli"/);
+  });
+
+  it('rejects bundle_cli without targets', () => {
+    const bad = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "."
+globs = ["**"]
+build = "bundled-cli"
+
+[package.bundle_cli]
+bin = "my-cli"
+`;
+    expect(() => parseConfig(bad)).toThrow(/bundle_cli requires at least one entry in `targets`/);
+  });
+
+  it('rejects unknown keys inside bundle_cli (typo guard — `stage_to` is pypi-only)', () => {
+    const bad =
+      WITH_NPM_BUNDLE +
+      `stage_to = "bin"
+`;
+    expect(() => parseConfig(bad)).toThrow();
+  });
+
+  it('rejects bundle_cli with empty-string `bin`', () => {
+    const bad = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-cli"
+kind  = "npm"
+path  = "."
+globs = ["**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = ""
+`;
+    expect(() => parseConfig(bad)).toThrow();
+  });
+});
+
 // #230: actions/upload-artifact@v4 forbids `/` and several other characters
 // in artifact names. The planner encodes `/` to `__` (the only realistically
 // usable forbidden char in piot identifiers); the rest are rejected at
