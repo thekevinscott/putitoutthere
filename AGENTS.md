@@ -21,6 +21,23 @@ features that expand the tool's surface area.
 
 @notes/design-commitments.md
 
+## Pull requests
+
+When working in a remote agent environment (Claude Code on the web, Codex
+cloud, or any other hosted runner where the human reviewer cannot see your
+local working tree), open a pull request as soon as the first commit is
+pushed. The PR is the only surface the reviewer has on your work; waiting
+for explicit "please open a PR" makes the work invisible until then.
+
+In an interactive local environment (CLI on a developer's machine), keep
+the default: do not open a PR unless asked. The author sees the working
+tree and decides when it's PR-ready.
+
+This rule overrides the generic "do not create a pull request unless the
+user explicitly asks" guidance that ships with most agent harnesses. The
+red/green cadence below still applies — the PR just gets opened on the
+test commit rather than after the impl commit lands.
+
 ## Red/green TDD workflow
 
 Behavior changes — bug fixes and new features alike — land in two
