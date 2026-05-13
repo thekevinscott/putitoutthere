@@ -663,3 +663,112 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
     ).toEqual([]);
   });
 });
+
+// #317: pre-merge `check.yml` reusable workflow. Pins the file's shape
+// so it stays consumable in one line by a downstream PR-CI workflow:
+//
+//   jobs:
+//     putitoutthere-check:
+//       uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0
+//
+// Acceptance from the issue:
+//   - the file exists,
+//   - it is a reusable workflow (`on: workflow_call`),
+//   - it drives the engine through the same JS action `release.yml`
+//     uses (no new step-level action shape — non-goal #10 from #316's
+//     reframe), with `command: check`,
+//   - the README documents it the same way `release.yml` is documented.
+//
+// What's deliberately NOT pinned here: the set of checks the workflow
+// runs. Those are #319's contract and get their own integration tests.
+// This test guards the shell only.
+describe('#317 check.yml reusable workflow shape', () => {
+  interface Step {
+    name?: string;
+    uses?: string;
+    with?: Record<string, unknown>;
+  }
+  interface CheckYaml {
+    on?: {
+      workflow_call?: {
+        inputs?: Record<string, unknown>;
+      };
+    };
+    permissions?: Record<string, string>;
+    jobs?: Record<string, { steps?: Step[]; uses?: string; with?: Record<string, unknown>; permissions?: Record<string, string> }>;
+  }
+
+  const checkPath = join(repoRoot, '.github/workflows/check.yml');
+
+  it('the file exists at .github/workflows/check.yml', () => {
+    expect(
+      existsSync(checkPath),
+      'check.yml must exist (issue #317 acceptance)',
+    ).toBe(true);
+  });
+
+  it('declares `on: workflow_call` so consumers can call it via `uses:`', () => {
+    const parsed = parseYaml(readFileSync(checkPath, 'utf8')) as CheckYaml;
+    expect(
+      parsed.on?.workflow_call,
+      'check.yml must be a reusable workflow (on: workflow_call) — issue #317',
+    ).toBeDefined();
+  });
+
+  it('runs the engine via the JS action with `command: check`', () => {
+    // The issue forbids forking validation logic across two surfaces.
+    // The release.yml path drives the engine via
+    // `uses: thekevinscott/putitoutthere@v0` with `command: <name>`;
+    // check.yml must do the same so both surfaces invoke the same
+    // CLI entry point and share the same validation code path.
+    const parsed = parseYaml(readFileSync(checkPath, 'utf8')) as CheckYaml;
+    const jobs = parsed.jobs ?? {};
+    const allSteps: Step[] = [];
+    for (const job of Object.values(jobs)) {
+      for (const step of job?.steps ?? []) allSteps.push(step);
+    }
+    const engineStep = allSteps.find(
+      (s) =>
+        typeof s.uses === 'string' &&
+        /^thekevinscott\/putitoutthere(?:\/[^@]+)?@v0$/.test(s.uses) &&
+        // The top-level repo ref is the JS action wrapper; the
+        // path-suffixed refs are the other reusable workflows
+        // (release.yml, build.yml, _matrix.yml). The action is the
+        // one that takes a `command:` input.
+        !s.uses.includes('/.github/workflows/'),
+    );
+    expect(
+      engineStep,
+      'check.yml must invoke `uses: thekevinscott/putitoutthere@v0` to drive the engine (issue #317)',
+    ).toBeDefined();
+    expect(
+      engineStep?.with?.command,
+      'the JS-action step must pass `command: check` so the same engine entry point as plan/publish/write-version runs (issue #317)',
+    ).toBe('check');
+  });
+
+  it('requests minimal permissions (no `id-token: write`)', () => {
+    // Mirror of build.yml's structural guarantee: a PR-time surface
+    // must not carry the OIDC publish capability. A configuration
+    // check that can mint a registry token is a parallel diagnostic
+    // surface masquerading as a check (non-goal #8 again).
+    const text = readFileSync(checkPath, 'utf8');
+    expect(
+      text,
+      'check.yml must not request id-token: write — PR-time surface cannot mint publish tokens (issue #317)',
+    ).not.toMatch(/id-token:\s*write/);
+  });
+
+  it('README documents the check.yml integration line', () => {
+    // The reusable workflow path is consumer-facing: a copy-paste
+    // from the README is the integration surface, so a drift between
+    // the file's actual path and the documented path breaks every
+    // adopter silently. Mirror of the release.yml invariant above.
+    const expected = 'thekevinscott/putitoutthere/.github/workflows/check.yml@v0';
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    expect(
+      readme,
+      'README must document the check.yml integration line so consumers can wire it in one line (issue #317 acceptance)',
+    ).toContain(expected);
+  });
+});
