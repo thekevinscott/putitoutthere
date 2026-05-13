@@ -332,22 +332,11 @@ function readDeclaredBins(cargoTomlPath: string): string[] {
   // workspace-root manifest reports bins as missing even when they
   // exist in a member. Walk `[workspace].members` so `crate_path = "."`
   // (the default) satisfies the standard cargo-workspace shape.
-  //
-  // `members` entries are documented as path strings; cargo also accepts
-  // glob patterns but the standard polyglot shape is explicit per-member
-  // paths. parseCargoToml returns null for missing / malformed manifests,
-  // so unexpanded globs and stray entries silently drop out — cargo's own
-  // diagnostics own surfacing those.
-  const workspace = parsed.workspace as { members?: unknown } | undefined;
-  /* v8 ignore next -- workspace.members is typed as unknown by smol-toml */
-  if (workspace?.members === undefined || !Array.isArray(workspace.members)) {
-    return result;
-  }
-  const workspaceDir = dirname(cargoTomlPath);
-  for (const m of workspace.members) {
-    /* v8 ignore next -- defensive: cargo rejects non-string members */
-    if (typeof m !== 'string') continue;
-    const memberParsed = parseCargoToml(join(workspaceDir, m, 'Cargo.toml'));
+  // parseCargoToml returns null for missing / malformed manifests, so
+  // unexpanded glob entries and stray entries silently drop out —
+  // cargo's own diagnostics own surfacing those.
+  for (const memberManifest of workspaceMemberManifests(parsed, cargoTomlPath)) {
+    const memberParsed = parseCargoToml(memberManifest);
     if (memberParsed === null) continue;
     for (const b of collectBinsFromManifest(memberParsed)) {
       if (!result.includes(b)) result.push(b);
@@ -356,19 +345,33 @@ function readDeclaredBins(cargoTomlPath: string): string[] {
   return result;
 }
 
+function workspaceMemberManifests(
+  parsed: Record<string, unknown>,
+  cargoTomlPath: string,
+): string[] {
+  const workspace = parsed.workspace;
+  if (typeof workspace !== 'object' || workspace === null) return [];
+  const members = (workspace as { members?: unknown }).members;
+  if (!Array.isArray(members)) return [];
+  const workspaceDir = dirname(cargoTomlPath);
+  const out: string[] = [];
+  for (const m of members) {
+    if (typeof m === 'string') {
+      out.push(join(workspaceDir, m, 'Cargo.toml'));
+    }
+  }
+  return out;
+}
+
 function parseCargoToml(path: string): Record<string, unknown> | null {
   let raw: string;
   try {
     raw = readFileSync(path, 'utf8');
-    /* v8 ignore next 3 -- defensive: workspace-member walk skips
-       missing/unreadable manifests; cargo surfaces those itself */
   } catch {
     return null;
   }
   try {
     return parseToml(raw);
-    /* v8 ignore next 3 -- malformed-Cargo.toml branch covered by the
-       "malformed Cargo.toml (parse error)" check.test.ts case */
   } catch {
     return null;
   }
