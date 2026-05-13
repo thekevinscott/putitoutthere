@@ -732,7 +732,7 @@ jobs:
           # #304: select retry schedule based on which registry we're
           # hitting. Real npm propagates packument metadata across its
           # CDN asynchronously, so verify-immediately-after-publish needs
-          # generous backoff (~140s total). Verdaccio runs as a same-host
+          # generous backoff (~320s total). Verdaccio runs as a same-host
           # service container — once `npm publish` returns, `npm view` is
           # immediately consistent. Tight backoff there both shortens the
           # e2e cycle and surfaces real failures faster.
@@ -741,7 +741,7 @@ jobs:
             registry_label="${REGISTRY_URL}"
             view_flags=(--registry "${REGISTRY_URL}")
           else
-            sleeps=(5 15 30 90)
+            sleeps=(5 15 30 90 180)
             registry_label='registry.npmjs.org'
             view_flags=()
           fi
@@ -761,17 +761,21 @@ jobs:
             fi
             echo "[$pkg_name@$version] verifying tarball at ${registry_label} contains: ${dirs[*]}"
             tarball_url=""
-            for attempt in 1 2 3 4 5; do
+            # Attempts and sleeps stay in lockstep: N sleeps for N+1
+            # attempts, no sleep after the last attempt. Bumping one
+            # requires bumping the other.
+            attempts=$((${#sleeps[@]} + 1))
+            for attempt in $(seq 1 "$attempts"); do
               tarball_url=$(npm view "${view_flags[@]}" "$pkg_name@$version" dist.tarball 2>/dev/null || true)
               if [ -n "$tarball_url" ]; then break; fi
-              if [ "$attempt" -lt 5 ]; then
+              if [ "$attempt" -lt "$attempts" ]; then
                 sleep_for="${sleeps[$((attempt - 1))]}"
-                echo "  packument lag: npm view returned empty (attempt $attempt/5); retrying in ${sleep_for}s"
+                echo "  packument lag: npm view returned empty (attempt $attempt/$attempts); retrying in ${sleep_for}s"
                 sleep "$sleep_for"
               fi
             done
             if [ -z "$tarball_url" ]; then
-              echo "::error::[$pkg_name@$version] npm view at ${registry_label} never returned a tarball URL after 5 attempts. Either the publish didn't actually publish, or packument propagation is much slower than expected."
+              echo "::error::[$pkg_name@$version] npm view at ${registry_label} never returned a tarball URL after $attempts attempts. Either the publish didn't actually publish, or packument propagation is much slower than expected."
               fail=1
               continue
             fi
