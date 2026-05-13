@@ -22,7 +22,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, parse as parsePath } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
@@ -277,12 +277,22 @@ export function checkCratesMetadata(
       continue;
     }
     const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
+    // `[workspace.package]` inheritance (#328): cargo resolves
+    // `license.workspace = true` against the workspace root before
+    // upload, so the literal value lands on crates.io. The check has
+    // to do the same — otherwise crates following Cargo's recommended
+    // centralized-metadata pattern false-positive.
+    const wsPkgTable = readWorkspacePackageTable(p.path);
+    const description = resolveInherited(pkgTable.description, wsPkgTable, 'description');
+    const license = resolveInherited(pkgTable.license, wsPkgTable, 'license');
+    const licenseFile = resolveInherited(
+      pkgTable['license-file'],
+      wsPkgTable,
+      'license-file',
+    );
     const missing: CratesRequiredField[] = [];
-    if (!nonEmptyString(pkgTable.description)) missing.push('description');
-    if (
-      !nonEmptyString(pkgTable.license) &&
-      !nonEmptyString(pkgTable['license-file'])
-    ) {
+    if (!nonEmptyString(description)) missing.push('description');
+    if (!nonEmptyString(license) && !nonEmptyString(licenseFile)) {
       missing.push('license');
     }
     if (missing.length > 0) {
@@ -294,6 +304,78 @@ export function checkCratesMetadata(
 
 function nonEmptyString(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
+}
+
+/**
+ * Return the inherited workspace value when the field is declared as
+ * `<field>.workspace = true`; otherwise pass the raw value through.
+ * `wsPkgTable` is `undefined` when no parent `Cargo.toml` declares a
+ * `[workspace.package]` block — inheritance simply yields `undefined`
+ * there, which `nonEmptyString` correctly treats as missing.
+ */
+function resolveInherited(
+  value: unknown,
+  wsPkgTable: Record<string, unknown> | undefined,
+  key: string,
+): unknown {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    (value as Record<string, unknown>).workspace === true
+  ) {
+    return wsPkgTable?.[key];
+  }
+  return value;
+}
+
+/**
+ * Find the nearest parent `Cargo.toml` whose `[workspace]` table makes
+ * it a workspace root and return its `[workspace.package]` table (if
+ * any). Walks up from `crateDir` to the filesystem root. Returns
+ * `undefined` when no workspace root is found or when the workspace
+ * defines no shared `[workspace.package]` metadata.
+ */
+function readWorkspacePackageTable(
+  crateDir: string,
+): Record<string, unknown> | undefined {
+  const rootMarker = parsePath(crateDir).root;
+  let dir = dirname(crateDir);
+  while (dir && dir !== rootMarker) {
+    const manifest = join(dir, 'Cargo.toml');
+    let raw: string;
+    try {
+      raw = readFileSync(manifest, 'utf8');
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = parseToml(raw);
+    } catch {
+      // Cargo will surface the parser error; just skip this manifest
+      // for workspace lookup so we don't crash on a malformed parent.
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+      continue;
+    }
+    if (parsed.workspace !== undefined) {
+      const ws = parsed.workspace as Record<string, unknown>;
+      const wsPkg = ws.package;
+      if (wsPkg !== undefined && typeof wsPkg === 'object') {
+        return wsPkg as Record<string, unknown>;
+      }
+      // Workspace root found, but no shared metadata — stop walking.
+      return undefined;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
 }
 
 /**
