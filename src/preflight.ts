@@ -537,3 +537,69 @@ export function requireCratesMetadata(packages: readonly Package[]): void {
   );
   throw new Error(lines.join('\n'));
 }
+
+/* ----------------------- pyproject.toml + Cargo.toml shape (#301) ----------------------- */
+//
+// Stub exports for the red-phase test commit. The real implementation
+// lands in the green commit on top of this. Returning empty findings
+// (and never throwing) here means every assertion in
+// `preflight.test.ts`'s #301 describe blocks that expects a finding
+// fails red, exactly the shape AGENTS.md's "red is the new test" rule
+// requires.
+
+export type PypiShapeCode =
+  | 'PIOT_PYPI_NAME_MISMATCH'
+  | 'PIOT_PYPI_BUILD_BACKEND_MISMATCH'
+  | 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND'
+  | 'PIOT_PYPI_MATURIN_INCLUDE_MISSING';
+
+export interface PyprojectShapeFinding {
+  package: string;
+  pyprojectPath: string;
+  code: PypiShapeCode;
+  detail: string;
+}
+
+export type CratesShapeCode =
+  | 'PIOT_CRATES_NAME_MISMATCH'
+  | 'PIOT_CRATES_MISSING_BIN'
+  | 'PIOT_CRATES_FEATURE_NOT_DECLARED'
+  | 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH';
+
+export interface CargoShapeFinding {
+  package: string;
+  cargoTomlPath: string;
+  code: CratesShapeCode;
+  detail: string;
+}
+
+export interface CargoShapeOptions {
+  /** Used to resolve `bundle_cli.crate_path` (documented as relative
+   *  to the repo root) and to bound the workspace-version walk.
+   *  Defaults to `process.cwd()`. */
+  cwd?: string;
+}
+
+export function checkPyprojectShape(
+  _packages: readonly Package[],
+): PyprojectShapeFinding[] {
+  return [];
+}
+
+export function requirePyprojectShape(_packages: readonly Package[]): void {
+  // stub
+}
+
+export function checkCargoShape(
+  _packages: readonly Package[],
+  _options: CargoShapeOptions = {},
+): CargoShapeFinding[] {
+  return [];
+}
+
+export function requireCargoShape(
+  _packages: readonly Package[],
+  _options: CargoShapeOptions = {},
+): void {
+  // stub
+}

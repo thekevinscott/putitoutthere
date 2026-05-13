@@ -55,6 +55,53 @@ export const ErrorCodes = {
    *  (the recommended path; setuptools-scm and the maturin
    *  Cargo.toml-driven path are equally valid). */
   PYPI_STATIC_VERSION: 'PIOT_PYPI_STATIC_VERSION',
+  /** A pypi package's `pyproject.toml` declares a `[project].name` that
+   *  differs from the `[[package]].name` configured in
+   *  `putitoutthere.toml` (or the `pypi` override when set). The build
+   *  tool will pack the wrong name and the upload either lands on the
+   *  wrong registered project or 403s with a confusing "no such project"
+   *  message. #301. */
+  PYPI_NAME_MISMATCH: 'PIOT_PYPI_NAME_MISMATCH',
+  /** A pypi package's `[build-system].build-backend` is set but does
+   *  not match the configured `build` mode (e.g. `build = "maturin"`
+   *  but the pyproject declares `hatchling.build`). The build tool
+   *  surfaces a confusing tail-end error long after maturin has run.
+   *  #301. */
+  PYPI_BUILD_BACKEND_MISMATCH: 'PIOT_PYPI_BUILD_BACKEND_MISMATCH',
+  /** A pypi package declares `dynamic = ["version"]` but no
+   *  version-source backend block (`[tool.hatch.version]` /
+   *  `[tool.setuptools_scm]`) is present, so the build backend has no
+   *  way to compute a version at pack time. #301. */
+  PYPI_DYNAMIC_VERSION_NO_BACKEND: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
+  /** A maturin pypi package declares `[package.bundle_cli]` but
+   *  `[tool.maturin].include` does not cover the configured
+   *  `bundle_cli.stage_to` path, so the cross-compiled binary will
+   *  never make it inside the wheel. The post-build wheel-content
+   *  guard catches it, but only after maturin has run. #301. */
+  PYPI_MATURIN_INCLUDE_MISSING: 'PIOT_PYPI_MATURIN_INCLUDE_MISSING',
+  /** A crates package's `Cargo.toml` declares a `[package].name` that
+   *  differs from the `[[package]].name` configured in
+   *  `putitoutthere.toml` (or the `crate` override when set). cargo
+   *  publish will pack the wrong crate, often 404'ing on the registry
+   *  side after a verification build that took 10+ minutes. #301. */
+  CRATES_NAME_MISMATCH: 'PIOT_CRATES_NAME_MISMATCH',
+  /** A `bundle_cli.bin` is configured but the target `Cargo.toml` has
+   *  no `[[bin]]` table with that name (and the implicit-bin name
+   *  derived from `[package].name` does not match either). `cargo
+   *  build --bin <bin>` fails with `no bin target named ...` mid-
+   *  build. #301. */
+  CRATES_MISSING_BIN: 'PIOT_CRATES_MISSING_BIN',
+  /** A `features` list (either on a `kind = "crates"` package or on
+   *  a `bundle_cli` block) references a feature that the target
+   *  `Cargo.toml` does not declare in `[features]`. `cargo build
+   *  --features <list>` fails with `Package ... does not have these
+   *  features`. #301. */
+  CRATES_FEATURE_NOT_DECLARED: 'PIOT_CRATES_FEATURE_NOT_DECLARED',
+  /** A crates package's `Cargo.toml` declares `version.workspace =
+   *  true`, but no ancestor `Cargo.toml` with a `[workspace]` table
+   *  declares `[workspace.package].version`. cargo fails with
+   *  `error: failed to inherit "version" from workspace`. #301. */
+  CRATES_WORKSPACE_VERSION_MISMATCH: 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -69,4 +116,12 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.NPM_MISSING_REPOSITORY,
   ErrorCodes.CRATES_MISSING_METADATA,
   ErrorCodes.PYPI_STATIC_VERSION,
+  ErrorCodes.PYPI_NAME_MISMATCH,
+  ErrorCodes.PYPI_BUILD_BACKEND_MISMATCH,
+  ErrorCodes.PYPI_DYNAMIC_VERSION_NO_BACKEND,
+  ErrorCodes.PYPI_MATURIN_INCLUDE_MISSING,
+  ErrorCodes.CRATES_NAME_MISMATCH,
+  ErrorCodes.CRATES_MISSING_BIN,
+  ErrorCodes.CRATES_FEATURE_NOT_DECLARED,
+  ErrorCodes.CRATES_WORKSPACE_VERSION_MISMATCH,
 ];

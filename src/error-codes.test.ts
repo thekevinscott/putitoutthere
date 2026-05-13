@@ -45,6 +45,20 @@ describe('error-codes', () => {
     expect(ErrorCodes.PUBLISH_EMPTY_PLAN).toBe('PIOT_PUBLISH_EMPTY_PLAN');
   });
 
+  it('exposes every pypi-shape preflight code surfaced by requirePyprojectShape (#301)', () => {
+    expect(ErrorCodes.PYPI_NAME_MISMATCH).toBe('PIOT_PYPI_NAME_MISMATCH');
+    expect(ErrorCodes.PYPI_BUILD_BACKEND_MISMATCH).toBe('PIOT_PYPI_BUILD_BACKEND_MISMATCH');
+    expect(ErrorCodes.PYPI_DYNAMIC_VERSION_NO_BACKEND).toBe('PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND');
+    expect(ErrorCodes.PYPI_MATURIN_INCLUDE_MISSING).toBe('PIOT_PYPI_MATURIN_INCLUDE_MISSING');
+  });
+
+  it('exposes every cargo-shape preflight code surfaced by requireCargoShape (#301)', () => {
+    expect(ErrorCodes.CRATES_NAME_MISMATCH).toBe('PIOT_CRATES_NAME_MISMATCH');
+    expect(ErrorCodes.CRATES_MISSING_BIN).toBe('PIOT_CRATES_MISSING_BIN');
+    expect(ErrorCodes.CRATES_FEATURE_NOT_DECLARED).toBe('PIOT_CRATES_FEATURE_NOT_DECLARED');
+    expect(ErrorCodes.CRATES_WORKSPACE_VERSION_MISMATCH).toBe('PIOT_CRATES_WORKSPACE_VERSION_MISMATCH');
+  });
+
   it('ErrorCode type alias resolves to the union of literal strings', () => {
     // Compile-time assertion that every value passes the type check.
     const sample: ErrorCode = ErrorCodes.AUTH_NO_TOKEN;
