@@ -286,7 +286,7 @@ crate_path = "crates/missing"
     write('packages/py/pyproject.toml', `
 [project]
 name = "py-lib"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     commit();
     const findings = runChecks({ cwd });
@@ -318,7 +318,7 @@ crate_path = "crates/cli"
     write('packages/py/pyproject.toml', `
 [project]
 name = "py-lib"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     // Directory exists but no Cargo.toml.
     write('crates/cli/src/main.rs', 'fn main(){}');
@@ -352,7 +352,7 @@ crate_path = "crates/cli"
     write('packages/py/pyproject.toml', `
 [project]
 name = "py-lib"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     write('crates/cli/Cargo.toml', `
 [package]
@@ -398,7 +398,7 @@ crate_path = "crates/cli"
     write('packages/py/pyproject.toml', `
 [project]
 name = "py-lib"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     write('crates/cli/Cargo.toml', `
 [package]
@@ -442,7 +442,7 @@ crate_path = "crates/cli"
     write('packages/py/pyproject.toml', `
 [project]
 name = "py-lib"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     // Cargo.toml exists but is malformed. readDeclaredBins returns []
     // and the "declared bins: (none)" branch lands.
@@ -532,7 +532,7 @@ license = "MIT"
     write('packages/py/pyproject.toml', `
 [project]
 name = "lib-py"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     write('packages/py/lib_py/__init__.py', '');
     commit();

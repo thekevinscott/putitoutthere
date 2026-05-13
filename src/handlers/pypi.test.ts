@@ -126,35 +126,23 @@ describe('pypi.writeVersion', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('rewrites the [project].version field in pyproject.toml', async () => {
+  it('rejects a static [project].version literal with PIOT_PYPI_STATIC_VERSION (#333)', async () => {
+    // After #333, pyproject.toml MUST declare `dynamic = ["version"]`.
+    // A static literal can no longer be rewritten in place: putitoutthere
+    // does not edit pyproject.toml at release time (design-commitment #1),
+    // and the writeVersion call point must error rather than silently
+    // accept the misconfigured shape.
     const p = join(dir, 'pyproject.toml');
     writeFileSync(
       p,
       ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
       'utf8',
     );
-    const changed = await pypi.writeVersion(
-      { ...basePkg(), path: dir },
-      '0.2.0',
-      makeCtx(),
-    );
-    expect(changed).toEqual([p]);
-    expect(readFileSync(p, 'utf8')).toContain('version = "0.2.0"');
-  });
-
-  it('is idempotent when version already matches', async () => {
-    const p = join(dir, 'pyproject.toml');
-    writeFileSync(
-      p,
-      ['[project]', 'name = "demo"', 'version = "0.5.0"', ''].join('\n'),
-      'utf8',
-    );
-    const changed = await pypi.writeVersion(
-      { ...basePkg(), path: dir },
-      '0.5.0',
-      makeCtx(),
-    );
-    expect(changed).toEqual([]);
+    await expect(
+      pypi.writeVersion({ ...basePkg(), path: dir }, '0.2.0', makeCtx()),
+    ).rejects.toThrow(/PIOT_PYPI_STATIC_VERSION.*dynamic\s*=\s*\["version"\]/s);
+    // The on-disk pyproject must not have been mutated by the failed call.
+    expect(readFileSync(p, 'utf8')).toContain('version = "0.1.0"');
   });
 
   it('throws when pyproject.toml is missing', async () => {
@@ -163,7 +151,7 @@ describe('pypi.writeVersion', () => {
     ).rejects.toThrow(/pyproject\.toml not found/);
   });
 
-  it('throws when [project] is present but declares neither static version nor dynamic (issue #171)', async () => {
+  it('throws when [project] is present but declares no version source', async () => {
     const p = join(dir, 'pyproject.toml');
     writeFileSync(
       p,
@@ -172,28 +160,7 @@ describe('pypi.writeVersion', () => {
     );
     await expect(
       pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
-    ).rejects.toThrow(/declares neither a static version nor dynamic/);
-  });
-
-  it('preserves comments', async () => {
-    const p = join(dir, 'pyproject.toml');
-    const original = [
-      '# top comment',
-      '[project]',
-      'name = "demo"  # inline comment',
-      '# preceding line',
-      'version = "0.1.0"  # version comment',
-      'description = "demo"',
-      '',
-    ].join('\n');
-    writeFileSync(p, original, 'utf8');
-    await pypi.writeVersion({ ...basePkg(), path: dir }, '0.9.0', makeCtx());
-    const out = readFileSync(p, 'utf8');
-    expect(out).toContain('# top comment');
-    expect(out).toContain('# inline comment');
-    expect(out).toContain('# preceding line');
-    expect(out).toContain('# version comment');
-    expect(out).toContain('version = "0.9.0"');
+    ).rejects.toThrow(/declares no version source.*dynamic\s*=\s*\["version"\]/s);
   });
 
   it('skips the rewrite when [project].dynamic contains "version" (hatch-vcs / setuptools-scm)', async () => {
@@ -241,7 +208,10 @@ describe('pypi.writeVersion', () => {
     expect(changed).toEqual([]);
   });
 
-  it('rewrites normally when dynamic array is present but does not include "version"', async () => {
+  it('rejects when dynamic array is present but does not include "version" and a literal exists (#333)', async () => {
+    // The literal still drives the build backend regardless of what
+    // other entries `dynamic` carries, so the rule is the same as the
+    // plain static-literal case: reject with PIOT_PYPI_STATIC_VERSION.
     const p = join(dir, 'pyproject.toml');
     writeFileSync(
       p,
@@ -254,13 +224,9 @@ describe('pypi.writeVersion', () => {
       ].join('\n'),
       'utf8',
     );
-    const changed = await pypi.writeVersion(
-      { ...basePkg(), path: dir },
-      '0.7.0',
-      makeCtx(),
-    );
-    expect(changed).toEqual([p]);
-    expect(readFileSync(p, 'utf8')).toContain('version = "0.7.0"');
+    await expect(
+      pypi.writeVersion({ ...basePkg(), path: dir }, '0.7.0', makeCtx()),
+    ).rejects.toThrow(/PIOT_PYPI_STATIC_VERSION/);
   });
 
   it('throws with a distinct message when [project] table is absent entirely', async () => {

@@ -4,6 +4,6 @@ build-backend = "maturin"
 
 [project]
 name = "piot-fixture-zzz-python-maturin"
-version = "__VERSION__"
+dynamic = ["version"]
 description = "Put It Out There canary fixture. Safe to ignore."
 license = { text = "MIT" }

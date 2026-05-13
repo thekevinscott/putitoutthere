@@ -145,59 +145,14 @@ describe('#30 rust-in-language fixtures', () => {
 // does cover is the contract that the bump exists, targets the right
 // file, and produces the expected on-disk state.
 describe('#276 build-phase version bump bumps the manifest the build tool reads', () => {
-  it('python-rust-maturin (static [project].version) → pyproject.toml carries the planned version', async () => {
+  it('python-rust-maturin → Cargo.toml carries the planned version, pyproject is unchanged', async () => {
+    // After #333, every pypi pyproject declares `dynamic = ["version"]`
+    // and the version source moves to Cargo.toml. The bump must
+    // follow.
     const cwd = prepareFixture('python-rust-maturin');
-    // Seed the manifest at a stale version to mirror the consumer
-    // case: pyproject.toml's literal lags the planned version.
     const pyPath = join(cwd, 'pyproject.toml');
-    const original = readFileSync(pyPath, 'utf8');
-    expect(original).toContain('version = "0.1.0"');
-
-    // Invoke the CLI subcommand the build matrix calls before maturin.
-    const code = await runCli([
-      'node',
-      'putitoutthere',
-      'write-version',
-      '--path',
-      cwd,
-      '--version',
-      '9.9.9',
-    ]);
-    expect(code).toBe(0);
-
-    const after = readFileSync(pyPath, 'utf8');
-    expect(after).toContain('version = "9.9.9"');
-    // Cargo.toml ALSO bumped on the static-version path when a
-    // sibling [package].version is present — maturin's mismatch
-    // resolution varies by platform (PR #277 hit this on Windows;
-    // wheels shipped at the stale Cargo literal). Bumping both
-    // keeps the contract platform-independent.
-    expect(readFileSync(join(cwd, 'Cargo.toml'), 'utf8')).toContain('version = "9.9.9"');
-  });
-
-  it('python-rust-maturin (dynamic version) → Cargo.toml carries the planned version', async () => {
-    const cwd = prepareFixture('python-rust-maturin');
-    // Switch the fixture into maturin's dynamic-version shape: pyproject
-    // declares `dynamic = ["version"]` and the version source moves to
-    // Cargo.toml. The bump must follow.
-    const pyPath = join(cwd, 'pyproject.toml');
-    writeFileSync(
-      pyPath,
-      [
-        '[build-system]',
-        'requires = ["maturin>=1"]',
-        'build-backend = "maturin"',
-        '',
-        '[project]',
-        'name = "piot-fixture-zzz-python-maturin"',
-        'dynamic = ["version"]',
-        'description = "Put It Out There canary fixture. Safe to ignore."',
-        'license = { text = "MIT" }',
-        '',
-      ].join('\n'),
-      'utf8',
-    );
     const pyBefore = readFileSync(pyPath, 'utf8');
+    expect(pyBefore).toContain('dynamic = ["version"]');
 
     const code = await runCli([
       'node',

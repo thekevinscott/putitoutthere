@@ -306,6 +306,124 @@ function nonEmptyString(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
+/* ----------------------- pypi dynamic version ----------------------- */
+
+// User-facing recipe for hatch-vcs adoption. Embedded verbatim in the
+// thrown error so users have a copy/paste fix instead of a doc-search
+// target.
+const PYPI_VERSION_DOC_POINTER =
+  'https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions';
+
+export interface PypiVersionFinding {
+  package: string;
+  /** Pkg-relative `pyproject.toml` path examined. */
+  pyprojectPath: string;
+}
+
+/**
+ * Scan every pypi package's `pyproject.toml` for a static
+ * `[project].version = "..."` literal. Returns the list of findings;
+ * an empty list means every pypi package declares
+ * `[project].dynamic = ["version"]` (or has no `[project]` table at
+ * all — that case is reported by a different check).
+ *
+ * Why: a static literal silently ships the previous release. The build
+ * backend reads pyproject.toml at build time and putitoutthere does not
+ * rewrite the literal (per design-commitment #1, no version
+ * computation). hatch-vcs / setuptools-scm derive the version from a
+ * git tag or `SETUPTOOLS_SCM_PRETEND_VERSION`; for maturin, the
+ * version flows from `Cargo.toml`'s `[package].version`. All three
+ * accept `dynamic = ["version"]`.
+ *
+ * Non-pypi packages, a missing `pyproject.toml`, malformed TOML, and a
+ * `pyproject.toml` with no `[project]` table are skipped — other parts
+ * of the pipeline (`checkPyprojectAndBundleCli`, the handler's own
+ * read) already surface those failure modes.
+ */
+export function checkPypiVersionSource(
+  packages: readonly Package[],
+): PypiVersionFinding[] {
+  const findings: PypiVersionFinding[] = [];
+  for (const p of packages) {
+    if (p.kind !== 'pypi') continue;
+    const pyprojectPath = join(p.path, 'pyproject.toml');
+    let raw: string;
+    try {
+      raw = readFileSync(pyprojectPath, 'utf8');
+    } catch {
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = parseToml(raw);
+    } catch {
+      continue;
+    }
+    const project = parsed.project as
+      | { version?: unknown; dynamic?: unknown }
+      | undefined;
+    if (project === undefined) continue;
+    if (declaresDynamicVersion(project)) continue;
+    if (typeof project.version === 'string') {
+      findings.push({ package: p.name, pyprojectPath });
+    }
+  }
+  return findings;
+}
+
+function declaresDynamicVersion(project: { dynamic?: unknown }): boolean {
+  const { dynamic } = project;
+  return Array.isArray(dynamic) && dynamic.includes('version');
+}
+
+/**
+ * Throw with an actionable error when any pypi package's pyproject.toml
+ * declares a static `[project].version` literal. Reports every failing
+ * package in one error rather than failing on the first, so consumers
+ * fix them all in one round-trip.
+ *
+ * The fix shape is the same across hatch-vcs, setuptools-scm, and
+ * maturin: declare `dynamic = ["version"]` and let the build backend
+ * derive the version from a tagged source (git tag,
+ * `SETUPTOOLS_SCM_PRETEND_VERSION`, or sibling `Cargo.toml`).
+ */
+export function requirePypiVersionSource(packages: readonly Package[]): void {
+  const findings = checkPypiVersionSource(packages);
+  if (findings.length === 0) return;
+  const lines: string[] = [
+    `[${ErrorCodes.PYPI_STATIC_VERSION}] pyproject.toml must declare \`[project].dynamic = ["version"]\` instead of a static \`[project].version = "..."\` literal.`,
+    '',
+    'Failing packages:',
+  ];
+  for (const f of findings) {
+    lines.push(`  - ${f.package}: ${f.pyprojectPath}`);
+  }
+  lines.push(
+    '',
+    'Why: putitoutthere does not edit pyproject.toml at release time (per the',
+    '"no version computation" design commitment). A static literal silently',
+    'ships the previous release\'s wheel/sdist, because the build backend reads',
+    'whatever is on disk.',
+    '',
+    'Recommended fix (hatch-vcs):',
+    '',
+    '  [build-system]',
+    '  requires = ["hatchling", "hatch-vcs"]',
+    '  build-backend = "hatchling.build"',
+    '',
+    '  [project]',
+    '  name = "<your-package>"',
+    '  dynamic = ["version"]',
+    '',
+    '  [tool.hatch.version]',
+    '  source = "vcs"',
+    '',
+    'setuptools-scm and the maturin (Cargo.toml-driven) path are equally',
+    `valid — see ${PYPI_VERSION_DOC_POINTER}.`,
+  );
+  throw new Error(lines.join('\n'));
+}
+
 /**
  * Return the inherited workspace value when the field is declared as
  * `<field>.workspace = true`; otherwise pass the raw value through.

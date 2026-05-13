@@ -27,7 +27,12 @@ import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { formatTag } from './tag-template.js';
-import { requireAuth, requireCratesMetadata, requireProvenanceMetadata } from './preflight.js';
+import {
+  requireAuth,
+  requireCratesMetadata,
+  requirePypiVersionSource,
+  requireProvenanceMetadata,
+} from './preflight.js';
 import { withRetry } from './retry.js';
 import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
@@ -99,6 +104,13 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     verification build has compiled the crate and every transitive
   //     dep — same wasted-work argument as 2b. #290.
   requireCratesMetadata(selectedPackages);
+
+  // 2d. Pre-flight pypi version source: every selected pypi package's
+  //     pyproject.toml must declare `[project].dynamic = ["version"]`
+  //     instead of a static literal. The engine does not rewrite the
+  //     literal at release time (design-commitment #1), so a literal
+  //     would silently ship the previous release's wheel/sdist.
+  requirePypiVersionSource(selectedPackages);
 
   // 3. Artifact completeness.
   // First normalize the layout in case actions/download-artifact@v8

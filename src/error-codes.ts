@@ -45,6 +45,16 @@ export const ErrorCodes = {
    *  transitive dep. Failing at preflight catches the precondition
    *  in milliseconds. #290. */
   CRATES_MISSING_METADATA: 'PIOT_CRATES_MISSING_METADATA',
+  /** A pypi package's `pyproject.toml` declares a static
+   *  `[project].version = "..."` literal instead of
+   *  `[project].dynamic = ["version"]`. putitoutthere does not edit
+   *  the literal at release time (per design-commitment #1, no
+   *  version computation), so the build backend reads whatever is on
+   *  disk and silently ships the previous release's wheel/sdist.
+   *  The fix is `dynamic = ["version"]` with hatch-vcs as the source
+   *  (the recommended path; setuptools-scm and the maturin
+   *  Cargo.toml-driven path are equally valid). */
+  PYPI_STATIC_VERSION: 'PIOT_PYPI_STATIC_VERSION',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -58,4 +68,5 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.PUBLISH_EMPTY_PLAN,
   ErrorCodes.NPM_MISSING_REPOSITORY,
   ErrorCodes.CRATES_MISSING_METADATA,
+  ErrorCodes.PYPI_STATIC_VERSION,
 ];

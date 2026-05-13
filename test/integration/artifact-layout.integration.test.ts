@@ -98,14 +98,16 @@ build = "setuptools"
 
 const PYPROJECT = `
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "single-pkg"
-version = "0.0.0"
+dynamic = ["version"]
 description = "fixture"
 license = { text = "MIT" }
+
+[tool.setuptools_scm]
 `;
 
 beforeEach(() => {

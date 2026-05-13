@@ -308,6 +308,84 @@ globs = ["packages/py/**"]
     ).toBe(true);
   });
 
+  it("flags pypi packages whose pyproject.toml declares a static [project].version literal", () => {
+    // "No release surprises" applied to PyPI: any non-maturin release path
+    // reads [project].version from pyproject.toml at build time. If that's
+    // a literal, someone — a human or a release-bot — has to rewrite the
+    // file on disk before each release. putitoutthere does not perform that
+    // rewrite (per design-commitment #1: no version computation), so a
+    // static literal silently ships the previous version's wheel/sdist.
+    //
+    // The fix is `[project].dynamic = ["version"]` with hatch-vcs (or
+    // setuptools-scm) as the source. We flag the literal at check time so
+    // the misconfiguration surfaces at PR review rather than at publish.
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "hatch"
+`);
+    writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "py-lib"
+version = "0.0.0"
+`);
+    writeRepoFile('packages/py/py_lib/__init__.py', '');
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'py-lib' &&
+          /PIOT_PYPI_STATIC_VERSION/.test(f.message) &&
+          /dynamic\s*=\s*\["version"\]|hatch-vcs/i.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag pypi packages that already use [project].dynamic = [\"version\"]", () => {
+    // Pins the other half of the static-literal rule: the fix the error
+    // message points at must actually clear the check. Without this pin,
+    // an enforcement that fires on every pypi package would also satisfy
+    // the red test above.
+    writeRepoFile('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "hatch"
+`);
+    writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "py-lib"
+dynamic = ["version"]
+
+[tool.hatch.version]
+source = "vcs"
+`);
+    writeRepoFile('packages/py/py_lib/__init__.py', '');
+    commitAll();
+    const findings = runChecks({ cwd: repo });
+    expect(findings.some((f) => /PIOT_PYPI_STATIC_VERSION/.test(f.message))).toBe(false);
+  });
+
   it("flags maturin+bundle_cli when crate_path's Cargo.toml has no matching [[bin]]", () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
@@ -329,7 +407,7 @@ crate_path = "crates/cli"
     writeRepoFile('packages/py/pyproject.toml', `
 [project]
 name = "py-lib"
-version = "0.0.0"
+dynamic = ["version"]
 `);
     // Cargo.toml exists but declares a different binary name.
     writeRepoFile('crates/cli/Cargo.toml', `
@@ -430,9 +508,16 @@ license = "MIT"
 `);
     writeRepoFile('packages/rs/src/lib.rs', '');
     writeRepoFile('packages/py/pyproject.toml', `
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [project]
 name = "lib-py"
-version = "0.0.0"
+dynamic = ["version"]
+
+[tool.hatch.version]
+source = "vcs"
 `);
     writeRepoFile('packages/py/lib_py/__init__.py', '');
     commitAll();
