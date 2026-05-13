@@ -922,6 +922,36 @@ version = "0.0.0"
     expect(checkPyprojectShape(pkgs).some((f) => f.code === 'PIOT_PYPI_MATURIN_INCLUDE_MISSING')).toBe(true);
   });
 
+  it('treats object-form maturin include entries without a `path` field as not covering', () => {
+    // Exercises `extractIncludePath`'s "object entry but no usable
+    // string path" arm (preflight.ts:510). The whole `include` list
+    // collapses to "no covering entry", so MATURIN_INCLUDE_MISSING
+    // fires.
+    const p = join(dir, 'a');
+    writePyproject(
+      p,
+      `[build-system]
+build-backend = "maturin"
+
+[project]
+name = "a"
+version = "0.0.0"
+
+[tool.maturin]
+include = [{ format = "wheel" }]
+`,
+    );
+    const pkgs = [
+      pypiPkg('a', p, {
+        build: 'maturin',
+        targets: ['x86_64-unknown-linux-gnu'],
+        bundle_cli: { bin: 'a', stage_to: 'a/bin', crate_path: '.', features: [], no_default_features: false },
+      }),
+    ];
+    const findings = checkPyprojectShape(pkgs);
+    expect(findings.some((f) => f.code === 'PIOT_PYPI_MATURIN_INCLUDE_MISSING')).toBe(true);
+  });
+
   it('accepts object-form maturin include entries with a `path` field', () => {
     const p = join(dir, 'a');
     writePyproject(
@@ -1132,6 +1162,37 @@ path = "src/main.rs"
     });
     const findings = checkCargoShape([pyPkg], { cwd: root });
     expect(findings.some((f) => f.code === 'PIOT_CRATES_MISSING_BIN' && /my-cli/.test(f.detail))).toBe(true);
+  });
+
+  it('honors an absolute bundle_cli.crate_path (skips resolve against cwd)', () => {
+    // Exercises the absolute-path branch of cratePathAbs (preflight.ts:606).
+    // Pass an already-absolute crate_path and pass a deliberately-wrong cwd;
+    // if the absolute path is honored the Cargo.toml is found and the
+    // happy-path passes; if `resolve(cwd, ...)` ran, the read would land
+    // somewhere else and `CRATES_MISSING_BIN` would fire spuriously.
+    const root = dir;
+    const cratePath = join(root, 'crates', 'cli');
+    writeCargoToml(
+      cratePath,
+      `[package]
+name = "my-cli"
+version = "0.0.0"
+`,
+    );
+    const pypiPath = join(root, 'py');
+    mkdirSync(pypiPath, { recursive: true });
+    const pyPkg = pkg('pypi', {
+      name: 'py-lib',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'my-cli', stage_to: 'py_lib/bin', crate_path: cratePath, features: [], no_default_features: false },
+    });
+    // Deliberately wrong cwd. If the absolute branch is bypassed, the
+    // resolve() would point at a non-existent file and the bin check
+    // would skip silently — covered by checking we get zero findings.
+    const findings = checkCargoShape([pyPkg], { cwd: join(root, 'does-not-exist') });
+    expect(findings).toEqual([]);
   });
 
   it('accepts bundle_cli.bin matching either an explicit [[bin]] or the implicit `[package].name`', () => {
