@@ -271,6 +271,18 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --sdist --outdir dist
 
+      # #324: pure-Python wheel for hatch/setuptools. Maturin emits per-
+      # target wheels in its own step; this row only runs for the planner-
+      # emitted `target: 'wheel-any'` row that exists when build != maturin.
+      # Same SETUPTOOLS_SCM_PRETEND_VERSION shape as the sdist step above.
+      - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'wheel-any'
+        working-directory: ${{ matrix.path }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ matrix.version }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
       # ---- npm ----
       - if: matrix.kind == 'npm'
         uses: actions/setup-node@v6

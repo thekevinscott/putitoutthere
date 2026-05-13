@@ -208,6 +208,23 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           if (bundleCli !== undefined) row.bundle_cli = bundleCli;
           out.push(row);
         }
+      } else if (build !== 'maturin') {
+        // #324: pure-Python builds (hatch/setuptools) emit a single
+        // py3-none-any wheel row alongside the sdist. Without this,
+        // PyPI gets sdist-only and downstream `pip install` / `uvx`
+        // must invoke the build backend from source on every cold
+        // cache. Maturin already produces per-target wheels above.
+        out.push({
+          name: pkg.name,
+          kind: 'pypi',
+          version,
+          target: 'wheel-any',
+          runs_on: 'ubuntu-latest',
+          artifact_name: `${safe}-wheel-any`,
+          artifact_path: at('dist'),
+          path: pkg.path,
+          ...(build !== undefined ? { build } : {}),
+        });
       }
       // Always emit an sdist row for pypi. Source-only — no staged
       // binary, no bundle_cli field.

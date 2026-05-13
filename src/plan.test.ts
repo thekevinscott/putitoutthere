@@ -233,6 +233,74 @@ globs = ["py/cachetta/**"]
     const matrix = await plan({ cwd: repo });
     expect(matrix.every((r) => r.name === 'py/cachetta')).toBe(true);
   });
+
+  // #324: hatch/setuptools pypi packages get a noarch wheel row in addition
+  // to the sdist row, so PyPI doesn't ship sdist-only and `pip install` /
+  // `uvx` skip the build-backend invocation on cold cache.
+  it('emits a wheel-any row alongside sdist for hatch pypi packages', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "pure-py"
+kind  = "pypi"
+path  = "pure-py"
+build = "hatch"
+globs = ["pure-py/**"]
+`,
+      'utf8',
+    );
+    commit('feat: initial', { 'pure-py/lib.py': '# python' });
+
+    const matrix = await plan({ cwd: repo });
+    const targets = matrix.map((r) => r.target).sort();
+    expect(targets).toEqual(['sdist', 'wheel-any']);
+
+    const wheel = matrix.find((r) => r.target === 'wheel-any')!;
+    expect(wheel.artifact_name).toBe('pure-py-wheel-any');
+    expect(wheel.artifact_path).toBe('pure-py/dist');
+    expect(wheel.runs_on).toBe('ubuntu-latest');
+    expect(wheel.build).toBe('hatch');
+    expect(wheel.bundle_cli).toBeUndefined();
+  });
+
+  it('emits a wheel-any row for setuptools (the default build backend)', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "pure-py"
+kind  = "pypi"
+path  = "pure-py"
+globs = ["pure-py/**"]
+`,
+      'utf8',
+    );
+    commit('feat: initial', { 'pure-py/lib.py': '# python' });
+
+    const matrix = await plan({ cwd: repo });
+    const wheel = matrix.find((r) => r.target === 'wheel-any');
+    expect(wheel).toBeDefined();
+    expect(wheel!.artifact_name).toBe('pure-py-wheel-any');
+    expect(wheel!.build).toBe('setuptools');
+  });
+
+  it('does not emit wheel-any for maturin packages (maturin emits per-target wheels)', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+
+    const matrix = await plan({ cwd: repo });
+    expect(matrix.find((r) => r.target === 'wheel-any')).toBeUndefined();
+  });
 });
 
 describe('plan: subsequent release with last_tag', () => {
