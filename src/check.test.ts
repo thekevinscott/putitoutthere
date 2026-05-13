@@ -523,6 +523,62 @@ path = "src/main.rs"
     ).toEqual([]);
   });
 
+  it("walks past a workspace member entry whose Cargo.toml is missing", () => {
+    // Defensive path in the workspace walk: cargo's `members` array can
+    // point at glob patterns or stale entries that don't resolve to a
+    // real manifest. The check silently skips those (cargo's own
+    // diagnostics own surfacing them) and still resolves bins from the
+    // members that do exist.
+    write('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+`);
+    write('packages/py/pyproject.toml', `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`);
+    write('Cargo.toml', `
+[workspace]
+members = ["crates/missing", "crates/cli"]
+resolver = "2"
+`);
+    // Only the second member exists. The first ("crates/missing")
+    // points at a path with no Cargo.toml — parseCargoToml returns
+    // null and the walk continues to the next member.
+    write('crates/cli/Cargo.toml', `
+[package]
+name = "cli-crate"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[[bin]]
+name = "my-cli"
+path = "src/main.rs"
+`);
+    write('crates/cli/src/main.rs', 'fn main(){}');
+    commit();
+    const findings = runChecks({ cwd });
+    expect(
+      findings.filter(
+        (f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message),
+      ),
+    ).toEqual([]);
+  });
+
   it("flags npm targets containing a triple that's not in TRIPLE_MAP", () => {
     write('putitoutthere.toml', `
 [putitoutthere]
