@@ -1,0 +1,9 @@
+{
+  "message": "Token request failed: invalid-publisher: valid token, but no corresponding publisher",
+  "errors": [
+    {
+      "code": "invalid-publisher",
+      "description": "Trusted publisher exchange failed. Among the publishers configured for project 'demo-py', none accept claims (repository=acme/demo, repository_owner=acme, job_workflow_ref=thekevinscott/putitoutthere/.github/workflows/release.yml@refs/tags/v1). The PyPI matcher filters candidates by `repository_owner` before checking `job_workflow_ref`, which means a TP registered against the reusable workflow's repository (thekevinscott/putitoutthere) is filtered out when the caller's repository_owner (acme) does not match. See https://github.com/pypi/warehouse/issues/11096."
+    }
+  ]
+}
