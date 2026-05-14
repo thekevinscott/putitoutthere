@@ -1,0 +1,17 @@
+{
+  "name": "@putitoutthere/piot-fixture-zzz-js-napi-first-publish-placeholder",
+  "version": "__VERSION__",
+  "description": "Put It Out There first-publish napi canary. Publishes against an empty Verdaccio. Safe to ignore.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc && node scripts/build.cjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

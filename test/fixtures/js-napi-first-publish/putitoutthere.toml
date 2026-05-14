@@ -1,0 +1,34 @@
+[putitoutthere]
+version = 1
+
+# First-publish e2e variant of js-napi. Exercises the npm-platform
+# handler's publish-ordering logic against an empty Verdaccio: the
+# main package's optionalDependencies reference per-triple platform
+# packages that 404 until the per-triple uploads land. The handler
+# publishes per-triple first, rewrites the main package.json to pin
+# the just-published versions, then publishes main; this fixture is
+# the e2e coverage of that ordering against a fresh registry.
+#
+# The `-placeholder` suffix on the package name is rewritten by the
+# e2e workflow's uniquification step to `-${run_id}-${run_attempt}`
+# so each scenario publishes to a guaranteed-404 packument with no
+# cross-PR collisions. `__VERSION__` is rewritten by the materialize
+# step to `0.0.${unix_seconds}`.
+
+[[package]]
+name = "@putitoutthere/piot-fixture-zzz-js-napi-first-publish-placeholder"
+kind = "npm"
+path = "."
+globs = ["src/**", "index.ts", "tsconfig.json", "Cargo.toml", "package.json"]
+build = "napi"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+first_version = "__VERSION__"
+# See test/fixtures/js-vanilla/putitoutthere.toml for why e2e
+# fixtures publish to a dedicated dist-tag instead of `latest`.
+tag = "e2e"
