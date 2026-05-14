@@ -324,6 +324,47 @@ skip-changelog: internal refactor
 
 Use sparingly; the default is to write the entry.
 
+## Verification policy
+
+Every new bullet under `CHANGELOG.md`'s `## Unreleased` section must carry
+inline evidence that the consumer-visible claim was checked on the PR's HEAD
+commit. This is enforced in CI (`.github/workflows/evidence-check.yml`) by
+diffing `CHANGELOG.md` against the PR base and validating only newly added
+bullets.
+
+Use a trailer-style clause at the end of each new bullet:
+
+```
+- Fixed: npm publish now retries packument-lag 404s. (verified by: e2e/js-vanilla-firstpub)
+```
+
+Accepted `verified by:` buckets are:
+
+- `e2e/<fixture>` — Verdaccio or registry-style end-to-end fixture evidence.
+- `integration/<test>` — engine-boundary integration coverage.
+- `unit/<test>` — focused unit coverage for behavior that cannot sensibly run
+  at a higher tier.
+- `consumer-template/<scenario>` — generated consumer workflow/template
+  coverage.
+
+Multiple citations may be comma-separated inside one clause:
+
+```
+- Changed: npm evidence is checked across both package shapes. (verified by: e2e/js-vanilla-firstpub, e2e/js-napi-firstpub)
+```
+
+For internal-only entries with no consumer-observable behavior, use a
+non-empty reason instead:
+
+```
+- Changed: internal plan-builder rename. (no fixture: pure refactor, no consumer surface)
+```
+
+Missing clauses, unsupported buckets, and cited evidence that did not pass on
+the PR HEAD are hard failures. The evidence check is separate from the
+`skip-changelog:` escape hatch: skipping the changelog requirement does not
+skip evidence for bullets that are actually added.
+
 ### `CHANGELOG.md`
 
 Keep a Changelog format. New entries go under `## Unreleased`, grouped by
@@ -348,4 +389,3 @@ entry uses this structure:
 
 When a version is cut, the release process renames `## Unreleased` to
 `## v<OLD> → v<NEW>` in both files and opens a fresh `## Unreleased` block.
-
