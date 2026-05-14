@@ -96,13 +96,15 @@ jobs:
           # from leftover state in the service container, no collisions
           # across PR pushes). #334: Cargo.toml is included in the rewrite
           # so the rust-vanilla-first-publish fixture's [package].name
-          # tracks putitoutthere.toml.
+          # tracks putitoutthere.toml. #294: pyproject.toml included so
+          # the polyglot-everything-first-publish fixture's maturin
+          # `[project].name` is uniquified alongside the wrapper crate.
           case "${FIXTURE}" in
             *-first-publish)
               SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
               find fixture-tree \
                 \( -name putitoutthere.toml -o -name package.json \
-                   -o -name Cargo.toml \) -print0 \
+                   -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
                 | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
               ;;
           esac
@@ -406,7 +408,20 @@ jobs:
       # cargo publish builds on the registry side; no artifact needed
       # at build time. The publish job invokes cargo directly.
 
-      - if: matrix.kind != 'crates'
+      # #294: pypi rows on `*-first-publish` fixtures skip the artifact
+      # upload. The caller-side `pypi-publish` job (see e2e-fixture.yml)
+      # would otherwise pick the wheel up and try to upload to real
+      # PyPI, where the uniquified package name has no Trusted Publisher
+      # record. The diagnostic property the maturin path exists to
+      # provide on a first-publish fixture is the in-job wheel-content
+      # guard above (verifies cross-compile + version-write produced a
+      # valid wheel against the planned version) — the upload to a
+      # real registry is explicitly out of scope per issue 294 and is
+      # tracked under the trusted-publisher coverage issue. npm rows
+      # still upload (the publish job downloads them for Verdaccio
+      # routing) and crates rows still skip (cargo builds on the
+      # registry side, no artifact needed).
+      - if: matrix.kind != 'crates' && !(matrix.kind == 'pypi' && endsWith(inputs.fixture, '-first-publish'))
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
@@ -488,12 +503,15 @@ jobs:
           # name on disk in publish matches what the matrix references.
           # #334: Cargo.toml included for the rust-vanilla-first-publish
           # fixture (cargo reads [package].name from the manifest).
+          # #294: pyproject.toml included for the
+          # polyglot-everything-first-publish fixture (maturin reads
+          # [project].name from pyproject.toml).
           case "${FIXTURE}" in
             *-first-publish)
               SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
               find fixture-tree \
                 \( -name putitoutthere.toml -o -name package.json \
-                   -o -name Cargo.toml \) -print0 \
+                   -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
                 | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
               ;;
           esac

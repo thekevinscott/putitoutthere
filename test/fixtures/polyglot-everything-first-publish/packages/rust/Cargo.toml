@@ -1,0 +1,11 @@
+[package]
+name = "piot-fixture-zzz-poly-rust-placeholder"
+version = "__VERSION__"
+edition = "2021"
+license = "MIT"
+description = "Put It Out There first-publish polyglot canary fixture (Rust crate). Publishes to an in-job cargo-http-registry under a uniquified name. Safe to ignore."
+repository = "https://github.com/thekevinscott/putitoutthere"
+
+[[bin]]
+name = "piot-fixture-zzz"
+path = "src/main.rs"

@@ -41,6 +41,7 @@ jobs:
           - python-pure-sdist-only
           - python-rust-maturin
           - polyglot-everything
+          - polyglot-everything-first-publish
           - rust-vanilla-first-publish
     uses: ./.github/workflows/e2e-fixture-job.yml
     secrets: inherit
