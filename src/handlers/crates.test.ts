@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { crates, scanDirtyOutsideManifest } from './crates.js';
+import { crates, looksLikeFirstPublishTpRejection, scanDirtyOutsideManifest } from './crates.js';
 import type { Ctx } from '../types.js';
 
 import type * as ChildProcess from 'node:child_process';
@@ -666,6 +666,162 @@ describe('crates.publish', () => {
       ),
     ).rejects.toThrow(/cargo publish|exit 1|permission denied/i);
     fetchSpy.mockRestore();
+  });
+
+  describe('first-publish TP rejection (#284)', () => {
+    const STDERR = [
+      'error: failed to publish to registry at https://crates.io',
+      '',
+      'Caused by:',
+      '  the remote server responded with an error (status 404 Not Found): Crate `demo-crate` does not exist or you do not have permission to publish to it. Trusted publishing requires the crate to already exist.',
+    ].join('\n');
+
+    it('surfaces PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED with the bootstrap-token hint', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        throw Object.assign(new Error('exit 1'), { stderr: Buffer.from(STDERR) });
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        ),
+      ).rejects.toThrow(/PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED/);
+      // And the hint names CARGO_REGISTRY_TOKEN as the bootstrap path,
+      // names the crate, and preserves cargo's full stderr block at the
+      // tail for debuggability.
+      let captured: unknown;
+      try {
+        await crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        );
+      } catch (err) {
+        captured = err;
+      }
+      const msg = (captured as Error).message;
+      expect(msg).toMatch(/CARGO_REGISTRY_TOKEN/);
+      expect(msg).toMatch(/demo-crate/);
+      expect(msg).toMatch(/--- cargo stderr ---/);
+      expect(msg).toMatch(/status 404 Not Found/);
+      fetchSpy.mockRestore();
+    });
+
+    it('does NOT misfire on the generic cargo failure stderr shape', async () => {
+      // The bootstrap-hint detector must be specific: a generic compile
+      // failure (no 404 status, no TP-specific prose) falls through to
+      // the existing `cargo publish failed` message.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        throw Object.assign(new Error('exit 1'), {
+          stderr: Buffer.from('error: could not compile `demo-crate` due to previous error'),
+        });
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        ),
+      ).rejects.toThrow(/cargo publish failed/);
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        ),
+      ).rejects.not.toThrow(/PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED/);
+      fetchSpy.mockRestore();
+    });
+
+    it('is suppressed under the PIOT_CRATES_REGISTRY_PRIMARY e2e seam', async () => {
+      // The alt-registry isn't TP-aware, so a 404 there is a different
+      // bug — surfacing the bootstrap hint would mislead. Confirm the
+      // detector stays quiet when the primary-override is in effect
+      // even if the stderr shape would otherwise match.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') throw new Error('not a git repo');
+        throw Object.assign(new Error('exit 1'), { stderr: Buffer.from(STDERR) });
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_PRIMARY: 'http://localhost:8000',
+            },
+          }),
+        ),
+      ).rejects.not.toThrow(/PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED/);
+      fetchSpy.mockRestore();
+    });
+  });
+});
+
+describe('looksLikeFirstPublishTpRejection (#284)', () => {
+  it('matches the canonical 404 + "crate does not exist" stderr', () => {
+    const stderr = [
+      'error: failed to publish to registry at https://crates.io',
+      'Caused by:',
+      '  the remote server responded with an error (status 404 Not Found): Crate `demo-crate` does not exist or you do not have permission to publish to it.',
+    ].join('\n');
+    expect(looksLikeFirstPublishTpRejection(stderr)).toBe(true);
+  });
+
+  it('matches when the 404 line and a "trusted publish" mention co-occur', () => {
+    const stderr = [
+      'status 404 Not Found',
+      'Trusted publishing requires the crate to already exist.',
+    ].join('\n');
+    expect(looksLikeFirstPublishTpRejection(stderr)).toBe(true);
+  });
+
+  it('rejects when only one anchor is present (404 without the prose)', () => {
+    expect(
+      looksLikeFirstPublishTpRejection(
+        'status 404 Not Found\nsome unrelated error about a missing index file',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects when only one anchor is present (prose without the 404)', () => {
+    expect(
+      looksLikeFirstPublishTpRejection(
+        'crate `demo-crate` does not exist — but this is a dependency error, not a 4xx',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects on an unrelated 429 rate-limit stderr', () => {
+    expect(
+      looksLikeFirstPublishTpRejection(
+        'status 429 Too Many Requests\nYou have published too many versions of this crate in the last 24 hours',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects an undefined stderr (defensive)', () => {
+    expect(looksLikeFirstPublishTpRejection(undefined)).toBe(false);
   });
 });
 
