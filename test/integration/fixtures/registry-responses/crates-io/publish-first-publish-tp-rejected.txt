@@ -1,0 +1,10 @@
+    Updating crates.io index
+   Packaging demo-crate v0.1.0 (/work/demo-crate)
+   Verifying demo-crate v0.1.0 (/work/demo-crate)
+   Compiling demo-crate v0.1.0 (/work/.../demo-crate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s
+   Uploading demo-crate v0.1.0 (/work/demo-crate)
+error: failed to publish to registry at https://crates.io
+
+Caused by:
+  the remote server responded with an error (status 404 Not Found): Crate `demo-crate` does not exist or you do not have permission to publish to it. Trusted publishing requires the crate to already exist. See https://crates.io/docs/trusted-publishing

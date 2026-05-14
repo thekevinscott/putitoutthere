@@ -102,6 +102,14 @@ export const ErrorCodes = {
    *  declares `[workspace.package].version`. cargo fails with
    *  `error: failed to inherit "version" from workspace`. #301. */
   CRATES_WORKSPACE_VERSION_MISMATCH: 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH',
+  /** crates.io rejected `cargo publish` because the crate has never been
+   *  published. Trusted Publishing on crates.io binds to an
+   *  already-published crate — the OIDC mint succeeds, the exchanged
+   *  token reaches cargo, but the registry returns 404 ("crate `<name>`
+   *  does not exist or you do not have permission to publish to it").
+   *  The fix is one bootstrap publish with a classic `CARGO_REGISTRY_TOKEN`;
+   *  trusted publishing works for every release after. #284. */
+  CRATES_FIRST_PUBLISH_TP_REJECTED: 'PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -124,4 +132,5 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.CRATES_MISSING_BIN,
   ErrorCodes.CRATES_FEATURE_NOT_DECLARED,
   ErrorCodes.CRATES_WORKSPACE_VERSION_MISMATCH,
+  ErrorCodes.CRATES_FIRST_PUBLISH_TP_REJECTED,
 ];
