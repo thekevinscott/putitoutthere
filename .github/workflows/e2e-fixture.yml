@@ -69,6 +69,32 @@ jobs:
           pattern: '*-wheel-*'
           path: dist/
           merge-multiple: true
+      # #294: discard first-publish wheels/sdists. They carry a literal
+      # `_placeholder` token in the project-name half of the filename
+      # (maturin normalizes the fixture's `-placeholder` suffix to
+      # `_placeholder` in wheel/sdist filenames; the build job's
+      # materialize step does NOT apply the `-placeholder` rewrite, by
+      # design — see e2e-fixture-job.yml's plan/publish materialize
+      # comments). Real PyPI has no Trusted Publisher record for these
+      # uniquified names, so the pypa-publish PUT would 4xx. The
+      # diagnostic surface that the maturin path provides on a
+      # first-publish fixture is the in-job wheel-content guard
+      # (e2e-fixture-job.yml lines ~233-274), not the upload to a
+      # real registry — TP-shaped failure modes are explicitly out of
+      # scope per issue 294.
+      - name: Discard first-publish wheels (no TP record on real PyPI)
+        run: |
+          set -euo pipefail
+          dropped=0
+          while IFS= read -r -d '' f; do
+            rm -f "$f"
+            dropped=$((dropped + 1))
+            echo "  dropped: $(basename "$f")"
+          done < <(find dist/ -maxdepth 1 -type f \
+            \( -name '*_placeholder*' -o -name '*-placeholder*' \) -print0 2>/dev/null)
+          if [ "$dropped" -gt 0 ]; then
+            echo "::warning::Dropped ${dropped} first-publish artifact(s) from dist/ — Trusted Publisher records are not provisioned for uniquified package names. The maturin build path on a first-publish fixture is guarded by the in-job wheel-content guard, not by the real-PyPI upload."
+          fi
       - id: have-pypi
         run: |
           if [ -n "$(ls -A dist/ 2>/dev/null)" ]; then

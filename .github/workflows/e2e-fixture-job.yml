@@ -408,20 +408,7 @@ jobs:
       # cargo publish builds on the registry side; no artifact needed
       # at build time. The publish job invokes cargo directly.
 
-      # #294: pypi rows on `*-first-publish` fixtures skip the artifact
-      # upload. The caller-side `pypi-publish` job (see e2e-fixture.yml)
-      # would otherwise pick the wheel up and try to upload to real
-      # PyPI, where the uniquified package name has no Trusted Publisher
-      # record. The diagnostic property the maturin path exists to
-      # provide on a first-publish fixture is the in-job wheel-content
-      # guard above (verifies cross-compile + version-write produced a
-      # valid wheel against the planned version) — the upload to a
-      # real registry is explicitly out of scope per issue 294 and is
-      # tracked under the trusted-publisher coverage issue. npm rows
-      # still upload (the publish job downloads them for Verdaccio
-      # routing) and crates rows still skip (cargo builds on the
-      # registry side, no artifact needed).
-      - if: matrix.kind != 'crates' && !(matrix.kind == 'pypi' && endsWith(inputs.fixture, '-first-publish'))
+      - if: matrix.kind != 'crates'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
