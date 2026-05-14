@@ -1,0 +1,9 @@
+{
+  "name": "@putitoutthere/piot-fixture-zzz-js-no-rust-first-publish-placeholder",
+  "version": "__VERSION__",
+  "description": "Put It Out There first-publish canary fixture (npm half of js-python-no-rust-first-publish). Publishes to Verdaccio under a uniquified name. Safe to ignore.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
+  "main": "src/index.js",
+  "files": ["src/index.js"]
+}

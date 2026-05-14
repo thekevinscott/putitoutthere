@@ -38,6 +38,7 @@ jobs:
           - js-bundled-cli
           - js-bundled-cli-first-publish
           - js-python-no-rust
+          - js-python-no-rust-first-publish
           - python-pure-hatch
           - python-pure-sdist-only
           - python-rust-maturin
