@@ -196,6 +196,23 @@ describe('#31 polyglot fixtures', () => {
     expect(byKind.get('npm')).toBe(1);
   });
 
+  // #308: first-publish variant of js-python-no-rust. Same plan shape
+  // as the steady-state fixture (the variant's contribution is the
+  // npm-side first-publish path against per-job Verdaccio plus a
+  // distinct python package name, not a different plan). Plan-shape
+  // assertion lives here so any drift in row count surfaces at the
+  // unit tier; the publish-path behavior is e2e-tier (see
+  // e2e-fixture-job.yml).
+  it('js-python-no-rust-first-publish → 2 pypi (sdist + wheel-any) + 1 npm noarch', async () => {
+    const cwd = prepareFixture('js-python-no-rust-first-publish');
+    const rows = await plan({ cwd });
+    expect(rows).toHaveLength(3);
+    const byKind = new Map<string, number>();
+    for (const r of rows) byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1);
+    expect(byKind.get('pypi')).toBe(2);
+    expect(byKind.get('npm')).toBe(1);
+  });
+
   it('polyglot-everything → rust + python (5+sdist) + multi-mode npm (5+5+main)', async () => {
     const cwd = prepareFixture('polyglot-everything');
     const rows = await plan({ cwd });
