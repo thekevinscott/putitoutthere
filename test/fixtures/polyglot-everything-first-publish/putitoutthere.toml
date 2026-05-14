@@ -1,0 +1,73 @@
+[putitoutthere]
+version = 1
+
+# First-publish e2e variant of polyglot-everything (#294). Mirrors the
+# steady-state fixture's shape — rust crate → maturin wheels + dual-mode
+# (bundled-cli + napi) npm — but with `-placeholder` suffixes on every
+# package name so each run publishes against a guaranteed 404 on the
+# empty cargo-http-registry / Verdaccio. The e2e workflow's
+# uniquification step rewrites `-placeholder` to
+# `-${RUN_ID}-${RUN_ATTEMPT}` at materialize time. NOT a consumer-facing
+# example; do not link from README.
+#
+# Issue 294 cross-checks landed by this fixture:
+#   - #266: dirty-workspace preflight tolerates sibling `node_modules/`
+#     populated by the npm `pnpm install + build` step before publish.
+#   - #277/#285: maturin reads the rewritten `[project].name` /
+#     [package].version from disk; the build job's wheel-content guard
+#     proves the produced wheel agrees with the planned version.
+#   - #285: bundled-cli cross-compile + stage path produces a binary at
+#     `${artifact_path}/${bin}` before the engine packs the npm
+#     platform tarball.
+#   - #331/#334: the engine's `PIOT_CRATES_REGISTRY_PRIMARY` seam routes
+#     `cargo publish` exclusively at the per-job cargo-http-registry,
+#     and the post-publish `.crate` tarball verify asserts the source
+#     tree surfaces inside the published archive.
+
+[[package]]
+name = "piot-fixture-zzz-poly-rust-placeholder"
+kind = "crates"
+path = "packages/rust"
+globs = ["packages/rust/**"]
+first_version = "__VERSION__"
+
+[[package]]
+name = "piot-fixture-zzz-python-placeholder"
+kind = "pypi"
+path = "packages/python"
+globs = ["packages/python/**"]
+build = "maturin"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+depends_on = ["piot-fixture-zzz-poly-rust-placeholder"]
+first_version = "__VERSION__"
+
+[[package]]
+name = "@putitoutthere/piot-fixture-zzz-cli-placeholder"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+# Dual-mode npm: bundled-cli keeps the historical `<name>-<triple>`
+# platform-package naming (no infix), napi family uses a `-napi-`
+# infix. Both families are uniquified through the `-placeholder` token
+# on the parent name — the platform-package synth derives from it, so
+# `-napi-{triple}` becomes
+# `@putitoutthere/piot-fixture-zzz-cli-${SUFFIX}-napi-{triple}`.
+build = [
+  "bundled-cli",
+  { mode = "napi", name = "{name}-napi-{triple}" },
+]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+depends_on = ["piot-fixture-zzz-poly-rust-placeholder"]
+first_version = "__VERSION__"

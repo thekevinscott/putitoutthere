@@ -96,13 +96,15 @@ jobs:
           # from leftover state in the service container, no collisions
           # across PR pushes). #334: Cargo.toml is included in the rewrite
           # so the rust-vanilla-first-publish fixture's [package].name
-          # tracks putitoutthere.toml.
+          # tracks putitoutthere.toml. #294: pyproject.toml included so
+          # the polyglot-everything-first-publish fixture's maturin
+          # `[project].name` is uniquified alongside the wrapper crate.
           case "${FIXTURE}" in
             *-first-publish)
               SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
               find fixture-tree \
                 \( -name putitoutthere.toml -o -name package.json \
-                   -o -name Cargo.toml \) -print0 \
+                   -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
                 | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
               ;;
           esac
@@ -488,12 +490,15 @@ jobs:
           # name on disk in publish matches what the matrix references.
           # #334: Cargo.toml included for the rust-vanilla-first-publish
           # fixture (cargo reads [package].name from the manifest).
+          # #294: pyproject.toml included for the
+          # polyglot-everything-first-publish fixture (maturin reads
+          # [project].name from pyproject.toml).
           case "${FIXTURE}" in
             *-first-publish)
               SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
               find fixture-tree \
                 \( -name putitoutthere.toml -o -name package.json \
-                   -o -name Cargo.toml \) -print0 \
+                   -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
                 | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
               ;;
           esac
