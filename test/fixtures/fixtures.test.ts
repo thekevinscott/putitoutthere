@@ -141,6 +141,23 @@ describe('#30 rust-in-language fixtures', () => {
     expect(rows).toHaveLength(6);
     expect(rows.filter((r) => r.target === 'main')).toHaveLength(1);
   });
+
+  // #306: js-napi-first-publish is the first-publish variant of js-napi.
+  // Same plan shape — the fixture's contribution is publishing against
+  // an empty Verdaccio where per-triple platform packages 404 before
+  // the main package's optionalDependencies are uploaded. The
+  // npm-platform handler's publish-ordering logic (per-triple first,
+  // then rewrite main's optionalDependencies, then publish main) is
+  // the only thing that keeps this working; this fixture is the e2e
+  // coverage of that ordering. Plan-shape assertion lives here so any
+  // drift in row count surfaces at the unit tier; the empty-registry
+  // publish-ordering behavior is e2e-tier (see e2e-fixture-job.yml).
+  it('js-napi-first-publish → 5 platform rows + 1 main', async () => {
+    const cwd = prepareFixture('js-napi-first-publish');
+    const rows = await plan({ cwd });
+    expect(rows).toHaveLength(6);
+    expect(rows.filter((r) => r.target === 'main')).toHaveLength(1);
+  });
 });
 
 // #276: artifact-version vs plan-version contract for the build phase.

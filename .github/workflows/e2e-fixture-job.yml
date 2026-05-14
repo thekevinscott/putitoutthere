@@ -973,6 +973,83 @@ jobs:
           done <<< "$rows"
           exit "$fail"
 
+      # #306: per-triple tarball-verify gate for first-publish napi /
+      # bundled-cli fixtures. Symmetric with the main/noarch verify above:
+      # download the published platform tarball back from Verdaccio and
+      # assert each per-triple package was actually published with its
+      # synthesized binary (`.node` for napi, executable for bundled-cli)
+      # inside. The publish step itself returns 0 even if a synthesized
+      # platform package ships with only `package.json` and no binary
+      # (npm-platform's synthesizePlatformPackage emits `files: <readdir>`,
+      # so an empty artifact dir produces a tarball with just metadata);
+      # this step is the only place that catches that shape end-to-end.
+      #
+      # Default name template (`{name}-{triple}`) — every fixture in the
+      # tree uses it. If a future fixture overrides `build.<mode>.name`,
+      # the matrix row's `name` field would still be the main package;
+      # the per-triple name has to be resolved through the same template
+      # resolution the engine does. Revisit when a fixture exercises a
+      # non-default template.
+      - name: Verify published per-triple npm tarballs honor expected files
+        if: endsWith(inputs.fixture, '-first-publish') && contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+          REGISTRY_URL: http://localhost:4873
+        run: |
+          set -euo pipefail
+          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and .target != "main" and .target != "noarch")')
+          if [ -z "$rows" ]; then
+            echo "No npm per-triple rows; nothing to verify."
+            exit 0
+          fi
+          fail=0
+          while IFS= read -r row; do
+            main_name=$(printf '%s' "$row" | jq -r '.name')
+            triple=$(printf '%s' "$row" | jq -r '.target')
+            version=$(printf '%s' "$row" | jq -r '.version')
+            # Default template is `{name}-{triple}`; reconstructed here
+            # because the matrix row carries the main package name, not
+            # the synthesized platform name (synthesis is a publish-time
+            # concern in the engine's npm-platform handler).
+            platform_name="${main_name}-${triple}"
+            echo "[$platform_name@$version] verifying tarball at ${REGISTRY_URL}"
+            tarball_url=""
+            for attempt in 1 2 3 4 5; do
+              tarball_url=$(npm view --registry "${REGISTRY_URL}" "$platform_name@$version" dist.tarball 2>/dev/null || true)
+              if [ -n "$tarball_url" ]; then break; fi
+              if [ "$attempt" -lt 5 ]; then
+                echo "  packument lag: npm view returned empty (attempt $attempt/5); retrying in 2s"
+                sleep 2
+              fi
+            done
+            if [ -z "$tarball_url" ]; then
+              echo "::error::[$platform_name@$version] npm view at ${REGISTRY_URL} never returned a tarball URL. Either the platform publish didn't actually publish, or the synthesized name diverged from the default {name}-{triple} template."
+              fail=1
+              continue
+            fi
+            tmp=$(mktemp -d)
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$tmp/pkg.tgz" "$tarball_url"
+            mkdir "$tmp/extracted"
+            tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
+            # Tarball layout: package/{package.json, <binary or .node>}.
+            # Assert at least one non-package.json file is present — the
+            # synthesis step's purpose is shipping that binary, and a
+            # tarball with only package.json is the failure mode this
+            # step exists to catch.
+            non_meta=$(find "$tmp/extracted/package" -mindepth 1 -maxdepth 1 -type f ! -name 'package.json' | wc -l)
+            if [ "$non_meta" -gt 0 ]; then
+              files=$(find "$tmp/extracted/package" -mindepth 1 -maxdepth 1 -type f ! -name 'package.json' -printf '%f ' )
+              echo "  ok: $non_meta non-metadata file(s): ${files}"
+            else
+              listing=$(find "$tmp/extracted/package" -mindepth 1 -type f -printf '%f ' )
+              echo "::error::[$platform_name@$version] tarball contains only package.json (no synthesized binary/.node staged). Tarball contents: ${listing}"
+              fail=1
+            fi
+            rm -rf "$tmp"
+          done <<< "$rows"
+          exit "$fail"
+
   # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
   # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside
   # any reusable workflow (PyPA blanket-disables it; see
