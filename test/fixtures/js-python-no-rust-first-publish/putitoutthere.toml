@@ -1,0 +1,44 @@
+[putitoutthere]
+version = 1
+
+# First-publish e2e variant of `js-python-no-rust` (#308). The npm
+# package is uniquified per run and published to a per-job Verdaccio
+# (see .github/workflows/e2e-fixture-job.yml). The python package
+# coexists in the same scenario and continues to publish to real
+# PyPI via the caller-side `pypi-publish` job — `__VERSION__` is
+# rewritten to a per-run timestamp so each run hits a fresh PyPI
+# version slot, and `skip-existing: true` on the upload step makes
+# any unlikely cross-job version collision benign. NOT a
+# consumer-facing example; do not link from README.
+#
+# The python package name (`piot-fixture-zzz-python-no-rust-fp`) is
+# distinct from the steady-state `js-python-no-rust` fixture's
+# `piot-fixture-zzz-python-no-rust` so the two e2e jobs don't
+# upload to colliding GitHub Actions artifact names
+# (`<safe>-sdist`, `<safe>-wheel-*`). PyPI Trusted Publisher record
+# for the new name is set up out-of-band by the maintainer; without
+# it, the caller-side `pypi-publish` job 4xx's on the first PR run.
+#
+# The `-placeholder` suffix on the npm package name is rewritten by
+# the e2e workflow's uniquification step to
+# `-${run_id}-${run_attempt}`. (Plain hyphen-separated tokens
+# because the engine's config validator rejects `__` in names — it
+# encodes `/` as `__` for artifact slots.)
+
+[[package]]
+name = "piot-fixture-zzz-python-no-rust-fp"
+kind = "pypi"
+path = "packages/python"
+globs = ["packages/python/**"]
+build = "hatch"
+first_version = "__VERSION__"
+
+[[package]]
+name = "@putitoutthere/piot-fixture-zzz-js-no-rust-first-publish-placeholder"
+kind = "npm"
+path = "packages/js"
+globs = ["packages/js/**"]
+first_version = "__VERSION__"
+# See test/fixtures/js-vanilla/putitoutthere.toml for why e2e
+# fixtures publish to a dedicated dist-tag instead of `latest`.
+tag = "e2e"
