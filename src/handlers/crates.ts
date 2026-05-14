@@ -33,6 +33,7 @@ import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
+import { ErrorCodes } from '../error-codes.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
 
@@ -206,6 +207,31 @@ async function publishImpl(
         url: `${fallbackUrl.replace(/\/$/, '')}/api/v1/crates/${crateNameFor(pkg)}/${version}`,
       };
     }
+    // crates.io's Trusted Publishing binds to an already-published
+    // crate: the OIDC mint succeeds and the exchanged token reaches
+    // cargo, but the registry returns a 404 ("crate `<name>` does not
+    // exist or you do not have permission to publish to it") on the
+    // very first publish. The naive "auth failed?" interpretation
+    // sends consumers down a credentials rabbit-hole when the real
+    // fix is one bootstrap publish with a classic CARGO_REGISTRY_TOKEN.
+    // Detect this exact shape and surface the bootstrap hint inline.
+    // Suppressed under the e2e seam (primary override in effect) — the
+    // alt-registry is configured `--no-auth` and doesn't model TP, so
+    // a 404 there is a different bug. #284.
+    if (
+      primaryOverride === undefined &&
+      looksLikeFirstPublishTpRejection(stderr)
+    ) {
+      throw new Error(
+        [
+          `[${ErrorCodes.CRATES_FIRST_PUBLISH_TP_REJECTED}] cargo publish: crates.io rejected publishing "${crateNameFor(pkg)}" because the crate has never been published.`,
+          'crates.io Trusted Publishing binds to an already-published crate, so the very first release of a new crate name cannot use the TP path.',
+          'Bootstrap by setting CARGO_REGISTRY_TOKEN (a classic crates.io API token) for the first publish; every release after that can use trusted publishing.',
+          stderr ? `\n--- cargo stderr ---\n${stderr}` : '',
+        ].filter((s) => s.length > 0).join('\n'),
+        { cause: err },
+      );
+    }
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(`cargo publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
   }
@@ -230,6 +256,29 @@ async function publishImpl(
 function isRateLimited(stderr: string | undefined): boolean {
   if (!stderr) return false;
   return /status\s+429\b/i.test(stderr) || /429\s+Too\s+Many\s+Requests/i.test(stderr);
+}
+
+/**
+ * Match cargo's stderr shape when crates.io rejects the TP exchange
+ * because the crate has never been published. The fixture at
+ * `test/integration/fixtures/registry-responses/crates-io/publish-first-publish-tp-rejected.txt`
+ * captures the canonical shape; the catalog at
+ * `notes/upstream-behaviors.md` is the source of truth for the contract.
+ *
+ * Two anchors keep false positives out: a 404-status line and either
+ * the registry's "crate `<name>` does not exist" prose or the
+ * "trusted publish" mention. An unrelated 404 in some other cargo
+ * subcommand (e.g. a missing index file) won't carry the prose; an
+ * unrelated `does not exist` (e.g. a missing dependency) won't carry
+ * the 404 status.
+ */
+export function looksLikeFirstPublishTpRejection(stderr: string | undefined): boolean {
+  if (!stderr) return false;
+  if (!/status\s+404\b/i.test(stderr)) return false;
+  return (
+    /crate\s+`[^`]+`\s+does\s+not\s+exist/i.test(stderr) ||
+    /trusted\s+publish/i.test(stderr)
+  );
 }
 
 /* ------------------------------ internals ------------------------------ */
