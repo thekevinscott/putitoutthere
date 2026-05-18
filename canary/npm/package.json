@@ -1,5 +1,5 @@
 {
-  "name": "@piot-canary/main",
+  "name": "@putitoutthere/piot-canary",
   "version": "__VERSION__",
   "description": "Put It Out There weekly canary against real npm. Re-published with a fresh timestamp version each run; safe to ignore. See https://github.com/thekevinscott/putitoutthere/issues/297.",
   "license": "MIT",

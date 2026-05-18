@@ -15,11 +15,15 @@
 # registry independently, NOT cascade behavior, which the per-PR
 # polyglot fixtures already cover):
 #
-#   - @piot-canary/main on npm (vanilla TS, publishes via OIDC Trusted
-#     Publisher after first-publish bootstrap).
+#   - @putitoutthere/piot-canary on npm (vanilla TS, publishes via OIDC
+#     Trusted Publisher after first-publish bootstrap). Reuses the
+#     existing @putitoutthere org that already hosts the per-PR
+#     piot-fixture-zzz-* family — no new org/scope to provision.
 #   - piot-canary on crates.io (library crate, publishes via OIDC
 #     Trusted Publisher after first-publish bootstrap with
-#     CARGO_REGISTRY_TOKEN).
+#     CARGO_REGISTRY_TOKEN). crates.io is flat-namespaced; the
+#     unscoped name `piot-canary` mirrors the npm package within
+#     the existing piot-* prefix used by all other test artifacts.
 #
 # Version is rewritten to `0.0.${unix_seconds}` at job start so every
 # weekly run gets a fresh slot (crates.io's immutable-publish rule
@@ -31,7 +35,7 @@
 version = 1
 
 [[package]]
-name  = "@piot-canary/main"
+name  = "@putitoutthere/piot-canary"
 kind  = "npm"
 path  = "npm"
 globs = [

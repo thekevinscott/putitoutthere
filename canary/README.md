@@ -11,8 +11,8 @@ Parent program: [#292](https://github.com/thekevinscott/putitoutthere/issues/292
 
 | Registry | Package | Notes |
 | --- | --- | --- |
-| npm | [`@piot-canary/main`](https://www.npmjs.com/package/@piot-canary/main) | Published under the `canary` dist-tag so the timestamp versions never touch `latest`. |
-| crates.io | [`piot-canary`](https://crates.io/crates/piot-canary) | Library crate; the post-publish verify step `cargo add`s it into a tmp `Cargo.toml`. |
+| npm | [`@putitoutthere/piot-canary`](https://www.npmjs.com/package/@putitoutthere/piot-canary) | Reuses the `@putitoutthere` org that hosts the per-PR `piot-fixture-zzz-*` family. Published under the `canary` dist-tag so the timestamp versions never touch `latest`. |
+| crates.io | [`piot-canary`](https://crates.io/crates/piot-canary) | Library crate; crates.io is flat-namespaced, so unscoped. The post-publish verify step `cargo add`s it into a tmp `Cargo.toml`. |
 
 Each weekly run rewrites `__VERSION__` to `0.0.${unix_seconds}` so
 crates.io's immutable-publish rule never collides. The npm package

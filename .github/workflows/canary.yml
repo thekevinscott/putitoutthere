@@ -364,7 +364,7 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install + version-check @piot-canary/main
+      - name: Install + version-check @putitoutthere/piot-canary
         env:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
@@ -379,7 +379,7 @@ jobs:
           sleeps=(15 30 60 120 240)
           installed=0
           for attempt in $(seq 1 "$attempts"); do
-            if npm install "@piot-canary/main@${VERSION}" --save=false --no-audit --no-fund 2>install.log; then
+            if npm install "@putitoutthere/piot-canary@${VERSION}" --save=false --no-audit --no-fund 2>install.log; then
               installed=1
               break
             fi
@@ -392,7 +392,7 @@ jobs:
             fi
           done
           if [ "$installed" -ne 1 ]; then
-            echo "::error::@piot-canary/main@${VERSION} did not install from real npm after ${attempts} attempts. Either the publish didn't land, packument propagation is much slower than expected, or the published tarball is broken."
+            echo "::error::@putitoutthere/piot-canary@${VERSION} did not install from real npm after ${attempts} attempts. Either the publish didn't land, packument propagation is much slower than expected, or the published tarball is broken."
             exit 1
           fi
           # Assert the just-installed package's runtime `version`
@@ -407,15 +407,15 @@ jobs:
           # cross-tier assertion that the publish actually shipped
           # the bytes the engine planned.
           cat > check.mjs <<'EOF'
-          import { version } from '@piot-canary/main';
+          import { version } from '@putitoutthere/piot-canary';
           process.stdout.write(version);
           EOF
           got=$(node check.mjs)
           if [ "$got" != "$VERSION" ]; then
-            echo "::error::installed @piot-canary/main reports version='${got}', expected '${VERSION}'. Tarball appears to be from a stale build."
+            echo "::error::installed @putitoutthere/piot-canary reports version='${got}', expected '${VERSION}'. Tarball appears to be from a stale build."
             exit 1
           fi
-          echo "ok: @piot-canary/main@${VERSION} installed from real npm and reports version=${got}"
+          echo "ok: @putitoutthere/piot-canary@${VERSION} installed from real npm and reports version=${got}"
 
   verify-crates:
     needs: [plan, publish]

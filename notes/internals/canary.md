@@ -10,8 +10,10 @@ Fixture: [`canary/`](../../canary/).
 A weekly scheduled GitHub Actions job that re-publishes two throwaway
 packages against real npm and real crates.io:
 
-- `@piot-canary/main` (npm)
-- `piot-canary` (crates.io)
+- `@putitoutthere/piot-canary` (npm — reuses the existing
+  `@putitoutthere` org that already hosts the per-PR
+  `piot-fixture-zzz-*` family)
+- `piot-canary` (crates.io — flat namespace, unscoped)
 
 Each run rewrites `__VERSION__` to `0.0.${unix_seconds}` so crates.io's
 immutable-publish rule never collides. The npm package publishes under
@@ -56,7 +58,7 @@ npm.yml` — and from `e2e` — which is per-PR Verdaccio runs).
 
 | Registry | Package | TP filename | TP environment |
 | --- | --- | --- | --- |
-| npm | `@piot-canary/main` | `canary.yml` | `canary` |
+| npm | `@putitoutthere/piot-canary` | `canary.yml` | `canary` |
 | crates.io | `piot-canary` | `canary.yml` | `canary` |
 
 The TP records encode the workflow **filename**. Renaming
@@ -82,9 +84,11 @@ tokens. Steps, for the historical record / disaster recovery:
    Then on crates.io's web UI, navigate to the `piot-canary` crate
    settings and add a Trusted Publisher entry: repo
    `thekevinscott/putitoutthere`, workflow `canary.yml`,
-   environment `release`.
-2. **npm** — register the `piot-canary` org on npmjs.com (the
-   maintainer owns it). Then:
+   environment `canary`.
+2. **npm** — the `@putitoutthere` org already exists (it hosts
+   the per-PR `piot-fixture-zzz-*` fixtures), so no org
+   provisioning is required. Confirm the maintainer's npm account
+   has publish rights on `@putitoutthere`, then:
    ```bash
    # With NPM_TOKEN exported as a maintainer automation token:
    cd canary/npm
@@ -92,10 +96,10 @@ tokens. Steps, for the historical record / disaster recovery:
    npm install && npm run build
    npm publish --access public --tag canary
    ```
-   Then on npmjs.com, navigate to the `@piot-canary/main` package
-   settings → Publishing access → Add Trusted Publisher: repo
-   `thekevinscott/putitoutthere`, workflow `canary.yml`,
-   environment `release`.
+   Then on npmjs.com, navigate to the `@putitoutthere/piot-canary`
+   package settings → Publishing access → Add Trusted Publisher:
+   repo `thekevinscott/putitoutthere`, workflow `canary.yml`,
+   environment `canary`.
 
 Once both TP records are in place, the scheduled `canary.yml` run
 authenticates via OIDC and the bootstrap tokens can be revoked.
@@ -118,7 +122,7 @@ regression or a transient lag past the verify retries?"
      [#256](https://github.com/thekevinscott/putitoutthere/issues/256)).
    - Verify failure with `did not install after N attempts` →
      packument / sparse-index propagation took longer than the
-     verify-step retry budget. If you can `npm install @piot-canary/main@<version>` /
+     verify-step retry budget. If you can `npm install @putitoutthere/piot-canary@<version>` /
      `cargo add piot-canary@=<version>` from your laptop after the
      run finished, the publish landed and the verify step needs a
      wider retry budget; that's still a regression worth filing
@@ -126,7 +130,7 @@ regression or a transient lag past the verify retries?"
      fail their own CI).
 2. **Confirm via the registry directly, not the workflow conclusion.**
    ```bash
-   curl -sI 'https://registry.npmjs.org/@piot-canary%2Fmain'
+   curl -sI 'https://registry.npmjs.org/@putitoutthere%2Fpiot-canary'
    curl -sI 'https://crates.io/api/v1/crates/piot-canary'
    ```
    The publish status is the registry's source of truth, not the
