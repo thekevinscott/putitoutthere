@@ -966,8 +966,10 @@ export interface RepoUrlMatchOptions {
   /** Value of the GitHub Actions `GITHUB_REPOSITORY` env var, format
    *  `owner/repo`. When `undefined` or empty, the check is a no-op
    *  (local CLI runs outside a GHA context can't disagree with a
-   *  workflow source). */
-  githubRepository?: string;
+   *  workflow source). Accepts `undefined` explicitly so callers
+   *  reading from `process.env.GITHUB_REPOSITORY` can pass the value
+   *  through without a defensive ternary. */
+  githubRepository?: string | undefined;
 }
 
 export interface RepoUrlMatchFinding {
@@ -1053,54 +1055,54 @@ interface DeclaredRepoUrl {
 }
 
 function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
-  if (p.kind === 'npm') {
-    const manifestPath = join(p.path, 'package.json');
-    const parsed = readJson(manifestPath);
-    if (parsed === null) return null;
-    const repository = (parsed as { repository?: unknown }).repository;
-    if (typeof repository === 'string' && repository.trim().length > 0) {
-      return { url: repository.trim(), manifestPath };
-    }
-    if (repository !== null && typeof repository === 'object') {
-      const url = (repository as { url?: unknown }).url;
-      if (typeof url === 'string' && url.trim().length > 0) {
-        return { url: url.trim(), manifestPath };
+  switch (p.kind) {
+    case 'npm': {
+      const manifestPath = join(p.path, 'package.json');
+      const parsed = readJson(manifestPath);
+      if (parsed === null) return null;
+      const repository = (parsed as { repository?: unknown }).repository;
+      if (typeof repository === 'string' && repository.trim().length > 0) {
+        return { url: repository.trim(), manifestPath };
       }
-    }
-    return null;
-  }
-  if (p.kind === 'crates') {
-    const manifestPath = join(p.path, 'Cargo.toml');
-    const parsed = readTomlDoc(manifestPath);
-    if (parsed === null) return null;
-    const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
-    const repo = pkgTable.repository;
-    if (typeof repo === 'string' && repo.trim().length > 0) {
-      return { url: repo.trim(), manifestPath };
-    }
-    return null;
-  }
-  if (p.kind === 'pypi') {
-    const manifestPath = join(p.path, 'pyproject.toml');
-    const parsed = readTomlDoc(manifestPath);
-    if (parsed === null) return null;
-    const project = (parsed.project ?? {}) as Record<string, unknown>;
-    const urls = (project.urls ?? {}) as Record<string, unknown>;
-    // PEP 621 leaves the key casing to the project, and PyPI normalises
-    // common labels case-insensitively. Accept the canonical "Repository"
-    // first and fall back to common synonyms (source-code repos vs.
-    // homepage links) so a project picking any reasonable label still
-    // gets the check.
-    for (const key of ['Repository', 'repository', 'Source', 'source', 'Homepage', 'homepage']) {
-      const candidate = urls[key];
-      if (typeof candidate === 'string' && candidate.trim().length > 0) {
-        return { url: candidate.trim(), manifestPath };
+      if (repository !== null && typeof repository === 'object') {
+        const url = (repository as { url?: unknown }).url;
+        if (typeof url === 'string' && url.trim().length > 0) {
+          return { url: url.trim(), manifestPath };
+        }
       }
+      return null;
     }
-    return null;
+    case 'crates': {
+      const manifestPath = join(p.path, 'Cargo.toml');
+      const parsed = readTomlDoc(manifestPath);
+      if (parsed === null) return null;
+      const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
+      const repo = pkgTable.repository;
+      if (typeof repo === 'string' && repo.trim().length > 0) {
+        return { url: repo.trim(), manifestPath };
+      }
+      return null;
+    }
+    case 'pypi': {
+      const manifestPath = join(p.path, 'pyproject.toml');
+      const parsed = readTomlDoc(manifestPath);
+      if (parsed === null) return null;
+      const project = (parsed.project ?? {}) as Record<string, unknown>;
+      const urls = (project.urls ?? {}) as Record<string, unknown>;
+      // PEP 621 leaves the key casing to the project, and PyPI normalises
+      // common labels case-insensitively. Accept the canonical "Repository"
+      // first and fall back to common synonyms (source-code repos vs.
+      // homepage links) so a project picking any reasonable label still
+      // gets the check.
+      for (const key of ['Repository', 'repository', 'Source', 'source', 'Homepage', 'homepage']) {
+        const candidate = urls[key];
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          return { url: candidate.trim(), manifestPath };
+        }
+      }
+      return null;
+    }
   }
-  /* v8 ignore next -- exhaustive over Kind */
-  return null;
 }
 
 function readJson(path: string): unknown {
@@ -1176,12 +1178,12 @@ function parseOwnerRepo(url: string): string | null {
 export interface RepoVisibilityOptions {
   /** `owner/repo` from `GITHUB_REPOSITORY`. When `undefined` or empty
    *  the check is a no-op. */
-  githubRepository?: string;
+  githubRepository?: string | undefined;
   /** Token used to authenticate the GitHub API call. Optional — the
    *  visibility endpoint is reachable unauthenticated for public
    *  repos, and a missing token plus a 404 disambiguates to
    *  "private or non-existent" which the check reports either way. */
-  githubToken?: string;
+  githubToken?: string | undefined;
   /** Injection seam for tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }

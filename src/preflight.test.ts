@@ -1490,6 +1490,130 @@ Repository = "https://github.com/wrong/repo"
     ).toEqual([]);
   });
 
+  it('skips crates packages whose Cargo.toml declares no [package].repository field', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+description = "x"
+license = "MIT"
+`,
+    );
+    expect(
+      checkRepoUrlMatch([cratesPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('skips pypi packages whose pyproject.toml has no [project.urls] block', () => {
+    const p = join(dir, 'a');
+    writePyproject(
+      p,
+      `[project]
+name = "a"
+dynamic = ["version"]
+`,
+    );
+    expect(
+      checkRepoUrlMatch([pypiPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('skips a missing or unreadable manifest (other checks own that diagnostic)', () => {
+    const missing = join(dir, 'missing');
+    expect(
+      checkRepoUrlMatch(
+        [
+          npmPkg('a', missing),
+          cratesPkg('b', missing),
+          pypiPkg('c', missing),
+        ],
+        { githubRepository: 'acme/widget' },
+      ),
+    ).toEqual([]);
+  });
+
+  it('skips a malformed package.json / Cargo.toml / pyproject.toml (build tooling surfaces those)', () => {
+    const npmDir = join(dir, 'npm');
+    const cratesDir = join(dir, 'crates');
+    const pypiDir = join(dir, 'pypi');
+    mkdirSync(npmDir, { recursive: true });
+    mkdirSync(cratesDir, { recursive: true });
+    mkdirSync(pypiDir, { recursive: true });
+    writeFileSync(join(npmDir, 'package.json'), '{ not json', 'utf8');
+    writeFileSync(join(cratesDir, 'Cargo.toml'), '[broken\nnope', 'utf8');
+    writeFileSync(join(pypiDir, 'pyproject.toml'), '[broken\nnope', 'utf8');
+    expect(
+      checkRepoUrlMatch(
+        [
+          npmPkg('a', npmDir),
+          cratesPkg('b', cratesDir),
+          pypiPkg('c', pypiDir),
+        ],
+        { githubRepository: 'acme/widget' },
+      ),
+    ).toEqual([]);
+  });
+
+  it('falls back to other [project.urls] keys when Repository is absent (Source / Homepage)', () => {
+    const a = join(dir, 'a');
+    const b = join(dir, 'b');
+    writePyproject(
+      a,
+      `[project]
+name = "a"
+dynamic = ["version"]
+[project.urls]
+Source = "https://github.com/acme/widget"
+`,
+    );
+    writePyproject(
+      b,
+      `[project]
+name = "b"
+dynamic = ["version"]
+[project.urls]
+Homepage = "https://github.com/wrong/repo"
+`,
+    );
+    expect(
+      checkRepoUrlMatch(
+        [pypiPkg('a', a), pypiPkg('b', b)],
+        { githubRepository: 'acme/widget' },
+      ).map((f) => f.package),
+    ).toEqual(['b']);
+  });
+
+  it('accepts an already-normalised GITHUB_REPOSITORY value in URL form', () => {
+    // Defensive: the GHA env var is documented as `owner/repo`, but a
+    // consumer who exports a full URL to the same env name shouldn't
+    // false-positive against a manifest that already agrees.
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/acme/widget.git',
+    });
+    expect(
+      checkRepoUrlMatch([npmPkg('a', p)], {
+        githubRepository: 'https://github.com/acme/widget',
+      }),
+    ).toEqual([]);
+  });
+
+  it('skips manifests pointing at non-github hosts (provenance catches those at publish time)', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'https://gitlab.com/acme/widget.git',
+    });
+    expect(
+      checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
   it('skips the check entirely when githubRepository is undefined (local CLI run, no GHA context)', () => {
     const p = join(dir, 'a');
     writePkgJson(p, {
@@ -1720,6 +1844,34 @@ describe('checkRepoPublic / requireRepoPublic — repo must not be private', () 
       expect(msg).toContain('acme/widget');
       expect(msg).toMatch(/provenance|private/i);
     }
+  });
+
+  it('requireRepoPublic error message distinguishes the 404 path from the explicit-private path', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(404, { message: 'Not Found' })),
+    );
+    try {
+      await requireRepoPublic({
+        githubRepository: 'acme/widget',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+      throw new Error('expected requireRepoPublic to throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('PIOT_REPO_PRIVATE');
+      expect(msg).toMatch(/404|private and the configured token lacks access|does not exist/);
+    }
+  });
+
+  it('treats `visibility = "internal"` (200 with non-public visibility) as private', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: false, visibility: 'internal' })),
+    );
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toMatchObject({ reason: 'private' });
   });
 
   it('requireRepoPublic returns silently when the repo is public', async () => {

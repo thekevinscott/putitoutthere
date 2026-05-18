@@ -123,8 +123,7 @@ function checkRepoUrlMatchFindings(
   // when GITHUB_REPOSITORY is unset), which is the right behaviour:
   // there is no workflow source to disagree with.
   const githubRepository = process.env.GITHUB_REPOSITORY;
-  const options = githubRepository !== undefined ? { githubRepository } : {};
-  for (const f of checkRepoUrlMatch(packages, options)) {
+  for (const f of checkRepoUrlMatch(packages, { githubRepository })) {
     findings.push({
       package: f.package,
       message: `[${ErrorCodes.REPO_URL_MISMATCH}] ${f.manifestPath}: declared repository "${f.declaredOwnerRepo}" does not match GITHUB_REPOSITORY "${f.expectedOwnerRepo}". npm rejects \`--provenance\` publishes whose package.json#repository.url disagrees with the OIDC source claim (422); crates.io / PyPI trusted-publisher paths carry the same risk.`,

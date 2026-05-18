@@ -128,21 +128,18 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     from provenance") and the analogous mismatch on crates.io / PyPI
   //     trusted-publisher paths. Pure local string compare against the
   //     GHA-provided env var.
-  const githubRepository = process.env.GITHUB_REPOSITORY;
-  requireRepoUrlMatch(
-    selectedPackages,
-    githubRepository !== undefined ? { githubRepository } : {},
-  );
+  requireRepoUrlMatch(selectedPackages, {
+    githubRepository: process.env.GITHUB_REPOSITORY,
+  });
 
   // 2g. Pre-flight GitHub repository visibility. Provenance attestations
   //     embed a public source-ref pointer; publishing from a private
   //     repo silently degrades every consumer's ability to verify the
   //     artifact. Hard-fail before any side effect.
-  const githubToken = process.env.GITHUB_TOKEN;
-  const visibilityOpts: { githubRepository?: string; githubToken?: string } = {};
-  if (githubRepository !== undefined) visibilityOpts.githubRepository = githubRepository;
-  if (githubToken !== undefined) visibilityOpts.githubToken = githubToken;
-  await requireRepoPublic(visibilityOpts);
+  await requireRepoPublic({
+    githubRepository: process.env.GITHUB_REPOSITORY,
+    githubToken: process.env.GITHUB_TOKEN,
+  });
 
   // 3. Artifact completeness.
   // First normalize the layout in case actions/download-artifact@v8
