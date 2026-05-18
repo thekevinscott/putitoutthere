@@ -1208,12 +1208,10 @@ export async function checkRepoPublic(
   if (githubRepository === undefined || githubRepository.length === 0) {
     return null;
   }
-  const slug = normalizeOwnerRepo(githubRepository);
   // Fall back to the raw value if normalization fails; the API call
   // will 404 and the check will report `not-found-or-private`, which
   // is the right diagnosis for a malformed slug we can't disambiguate.
-  /* v8 ignore next -- normalizeOwnerRepo handles every owner/repo shape we get from GITHUB_REPOSITORY */
-  const apiSlug = slug ?? githubRepository;
+  const apiSlug = normalizeOwnerRepo(githubRepository) ?? githubRepository;
   const fetchImpl = options.fetchImpl ?? fetch;
   const headers: Record<string, string> = {
     accept: 'application/vnd.github+json',
@@ -1237,7 +1235,6 @@ export async function checkRepoPublic(
     }
     return null;
   }
-  /* v8 ignore next 4 -- defensive; the repos endpoint reliably returns 200/404 for visibility */
   throw new Error(
     `GitHub API GET ${url} returned ${res.status}; cannot determine repository visibility`,
   );

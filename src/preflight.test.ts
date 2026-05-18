@@ -1874,6 +1874,31 @@ describe('checkRepoPublic / requireRepoPublic — repo must not be private', () 
     expect(finding).toMatchObject({ reason: 'private' });
   });
 
+  it('throws on an unexpected non-200/404 response (the API is not in a state we can interpret)', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(500, { message: 'oh no' })),
+    );
+    await expect(
+      checkRepoPublic({
+        githubRepository: 'acme/widget',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/500.*cannot determine repository visibility/);
+  });
+
+  it('falls back to the raw input slug when it does not parse to owner/repo (e.g. a stray string)', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(404, { message: 'Not Found' })),
+    );
+    const finding = await checkRepoPublic({
+      githubRepository: 'garbage-not-a-slug',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toMatchObject({ githubRepository: 'garbage-not-a-slug', reason: 'not-found-or-private' });
+    const url = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0];
+    expect(url).toBe('https://api.github.com/repos/garbage-not-a-slug');
+  });
+
   it('requireRepoPublic returns silently when the repo is public', async () => {
     const fetchImpl = vi.fn(() => Promise.resolve(
       jsonResponse(200, { private: false })),
