@@ -1,0 +1,471 @@
+name: Canary
+
+# Weekly canary publish against REAL npm + REAL crates.io (#297).
+#
+# Why this exists: per-PR e2e coverage runs against Verdaccio (npm)
+# and cargo-http-registry (crates) inside the workflow runner. Those
+# mocks are good enough to exercise the engine's plan/build/publish
+# graph, but they lag real-registry behavior on:
+#
+#   - npm packument propagation lag (#265) — `npm view` returns 404
+#     from the publishing CI host immediately after `npm publish` 200s,
+#     even though the same query resolves from elsewhere seconds later.
+#   - crates.io OIDC TP steady-state round-trip (token mint → claim
+#     validation → publish ack).
+#   - Upstream action major-bump auth-flow drift.
+#   - Registry endpoint deprecations.
+#   - npm CLI updates changing publish response shape.
+#
+# Failure of this workflow surfaces a real-registry regression the
+# per-PR coverage did not catch. It does NOT block PRs — runs are
+# scheduled, not on `pull_request` / `push`.
+#
+# Fidelity: this workflow mirrors `release.yml`'s plan → build →
+# publish job graph step-for-step against the `canary/` fixture
+# tree, with three additions: (1) a materialize step that copies
+# `canary/` to `canary-tree/` and rewrites `__VERSION__` to a
+# throwaway `0.0.${unix_seconds}` slot; (2) post-publish verify jobs
+# that install the just-published artifacts via real `npm install`
+# and a real `cargo add`, with packument-lag-aware retries; (3) no
+# Verdaccio / cargo-http-registry — every publish PUT goes out to a
+# real registry. The "uses: ./" engine reference matches what the
+# public `release.yml@v0` would invoke when cut from this ref, so
+# the canary exercises the engine bytes that a consumer pinned to
+# `@v<N>` would receive.
+#
+# Trusted Publisher records on npm and crates.io encode THIS
+# filename. Renaming this file silently invalidates trust on a
+# registry-specific schedule (see AGENTS.md →
+# "Never rename a release-path workflow file"). Refactor without
+# renaming; if a rename is genuinely required, treat it the same as
+# a credentials rotation.
+
+on:
+  schedule:
+    # Mondays 09:00 UTC — quiet hours for most contributors, lines up
+    # with weekday business hours so a failed canary surfaces in a
+    # notification window where someone can actually investigate.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      skip_npm:
+        description: >-
+          Skip the npm publish + verify legs of the canary. Useful
+          when investigating a crates-only regression and you don't
+          want to burn an npm version slot per re-run.
+        type: boolean
+        required: false
+        default: false
+      skip_crates:
+        description: >-
+          Skip the crates.io publish + verify legs. Useful when
+          investigating an npm-only regression; crates.io's
+          immutable-publish rule means re-runs always burn a fresh
+          version slot, and the alphabetically-low canary name has
+          a 24-hour rate-limit ceiling on crate publishes.
+        type: boolean
+        required: false
+        default: false
+
+# Real-registry publishes serialize — two concurrent canary runs would
+# race on the version slot (timestamp granularity is 1s; two runs that
+# start in the same second collide on crates.io's immutable-publish
+# rule). cancel-in-progress is false because cancelling a run mid-
+# publish could leave one registry with a tag the other one doesn't.
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+permissions:
+  # contents: write — engine creates annotated git tags + the
+  # workflow cuts a GitHub Release at the end (mirrors release.yml).
+  # id-token: write — OIDC Trusted Publisher exchange on npm and
+  # crates.io.
+  contents: write
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.materialize.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install engine dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build engine + action bundle
+        run: |
+          pnpm run build
+          pnpm run build:action
+
+      - id: materialize
+        name: Materialize canary fixture
+        env:
+          SKIP_NPM: ${{ inputs.skip_npm || 'false' }}
+          SKIP_CRATES: ${{ inputs.skip_crates || 'false' }}
+        run: |
+          set -euo pipefail
+          rm -rf canary-tree
+          cp -r canary canary-tree
+          VERSION="0.0.$(date +%s)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          find canary-tree \
+            \( -name putitoutthere.toml -o -name package.json \
+               -o -name Cargo.toml -o -name '*.ts' \) -print0 \
+            | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
+          # workflow_dispatch skip toggles: drop the corresponding
+          # `[[package]]` block from the canary tree's
+          # putitoutthere.toml so the planner never emits a matrix row
+          # for it. Cheaper than gating every downstream step on the
+          # input flag and keeps the matrix honest. See
+          # canary/_strip-package.py for the strip implementation +
+          # rationale; it errors on no-match so a drifted canary toml
+          # surfaces as a workflow failure rather than a silent no-op.
+          if [ "${SKIP_NPM}" = "true" ]; then
+            python3 canary/_strip-package.py canary-tree/putitoutthere.toml npm
+          fi
+          if [ "${SKIP_CRATES}" = "true" ]; then
+            python3 canary/_strip-package.py canary-tree/putitoutthere.toml crates
+          fi
+          # Init a throwaway git repo so the engine's tag-creation path
+          # has a HEAD to point at. The repo is local to the runner and
+          # never pushed.
+          cd canary-tree
+          git init -q -b main
+          git config user.email 'canary@putitoutthere.dev'
+          git config user.name 'piot canary'
+          git config commit.gpgsign false
+          git config tag.gpgsign false
+          git add .
+          git commit -q -m 'canary: initial fixture'
+
+      - id: plan
+        uses: ./
+        with:
+          command: plan
+          working_directory: canary-tree
+
+  build:
+    needs: plan
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install engine dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build engine + action bundle
+        run: |
+          pnpm run build
+          pnpm run build:action
+
+      - name: Materialize canary fixture
+        shell: bash
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          SKIP_NPM: ${{ inputs.skip_npm || 'false' }}
+          SKIP_CRATES: ${{ inputs.skip_crates || 'false' }}
+        run: |
+          set -euo pipefail
+          rm -rf canary-tree
+          cp -r canary canary-tree
+          # perl -i is portable across GNU sed (Linux) and BSD sed
+          # (macOS). The canary fixture is Linux-only today but the
+          # idiom is cheap and tracks _matrix.yml's portability stance.
+          find canary-tree \
+            \( -name putitoutthere.toml -o -name package.json \
+               -o -name Cargo.toml -o -name '*.ts' \) -print0 \
+            | xargs -0 perl -i -pe "s/__VERSION__/${VERSION}/g"
+          if [ "${SKIP_NPM}" = "true" ]; then
+            python3 canary/_strip-package.py canary-tree/putitoutthere.toml npm
+          fi
+          if [ "${SKIP_CRATES}" = "true" ]; then
+            python3 canary/_strip-package.py canary-tree/putitoutthere.toml crates
+          fi
+
+      # ---- npm ----
+      - if: matrix.kind == 'npm'
+        working-directory: canary-tree/${{ matrix.path }}
+        shell: bash
+        run: |
+          npm install
+          npm run build --if-present
+
+      # ---- crates ----
+      # cargo publish builds on the registry side; no artifact needed
+      # at build time.
+
+      - if: matrix.kind != 'crates'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: canary-tree/${{ matrix.artifact_path }}
+
+  publish:
+    needs: [plan, build]
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    runs-on: ubuntu-latest
+    # Dedicated `canary` GitHub Environment — separate from
+    # `release` (production publishes via release.yml / release-
+    # npm.yml) and `e2e` (per-PR e2e against Verdaccio). The
+    # Trusted Publisher records on npm + crates.io are filtered by
+    # `environment: canary`, so this job MUST run under that
+    # environment for the OIDC claim to match. The environment also
+    # gives the maintainer a place to scope canary-only secrets
+    # during bootstrap (long-lived `CARGO_REGISTRY_TOKEN` /
+    # `NPM_TOKEN` for the very first publish, revoked once OIDC is
+    # registered).
+    environment: canary
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # npm Trusted Publishing landed in npm 11.5.1 (July 2025).
+      # Node 24's bundled npm on the runner image may be older. Pin
+      # forward so the OIDC-TP exchange on `npm publish --provenance`
+      # engages cleanly. Same step release.yml runs.
+      - name: Pin npm to a Trusted-Publishing-capable version
+        run: npm install -g npm@latest
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install engine dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build engine + action bundle
+        run: |
+          pnpm run build
+          pnpm run build:action
+
+      - name: Materialize canary fixture
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          SKIP_NPM: ${{ inputs.skip_npm || 'false' }}
+          SKIP_CRATES: ${{ inputs.skip_crates || 'false' }}
+        run: |
+          set -euo pipefail
+          rm -rf canary-tree
+          cp -r canary canary-tree
+          find canary-tree \
+            \( -name putitoutthere.toml -o -name package.json \
+               -o -name Cargo.toml -o -name '*.ts' \) -print0 \
+            | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
+          if [ "${SKIP_NPM}" = "true" ]; then
+            python3 canary/_strip-package.py canary-tree/putitoutthere.toml npm
+          fi
+          if [ "${SKIP_CRATES}" = "true" ]; then
+            python3 canary/_strip-package.py canary-tree/putitoutthere.toml crates
+          fi
+          cd canary-tree
+          git init -q -b main
+          git config user.email 'canary@putitoutthere.dev'
+          git config user.name 'piot canary'
+          git config commit.gpgsign false
+          git config tag.gpgsign false
+          git add .
+          git commit -q -m 'canary: initial fixture'
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: canary-tree/artifacts
+
+      # crates.io OIDC TP exchange — only when the matrix contains a
+      # crates row. Mirrors release.yml. The exchange has no caller-
+      # token fallback in the canary path: the canary crate has already
+      # been bootstrapped (its first publish landed via a manual
+      # `CARGO_REGISTRY_TOKEN` run; subsequent canary runs use OIDC TP).
+      - name: Authenticate with crates.io (OIDC)
+        if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
+        id: crates-auth
+        uses: rust-lang/crates-io-auth-action@v1.0.4
+
+      - name: Export CARGO_REGISTRY_TOKEN
+        if: steps.crates-auth.outcome == 'success'
+        env:
+          CRATES_IO_TOKEN: ${{ steps.crates-auth.outputs.token }}
+        run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
+
+      # Mirrors release.yml: rebuild npm packages from source before
+      # `npm publish` runs. The build job's dist/ is not carried
+      # through as an artifact for vanilla npm rows.
+      - name: Build npm packages
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
+          for path in $paths; do
+            pushd "canary-tree/${path}" > /dev/null
+            npm install
+            npm run build --if-present
+            popd > /dev/null
+          done
+
+      - uses: ./
+        with:
+          command: publish
+          working_directory: canary-tree
+
+      # No GitHub Release / tag push: the canary's git tree is a
+      # throwaway `git init` inside the runner. The engine attempts a
+      # `git push origin <tag>` after each publish; the canary tree has
+      # no `origin` remote, so the push fails and the engine logs a
+      # warning and moves on (`publish.ts` catches the push error and
+      # downgrades it to log.warn). That's intentional — pushing
+      # canary tags to the upstream repo would litter `/tags` and
+      # `/releases` with weekly throwaway entries. Verify of
+      # publish-actually-landed happens in the verify-npm / verify-
+      # crates jobs below, not via GitHub Release metadata.
+
+  verify-npm:
+    needs: [plan, publish]
+    if: |
+      fromJSON(needs.plan.outputs.matrix || '[]')[0] != null &&
+      contains(needs.plan.outputs.matrix, '"kind":"npm"')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install + version-check @piot-canary/main
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cd "$tmp"
+          npm init -y > /dev/null
+          # Real npm propagates packument metadata across its CDN
+          # asynchronously after a successful publish. Same retry
+          # schedule release.yml's e2e verify step uses.
+          attempts=5
+          sleeps=(15 30 60 120 240)
+          installed=0
+          for attempt in $(seq 1 "$attempts"); do
+            if npm install "@piot-canary/main@${VERSION}" --save=false --no-audit --no-fund 2>install.log; then
+              installed=1
+              break
+            fi
+            echo "  npm install attempt ${attempt} failed; tail of log:"
+            tail -n 20 install.log || true
+            if [ "$attempt" -lt "$attempts" ]; then
+              sleep_for="${sleeps[$((attempt - 1))]}"
+              echo "  packument lag likely — retrying in ${sleep_for}s"
+              sleep "$sleep_for"
+            fi
+          done
+          if [ "$installed" -ne 1 ]; then
+            echo "::error::@piot-canary/main@${VERSION} did not install from real npm after ${attempts} attempts. Either the publish didn't land, packument propagation is much slower than expected, or the published tarball is broken."
+            exit 1
+          fi
+          # Assert the just-installed package's runtime `version`
+          # constant matches the planned version. The materialize
+          # step rewrote `__VERSION__` in src/index.ts, so the
+          # published dist/ carries the planned version compiled in.
+          # Catches the cachetta-style "publish claimed success but
+          # the tarball is from a stale build" regression: the
+          # registry-side package.json could carry the right version
+          # while the published JS module ships an old constant.
+          # Importing the actual runtime module is the strongest
+          # cross-tier assertion that the publish actually shipped
+          # the bytes the engine planned.
+          cat > check.mjs <<'EOF'
+          import { version } from '@piot-canary/main';
+          process.stdout.write(version);
+          EOF
+          got=$(node check.mjs)
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::installed @piot-canary/main reports version='${got}', expected '${VERSION}'. Tarball appears to be from a stale build."
+            exit 1
+          fi
+          echo "ok: @piot-canary/main@${VERSION} installed from real npm and reports version=${got}"
+
+  verify-crates:
+    needs: [plan, publish]
+    if: |
+      fromJSON(needs.plan.outputs.matrix || '[]')[0] != null &&
+      contains(needs.plan.outputs.matrix, '"kind":"crates"')
+    runs-on: ubuntu-latest
+    steps:
+      - name: cargo add + resolve piot-canary
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cd "$tmp"
+          cargo init --name canary-verify --lib --vcs none > /dev/null
+          # crates.io's sparse index propagates faster than npm's
+          # packument CDN but is still asynchronous after the
+          # publish-PUT 200. Same shape as the npm retry above with a
+          # tighter schedule.
+          attempts=5
+          sleeps=(10 20 40 90 180)
+          added=0
+          for attempt in $(seq 1 "$attempts"); do
+            if cargo add "piot-canary@=${VERSION}" 2>add.log; then
+              added=1
+              break
+            fi
+            echo "  cargo add attempt ${attempt} failed; tail of log:"
+            tail -n 20 add.log || true
+            if [ "$attempt" -lt "$attempts" ]; then
+              sleep_for="${sleeps[$((attempt - 1))]}"
+              echo "  sparse-index lag likely — retrying in ${sleep_for}s"
+              sleep "$sleep_for"
+            fi
+          done
+          if [ "$added" -ne 1 ]; then
+            echo "::error::cargo add piot-canary@${VERSION} failed after ${attempts} attempts. Either the publish didn't land, sparse-index propagation is much slower than expected, or the OIDC TP exchange did not authenticate the publish."
+            exit 1
+          fi
+          # `cargo fetch` resolves the dependency graph against the
+          # sparse index — the strongest assertion that the version
+          # is actually retrievable, beyond just `cargo add`'s
+          # Cargo.toml mutation.
+          cargo fetch
+          # Sanity check the recorded version matches what we planned.
+          got=$(grep -E '^piot-canary[[:space:]]*=' Cargo.toml | sed -E 's/.*"=?([0-9][^"]*)".*/\1/')
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::cargo add recorded piot-canary version='${got}', expected '${VERSION}'"
+            cat Cargo.toml
+            exit 1
+          fi
+          echo "ok: piot-canary@${VERSION} resolved from real crates.io"

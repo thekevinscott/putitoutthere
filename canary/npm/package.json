@@ -1,0 +1,17 @@
+{
+  "name": "@piot-canary/main",
+  "version": "__VERSION__",
+  "description": "Put It Out There weekly canary against real npm. Re-published with a fresh timestamp version each run; safe to ignore. See https://github.com/thekevinscott/putitoutthere/issues/297.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/thekevinscott/putitoutthere.git" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

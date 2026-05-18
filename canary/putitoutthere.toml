@@ -1,0 +1,58 @@
+# Live canary fixture (#297).
+#
+# Scheduled weekly via .github/workflows/canary.yml against REAL
+# registries (npm + crates.io). Catches regressions in the public
+# reusable workflow's interaction with real-registry behavior that
+# the per-PR Verdaccio + cargo-http-registry mocks lag behind on:
+#
+#   - npm packument propagation lag (#265)
+#   - crates.io OIDC TP steady-state round-trip
+#   - Upstream action major-bump auth-flow drift
+#   - Registry endpoint deprecations
+#
+# Two packages, neither depending on the other (intentionally — the
+# canary's job is to exercise the publish + auth + verify path on each
+# registry independently, NOT cascade behavior, which the per-PR
+# polyglot fixtures already cover):
+#
+#   - @piot-canary/main on npm (vanilla TS, publishes via OIDC Trusted
+#     Publisher after first-publish bootstrap).
+#   - piot-canary on crates.io (library crate, publishes via OIDC
+#     Trusted Publisher after first-publish bootstrap with
+#     CARGO_REGISTRY_TOKEN).
+#
+# Version is rewritten to `0.0.${unix_seconds}` at job start so every
+# weekly run gets a fresh slot (crates.io's immutable-publish rule
+# prevents reuse; npm has no such rule but a monotonic version keeps
+# the dist-tag math sane). Same pattern as the Verdaccio-backed e2e
+# fixtures.
+
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "@piot-canary/main"
+kind  = "npm"
+path  = "npm"
+globs = [
+  "npm/src/**",
+  "npm/package.json",
+  "npm/tsconfig.json",
+]
+first_version = "__VERSION__"
+# Canary publishes are throwaway. Use a dedicated dist-tag so the
+# weekly timestamp-versioned releases don't update `latest` and a
+# consumer who accidentally `npm install`s the canary gets nothing
+# useful by default. Mirrors the e2e fixtures' `tag = "e2e"`.
+tag = "canary"
+access = "public"
+
+[[package]]
+name  = "piot-canary"
+kind  = "crates"
+path  = "rust"
+globs = [
+  "rust/src/**",
+  "rust/Cargo.toml",
+]
+first_version = "__VERSION__"
