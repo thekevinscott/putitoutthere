@@ -109,13 +109,16 @@ function writeVersionImpl(
     // build` / `maturin build` runs. Per design-commitment #1 (no
     // version computation), we surface guidance and exit.
     const who = pkg.name ? `pypi: ${pkg.name}` : 'pypi';
-    const envSuffix = pkg.name ? scmEnvSuffix(pkg.name) : '<PKG>';
     ctx.log.info(
       [
         `${who}: detected dynamic version; nothing to rewrite in pyproject.toml.`,
         `  Planned version: ${version}. Pass it to the build backend via one of:`,
-        `    - SETUPTOOLS_SCM_PRETEND_VERSION_FOR_${envSuffix}=${version}  (hatch-vcs / setuptools-scm)`,
-        `    - Update [package].version in Cargo.toml                ${' '.repeat(Math.max(0, envSuffix.length - 12))}  (maturin reading Cargo)`,
+        `    - SETUPTOOLS_SCM_PRETEND_VERSION=${version}  (hatch-vcs / setuptools-scm)`,
+        // Per-package `_FOR_<SUFFIX>` variants exist in setuptools-scm but
+        // are silently ignored by hatch-vcs; only the global env var works
+        // across both backends. Match what the reusable workflow actually
+        // sets in `_matrix.yml`. See README → "Python version source".
+        `    - Update [package].version in Cargo.toml  (maturin reading Cargo)`,
         `  Set the env var on the build job, before \`python -m build\` / \`maturin build\` runs.`,
         `  See ${DYNAMIC_VERSION_DOC_POINTER}`,
       ].join('\n'),
@@ -188,15 +191,6 @@ function pypiNameFor(pkg: { name: string; pypi?: string }): string {
 function projectDynamicIncludesVersion(project: { dynamic?: unknown }): boolean {
   const { dynamic } = project;
   return Array.isArray(dynamic) && dynamic.includes('version');
-}
-
-/**
- * `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<SUFFIX>` name suffix derived from
- * a package name per PEP 503's canonical normalisation. Uppercase,
- * dashes + dots + underscores all collapse to a single underscore.
- */
-export function scmEnvSuffix(pkgName: string): string {
-  return pkgName.replace(/[-._]+/g, '_').toUpperCase();
 }
 
 export const pypi: Handler = {

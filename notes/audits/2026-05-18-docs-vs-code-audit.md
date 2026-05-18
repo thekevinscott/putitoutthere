@@ -13,24 +13,28 @@ and workflow inputs/outputs are in scope.
 
 ## Summary
 
-Eleven findings. Three are clear doc bugs that should be fixed under
-a follow-up (1, 2, 3). The rest are stale internal notes and
-documentation gaps that don't actively mislead consumers but should be
-cleaned up.
+Nine findings. Two are clear doc bugs that should be fixed under
+a follow-up (1, 2). The rest are smaller documentation gaps.
+
+Two earlier findings (artifact-contract.md `download-artifact@v4`,
+upstream-behaviors.md npm-repository layering) were retracted on a
+second read — the docs already match the code on both. Methodology
+note: the initial pass leaned on a fast-pass exploration agent for
+breadth; both retractions were claims that agent surfaced without me
+re-reading the source file. Subsequent findings were verified by hand
+before being recorded.
 
 | # | Severity | Where                                              | What                                                                                             |
 |---|----------|----------------------------------------------------|--------------------------------------------------------------------------------------------------|
 | 1 | High     | `README.md:254`                                    | PyPI `build` field claimed "Required" — code defaults to `"setuptools"`.                          |
 | 2 | High     | `src/handlers/pypi.ts:117`                          | CLI guidance suggests `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<SUFFIX>` which README+workflow flag as broken. |
-| 3 | High     | `notes/internals/artifact-contract.md:23`           | References `actions/download-artifact@v4`; workflows use `@v8`.                                  |
-| 4 | Medium   | `README.md` (error-code listings)                   | Three consumer-visible error codes are emitted but undocumented.                                 |
-| 5 | Medium   | `README.md:281,282`                                 | npm `access` / `tag` defaults documented as schema defaults; code applies them at handler time.   |
-| 6 | Medium   | `README.md` Trailer section                         | Three behaviors implemented but not documented (case-insensitive, indented, empty `[]` list).    |
-| 7 | Low      | `README.md` `check.yml` description                 | `check.yml` hardcodes Node 24; `build.yml`/`release.yml` accept `node_version`. Undocumented asymmetry. |
-| 8 | Low      | `notes/upstream-behaviors.md:116-122`               | npm `repository`-field check phrased as a single handler step; actual layering is preflight + handler. |
-| 9 | Low      | `notes/4-17-2026-initial-plan/INSTRUCTIONS.md`      | Pre-rewrite plan; architecture description no longer matches the engine.                         |
-| 10| Info     | `action.yml`                                        | Doc/code accurate; flagged here only so future doc work tracks the `node24` runtime.             |
-| 11| Info     | `README.md` Recipes / multi-mode validation         | All four validation rules in README match `src/config.ts` 1:1. No drift; recorded for next audit.|
+| 3 | Medium   | `README.md` (error-code listings)                   | Three consumer-visible error codes are emitted but undocumented.                                 |
+| 4 | Medium   | `README.md:281,282`                                 | npm `access` / `tag` defaults documented as schema defaults; code applies them at handler time.   |
+| 5 | Medium   | `README.md` Trailer section                         | Three behaviors implemented but not documented (case-insensitive, indented, empty `[]` list).    |
+| 6 | Low      | `README.md` `check.yml` description                 | `check.yml` hardcodes Node 24; `build.yml`/`release.yml` accept `node_version`. Undocumented asymmetry. |
+| 7 | Low      | `notes/4-17-2026-initial-plan/INSTRUCTIONS.md`      | Pre-rewrite plan; architecture description no longer matches the engine.                         |
+| 8 | Info     | `action.yml`                                        | Doc/code accurate; flagged here only so future doc work tracks the `node24` runtime.             |
+| 9 | Info     | `README.md` Recipes / multi-mode validation         | All four validation rules in README match `src/config.ts` 1:1. No drift; recorded for next audit.|
 
 ## Findings
 
@@ -109,32 +113,7 @@ the failure mode the design-commitments doc calls out
 a note about `hatch-vcs`'s scoping limitation. Either way the CLI
 output should match what the build job actually sets.
 
-### 3. `artifact-contract.md` references download-artifact@v4
-
-`notes/internals/artifact-contract.md:23` documents the publish job
-pulling artifacts via:
-
-```
-publish job: actions/download-artifact@v4 path: artifacts
-```
-
-`.github/workflows/release.yml:139-141` uses `@v8`:
-
-```yaml
-- uses: actions/download-artifact@v8
-  with:
-    path: artifacts
-```
-
-Same applies elsewhere — every workflow in this repo is on `@v8`. The
-behavior contract (single `artifacts/` directory, per-row subdir
-naming) is unchanged across versions, so this is a documentation-only
-drift, not a functional one. Internal-only doc; consumers don't read
-it.
-
-**Fix shape:** one-line search-replace.
-
-### 4. Undocumented consumer-visible error codes
+### 3. Undocumented consumer-visible error codes
 
 `src/error-codes.ts` defines 14 codes. The README surfaces 11 of them
 in `kind`-specific tables. The other three:
@@ -166,7 +145,7 @@ the inline doc-comment in `src/error-codes.ts:1-8` claims the codes
 exist to support ("the docs site deep-linking from a code to a
 recipe") — the deep-link target needs to actually exist.
 
-### 5. Schema defaults documented as if they were schema defaults
+### 4. Schema defaults documented as if they were schema defaults
 
 `README.md:281-282`:
 
@@ -196,7 +175,7 @@ expect `src/config.ts` to be the source of truth. Either move the
 defaults into the schema (cheaper to test) or leave a comment on the
 handler-side that the README contract is intentional.
 
-### 6. Undocumented trailer flexibility
+### 5. Undocumented trailer flexibility
 
 `src/trailer.ts` accepts three forms the README does not document:
 
@@ -221,7 +200,7 @@ sensitive, no leading whitespace, no empty list) or add a one-line
 parser's leniency was deliberately added (per the test comment "be
 lenient"), so a doc-only fix is appropriate.
 
-### 7. `check.yml` hardcodes Node 24 with no consumer override
+### 6. `check.yml` hardcodes Node 24 with no consumer override
 
 `README.md:84-117` describes `check.yml` as the cheap PR-time
 config-validation gate. The README does not document any inputs for
@@ -247,31 +226,7 @@ block in the README: "No inputs — Node version is fixed because
 `check.yml` does not run consumer build steps." Or expose the input
 for parity if there's a future use case.
 
-### 8. `upstream-behaviors.md` collapses two-layer npm repository check
-
-`notes/upstream-behaviors.md:116-122` describes the npm
-`repository`-field requirement as a single-step check inside the
-npm handler:
-
-> Preflight, not response-parsing. `assertRepositoryField` in
-> `src/handlers/npm.ts`.
-
-The actual structure is two layers:
-
-- **Preflight gate** at `src/preflight.ts` →
-  `requireProvenanceMetadata` / `checkProvenanceMetadata`, emitting
-  `PIOT_NPM_MISSING_REPOSITORY` (`src/error-codes.ts:39`).
-- **Handler-side belt-and-braces check** at
-  `src/handlers/npm.ts:205-228`'s `assertRepositoryField`, fired only
-  on the OIDC path.
-
-The note isn't wrong in the sense that the function exists, but a
-reader using the note to map the check's position in the pipeline
-will miss the preflight gate that catches it earliest. The
-`2026-05-13-preflight-phase-audit.md` already covers the right layer
-correctly; this note pre-dates that move and should be updated.
-
-### 9. `4-17-2026-initial-plan/` describes a different architecture
+### 7. `4-17-2026-initial-plan/` describes a different architecture
 
 Per `AGENTS.md`, `notes/migrations-pre-rewrite/` is explicitly stale.
 `notes/4-17-2026-initial-plan/` is not flagged, but
@@ -286,7 +241,7 @@ new contributors reading `notes/` for orientation.
 **Fix shape:** move into `notes/migrations-pre-rewrite/` or annotate
 the dir with a top-level `STALE.md` describing what supersedes it.
 
-### 10. `action.yml` (informational, no drift)
+### 8. `action.yml` (informational, no drift)
 
 `action.yml` documents `node24` runtime and `command` /
 `working_directory` / `version` inputs that map 1:1 to
@@ -294,7 +249,7 @@ the dir with a top-level `STALE.md` describing what supersedes it.
 internal-only (`notes/design-commitments.md` non-goal #10). No
 drift; recorded for future doc audits so this stays on the radar.
 
-### 11. Multi-mode npm validation (informational, no drift)
+### 9. Multi-mode npm validation (informational, no drift)
 
 `README.md:649-654` enumerates four validation rules for the npm
 multi-mode `build` array:

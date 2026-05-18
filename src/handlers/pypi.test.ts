@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { pypi, scmEnvSuffix } from './pypi.js';
+import { pypi } from './pypi.js';
 import type { Ctx } from '../types.js';
 
 vi.mock('node:child_process', async (orig) => {
@@ -344,12 +344,3 @@ describe('pypi.publish (caller-side upload architecture)', () => {
   });
 });
 
-describe('scmEnvSuffix (#207)', () => {
-  it('uppercases + collapses dashes, dots, underscores to `_` per PEP 503', () => {
-    expect(scmEnvSuffix('my-lib')).toBe('MY_LIB');
-    expect(scmEnvSuffix('my.lib')).toBe('MY_LIB');
-    expect(scmEnvSuffix('my_lib')).toBe('MY_LIB');
-    expect(scmEnvSuffix('my--lib')).toBe('MY_LIB');
-    expect(scmEnvSuffix('coaxer')).toBe('COAXER');
-  });
-});
