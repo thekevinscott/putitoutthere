@@ -139,11 +139,13 @@ jobs:
           // with every workflow whose evidence it cites (test.yml, integration,
           // e2e, ...). Evidence check completes in 3-6s; cited workflows take
           // 20s+. Without polling, on a fresh PR push the cited runs are still
-          // `in_progress` (or `queued`) when we first query and the check fails
-          // with "no successful GitHub Actions run or job matched ..." even
-          // though the evidence is about to land. Collect every citation up
-          // front, then poll cited runs until they reach a terminal state or
-          // the bounded deadline elapses, and only then decide success/fail.
+          // `in_progress` (or `queued`) — or not yet indexed under
+          // `actions/runs?head_sha=...` at all — when we first query, and the
+          // check fails with "no successful GitHub Actions run or job matched
+          // ..." even though the evidence is about to land. Collect every
+          // citation up front, then poll per-citation resolution until every
+          // citation is `passed` / `failed` or the bounded deadline elapses,
+          // and only then run the downstream success/fail decision.
           const POLL_INTERVAL_MS = 30 * 1000;
           const POLL_DEADLINE_MS = Date.now() + 20 * 60 * 1000;
 
@@ -160,26 +162,27 @@ jobs:
             return needles;
           }
 
-          function inFlightCitedRuns(needles) {
-            return runsForHead().filter((run) => {
-              if (run.status === 'completed') return false;
-              for (const citation of needles) {
-                if (runMatches(run, citation)) return true;
-              }
-              return false;
-            });
+          function citationResolution(citation) {
+            // 'passed' — at least one matching run succeeded.
+            // 'failed' — every matching run reached a terminal state and none succeeded.
+            // 'pending' — no matching runs yet, OR at least one match is still queued/in_progress.
+            const matches = runsForHead().filter((run) => runMatches(run, citation));
+            if (matches.length === 0) return 'pending';
+            if (matches.some((r) => r.status === 'completed' && r.conclusion === 'success')) return 'passed';
+            if (matches.every((r) => r.status === 'completed')) return 'failed';
+            return 'pending';
           }
 
           const needles = citedRunNeedles();
           if (needles.size > 0) {
             while (Date.now() < POLL_DEADLINE_MS) {
-              const pending = inFlightCitedRuns(needles);
-              if (pending.length === 0) break;
-              const sample = pending.slice(0, 5).map((r) => `${r.name} [${r.status}]`).join(', ');
-              const ellipsis = pending.length > 5 ? ', ...' : '';
+              const pendingCitations = [...needles].filter((c) => citationResolution(c) === 'pending');
+              if (pendingCitations.length === 0) break;
+              const elapsedSeconds = Math.round((Date.now() - (POLL_DEADLINE_MS - 20 * 60 * 1000)) / 1000);
               console.log(
-                `evidence-check: waiting for ${pending.length} cited workflow_run(s) to ` +
-                  `reach a terminal state (${sample}${ellipsis})`,
+                `evidence-check: t+${elapsedSeconds}s — ${pendingCitations.length} citation(s) ` +
+                  `still pending (no matching workflow_run yet, or matches still in_progress / queued): ` +
+                  `${pendingCitations.join(', ')}`,
               );
               execFileSync('sleep', [String(POLL_INTERVAL_MS / 1000)], { stdio: 'ignore' });
               resetRunCaches();
