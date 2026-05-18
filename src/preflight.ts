@@ -952,6 +952,104 @@ function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): boolean {
   }
 }
 
+/* ----------------------- repository URL match ----------------------- */
+//
+// Catches the manifest-vs-GITHUB_REPOSITORY mismatch that npm's
+// provenance verification rejects with a 422 ("repository.url is X,
+// expected to match Y from provenance"). Same risk exists on
+// crates.io / PyPI trusted-publisher paths against
+// Cargo.toml [package].repository and pyproject.toml [project.urls];
+// catching all three in the same check keeps the failure modes
+// fingerprinted by the same error code.
+
+export interface RepoUrlMatchOptions {
+  /** Value of the GitHub Actions `GITHUB_REPOSITORY` env var, format
+   *  `owner/repo`. When `undefined` or empty, the check is a no-op
+   *  (local CLI runs outside a GHA context can't disagree with a
+   *  workflow source). */
+  githubRepository?: string;
+}
+
+export interface RepoUrlMatchFinding {
+  package: string;
+  /** Pkg-relative manifest file the URL was read from. */
+  manifestPath: string;
+  /** The normalised `owner/repo` parsed from the manifest URL. */
+  declaredOwnerRepo: string;
+  /** The `owner/repo` from `GITHUB_REPOSITORY`. */
+  expectedOwnerRepo: string;
+  /** Verbatim URL as it appears in the manifest, useful for the
+   *  remediation message. */
+  declaredUrl: string;
+}
+
+export function checkRepoUrlMatch(
+  _packages: readonly Package[],
+  _options: RepoUrlMatchOptions = {},
+): RepoUrlMatchFinding[] {
+  // Stub: real implementation lands in the next commit. Returning an
+  // empty list keeps callers green; the red tests in preflight.test.ts
+  // expect findings on a mismatch.
+  return [];
+}
+
+export function requireRepoUrlMatch(
+  packages: readonly Package[],
+  options: RepoUrlMatchOptions = {},
+): void {
+  const findings = checkRepoUrlMatch(packages, options);
+  if (findings.length === 0) return;
+  /* v8 ignore next 2 -- stub; throw path covered when implementation lands */
+  throw new Error('stub');
+}
+
+/* ----------------------- repository visibility ----------------------- */
+//
+// Hard-fails when the GitHub repository running the workflow is
+// private. npm provenance attestations embed a public source-ref
+// pointer; a private repo means consumers cannot verify the
+// attestation, and the same source-visibility expectation underpins
+// the trusted-publisher story on every registry we publish to.
+
+export interface RepoVisibilityOptions {
+  /** `owner/repo` from `GITHUB_REPOSITORY`. When `undefined` or empty
+   *  the check is a no-op. */
+  githubRepository?: string;
+  /** Token used to authenticate the GitHub API call. Optional — the
+   *  visibility endpoint is reachable unauthenticated for public
+   *  repos, and a missing token plus a 404 disambiguates to
+   *  "private or non-existent" which the check reports either way. */
+  githubToken?: string;
+  /** Injection seam for tests. Defaults to the global `fetch`. */
+  fetchImpl?: typeof fetch;
+}
+
+export interface RepoVisibilityFinding {
+  /** The `owner/repo` whose visibility check failed. */
+  githubRepository: string;
+  /** Either the API said `private: true`, or the API replied with a
+   *  404 (which for our purposes is indistinguishable from private —
+   *  in both cases consumers cannot dereference a provenance source
+   *  pointer to inspect it). */
+  reason: 'private' | 'not-found-or-private';
+}
+
+export function checkRepoPublic(
+  _options: RepoVisibilityOptions = {},
+): Promise<RepoVisibilityFinding | null> {
+  // Stub: real implementation lands in the next commit.
+  return Promise.resolve(null);
+}
+
+export async function requireRepoPublic(
+  options: RepoVisibilityOptions = {},
+): Promise<void> {
+  const finding = await checkRepoPublic(options);
+  if (finding === null) return;
+  /* v8 ignore next 2 -- stub; throw path covered when implementation lands */
+  throw new Error('stub');
+}
+
 export function requireCargoShape(
   packages: readonly Package[],
   options: CargoShapeOptions = {},

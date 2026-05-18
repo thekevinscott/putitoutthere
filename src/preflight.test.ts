@@ -7,18 +7,22 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkAuth,
   checkCargoShape,
   checkCratesMetadata,
   checkProvenanceMetadata,
   checkPyprojectShape,
+  checkRepoPublic,
+  checkRepoUrlMatch,
   requireAuth,
   requireCargoShape,
   requireCratesMetadata,
   requireProvenanceMetadata,
   requirePyprojectShape,
+  requireRepoPublic,
+  requireRepoUrlMatch,
   type AuthStatus,
 } from './preflight.js';
 import type { Package } from './config.js';
@@ -1314,5 +1318,419 @@ default = []
 
   it('requireCargoShape returns silently when there are no crates / bundle_cli packages', () => {
     expect(() => requireCargoShape([pkg('npm')])).not.toThrow();
+  });
+});
+
+describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GITHUB_REPOSITORY', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'piot-repo-url-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function npmPkg(name: string, path: string): Package {
+    return pkg('npm', { name, path });
+  }
+  function cratesPkg(name: string, path: string): Package {
+    return pkg('crates', { name, path });
+  }
+  function pypiPkg(name: string, path: string): Package {
+    return pkg('pypi', { name, path });
+  }
+  function writePkgJson(path: string, body: unknown): void {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'package.json'), JSON.stringify(body), 'utf8');
+  }
+  function writeCargoToml(path: string, body: string): void {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'Cargo.toml'), body, 'utf8');
+  }
+  function writePyproject(path: string, body: string): void {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'pyproject.toml'), body, 'utf8');
+  }
+
+  it('npm: passes when repository.url (object form) parses to the same owner/repo as GITHUB_REPOSITORY', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: { type: 'git', url: 'git+https://github.com/acme/widget.git' },
+    });
+    expect(
+      checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('npm: passes when repository is the legacy non-empty string form and matches', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/acme/widget.git',
+    });
+    expect(
+      checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('npm: fails when repository.url resolves to a different owner/repo (the 422 provenance bug)', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: { type: 'git', url: 'git+https://github.com/thekevinscott/modwheel.git' },
+    });
+    const findings = checkRepoUrlMatch([npmPkg('a', p)], {
+      githubRepository: 'thekevinscott/steervec',
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      package: 'a',
+      declaredOwnerRepo: 'thekevinscott/modwheel',
+      expectedOwnerRepo: 'thekevinscott/steervec',
+    });
+  });
+
+  it('npm: fails when repository (string form) resolves to a different owner/repo', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/wrong/repo.git',
+    });
+    const findings = checkRepoUrlMatch([npmPkg('a', p)], {
+      githubRepository: 'acme/widget',
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.declaredOwnerRepo).toBe('wrong/repo');
+  });
+
+  it('crates: passes when [package].repository matches', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+description = "x"
+license = "MIT"
+repository = "https://github.com/acme/widget"
+`,
+    );
+    expect(
+      checkRepoUrlMatch([cratesPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('crates: fails when [package].repository resolves to a different owner/repo', () => {
+    const p = join(dir, 'a');
+    writeCargoToml(
+      p,
+      `[package]
+name = "a"
+version = "0.0.0"
+description = "x"
+license = "MIT"
+repository = "https://github.com/wrong/repo"
+`,
+    );
+    const findings = checkRepoUrlMatch([cratesPkg('a', p)], {
+      githubRepository: 'acme/widget',
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      package: 'a',
+      declaredOwnerRepo: 'wrong/repo',
+      expectedOwnerRepo: 'acme/widget',
+    });
+  });
+
+  it('pypi: passes when [project.urls].Repository matches', () => {
+    const p = join(dir, 'a');
+    writePyproject(
+      p,
+      `[project]
+name = "a"
+dynamic = ["version"]
+[project.urls]
+Repository = "https://github.com/acme/widget"
+`,
+    );
+    expect(
+      checkRepoUrlMatch([pypiPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('pypi: fails when [project.urls].Repository resolves to a different owner/repo', () => {
+    const p = join(dir, 'a');
+    writePyproject(
+      p,
+      `[project]
+name = "a"
+dynamic = ["version"]
+[project.urls]
+Repository = "https://github.com/wrong/repo"
+`,
+    );
+    const findings = checkRepoUrlMatch([pypiPkg('a', p)], {
+      githubRepository: 'acme/widget',
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.declaredOwnerRepo).toBe('wrong/repo');
+  });
+
+  it('skips packages whose manifest does not declare a repository field (other checks own that)', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, { name: 'a', version: '0.0.0' });
+    expect(
+      checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('skips the check entirely when githubRepository is undefined (local CLI run, no GHA context)', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/wrong/repo.git',
+    });
+    expect(checkRepoUrlMatch([npmPkg('a', p)], {})).toEqual([]);
+    expect(checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: '' })).toEqual([]);
+  });
+
+  it('parses the ssh URL form (git@github.com:owner/repo.git) to owner/repo', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: { type: 'git', url: 'git@github.com:acme/widget.git' },
+    });
+    expect(
+      checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('parses plain https URLs without the .git suffix or with a trailing slash', () => {
+    const a = join(dir, 'a');
+    const b = join(dir, 'b');
+    writePkgJson(a, {
+      name: 'a',
+      version: '0.0.0',
+      repository: { type: 'git', url: 'https://github.com/acme/widget' },
+    });
+    writePkgJson(b, {
+      name: 'b',
+      version: '0.0.0',
+      repository: { type: 'git', url: 'https://github.com/acme/widget/' },
+    });
+    expect(
+      checkRepoUrlMatch(
+        [npmPkg('a', a), npmPkg('b', b)],
+        { githubRepository: 'acme/widget' },
+      ),
+    ).toEqual([]);
+  });
+
+  it('reports every failing package, not just the first', () => {
+    const a = join(dir, 'a');
+    const b = join(dir, 'b');
+    writePkgJson(a, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/wrong/a.git',
+    });
+    writePkgJson(b, {
+      name: 'b',
+      version: '0.0.0',
+      repository: 'git+https://github.com/wrong/b.git',
+    });
+    const findings = checkRepoUrlMatch(
+      [npmPkg('a', a), npmPkg('b', b)],
+      { githubRepository: 'acme/widget' },
+    );
+    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
+  });
+
+  it('requireRepoUrlMatch throws with PIOT_REPO_URL_MISMATCH when any package mismatches', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/wrong/repo.git',
+    });
+    expect(() =>
+      requireRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).toThrow(/PIOT_REPO_URL_MISMATCH/);
+  });
+
+  it('requireRepoUrlMatch error message names declared + expected owner/repo and the manifest path', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/wrong/repo.git',
+    });
+    try {
+      requireRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' });
+      throw new Error('expected requireRepoUrlMatch to throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('wrong/repo');
+      expect(msg).toContain('acme/widget');
+      expect(msg).toContain(join(p, 'package.json'));
+    }
+  });
+
+  it('requireRepoUrlMatch returns silently when every package matches', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, {
+      name: 'a',
+      version: '0.0.0',
+      repository: 'git+https://github.com/acme/widget.git',
+    });
+    expect(() =>
+      requireRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
+    ).not.toThrow();
+  });
+});
+
+describe('checkRepoPublic / requireRepoPublic — repo must not be private', () => {
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  it('returns null when the GitHub API reports the repo as public', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: false, visibility: 'public' })),
+    );
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toBeNull();
+  });
+
+  it('returns a `private` finding when the GitHub API reports the repo as private', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: true, visibility: 'private' })),
+    );
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      githubToken: 't',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toMatchObject({
+      githubRepository: 'acme/widget',
+      reason: 'private',
+    });
+  });
+
+  it('returns a `not-found-or-private` finding on a 404 (could be private or non-existent)', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(404, { message: 'Not Found' })),
+    );
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toMatchObject({
+      githubRepository: 'acme/widget',
+      reason: 'not-found-or-private',
+    });
+  });
+
+  it('skips entirely when githubRepository is undefined or empty', async () => {
+    const fetchImpl = vi.fn();
+    expect(
+      await checkRepoPublic({
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).toBeNull();
+    expect(
+      await checkRepoPublic({
+        githubRepository: '',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('sends Authorization: Bearer <token> when githubToken is supplied', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: false })),
+    ) as unknown as typeof fetch;
+    await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      githubToken: 'ghs_abc123',
+      fetchImpl,
+    });
+    const mock = fetchImpl as unknown as { mock: { calls: unknown[][] } };
+    const call = mock.mock.calls[0] ?? [];
+    const init = call[1] as RequestInit | undefined;
+    const headers = init?.headers as Record<string, string> | undefined;
+    const auth = headers
+      ? headers['authorization'] ?? headers['Authorization']
+      : undefined;
+    expect(auth).toBe('Bearer ghs_abc123');
+  });
+
+  it('hits the canonical GitHub repos endpoint with the owner/repo slug', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: false })),
+    ) as unknown as typeof fetch;
+    await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl,
+    });
+    const mock = fetchImpl as unknown as { mock: { calls: unknown[][] } };
+    const url = mock.mock.calls[0]?.[0] as string | undefined;
+    expect(url).toBe('https://api.github.com/repos/acme/widget');
+  });
+
+  it('requireRepoPublic throws with PIOT_REPO_PRIVATE when the repo is private', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: true })),
+    );
+    await expect(
+      requireRepoPublic({
+        githubRepository: 'acme/widget',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/PIOT_REPO_PRIVATE/);
+  });
+
+  it('requireRepoPublic error message names the owner/repo and explains why private repos are rejected', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: true })),
+    );
+    try {
+      await requireRepoPublic({
+        githubRepository: 'acme/widget',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+      throw new Error('expected requireRepoPublic to throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('acme/widget');
+      expect(msg).toMatch(/provenance|private/i);
+    }
+  });
+
+  it('requireRepoPublic returns silently when the repo is public', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(200, { private: false })),
+    );
+    await expect(
+      requireRepoPublic({
+        githubRepository: 'acme/widget',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).resolves.toBeUndefined();
   });
 });
