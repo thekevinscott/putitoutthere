@@ -91,4 +91,30 @@ describeWhenWorkflowExists('#309 CHANGELOG evidence-check workflow contract', ()
       /conclusion|status|success|completed/i,
     );
   });
+
+  it('waits for cited workflow_runs to reach a terminal state before failing (#354)', () => {
+    // Without a wait, evidence-check races every workflow it cites:
+    // both fire on `pull_request:` in parallel, evidence-check completes
+    // in ~3-6s, the cited unit / integration / e2e workflows take 20s+,
+    // so on a fresh PR push the cited runs are still `in_progress` when
+    // this check first queries and the check fails with "no successful
+    // GitHub Actions run or job matched ..." even though the evidence
+    // is about to land. The fix is to poll cited runs until they reach
+    // a terminal state (success / failure / cancelled / timed_out) or
+    // a bounded deadline elapses, and only then make the success/fail
+    // decision against the final state.
+    const text = readWorkflow();
+    expect(
+      text,
+      'evidence-check must sleep+retry rather than failing on cited runs still in flight',
+    ).toMatch(/\bsleep\b/i);
+    expect(
+      text,
+      'the wait must be bounded by an explicit deadline',
+    ).toMatch(/deadline|timeout/i);
+    expect(
+      text,
+      'the wait must observe in-flight cited runs (queued / in_progress) to know when to stop',
+    ).toMatch(/in_progress|pending|queued/i);
+  });
 });

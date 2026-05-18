@@ -103,6 +103,11 @@ jobs:
             return workflowRuns;
           }
 
+          function resetRunCaches() {
+            workflowRuns = null;
+            jobsByRun.clear();
+          }
+
           function jobsForRun(runId) {
             if (jobsByRun.has(runId)) return jobsByRun.get(runId);
             const response = ghApi(`repos/${repository}/actions/runs/${runId}/jobs?per_page=100`);
@@ -128,6 +133,60 @@ jobs:
               if (run.status !== 'completed' || run.conclusion !== 'success') return false;
               return runMatches(run, citation);
             });
+          }
+
+          // Race-aware wait: evidence-check fires on `pull_request:` in parallel
+          // with every workflow whose evidence it cites (test.yml, integration,
+          // e2e, ...). Evidence check completes in 3-6s; cited workflows take
+          // 20s+. Without polling, on a fresh PR push the cited runs are still
+          // `in_progress` (or `queued`) — or not yet indexed under
+          // `actions/runs?head_sha=...` at all — when we first query, and the
+          // check fails with "no successful GitHub Actions run or job matched
+          // ..." even though the evidence is about to land. Collect every
+          // citation up front, then poll per-citation resolution until every
+          // citation is `passed` / `failed` or the bounded deadline elapses,
+          // and only then run the downstream success/fail decision.
+          const POLL_INTERVAL_MS = 30 * 1000;
+          const POLL_DEADLINE_MS = Date.now() + 20 * 60 * 1000;
+
+          function citedRunNeedles() {
+            const needles = new Set();
+            for (const bullet of addedUnreleasedBullets()) {
+              const evidence = bullet.text.match(/\((verified by|no fixture):\s*([^)]+)\)\s*$/i);
+              if (!evidence) continue;
+              if (evidence[1].toLowerCase() === 'no fixture') continue;
+              for (const citation of evidence[2].split(',').map((p) => p.trim()).filter(Boolean)) {
+                if (allowedBuckets.has(citation.split('/')[0])) needles.add(citation);
+              }
+            }
+            return needles;
+          }
+
+          function citationResolution(citation) {
+            // 'passed' — at least one matching run succeeded.
+            // 'failed' — every matching run reached a terminal state and none succeeded.
+            // 'pending' — no matching runs yet, OR at least one match is still queued/in_progress.
+            const matches = runsForHead().filter((run) => runMatches(run, citation));
+            if (matches.length === 0) return 'pending';
+            if (matches.some((r) => r.status === 'completed' && r.conclusion === 'success')) return 'passed';
+            if (matches.every((r) => r.status === 'completed')) return 'failed';
+            return 'pending';
+          }
+
+          const needles = citedRunNeedles();
+          if (needles.size > 0) {
+            while (Date.now() < POLL_DEADLINE_MS) {
+              const pendingCitations = [...needles].filter((c) => citationResolution(c) === 'pending');
+              if (pendingCitations.length === 0) break;
+              const elapsedSeconds = Math.round((Date.now() - (POLL_DEADLINE_MS - 20 * 60 * 1000)) / 1000);
+              console.log(
+                `evidence-check: t+${elapsedSeconds}s — ${pendingCitations.length} citation(s) ` +
+                  `still pending (no matching workflow_run yet, or matches still in_progress / queued): ` +
+                  `${pendingCitations.join(', ')}`,
+              );
+              execFileSync('sleep', [String(POLL_INTERVAL_MS / 1000)], { stdio: 'ignore' });
+              resetRunCaches();
+            }
           }
 
           const failures = [];
