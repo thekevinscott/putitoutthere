@@ -354,7 +354,12 @@ function defaultRunsOn(target: string): string {
     return 'macos-latest';
   }
   if (target.includes('windows') || target.includes('win32') || target.includes('msvc')) {
-    return 'windows-latest';
+    // Pinned: GitHub is migrating windows-latest → windows-2025-vs2026
+    // between 2026-06-08 and 2026-06-15. Tracking the floating label would
+    // silently move every consumer's Windows release runs onto VS2026 on
+    // the cutover. Consumers that want a different image opt in via the
+    // per-target `{ triple, runner }` override. See issue #354.
+    return 'windows-2022';
   }
   if (target.includes('aarch64-unknown-linux') || target.includes('aarch64-linux')) {
     // Native arm runners are free for public repos.

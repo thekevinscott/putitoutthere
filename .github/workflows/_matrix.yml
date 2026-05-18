@@ -152,8 +152,8 @@ jobs:
       # Targets resolve to native runners via `defaultRunsOn` in
       # `src/plan.ts`, so cargo cross-compile linkers are not needed:
       # x86_64-linux on ubuntu-latest, aarch64-linux on ubuntu-24.04-arm,
-      # darwin on macos-latest, windows on windows-latest. Rust is
-      # pre-installed on all GHA runners; we only `rustup target add`
+      # darwin on macos-latest, windows on windows-2022 (pinned; see #354).
+      # Rust is pre-installed on all GHA runners; we only `rustup target add`
       # to make the triple known.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — add Rust target
