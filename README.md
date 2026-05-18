@@ -116,6 +116,11 @@ does not run `setup-node` against your sources, and never holds a
 publishable artifact in memory; its `permissions:` block is
 `contents: read` only.
 
+`check.yml` takes no inputs. The Node version is pinned internally
+because no consumer build steps run on this code path — the
+`node_version` knob on `build.yml` / `release.yml` does not exist
+here. Wire `check.yml` exactly as shown above.
+
 ### 1c. Recommended: drop in `.github/workflows/build-check.yml`
 
 Run the same plan + build matrix on every PR, with the publish step
@@ -251,7 +256,7 @@ version = 1   # required; only 1 is valid today
 | Field        | Type                   | Notes                                              |
 |--------------|------------------------|----------------------------------------------------|
 | `pypi`       | string                 | Override `name` → PyPI registered name.            |
-| `build`      | enum                   | `maturin` \| `setuptools` \| `hatch`. Required.    |
+| `build`      | enum                   | `maturin` \| `setuptools` \| `hatch`. Optional. Default `setuptools`. |
 | `targets`    | (string \| object)[]   | Required when `build = "maturin"`. Triples or `{ triple, runner }` objects. |
 | `bundle_cli` | table                  | Opt-in: cross-compile a Rust CLI per target and stage it into each wheel. Only valid with `build = "maturin"`. See [Recipes → Rust CLI inside a PyPI wheel](#rust-cli-inside-a-pypi-wheel). |
 
@@ -383,6 +388,13 @@ scopes a non-default bump to specific packages.
 
 The trailer matches anywhere in the commit body. If multiple `release:` lines
 are present, the **last** one wins.
+
+The parser is intentionally lenient on three points: the key is
+case-insensitive (`Release:` and `RELEASE:` both match), leading
+whitespace before `release:` is allowed, and an empty package list
+(`release: minor []`) is equivalent to no list (`release: minor`).
+The documented forms above are the canonical shape; the leniency
+exists so commits authored under varied review styles still parse.
 
 ## Cascade
 
@@ -773,6 +785,29 @@ ignored by `hatch-vcs`; only the global form works.
 
 If a Python package can't fit any of these three shapes, it's outside
 putitoutthere's scope — write your own release workflow.
+
+## Error codes
+
+Every consumer-visible failure carries a stable `PIOT_*` code in the
+GitHub Actions `::error::` annotation and in the corresponding log
+line. Grep the run log for the code, then look it up here.
+
+| Code | What trips it | Where it fires |
+|------|---------------|----------------|
+| `PIOT_NPM_MISSING_REPOSITORY` | An npm package's `package.json` is missing a non-empty `repository` field. Required by `npm publish --provenance`. | PR-time (`check.yml`) and publish-time preflight. See [`kind = "npm"`](#kind--npm). |
+| `PIOT_CRATES_NAME_MISMATCH` | `Cargo.toml`'s `[package].name` disagrees with the configured `[[package]].name` (or `crate` override). | PR-time and publish-time. See [`kind = "crates"`](#kind--crates). |
+| `PIOT_CRATES_MISSING_METADATA` | `Cargo.toml` lacks `[package].description` and/or `license` (or `license-file`). crates.io 400s without it. | PR-time and publish-time. |
+| `PIOT_CRATES_FEATURE_NOT_DECLARED` | A `features` entry (on the package or in `bundle_cli.features`) is not declared in the crate's `[features]` table. | PR-time and publish-time. |
+| `PIOT_CRATES_MISSING_BIN` | `bundle_cli.bin` is set but the target crate has no `[[bin]]` (or implicit-binary) of that name. | PR-time and publish-time. |
+| `PIOT_CRATES_WORKSPACE_VERSION_MISMATCH` | `Cargo.toml` declares `version.workspace = true` but no ancestor declares `[workspace.package].version`. | PR-time and publish-time. |
+| `PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED` | crates.io returned 404 because the crate has never been published. Trusted Publishing binds to an already-published crate. Bootstrap with `CARGO_REGISTRY_TOKEN` (see [crates.io](#cratesio) above). | Publish-time only — the registry's response is the signal. |
+| `PIOT_PYPI_STATIC_VERSION` | `pyproject.toml` declares a static `[project].version = "..."` literal. Use `[project].dynamic = ["version"]` instead (see [Python version source](#python-version-source--required-shape)). | PR-time and publish-time. |
+| `PIOT_PYPI_NAME_MISMATCH` | `pyproject.toml`'s `[project].name` disagrees with the configured `[[package]].name` (or `pypi` override). | PR-time and publish-time. |
+| `PIOT_PYPI_BUILD_BACKEND_MISMATCH` | `[build-system].build-backend` is set but doesn't match the configured `build` mode (`maturin` → `maturin`, `setuptools` → `setuptools.build_meta`, `hatch` → `hatchling.build`). | PR-time and publish-time. |
+| `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND` | `[project].dynamic` contains `"version"` but no `[tool.hatch.version]` or `[tool.setuptools_scm]` block declares the source. | PR-time and publish-time. |
+| `PIOT_PYPI_MATURIN_INCLUDE_MISSING` | `bundle_cli` is set on a maturin package but `[tool.maturin].include` doesn't cover `bundle_cli.stage_to`. The cross-compiled binary wouldn't land in any wheel. | PR-time and publish-time. |
+| `PIOT_AUTH_NO_TOKEN` | The publish job reached the registry-auth step with no token resolved (neither an OIDC-minted token nor a caller-provided long-lived token). Almost always means the reusable workflow's trusted-publisher exchange failed silently or the caller-provided secret was empty. | Publish-time only. |
+| `PIOT_PUBLISH_EMPTY_PLAN` | `publish` was invoked but `plan` returned zero rows for a reason other than `release: skip`. The reusable workflow's gate normally prevents this; if it fires, the gate was bypassed or the engine is inconsistent. | Publish-time only. |
 
 ## Project layout
 
