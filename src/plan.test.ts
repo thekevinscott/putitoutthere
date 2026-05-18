@@ -453,7 +453,10 @@ describe('plan: npm kinds', () => {
     expect(main.artifact_name).toBe('lib-napi-main');
     expect(main.runs_on).toBe('ubuntu-latest');
     const win = matrix.find((r) => r.target === 'x86_64-pc-windows-msvc')!;
-    expect(win.runs_on).toBe('windows-latest');
+    // Pinned to windows-2022 (not windows-latest) so consumer releases don't
+    // silently migrate to VS2026 on 2026-06-15 when GitHub flips
+    // windows-latest → windows-2025-vs2026. See issue #354.
+    expect(win.runs_on).toBe('windows-2022');
     expect(win.artifact_name).toBe('lib-napi-x86_64-pc-windows-msvc');
   });
 
