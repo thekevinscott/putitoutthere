@@ -129,6 +129,62 @@ describe('publish: pre-flight and completeness', () => {
     expect(handler.publish).not.toHaveBeenCalled();
   });
 
+  it('aborts when GITHUB_REPOSITORY does not match package.json#repository.url', async () => {
+    writeRepoFile(
+      'packages/ts/package.json',
+      JSON.stringify({
+        name: 'lib-js',
+        version: '0.0.0',
+        repository: { type: 'git', url: 'git+https://github.com/wrong/repo.git' },
+      }),
+    );
+    git(['add', '-A']);
+    git(['commit', '-m', 'manifest url\n\nrelease: patch']);
+    process.env.GITHUB_REPOSITORY = 'acme/widget';
+    const handler = makeHandler();
+    await expect(
+      publish({ cwd: repo, handlerFor: () => handler }),
+    ).rejects.toThrow(/PIOT_REPO_URL_MISMATCH/);
+    expect(handler.publish).not.toHaveBeenCalled();
+  });
+
+  it('aborts when the GitHub repository the workflow is running from is private', async () => {
+    writeRepoFile(
+      'packages/ts/package.json',
+      JSON.stringify({
+        name: 'lib-js',
+        version: '0.0.0',
+        repository: { type: 'git', url: 'git+https://github.com/acme/widget.git' },
+      }),
+    );
+    git(['add', '-A']);
+    git(['commit', '-m', 'manifest url\n\nrelease: patch']);
+    process.env.GITHUB_REPOSITORY = 'acme/widget';
+    process.env.GITHUB_TOKEN = 'gha-token';
+    const fakeFetch = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ private: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fakeFetch);
+    try {
+      const handler = makeHandler();
+      await expect(
+        publish({ cwd: repo, handlerFor: () => handler }),
+      ).rejects.toThrow(/PIOT_REPO_PRIVATE/);
+      expect(handler.publish).not.toHaveBeenCalled();
+      expect(fakeFetch).toHaveBeenCalledWith(
+        'https://api.github.com/repos/acme/widget',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('aborts on incomplete artifacts', async () => {
     // Swap to a pypi-kind config so the completeness check actually
     // fires (vanilla-npm-noarch and crates rows skip — npm and cargo

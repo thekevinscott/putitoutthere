@@ -110,6 +110,22 @@ export const ErrorCodes = {
    *  The fix is one bootstrap publish with a classic `CARGO_REGISTRY_TOKEN`;
    *  trusted publishing works for every release after. #284. */
   CRATES_FIRST_PUBLISH_TP_REJECTED: 'PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED',
+  /** A manifest's declared repository URL resolves to a different
+   *  `owner/repo` than the GitHub repository the workflow is running
+   *  from (`GITHUB_REPOSITORY`). npm's provenance verification compares
+   *  `package.json#repository.url` against the OIDC source claim and
+   *  returns a 422 after artifact upload — Cargo.toml `[package].repository`
+   *  and pyproject.toml `[project.urls]` carry the same risk on
+   *  crates.io / PyPI trusted-publisher paths. Failing at preflight
+   *  catches the mismatch in milliseconds. */
+  REPO_URL_MISMATCH: 'PIOT_REPO_URL_MISMATCH',
+  /** The GitHub repository the workflow is running from is private.
+   *  putitoutthere refuses to publish from a private repository:
+   *  npm provenance attestations embed a source-ref pointer that
+   *  consumers cannot dereference when the repo is private, and the
+   *  same source-visibility expectation underpins the trusted-publisher
+   *  story on the other registries. */
+  REPO_PRIVATE: 'PIOT_REPO_PRIVATE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -133,4 +149,6 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.CRATES_FEATURE_NOT_DECLARED,
   ErrorCodes.CRATES_WORKSPACE_VERSION_MISMATCH,
   ErrorCodes.CRATES_FIRST_PUBLISH_TP_REJECTED,
+  ErrorCodes.REPO_URL_MISMATCH,
+  ErrorCodes.REPO_PRIVATE,
 ];

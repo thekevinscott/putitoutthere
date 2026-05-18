@@ -34,6 +34,8 @@ import {
   requireProvenanceMetadata,
   requirePyprojectShape,
   requirePypiVersionSource,
+  requireRepoPublic,
+  requireRepoUrlMatch,
 } from './preflight.js';
 import { withRetry } from './retry.js';
 import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
@@ -120,6 +122,24 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     hatchling / cargo finally tripped on them. #301.
   requirePyprojectShape(selectedPackages);
   requireCargoShape(selectedPackages, { cwd });
+
+  // 2f. Pre-flight manifest repository URL vs GITHUB_REPOSITORY: catches
+  //     the npm-provenance 422 ("repository.url is X, expected to match Y
+  //     from provenance") and the analogous mismatch on crates.io / PyPI
+  //     trusted-publisher paths. Pure local string compare against the
+  //     GHA-provided env var.
+  requireRepoUrlMatch(selectedPackages, {
+    githubRepository: process.env.GITHUB_REPOSITORY,
+  });
+
+  // 2g. Pre-flight GitHub repository visibility. Provenance attestations
+  //     embed a public source-ref pointer; publishing from a private
+  //     repo silently degrades every consumer's ability to verify the
+  //     artifact. Hard-fail before any side effect.
+  await requireRepoPublic({
+    githubRepository: process.env.GITHUB_REPOSITORY,
+    githubToken: process.env.GITHUB_TOKEN,
+  });
 
   // 3. Artifact completeness.
   // First normalize the layout in case actions/download-artifact@v8
