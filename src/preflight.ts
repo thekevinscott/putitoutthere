@@ -983,14 +983,34 @@ export interface RepoUrlMatchFinding {
   declaredUrl: string;
 }
 
+// User-facing pointer for the manifest-repository-URL recipe. Surfaced
+// verbatim in the thrown error so the consumer has a copy/paste fix
+// instead of a code-search target.
+const REPO_URL_DOC_POINTER =
+  'https://thekevinscott.github.io/putitoutthere/guide/repository-url';
+
 export function checkRepoUrlMatch(
-  _packages: readonly Package[],
-  _options: RepoUrlMatchOptions = {},
+  packages: readonly Package[],
+  options: RepoUrlMatchOptions = {},
 ): RepoUrlMatchFinding[] {
-  // Stub: real implementation lands in the next commit. Returning an
-  // empty list keeps callers green; the red tests in preflight.test.ts
-  // expect findings on a mismatch.
-  return [];
+  const expectedOwnerRepo = normalizeOwnerRepo(options.githubRepository);
+  if (expectedOwnerRepo === null) return [];
+  const findings: RepoUrlMatchFinding[] = [];
+  for (const p of packages) {
+    const declared = readDeclaredRepoUrl(p);
+    if (declared === null) continue;
+    const declaredOwnerRepo = parseOwnerRepo(declared.url);
+    if (declaredOwnerRepo === null) continue;
+    if (declaredOwnerRepo.toLowerCase() === expectedOwnerRepo.toLowerCase()) continue;
+    findings.push({
+      package: p.name,
+      manifestPath: declared.manifestPath,
+      declaredOwnerRepo,
+      expectedOwnerRepo,
+      declaredUrl: declared.url,
+    });
+  }
+  return findings;
 }
 
 export function requireRepoUrlMatch(
@@ -999,8 +1019,150 @@ export function requireRepoUrlMatch(
 ): void {
   const findings = checkRepoUrlMatch(packages, options);
   if (findings.length === 0) return;
-  /* v8 ignore next 2 -- stub; throw path covered when implementation lands */
-  throw new Error('stub');
+  const lines: string[] = [
+    `[${ErrorCodes.REPO_URL_MISMATCH}] manifest repository URL does not match GITHUB_REPOSITORY.`,
+    '',
+    'Failing packages:',
+  ];
+  for (const f of findings) {
+    lines.push(
+      `  - ${f.package}: ${f.manifestPath}`,
+      `      declared:  ${f.declaredOwnerRepo}  (${f.declaredUrl})`,
+      `      expected:  ${f.expectedOwnerRepo}  (from GITHUB_REPOSITORY)`,
+    );
+  }
+  lines.push(
+    '',
+    'Why: npm verifies `package.json#repository.url` against the OIDC source claim',
+    'before accepting a `--provenance` publish and rejects mismatches with a 422',
+    'after the artifact has already been uploaded. crates.io and PyPI carry the same',
+    'risk on their trusted-publisher paths.',
+    '',
+    'Fix: either update the manifest URL to match the GitHub repository this workflow',
+    'is running from, or rename the GitHub repository so the slugs line up. Run the',
+    'release again once the manifest and the repo agree.',
+    '',
+    `See ${REPO_URL_DOC_POINTER}.`,
+  );
+  throw new Error(lines.join('\n'));
+}
+
+interface DeclaredRepoUrl {
+  url: string;
+  manifestPath: string;
+}
+
+function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
+  if (p.kind === 'npm') {
+    const manifestPath = join(p.path, 'package.json');
+    const parsed = readJson(manifestPath);
+    if (parsed === null) return null;
+    const repository = (parsed as { repository?: unknown }).repository;
+    if (typeof repository === 'string' && repository.trim().length > 0) {
+      return { url: repository.trim(), manifestPath };
+    }
+    if (repository !== null && typeof repository === 'object') {
+      const url = (repository as { url?: unknown }).url;
+      if (typeof url === 'string' && url.trim().length > 0) {
+        return { url: url.trim(), manifestPath };
+      }
+    }
+    return null;
+  }
+  if (p.kind === 'crates') {
+    const manifestPath = join(p.path, 'Cargo.toml');
+    const parsed = readTomlDoc(manifestPath);
+    if (parsed === null) return null;
+    const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
+    const repo = pkgTable.repository;
+    if (typeof repo === 'string' && repo.trim().length > 0) {
+      return { url: repo.trim(), manifestPath };
+    }
+    return null;
+  }
+  if (p.kind === 'pypi') {
+    const manifestPath = join(p.path, 'pyproject.toml');
+    const parsed = readTomlDoc(manifestPath);
+    if (parsed === null) return null;
+    const project = (parsed.project ?? {}) as Record<string, unknown>;
+    const urls = (project.urls ?? {}) as Record<string, unknown>;
+    // PEP 621 leaves the key casing to the project, and PyPI normalises
+    // common labels case-insensitively. Accept the canonical "Repository"
+    // first and fall back to common synonyms (source-code repos vs.
+    // homepage links) so a project picking any reasonable label still
+    // gets the check.
+    for (const key of ['Repository', 'repository', 'Source', 'source', 'Homepage', 'homepage']) {
+      const candidate = urls[key];
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return { url: candidate.trim(), manifestPath };
+      }
+    }
+    return null;
+  }
+  /* v8 ignore next -- exhaustive over Kind */
+  return null;
+}
+
+function readJson(path: string): unknown {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function readTomlDoc(path: string): Record<string, unknown> | null {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  try {
+    return parseToml(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOwnerRepo(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  // Tolerate accidental wrapping (e.g. `https://github.com/owner/repo`
+  // landed in the GITHUB_REPOSITORY env var by misconfiguration); the
+  // GHA-provided value is always `owner/repo` so this is defence in
+  // depth, not a documented surface.
+  const slugMatch = trimmed.match(/^([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/);
+  if (slugMatch) {
+    return `${slugMatch[1]}/${slugMatch[2]}`;
+  }
+  return parseOwnerRepo(trimmed);
+}
+
+// Recognises the canonical GitHub URL shapes the npm / cargo / hatch
+// ecosystems serialise into manifests:
+//   - git+https://github.com/owner/repo(.git)?
+//   - https://github.com/owner/repo(.git)?(/)?
+//   - http://github.com/owner/repo(.git)?(/)?
+//   - git@github.com:owner/repo(.git)?
+//   - ssh://git@github.com/owner/repo(.git)?
+// Non-github hosts return null; the check skips those packages rather
+// than false-positive on legitimately-hosted forks (provenance still
+// catches them at publish time).
+function parseOwnerRepo(url: string): string | null {
+  const stripped = url.trim().replace(/^git\+/i, '');
+  const match = stripped.match(
+    /github\.com[/:]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/,
+  );
+  if (match === null) return null;
+  return `${match[1]}/${match[2]}`;
 }
 
 /* ----------------------- repository visibility ----------------------- */
@@ -1034,11 +1196,49 @@ export interface RepoVisibilityFinding {
   reason: 'private' | 'not-found-or-private';
 }
 
-export function checkRepoPublic(
-  _options: RepoVisibilityOptions = {},
+const REPO_VISIBILITY_DOC_POINTER =
+  'https://thekevinscott.github.io/putitoutthere/guide/public-repo';
+
+export async function checkRepoPublic(
+  options: RepoVisibilityOptions = {},
 ): Promise<RepoVisibilityFinding | null> {
-  // Stub: real implementation lands in the next commit.
-  return Promise.resolve(null);
+  const githubRepository = options.githubRepository?.trim();
+  if (githubRepository === undefined || githubRepository.length === 0) {
+    return null;
+  }
+  const slug = normalizeOwnerRepo(githubRepository);
+  // Fall back to the raw value if normalization fails; the API call
+  // will 404 and the check will report `not-found-or-private`, which
+  // is the right diagnosis for a malformed slug we can't disambiguate.
+  /* v8 ignore next -- normalizeOwnerRepo handles every owner/repo shape we get from GITHUB_REPOSITORY */
+  const apiSlug = slug ?? githubRepository;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const headers: Record<string, string> = {
+    accept: 'application/vnd.github+json',
+    'user-agent': 'putitoutthere',
+  };
+  if (options.githubToken !== undefined && options.githubToken.length > 0) {
+    headers.authorization = `Bearer ${options.githubToken}`;
+  }
+  const url = `https://api.github.com/repos/${apiSlug}`;
+  const res = await fetchImpl(url, { method: 'GET', headers });
+  if (res.status === 404) {
+    return { githubRepository: apiSlug, reason: 'not-found-or-private' };
+  }
+  if (res.status === 200) {
+    const body = (await res.json()) as { private?: unknown; visibility?: unknown };
+    const isPrivate =
+      body.private === true ||
+      (typeof body.visibility === 'string' && body.visibility !== 'public');
+    if (isPrivate) {
+      return { githubRepository: apiSlug, reason: 'private' };
+    }
+    return null;
+  }
+  /* v8 ignore next 4 -- defensive; the repos endpoint reliably returns 200/404 for visibility */
+  throw new Error(
+    `GitHub API GET ${url} returned ${res.status}; cannot determine repository visibility`,
+  );
 }
 
 export async function requireRepoPublic(
@@ -1046,8 +1246,26 @@ export async function requireRepoPublic(
 ): Promise<void> {
   const finding = await checkRepoPublic(options);
   if (finding === null) return;
-  /* v8 ignore next 2 -- stub; throw path covered when implementation lands */
-  throw new Error('stub');
+  const lines: string[] = [
+    `[${ErrorCodes.REPO_PRIVATE}] refusing to publish from a private GitHub repository (${finding.githubRepository}).`,
+    '',
+    finding.reason === 'private'
+      ? 'The GitHub API reports this repository as private.'
+      : 'The GitHub API returned 404 for this repository slug — either the repo is private and the configured token lacks access, or the slug does not exist.',
+    '',
+    'Why: npm provenance attestations embed a public source-ref pointer that',
+    'consumers cannot dereference on a private repo, and the same source-visibility',
+    'expectation underpins the trusted-publisher story across the registries we',
+    'publish to. Publishing from a private repo silently degrades every consumer\'s',
+    'ability to verify the artifact.',
+    '',
+    'Fix: make the repository public before publishing, or unset the release',
+    'trigger until visibility flips. See',
+    `  ${REPO_VISIBILITY_DOC_POINTER}`,
+    'for the trusted-publisher rationale and the registry-specific failure modes',
+    'this check exists to prevent.',
+  ];
+  throw new Error(lines.join('\n'));
 }
 
 export function requireCargoShape(
