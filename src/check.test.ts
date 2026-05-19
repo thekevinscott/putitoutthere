@@ -671,3 +671,55 @@ dynamic = ["version"]
     expect(runChecks({ cwd })).toEqual([]);
   });
 });
+
+describe('runChecks: repository URL match against GITHUB_REPOSITORY', () => {
+  function writeOneNpmPkg(repositoryUrl: string): void {
+    write(
+      'putitoutthere.toml',
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "lib-js"
+kind  = "npm"
+path  = "packages/ts"
+globs = ["packages/ts/**"]
+`,
+    );
+    write(
+      'packages/ts/package.json',
+      JSON.stringify({
+        name: 'lib-js',
+        version: '0.0.0',
+        repository: { type: 'git', url: repositoryUrl },
+      }),
+    );
+    write('packages/ts/index.ts', 'x');
+    commit();
+  }
+
+  it('passes when GITHUB_REPOSITORY matches the manifest URL', () => {
+    writeOneNpmPkg('git+https://github.com/acme/widget.git');
+    process.env.GITHUB_REPOSITORY = 'acme/widget';
+    expect(runChecks({ cwd })).toEqual([]);
+  });
+
+  it('flags PIOT_REPO_URL_MISMATCH when GITHUB_REPOSITORY disagrees with the manifest URL', () => {
+    writeOneNpmPkg('git+https://github.com/wrong/repo.git');
+    process.env.GITHUB_REPOSITORY = 'acme/widget';
+    const findings = runChecks({ cwd });
+    expect(
+      findings.some(
+        (f) => f.package === 'lib-js' && f.message.includes('PIOT_REPO_URL_MISMATCH'),
+      ),
+    ).toBe(true);
+  });
+
+  it('skips the URL-match check when GITHUB_REPOSITORY is unset (local CLI run)', () => {
+    writeOneNpmPkg('git+https://github.com/wrong/repo.git');
+    // setup.ts already deletes GITHUB_REPOSITORY; assert no PIOT_REPO_URL_MISMATCH.
+    const findings = runChecks({ cwd });
+    expect(findings.some((f) => f.message.includes('PIOT_REPO_URL_MISMATCH'))).toBe(false);
+  });
+});

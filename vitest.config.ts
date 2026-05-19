@@ -7,6 +7,7 @@ export default defineConfig({
       'test/fixtures/**/*.test.ts',
       'test/workflows/**/*.test.ts',
     ],
+    setupFiles: ['./test/setup.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',
