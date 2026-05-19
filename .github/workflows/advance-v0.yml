@@ -1,0 +1,87 @@
+name: Advance v0 floating tag
+
+# `v0` tracks main HEAD, not the latest release. Every push to main builds
+# the action bundle, folds it into a tag-only commit (mirroring the Fold
+# step in `release-npm.yml` — `dist-action/` is gitignored on main, so the
+# tag must point at a synthesized bundle commit for `uses:
+# thekevinscott/putitoutthere@v0` to resolve to a runnable action), and
+# force-moves `v0` to that commit.
+#
+# Trailer-gated registry releases (`release: minor` / `patch` / etc.) still
+# fire `release-npm.yml`, which cuts `putitoutthere-v0.x.y` tags. Those
+# tags are the permanent per-release record. `v0` is the floating ref
+# consumers compose against, and it stays fresh on every main commit.
+#
+# Concurrency: shares the `release` group with `release-npm.yml` so the two
+# workflows serialize per repo. When both fire on the same push, the
+# release workflow runs first (cutting versioned tags), then this workflow
+# advances `v0` to a fresh bundle commit on top of main HEAD.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm run build
+
+      - name: Build action bundle
+        run: pnpm run build:action
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Mirrors `release-npm.yml`'s Fold step: stage the freshly-built
+      # `dist-action/` bundle and create a commit on top of HEAD that
+      # forwards the parent commit's full body. Forwarding the body keeps
+      # any `release:` trailer on the parent visible to downstream tooling
+      # that re-reads HEAD (the dogfood publish re-derives plan from HEAD
+      # and would otherwise silently downgrade the bump — see
+      # `notes/handoff/2026-04-24-dist-action.md`).
+      - name: Fold action bundle into v0 commit
+        run: |
+          set -euo pipefail
+          git add -f dist-action/
+          if git diff --cached --quiet; then
+            echo "No bundle changes to commit (unexpected — build:action should have produced output)." >&2
+            exit 1
+          fi
+          {
+            printf 'chore(v0): bundle action\n\n'
+            git log -1 --format=%B HEAD
+          } | git commit -F -
+
+      - name: Force-move v0 to bundle commit
+        run: |
+          set -euo pipefail
+          target=$(git rev-parse HEAD)
+          echo "Moving v0 -> ${target}"
+          git tag -f v0 "${target}"
+          git push --force origin "refs/tags/v0"
