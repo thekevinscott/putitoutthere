@@ -122,6 +122,11 @@ jobs:
           } | git commit -F -
 
       - name: putitoutthere publish
+        env:
+          # The repository-visibility preflight check calls the GitHub
+          # API; an authenticated call gets 5000 req/hr instead of the
+          # unauthenticated 60, so a busy runner never rate-limits.
+          GITHUB_TOKEN: ${{ github.token }}
         run: node dist/cli-bin.js publish
 
       # Scaffolded workflows reference `thekevinscott/putitoutthere@v<major>`

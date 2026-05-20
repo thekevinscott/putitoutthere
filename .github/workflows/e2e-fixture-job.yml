@@ -771,6 +771,11 @@ jobs:
 
       - uses: ./
         env:
+          # The repository-visibility preflight check calls the GitHub
+          # API; an authenticated call gets 5000 req/hr instead of the
+          # unauthenticated 60, so a multi-fixture e2e run never
+          # rate-limits across its many publish jobs.
+          GITHUB_TOKEN: ${{ github.token }}
           # #304: routes the engine's npm handler at Verdaccio for
           # first-publish rows. Empty for steady-state rows so the handler
           # falls through to its normal real-npm + OIDC-TP path.

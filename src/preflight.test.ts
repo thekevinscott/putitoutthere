@@ -1874,16 +1874,58 @@ describe('checkRepoPublic / requireRepoPublic — repo must not be private', () 
     expect(finding).toMatchObject({ reason: 'private' });
   });
 
-  it('throws on an unexpected non-200/404 response (the API is not in a state we can interpret)', async () => {
+  it('returns null (indeterminate, non-fatal) on a 403 — a rate-limited API call says nothing about visibility', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(403, { message: 'API rate limit exceeded' })),
+    );
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toBeNull();
+  });
+
+  it('returns null (indeterminate, non-fatal) on a 429 rate-limit response', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(429, { message: 'Too Many Requests' })),
+    );
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toBeNull();
+  });
+
+  it('returns null (indeterminate, non-fatal) on a 5xx response', async () => {
     const fetchImpl = vi.fn(() => Promise.resolve(
       jsonResponse(500, { message: 'oh no' })),
     );
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toBeNull();
+  });
+
+  it('returns null (indeterminate, non-fatal) when the fetch itself rejects (network error)', async () => {
+    const fetchImpl = vi.fn(() => Promise.reject(new Error('ECONNRESET')));
+    const finding = await checkRepoPublic({
+      githubRepository: 'acme/widget',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(finding).toBeNull();
+  });
+
+  it('requireRepoPublic does not throw when the API call is rate-limited (403)', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(
+      jsonResponse(403, { message: 'API rate limit exceeded' })),
+    );
     await expect(
-      checkRepoPublic({
+      requireRepoPublic({
         githubRepository: 'acme/widget',
         fetchImpl: fetchImpl as unknown as typeof fetch,
       }),
-    ).rejects.toThrow(/500.*cannot determine repository visibility/);
+    ).resolves.toBeUndefined();
   });
 
   it('falls back to the raw input slug when it does not parse to owner/repo (e.g. a stray string)', async () => {

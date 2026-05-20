@@ -1221,7 +1221,15 @@ export async function checkRepoPublic(
     headers.authorization = `Bearer ${options.githubToken}`;
   }
   const url = `https://api.github.com/repos/${apiSlug}`;
-  const res = await fetchImpl(url, { method: 'GET', headers });
+  let res: Response;
+  try {
+    res = await fetchImpl(url, { method: 'GET', headers });
+  } catch (err) {
+    // A network failure says nothing about repository visibility.
+    // Treat it as indeterminate rather than blocking the release.
+    warnIndeterminate(apiSlug, `request failed (${(err as Error).message})`);
+    return null;
+  }
   if (res.status === 404) {
     return { githubRepository: apiSlug, reason: 'not-found-or-private' };
   }
@@ -1235,8 +1243,18 @@ export async function checkRepoPublic(
     }
     return null;
   }
-  throw new Error(
-    `GitHub API GET ${url} returned ${res.status}; cannot determine repository visibility`,
+  // Any other status (most commonly a 403 from an unauthenticated
+  // rate-limited call, or a transient 5xx) tells us nothing about
+  // visibility. Blocking the publish on "we couldn't reach the API"
+  // is the kind of release surprise this engine exists to prevent —
+  // treat it as indeterminate and non-fatal, with a visible warning.
+  warnIndeterminate(apiSlug, `GitHub API returned ${res.status}`);
+  return null;
+}
+
+function warnIndeterminate(apiSlug: string, detail: string): void {
+  process.stdout.write(
+    `::warning::repository visibility check skipped for ${apiSlug}: ${detail}\n`,
   );
 }
 
