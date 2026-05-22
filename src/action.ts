@@ -28,14 +28,17 @@ export async function main(): Promise<void> {
 
   // #276: write-version uses a different argv shape — `--path` (the
   // package dir, sourced from `working_directory`) and `--version`.
+  // #366: write-crate-version shares that shape — `--path` (the
+  // bundled-cli crate dir, sourced from `working_directory`) and
+  // `--version`.
   // #299: write-launcher takes `--path` (the matrix row's package dir,
   // sourced from `working_directory`) and reads `--cwd` from
   // process.cwd() — the runner working dir is the repo root, where
   // `putitoutthere.toml` lives.
-  // No `--json` on either: both subcommands emit a single human line;
-  // there's no structured output to consume.
+  // No `--json` on any of them: these subcommands emit a single human
+  // line; there's no structured output to consume.
   const argv = ['node', 'putitoutthere', command];
-  if (command === 'write-version') {
+  if (command === 'write-version' || command === 'write-crate-version') {
     if (workingDirectory) argv.push('--path', workingDirectory);
     if (versionInput) argv.push('--version', versionInput);
   } else if (command === 'write-launcher') {

@@ -315,6 +315,19 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: rustup target add "$TARGET"
 
+      # #366: mirror of the _matrix.yml write-crate-version step. Bump
+      # the crate's `[package].version` to matrix.version before
+      # `cargo build` bakes CARGO_PKG_VERSION into the binary, so the
+      # e2e fixture exercises the same pre-build version write a real
+      # consumer's npm bundled-cli release does.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — write crate version for ${{ matrix.name }}
+        uses: ./
+        with:
+          command: write-crate-version
+          working_directory: fixture-tree/${{ matrix.bundle_cli.crate_path }}
+          version: ${{ matrix.version }}
+
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — cargo build for ${{ matrix.target }} (${{ matrix.bundle_cli.bin }})
         shell: bash

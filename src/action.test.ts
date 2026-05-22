@@ -70,4 +70,18 @@ describe('action', () => {
     expect(stderrChunks.join('')).toMatch(/pyproject\.toml/);
   });
 
+  it('write-crate-version: forwards working_directory as --path and version as --version (#366)', async () => {
+    // The reusable workflow's `_matrix.yml` invokes the action with
+    // command: write-crate-version, working_directory:
+    // ${{ matrix.bundle_cli.crate_path }}, version: ${{ matrix.version }}.
+    // Confirm the dispatch arm forwards both inputs and exits non-zero
+    // on a missing Cargo.toml (the realistic failure shape for the
+    // action wrapper).
+    process.env.INPUT_COMMAND = 'write-crate-version';
+    process.env.INPUT_WORKING_DIRECTORY = '/path/that/does/not/exist';
+    process.env.INPUT_VERSION = '0.3.5';
+    await expect(main()).rejects.toThrow(/exit:1/);
+    expect(stderrChunks.join('')).toMatch(/Cargo\.toml/);
+  });
+
 });
