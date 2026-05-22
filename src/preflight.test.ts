@@ -1188,6 +1188,40 @@ path = "src/main.rs"
     expect(findings.some((f) => f.code === 'PIOT_CRATES_MISSING_BIN' && /my-cli/.test(f.detail))).toBe(true);
   });
 
+  it('walks glob `[workspace].members` entries so crate_path = "." resolves a member crate bin (#361)', () => {
+    // #361: cargo `[workspace].members` entries are globs. #337 taught
+    // the preflight `PIOT_CRATES_MISSING_BIN` walk to read *literal*
+    // member entries, but a glob entry (`members = ["packages/*"]`,
+    // the standard polyglot-repo shape) never resolves to a literal
+    // `<member>/Cargo.toml`, so the member crate's `[[bin]]` is never
+    // seen and the check false-fires for `crate_path = "."`.
+    const root = dir;
+    writeCargoToml(root, '[workspace]', 'members = ["packages/*"]', 'resolver = "2"');
+    writeCargoToml(
+      join(root, 'packages', 'rust'),
+      `[package]
+name = "rust-core"
+version = "0.0.0"
+
+[[bin]]
+name = "my-cli"
+path = "src/main.rs"
+`,
+    );
+    const pypiPath = join(root, 'py');
+    mkdirSync(pypiPath, { recursive: true });
+    const pyPkg = pkg('pypi', {
+      name: 'py-lib',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'my-cli', stage_to: 'py_lib/bin', crate_path: '.', features: [], no_default_features: false },
+    });
+    expect(
+      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
+    ).toEqual([]);
+  });
+
   it('honors an absolute bundle_cli.crate_path (skips resolve against cwd)', () => {
     // Exercises the absolute-path branch of cratePathAbs (preflight.ts:606).
     // Pass an already-absolute crate_path and pass a deliberately-wrong cwd;

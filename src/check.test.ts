@@ -586,6 +586,67 @@ path = "src/main.rs"
     ).toEqual([]);
   });
 
+  it("accepts maturin+bundle_cli when [workspace].members is a glob and the bin lives in a matched member crate", () => {
+    // #361: cargo `[workspace].members` entries are globs, and
+    // `members = ["packages/*"]` is the standard polyglot-repo shape —
+    // a Rust core crate under `packages/rust`, wrapped by sibling
+    // python/npm packages. #337 taught the bundle_cli check to walk
+    // *literal* member entries, but a glob entry never resolves to a
+    // literal `<member>/Cargo.toml`: the walk reads
+    // `packages/*/Cargo.toml`, finds nothing, and reports the bin as
+    // missing. The check must expand member globs the same way cargo
+    // does, otherwise `crate_path = "."` (the default) is unsatisfiable
+    // for any workspace that declares its members with a glob.
+    write('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+# crate_path defaults to "." (the workspace root).
+`);
+    write('packages/py/pyproject.toml', `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`);
+    // Workspace root Cargo.toml — members declared with a glob.
+    write('Cargo.toml', `
+[workspace]
+members = ["packages/*"]
+resolver = "2"
+`);
+    // Member crate (matched by the glob) carries the [[bin]].
+    write('packages/rust/Cargo.toml', `
+[package]
+name = "rust-core"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[[bin]]
+name = "my-cli"
+path = "src/main.rs"
+`);
+    write('packages/rust/src/main.rs', 'fn main(){}');
+    commit();
+    const findings = runChecks({ cwd });
+    expect(
+      findings.filter(
+        (f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message),
+      ),
+    ).toEqual([]);
+  });
+
   it("flags npm targets containing a triple that's not in TRIPLE_MAP", () => {
     write('putitoutthere.toml', `
 [putitoutthere]
