@@ -18,6 +18,10 @@ describe('expandRequiresPython', () => {
     expect(expandRequiresPython('>=3.10')).toEqual(['3.10', '3.11', '3.12', '3.13']);
   });
 
+  it('includes the latest released CPython for open-ended lower bounds (#375)', () => {
+    expect(expandRequiresPython('>=3.11')).toContain('3.14');
+  });
+
   it('honours an upper bound', () => {
     expect(expandRequiresPython('>=3.9,<3.12')).toEqual(['3.9', '3.10', '3.11']);
   });
