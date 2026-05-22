@@ -13,6 +13,8 @@
  *                    not surfaced in user-facing docs per non-goal #7.
  *   write-version  — bump a package's manifest to a planned version
  *                    (pre-build hook for maturin; #276)
+ *   write-crate-version — bump a crate's Cargo.toml to a planned
+ *                    version (pre-build hook for npm bundled-cli; #366)
  *   version        — print CLI version
  *
  * Global flags:
@@ -35,11 +37,20 @@ import { isAbsolute, resolve } from 'node:path';
 import { runChecks } from './check.js';
 import { plan } from './plan.js';
 import { publish } from './publish.js';
+import { writeCrateVersionForBuild } from './write-crate-version.js';
 import { writeLauncherFromConfig } from './write-launcher.js';
 import { writeVersionForBuild } from './write-version.js';
 import { VERSION } from './version.js';
 
-const COMMANDS = ['plan', 'publish', 'check', 'write-version', 'write-launcher', 'version'] as const;
+const COMMANDS = [
+  'plan',
+  'publish',
+  'check',
+  'write-version',
+  'write-crate-version',
+  'write-launcher',
+  'version',
+] as const;
 type Command = (typeof COMMANDS)[number];
 
 function isCommand(value: string): value is Command {
@@ -56,14 +67,15 @@ function printUsage(): void {
       '  publish        Execute the plan',
       '  check          Pre-merge configuration validation (#319)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
+      '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
       '  version        Print CLI version',
       '',
       'Options:',
       '  --cwd <path>      working directory',
       '  --config <path>   path to putitoutthere.toml',
-      '  --path <dir>      package directory (write-version)',
-      '  --version <v>     planned version (write-version)',
+      '  --path <dir>      package or crate directory (write-version / write-crate-version)',
+      '  --version <v>     planned version (write-version / write-crate-version)',
       '  --json            emit machine-readable output',
       '',
       'See https://github.com/thekevinscott/putitoutthere for docs.',
@@ -236,6 +248,22 @@ export async function run(argv: readonly string[]): Promise<number> {
         const written = writeVersionForBuild(target, flags.version);
         process.stdout.write(
           `write-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
+        );
+        return 0;
+      }
+      case 'write-crate-version': {
+        // #366: pre-build hook used by `_matrix.yml`'s npm bundled-cli
+        // steps. `cargo build` bakes CARGO_PKG_VERSION from the crate's
+        // Cargo.toml at compile time with no env override, so the
+        // manifest must match the planned version before the
+        // cross-compile runs — otherwise the bundled binary reports the
+        // stale on-disk literal from `--version`.
+        if (!flags.path) throw new Error('write-crate-version: --path <crate-dir> is required');
+        if (!flags.version) throw new Error('write-crate-version: --version <v> is required');
+        const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
+        const written = writeCrateVersionForBuild(target, flags.version);
+        process.stdout.write(
+          `write-crate-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
         );
         return 0;
       }

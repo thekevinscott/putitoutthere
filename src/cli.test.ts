@@ -473,6 +473,88 @@ globs = ["packages/ts/**"]
     }
   });
 
+  it('write-crate-version: rewrites Cargo.toml [package].version (#366)', async () => {
+    // `_matrix.yml`'s npm bundled-cli path invokes
+    // `command: write-crate-version` against the cross-compiled crate
+    // so `cargo build` bakes the planned version into the binary.
+    const dir = mkdtempSync(join(tmpdir(), 'cli-write-crate-version-'));
+    try {
+      writeFileSync(
+        join(dir, 'Cargo.toml'),
+        ['[package]', 'name = "dirsql"', 'version = "0.2.7"', 'edition = "2021"', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-crate-version',
+        '--path',
+        dir,
+        '--version',
+        '0.3.5',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).toContain('version = "0.3.5"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('write-crate-version: resolves a relative --path against --cwd (#366)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cli-write-crate-version-rel-'));
+    try {
+      const crate = join(root, 'crate');
+      mkdirSync(crate);
+      writeFileSync(
+        join(crate, 'Cargo.toml'),
+        ['[package]', 'name = "dirsql"', 'version = "0.2.7"', ''].join('\n'),
+        'utf8',
+      );
+      const code = await run([
+        'node',
+        'putitoutthere',
+        'write-crate-version',
+        '--cwd',
+        root,
+        '--path',
+        'crate',
+        '--version',
+        '0.3.5',
+      ]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(crate, 'Cargo.toml'), 'utf8')).toContain('version = "0.3.5"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('write-crate-version: errors when --path is missing (#366)', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run(['node', 'putitoutthere', 'write-crate-version', '--version', '0.3.5']);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/--path/);
+  });
+
+  it('write-crate-version: errors when --version is missing (#366)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-write-crate-version-no-version-'));
+    try {
+      const stderrChunks: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run(['node', 'putitoutthere', 'write-crate-version', '--path', dir]);
+      expect(code).toBe(1);
+      expect(stderrChunks.join('')).toMatch(/--version/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('write-launcher: writes bin/<bin>.js + updates package.json#bin for a bundled-cli npm package (#299)', async () => {
     // The matrix's main row invokes `command: write-launcher` so the
     // engine authors the per-platform launcher consumers used to have
