@@ -34,7 +34,12 @@ on:
         default: '24'
       python_version:
         description: >-
-          Python version for kind = "pypi" build steps. Default `3.12`.
+          Deprecated (#369): superseded by per-package
+          `python_versions` in `putitoutthere.toml` and by
+          `requires-python` inference. `kind = "pypi"` build steps now
+          read the Python version from the planned matrix row, not
+          this input. Retained so existing callers don't break; it has
+          no effect on pypi builds.
         type: string
         default: '3.12'
     outputs:
@@ -107,10 +112,15 @@ jobs:
           fetch-depth: 0
 
       # ---- pypi ----
+      # #369: each pypi row carries its own `python_version` (the
+      # planner fans the matrix across the package's supported set,
+      # inferred from `requires-python` or pinned via
+      # `python_versions`). setup-python provisions exactly that
+      # interpreter; the maturin build step below selects it explicitly.
       - if: matrix.kind == 'pypi'
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ inputs.python_version }}
+          python-version: ${{ matrix.python_version }}
 
       # #276: bump the version source on disk to matrix.version BEFORE
       # maturin reads it. Maturin reads [project].version from
@@ -213,12 +223,24 @@ jobs:
           cp "$src" "$dst_dir/"
           echo "staged: $src -> $dst_dir/${BIN}${ext}"
 
+      # #369: build the wheel for this row's specific CPython version.
+      # maturin's linux builds run inside a manylinux container that
+      # ships every CPython, so the interpreter has to be selected
+      # explicitly — `-i <version>` (a bare `3.12`) is resolved by
+      # maturin's manylinux interpreter scan. macOS uses the host
+      # `python<version>` that setup-python provisioned. Windows omits
+      # `-i` entirely: maturin's non-container build there already uses
+      # the single host interpreter setup-python pinned to this row's
+      # version.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
         uses: PyO3/maturin-action@v1
         with:
           working-directory: ${{ matrix.path }}
           command: build
-          args: --release --out dist --target ${{ matrix.target }}
+          args: >-
+            --release --out dist --target ${{ matrix.target }}
+            ${{ runner.os == 'Linux' && format('--interpreter {0}', matrix.python_version)
+                || (runner.os == 'macOS' && format('--interpreter python{0}', matrix.python_version) || '') }}
 
       # #282: wheel-content guard. Permanent defense-in-depth — the
       # produced wheel must contain the staged binary at <stage_to>/<bin>.

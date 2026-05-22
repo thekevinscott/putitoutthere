@@ -1098,3 +1098,100 @@ targets = ["x86_64-unknown-linux-gnu"]
     }
   });
 });
+
+describe('plan: pypi multi-version wheels (#369)', () => {
+  const TOML = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "py-lib"
+kind    = "pypi"
+path    = "pkg"
+build   = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+globs   = ["pkg/**"]
+`;
+
+  // Cast helper: python_version is a pypi-only matrix-row field.
+  const pyVer = (r: unknown): string | undefined =>
+    (r as Record<string, unknown>)['python_version'] as string | undefined;
+
+  it('infers the wheel matrix from requires-python in pyproject.toml', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.11"\n',
+      'pkg/lib.rs': '// rust',
+    });
+    const matrix = await plan({ cwd: repo });
+    const wheels = matrix.filter(
+      (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
+    );
+    expect(wheels.map(pyVer).sort()).toEqual(['3.11', '3.12', '3.13']);
+  });
+
+  it('suffixes wheel artifact names per python version when more than one applies', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.12"\n',
+      'pkg/lib.rs': '// rust',
+    });
+    const matrix = await plan({ cwd: repo });
+    const wheels = matrix.filter(
+      (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
+    );
+    expect(wheels.map((r) => r.artifact_name).sort()).toEqual([
+      'py-lib-wheel-x86_64-unknown-linux-gnu-py3.12',
+      'py-lib-wheel-x86_64-unknown-linux-gnu-py3.13',
+    ]);
+  });
+
+  it('a python_versions override pins the wheel matrix to the subset', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `${TOML}python_versions = ["3.10"]\n`,
+      'utf8',
+    );
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.10"\n',
+      'pkg/lib.rs': '// rust',
+    });
+    const matrix = await plan({ cwd: repo });
+    const wheels = matrix.filter(
+      (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
+    );
+    expect(wheels).toHaveLength(1);
+    expect(pyVer(wheels[0]!)).toBe('3.10');
+    // A single planned version keeps the historical unsuffixed name.
+    expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
+  });
+
+  it('every pypi row carries a python_version, including the sdist row', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.12"\n',
+      'pkg/lib.rs': '// rust',
+    });
+    const matrix = await plan({ cwd: repo });
+    const pypi = matrix.filter((r) => r.kind === 'pypi');
+    expect(pypi.length).toBeGreaterThan(0);
+    for (const row of pypi) expect(typeof pyVer(row)).toBe('string');
+    const sdist = matrix.find((r) => r.kind === 'pypi' && r.target === 'sdist')!;
+    expect(pyVer(sdist)).toBe('3.13');
+  });
+
+  it('falls back to a single default version when requires-python is absent', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
+      'pkg/lib.rs': '// rust',
+    });
+    const matrix = await plan({ cwd: repo });
+    const wheels = matrix.filter(
+      (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
+    );
+    expect(wheels).toHaveLength(1);
+    expect(pyVer(wheels[0]!)).toBe('3.12');
+    expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
+  });
+});

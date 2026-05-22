@@ -21,3 +21,7 @@ jobs:
       - uses: thekevinscott/pr-monitor@v1
         with:
           job-name: CI Gate
+          # pr-monitor's default cap is 10 minutes; the full suite
+          # (e2e fixtures + TestPyPI publish) runs ~10m, so the default
+          # times out before the last job reports. Give it headroom.
+          timeout: '20'

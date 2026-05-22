@@ -1380,3 +1380,39 @@ describe('sanitizeArtifactName (#230)', () => {
     expect(sanitizeArtifactName('lang/py/foo')).toBe('lang__py__foo');
   });
 });
+
+describe('parseConfig: python_versions override (#369)', () => {
+  it('accepts a python_versions array on a pypi package', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "pypi"
+path    = "."
+globs   = ["**"]
+build   = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+python_versions = ["3.12", "3.13"]
+`);
+    const pkg = cfg.packages[0]!;
+    expect(pkg.kind).toBe('pypi');
+    expect((pkg as Record<string, unknown>)['python_versions']).toEqual(['3.12', '3.13']);
+  });
+
+  it('rejects a malformed python_versions entry', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "pypi"
+path    = "."
+globs   = ["**"]
+build   = "hatch"
+python_versions = ["3.x"]
+`),
+    ).toThrow(/python_versions/i);
+  });
+});
