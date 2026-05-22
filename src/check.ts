@@ -30,6 +30,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import { assertNoCycles } from './cascade.js';
+import { checkCratesPackageSize } from './check-crate-size.js';
 import { loadConfig, type Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { matchesAny } from './glob.js';
@@ -103,6 +104,7 @@ export function runChecks(opts: CheckOptions): CheckFinding[] {
   checkTagTemplateCollisions(packages, findings);
   checkNpmRepository(packages, findings);
   checkCratesPackageMetadata(packages, findings);
+  findings.push(...checkCratesPackageSize(packages));
   checkPyprojectAndBundleCli(packages, cwd, findings);
   checkPypiVersion(packages, findings);
   checkPyprojectShapeFindings(packages, findings);

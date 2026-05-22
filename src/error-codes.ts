@@ -110,6 +110,15 @@ export const ErrorCodes = {
    *  The fix is one bootstrap publish with a classic `CARGO_REGISTRY_TOKEN`;
    *  trusted publishing works for every release after. #284. */
   CRATES_FIRST_PUBLISH_TP_REJECTED: 'PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED',
+  /** A crates package's `.crate`, as produced by `cargo package`, is
+   *  larger than crates.io's 10 MiB (`10485760`-byte) upload limit.
+   *  `cargo publish` would fail with `413 Payload Too Large` only
+   *  mid-release, after the verification build; `runChecks` reproduces
+   *  the tarball at PR time so the regression is caught before merge.
+   *  A tracked symlink pointing into a build directory, or a missing
+   *  `[package].exclude`, is the usual cause of build output landing
+   *  in the crate. #362. */
+  CRATES_PACKAGE_TOO_LARGE: 'PIOT_CRATES_PACKAGE_TOO_LARGE',
   /** A manifest's declared repository URL resolves to a different
    *  `owner/repo` than the GitHub repository the workflow is running
    *  from (`GITHUB_REPOSITORY`). npm's provenance verification compares
@@ -149,6 +158,7 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.CRATES_FEATURE_NOT_DECLARED,
   ErrorCodes.CRATES_WORKSPACE_VERSION_MISMATCH,
   ErrorCodes.CRATES_FIRST_PUBLISH_TP_REJECTED,
+  ErrorCodes.CRATES_PACKAGE_TOO_LARGE,
   ErrorCodes.REPO_URL_MISMATCH,
   ErrorCodes.REPO_PRIVATE,
 ];
