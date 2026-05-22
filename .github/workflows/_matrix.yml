@@ -42,6 +42,14 @@ on:
           no effect on pypi builds.
         type: string
         default: '3.12'
+      release_packages:
+        description: >-
+          Manual-release spec forwarded to `plan`. Comma-separated
+          `name[@<bump|version>]` entries; when set, change detection
+          is bypassed and exactly the named packages are planned.
+          Empty (the default) => normal change-detected planning.
+        type: string
+        default: ''
     outputs:
       matrix:
         description: >-
@@ -79,6 +87,7 @@ jobs:
         uses: thekevinscott/putitoutthere@v0
         with:
           command: plan
+          release_packages: ${{ inputs.release_packages }}
 
       # Compute a boolean "has_pypi" the consumer can gate their
       # caller-side pypi-publish job on. PyPI uploads run in the

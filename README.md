@@ -424,6 +424,61 @@ Each handler's first move on publish is `isPublished` — check the registry
 for the target version. Already there → skip cleanly. Lets you re-run failed
 releases without fighting registry-immutable-publish semantics.
 
+## Manual release
+
+Releases are normally change-driven: a package ships when a commit touches
+its `globs`. Sometimes you need to release a package that has **no new
+commits** — most often a re-release after a release-pipeline bug is fixed.
+The `release_packages` input on `release.yml` does exactly that.
+
+Wire it to a `workflow_dispatch` trigger in your caller workflow:
+
+```yaml
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+    inputs:
+      release_packages:
+        description: 'Comma-separated name[@bump|version] list'
+        required: true
+
+jobs:
+  release:
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      release_packages: ${{ inputs.release_packages }}
+```
+
+Push-triggered runs leave `release_packages` empty (the `inputs` context is
+empty outside `workflow_dispatch`), so the normal change-detected path is
+unaffected. Triggering the workflow manually from the Actions tab with
+`release_packages` set takes over.
+
+Grammar — a comma-separated list of entries:
+
+```
+release_packages: lib-core@minor, lib-py@1.4.0, lib-js
+```
+
+Each entry is a package name optionally suffixed with a version spec:
+
+| Entry            | Effect                                                            |
+|------------------|-------------------------------------------------------------------|
+| `lib-js`         | Release `lib-js`, bumping its last tag by `patch`.                |
+| `lib-core@minor` | Release `lib-core`, bumping its last tag by `minor` (or `major`). |
+| `lib-py@1.4.0`   | Release `lib-py` at exactly `1.4.0`.                              |
+
+When `release_packages` is set, change detection and `depends_on` cascade
+are bypassed entirely: **exactly** the named packages are released, and
+nothing else — even a package with real pending changes is left out unless
+you name it. An explicit version is used verbatim and is not checked
+against the last tag; if that version is already on the registry the
+publish-phase `isPublished` check skips it cleanly. Naming a package that
+is not declared in `putitoutthere.toml` is an error.
+
 ## Trusted publishers
 
 OIDC trusted publishers are the default and recommended auth path.

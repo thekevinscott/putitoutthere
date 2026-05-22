@@ -44,6 +44,13 @@ import { dumpFailure } from './verbose.js';
 export interface PublishOptions {
   cwd: string;
   configPath?: string;
+  /**
+   * Manual-release spec, forwarded verbatim to the internal `plan()`
+   * re-run. Must match what the plan job was given so plan and publish
+   * agree on the matrix — see the `release_packages` plumbing in
+   * `.github/workflows/release.yml`.
+   */
+  releasePackages?: string | undefined;
   /** Override for tests. */
   handlerFor?: (kind: Handler['kind']) => Handler;
 }
@@ -76,7 +83,11 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   // plan and publish jobs disagreed on what HEAD looked like. Throw
   // loudly with a fingerprintable code rather than exiting green-but-
   // having-done-nothing.
-  const matrix = await plan({ cwd, configPath: cfgPath });
+  const matrix = await plan({
+    cwd,
+    configPath: cfgPath,
+    releasePackages: opts.releasePackages,
+  });
   if (matrix.length === 0) {
     throw new Error(
       `[${ErrorCodes.PUBLISH_EMPTY_PLAN}] publish was invoked but the plan is empty. ` +

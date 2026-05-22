@@ -1277,12 +1277,14 @@ describe('plan: manual release (release-packages)', () => {
     expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
   });
 
-  it('throws when a named package is not declared in the config', async () => {
+  it('throws when a named package is not declared in the config', () => {
     writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
     commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
 
-    await expect(
-      plan({ cwd: repo, releasePackages: 'lib-ghost@minor' }),
-    ).rejects.toThrow(/lib-ghost/);
+    // Like `loadConfig`, the manual planner rejects bad input
+    // synchronously — before any promise is returned.
+    expect(() => plan({ cwd: repo, releasePackages: 'lib-ghost@minor' })).toThrow(
+      /lib-ghost/,
+    );
   });
 });
