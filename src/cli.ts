@@ -22,6 +22,10 @@
  *   --config <path>   path to putitoutthere.toml
  *   --json            machine-readable output
  *
+ * `plan` / `publish` flags:
+ *   --release-packages <spec>  manual-release spec; bypasses change
+ *                    detection and plans exactly the named packages
+ *
  * `write-version` flags:
  *   --path <dir>      package directory (where pyproject.toml lives)
  *   --version <v>     planned version to write
@@ -76,6 +80,7 @@ function printUsage(): void {
       '  --config <path>   path to putitoutthere.toml',
       '  --path <dir>      package or crate directory (write-version / write-crate-version)',
       '  --version <v>     planned version (write-version / write-crate-version)',
+      '  --release-packages <spec>  manual-release spec (plan / publish)',
       '  --json            emit machine-readable output',
       '',
       'See https://github.com/thekevinscott/putitoutthere for docs.',
@@ -93,6 +98,9 @@ interface ParsedFlags {
   // arm validates presence before use.
   path?: string | undefined;
   version?: string | undefined;
+  // Manual-release spec for `plan` / `publish`. Forwarded to the
+  // planner; absent => normal change-detected planning.
+  releasePackages?: string | undefined;
 }
 
 export function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -108,6 +116,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--json') out.json = true;
     else if (a === '--path') out.path = argv[++i];
     else if (a === '--version') out.version = argv[++i];
+    else if (a === '--release-packages') out.releasePackages = argv[++i];
     else if (a === '--dry-run') {
       // Removed in #244. Publishing is the library's only job; a
       // non-publishing flavor of `publish` is a coverage hole, not
@@ -158,6 +167,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         const matrix = await plan({
           cwd: flags.cwd,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+          releasePackages: flags.releasePackages,
         });
         if (flags.json) {
           process.stdout.write(JSON.stringify(matrix) + '\n');
@@ -272,6 +282,7 @@ export async function run(argv: readonly string[]): Promise<number> {
           cwd: flags.cwd,
           /* v8 ignore next -- --config test covered in plan arm; publish shares the same plumbing */
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+          releasePackages: flags.releasePackages,
         });
         if (flags.json) {
           process.stdout.write(JSON.stringify(result) + '\n');

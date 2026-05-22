@@ -16,6 +16,7 @@ export async function main(): Promise<void> {
   const command = process.env.INPUT_COMMAND ?? '';
   const workingDirectory = process.env.INPUT_WORKING_DIRECTORY ?? '';
   const versionInput = process.env.INPUT_VERSION ?? '';
+  const releasePackages = process.env.INPUT_RELEASE_PACKAGES ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
@@ -46,6 +47,10 @@ export async function main(): Promise<void> {
   } else {
     argv.push('--json');
     if (workingDirectory) argv.push('--cwd', workingDirectory);
+    // Manual release: forward `release_packages` to the CLI. Only
+    // `plan` / `publish` act on it; the flag parses harmlessly for the
+    // other commands that land in this branch.
+    if (releasePackages) argv.push('--release-packages', releasePackages);
   }
 
   const code = await run(argv);

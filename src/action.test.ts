@@ -1,18 +1,27 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { main } from './action.js';
 
 describe('action', () => {
   let stderrChunks: string[] = [];
+  let stdoutChunks: string[] = [];
   let exitCode: number | undefined;
 
   beforeEach(() => {
     stderrChunks = [];
+    stdoutChunks = [];
     exitCode = undefined;
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
       stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;
     });
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       exitCode = code ?? 0;
       throw new Error(`exit:${exitCode}`);
@@ -25,6 +34,7 @@ describe('action', () => {
     delete process.env.INPUT_FAIL_ON_ERROR;
     delete process.env.INPUT_WORKING_DIRECTORY;
     delete process.env.INPUT_VERSION;
+    delete process.env.INPUT_RELEASE_PACKAGES;
   });
 
   it('fails when INPUT_COMMAND is missing', async () => {
@@ -68,6 +78,58 @@ describe('action', () => {
     process.env.INPUT_VERSION = '0.2.8';
     await expect(main()).rejects.toThrow(/exit:1/);
     expect(stderrChunks.join('')).toMatch(/pyproject\.toml/);
+  });
+
+  it('plan: forwards release_packages as --release-packages', async () => {
+    // The reusable workflow's `_matrix.yml` invokes the action with
+    // command: plan, release_packages: ${{ inputs.release_packages }}.
+    // Build a repo with a tagged package and NO new commits — the
+    // change-detected path would plan nothing; the manual spec must
+    // make `demo` show up in the emitted matrix.
+    const repo = mkdtempSync(join(tmpdir(), 'action-relpkg-'));
+    try {
+      const git = (args: string[]): void => {
+        execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+      };
+      git(['init', '-q', '-b', 'main']);
+      git(['config', 'user.email', 'test@example.com']);
+      git(['config', 'user.name', 'Test']);
+      git(['config', 'commit.gpgsign', 'false']);
+      git(['config', 'tag.gpgsign', 'false']);
+      mkdirSync(join(repo, 'packages/ts'), { recursive: true });
+      writeFileSync(
+        join(repo, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "demo"
+kind  = "npm"
+path  = "packages/ts"
+globs = ["packages/ts/**"]
+`,
+        'utf8',
+      );
+      writeFileSync(join(repo, 'packages/ts/index.ts'), 'x', 'utf8');
+      git(['add', '-A']);
+      git(['commit', '-q', '-m', 'init']);
+      git(['tag', 'demo-v1.0.0']);
+
+      process.env.INPUT_COMMAND = 'plan';
+      process.env.INPUT_WORKING_DIRECTORY = repo;
+      process.env.INPUT_RELEASE_PACKAGES = 'demo@minor';
+
+      // main() exits 0 on a successful plan (process.exit is mocked to
+      // throw `exit:<code>`).
+      await expect(main()).rejects.toThrow(/exit:0/);
+      const out = JSON.parse(stdoutChunks.join('').trim()) as Array<{
+        name: string;
+        version: string;
+      }>;
+      expect(out.map((r) => r.name)).toEqual(['demo']);
+      expect(out[0]!.version).toBe('1.1.0');
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
 });

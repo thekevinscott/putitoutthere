@@ -24,6 +24,7 @@ import { resolvePythonVersions } from './python-versions.js';
 import { parseTagVersion } from './tag-template.js';
 import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
+import { parseReleasePackages, type ReleasePackagesEntry } from './release-packages.js';
 import { bump as bumpVersion, firstVersion } from './version.js';
 
 export interface MatrixRow {
@@ -68,12 +69,28 @@ export interface MatrixRow {
 export interface PlanOptions {
   cwd: string;
   configPath?: string;   // defaults to `${cwd}/putitoutthere.toml`
+  /**
+   * Manual-release spec (the reusable workflow's `release_packages`
+   * input). When set, change detection is bypassed entirely and the
+   * matrix covers exactly the named packages — the re-release path for
+   * consumers with no new commits since their last tag.
+   */
+  releasePackages?: string | undefined;
 }
 
 export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
   const config = loadConfig(cfgPath);
+
+  // Manual release: an explicit package list short-circuits change
+  // detection. `release_packages` is the override for re-releasing
+  // packages that have no new commits (e.g. after a putitoutthere bug
+  // fix). The named packages — and only those — are planned.
+  const manual = parseReleasePackages(opts.releasePackages);
+  if (manual !== null) {
+    return Promise.resolve(planManual(config.packages, manual, cwd));
+  }
 
   // What changed since the last release per package?
   const head = headCommit({ cwd });
@@ -112,6 +129,58 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
 }
 
 /* ----------------------------- internals ----------------------------- */
+
+/**
+ * Manual-release planner. Emits a matrix for exactly the packages named
+ * in the `release_packages` spec — no change detection, no cascade.
+ * Each named package is versioned per its entry: an explicit semver is
+ * used verbatim, a bump keyword bumps the last tag (or first_version
+ * when the package has no tag yet).
+ */
+function planManual(
+  packages: readonly Package[],
+  manual: ReadonlyMap<string, ReleasePackagesEntry>,
+  cwd: string,
+): MatrixRow[] {
+  const known = new Set(packages.map((p) => p.name));
+  for (const name of manual.keys()) {
+    if (!known.has(name)) {
+      throw new Error(
+        `release-packages: "${name}" is not declared in putitoutthere.toml`,
+      );
+    }
+  }
+  // Iterate config order so the matrix shape matches the change-
+  // detected path for the same package set.
+  const rows: MatrixRow[] = [];
+  for (const p of packages) {
+    const entry = manual.get(p.name);
+    if (entry === undefined) continue;
+    rows.push(...rowsForPackage(p, manualVersion(p, entry, cwd), cwd));
+  }
+  return rows;
+}
+
+function manualVersion(
+  pkg: Package,
+  entry: ReleasePackagesEntry,
+  cwd: string,
+): string {
+  // Explicit semver is used as-is. It is intentionally NOT compared
+  // against the last tag: re-releasing the same version is valid when
+  // the prior publish failed before reaching the registry, and the
+  // publish-phase `isPublished` check is the right place to refuse a
+  // genuine collision.
+  if (entry.version !== undefined) return entry.version;
+
+  // A bump keyword bumps the last tag, or first_version when the named
+  // package has never been released. `parseTagVersion` is non-null
+  // here: `lastTag` only ever returns a tag the format already matched.
+  const tag = lastTag(pkg.name, pkg.tag_format, { cwd });
+  if (tag === null) return firstVersion(pkg);
+  const lastVersion = parseTagVersion(pkg.tag_format, pkg.name, tag)!;
+  return bumpVersion(lastVersion, entry.bump!);
+}
 
 function collectChanges(
   packages: readonly Package[],

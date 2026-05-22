@@ -25,6 +25,15 @@ inputs:
       build matrix's `version` row from the planner.
     required: false
     default: ''
+  release_packages:
+    description: >-
+      Manual-release spec, forwarded to `plan` / `publish` as
+      `--release-packages`. Comma-separated `name[@<bump|version>]`
+      entries; when set, change detection is bypassed and exactly the
+      named packages are released. Empty => normal change-detected
+      planning. Ignored for other commands.
+    required: false
+    default: ''
   fail_on_error:
     description: 'If true, non-zero CLI exit codes fail the step.'
     required: false

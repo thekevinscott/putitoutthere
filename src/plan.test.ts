@@ -1195,3 +1195,96 @@ globs   = ["pkg/**"]
     expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
   });
 });
+
+describe('plan: manual release (release-packages)', () => {
+  // The motivating case: putitoutthere shipped a release bug, it was
+  // fixed, and downstream consumers must re-release packages that have
+  // no new commits since their last tag. Change detection emits an
+  // empty matrix in that state; `release_packages` is the explicit
+  // override that releases exactly the named packages anyway.
+
+  it('releases only the named package even with no changes since its tag', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+    git(['tag', 'lib-rust-v1.2.3']);
+    git(['tag', 'lib-python-v1.2.3']);
+
+    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@minor' });
+    const names = [...new Set(matrix.map((r) => r.name))];
+    expect(names).toEqual(['lib-rust']);
+    expect(matrix.every((r) => r.version === '1.3.0')).toBe(true);
+  });
+
+  it('bumps a bare name by patch', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
+    git(['tag', 'lib-rust-v1.2.3']);
+
+    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust' });
+    expect(matrix.every((r) => r.version === '1.2.4')).toBe(true);
+  });
+
+  it('uses an explicit version verbatim', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
+    git(['tag', 'lib-rust-v1.2.3']);
+
+    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@2.0.1' });
+    expect(matrix.every((r) => r.version === '2.0.1')).toBe(true);
+  });
+
+  it('releases multiple named packages at their per-package versions', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+    git(['tag', 'lib-rust-v1.2.3']);
+    git(['tag', 'lib-python-v0.4.0']);
+
+    const matrix = await plan({
+      cwd: repo,
+      releasePackages: 'lib-rust@major, lib-python@9.9.9',
+    });
+    expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('2.0.0');
+    expect(matrix.find((r) => r.name === 'lib-python')!.version).toBe('9.9.9');
+  });
+
+  it('ignores change-detected packages not named in the spec', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', {
+      'packages/rust/lib.rs': '// rust',
+      'packages/python/lib.py': '# python',
+    });
+    git(['tag', 'lib-rust-v1.2.3']);
+    git(['tag', 'lib-python-v1.2.3']);
+    // A real change to lib-python lands after the tags.
+    commit('feat: python change', { 'packages/python/lib.py': '# changed' });
+
+    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@patch' });
+    const names = [...new Set(matrix.map((r) => r.name))];
+    expect(names).toEqual(['lib-rust']);
+  });
+
+  it('uses first_version for a named package that has no tag', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
+
+    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@minor' });
+    expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
+  });
+
+  it('throws when a named package is not declared in the config', () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
+
+    // Like `loadConfig`, the manual planner rejects bad input
+    // synchronously — before any promise is returned.
+    expect(() => plan({ cwd: repo, releasePackages: 'lib-ghost@minor' })).toThrow(
+      /lib-ghost/,
+    );
+  });
+});

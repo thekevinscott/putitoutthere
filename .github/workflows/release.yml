@@ -63,6 +63,20 @@ on:
           builds; it is retained only so existing callers don't break.
         type: string
         default: '3.12'
+      release_packages:
+        description: >-
+          Manual release. Comma-separated `name[@<bump|version>]`
+          entries — e.g. `lib-core@minor, lib-py@1.4.0, lib-js`. Each
+          entry is a package name optionally suffixed with
+          `@<patch|minor|major>` or an explicit `@<X.Y.Z>` semver; a
+          bare name defaults to a patch bump. When set, change
+          detection is bypassed and exactly the named packages are
+          released. Wire this to a `workflow_dispatch` input in your
+          caller workflow to re-release packages that have no new
+          commits (e.g. after a release-pipeline bug fix). Empty (the
+          default) => normal change-detected release.
+        type: string
+        default: ''
     secrets:
       # Optional fallback for accounts where Trusted Publishing isn't
       # available, or for the very first publish of a brand-new crate
@@ -106,6 +120,7 @@ jobs:
     with:
       node_version: ${{ inputs.node_version }}
       python_version: ${{ inputs.python_version }}
+      release_packages: ${{ inputs.release_packages }}
 
   publish:
     needs: build
@@ -268,6 +283,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           command: publish
+          # publish re-runs plan internally; it must see the same
+          # manual-release spec the plan job did or the two phases
+          # disagree on the matrix.
+          release_packages: ${{ inputs.release_packages }}
 
       # The engine creates annotated git tags + pushes to PyPI / npm /
       # crates.io but does NOT cut GitHub Releases. Backfill that here so

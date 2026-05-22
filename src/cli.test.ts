@@ -150,6 +150,16 @@ globs = ["pkg/**"]
     const flags = parseFlags(['--cwd', '/tmp/abs-path-test']);
     expect(flags.cwd).toBe('/tmp/abs-path-test');
   });
+
+  it('parses --release-packages', () => {
+    const flags = parseFlags(['--release-packages', 'lib-core@minor, lib-js']);
+    expect(flags.releasePackages).toBe('lib-core@minor, lib-js');
+  });
+
+  it('leaves releasePackages undefined when --release-packages is absent', () => {
+    const flags = parseFlags(['--cwd', '/tmp/x']);
+    expect(flags.releasePackages).toBeUndefined();
+  });
 });
 
 describe('cli: plan', () => {
@@ -212,6 +222,29 @@ globs = ["packages/ts/**"]
     const out = stdoutChunks.join('').trim();
     const parsed = JSON.parse(out) as Array<{ name: string }>;
     expect(parsed.map((r) => r.name)).toContain('demo');
+  });
+
+  it('honors --release-packages, planning only the named package', async () => {
+    // Tag `demo` so a manual bump has a base version. No new commit
+    // lands after the tag — the manual path must release it anyway.
+    git(['tag', 'demo-v1.0.0']);
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    const code = await run([
+      'node', 'putitoutthere', 'plan', '--cwd', repo, '--json',
+      '--release-packages', 'demo@minor',
+    ]);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdoutChunks.join('').trim()) as Array<{
+      name: string;
+      version: string;
+    }>;
+    expect(parsed.map((r) => r.name)).toEqual(['demo']);
+    expect(parsed[0]!.version).toBe('1.1.0');
   });
 
   it('appends to $GITHUB_OUTPUT when set', async () => {
