@@ -28,6 +28,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
+import { expandDirGlob } from './glob.js';
 import type { Kind } from './types.js';
 
 // Per-kind accepted env var names, primary first. `checkAuth` scans left
@@ -892,7 +893,12 @@ function workspaceMemberManifests(
   const out: string[] = [];
   for (const m of members) {
     if (typeof m === 'string') {
-      out.push(join(workspaceDir, m, 'Cargo.toml'));
+      // `members` entries are globs (`packages/*`); expand them against
+      // the filesystem the way cargo does so a member crate's [[bin]] is
+      // found even when the workspace declares its members with a pattern.
+      for (const memberDir of expandDirGlob(workspaceDir, m)) {
+        out.push(join(memberDir, 'Cargo.toml'));
+      }
     }
   }
   return out;

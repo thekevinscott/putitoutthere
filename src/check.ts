@@ -33,7 +33,7 @@ import { assertNoCycles } from './cascade.js';
 import { checkCratesPackageSize } from './check-crate-size.js';
 import { loadConfig, type Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
-import { matchesAny } from './glob.js';
+import { expandDirGlob, matchesAny } from './glob.js';
 import { assertTripleSupported } from './handlers/npm-platform.js';
 import {
   checkCargoShape,
@@ -354,9 +354,10 @@ function readDeclaredBins(cargoTomlPath: string): string[] {
   // workspace-root manifest reports bins as missing even when they
   // exist in a member. Walk `[workspace].members` so `crate_path = "."`
   // (the default) satisfies the standard cargo-workspace shape.
-  // parseCargoToml returns null for missing / malformed manifests, so
-  // unexpanded glob entries and stray entries silently drop out —
-  // cargo's own diagnostics own surfacing those.
+  // `members` entries are globs, expanded against the filesystem the way
+  // cargo resolves them. parseCargoToml returns null for missing /
+  // malformed manifests, so stray entries silently drop out — cargo's
+  // own diagnostics own surfacing those.
   for (const memberManifest of workspaceMemberManifests(parsed, cargoTomlPath)) {
     const memberParsed = parseCargoToml(memberManifest);
     if (memberParsed === null) continue;
@@ -379,7 +380,9 @@ function workspaceMemberManifests(
   const out: string[] = [];
   for (const m of members) {
     if (typeof m === 'string') {
-      out.push(join(workspaceDir, m, 'Cargo.toml'));
+      for (const memberDir of expandDirGlob(workspaceDir, m)) {
+        out.push(join(memberDir, 'Cargo.toml'));
+      }
     }
   }
   return out;
