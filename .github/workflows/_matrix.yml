@@ -181,6 +181,21 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: rustup target add "$TARGET"
 
+      # #374: bump the separate bundle_cli crate's `[package].version`
+      # before `cargo build` runs. The maturin `write-version` step
+      # above bumps the Python package's version source; it does not
+      # touch the CLI crate at `bundle_cli.crate_path`. cargo bakes
+      # CARGO_PKG_VERSION from that crate's on-disk Cargo.toml at
+      # compile time, so the staged binary must get the same direct
+      # Cargo.toml rewrite as the npm bundled-cli path.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
+        name: bundle_cli — write crate version for ${{ matrix.name }}
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: write-crate-version
+          working_directory: ${{ matrix.bundle_cli.crate_path }}
+          version: ${{ matrix.version }}
+
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — cargo build for ${{ matrix.target }} (${{ matrix.bundle_cli.bin }})
         shell: bash

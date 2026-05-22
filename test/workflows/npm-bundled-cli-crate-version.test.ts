@@ -1,7 +1,8 @@
 /**
- * Workflow-YAML contract: the npm `bundled-cli` path in the reusable
- * workflow must rewrite the cross-compiled crate's `[package].version`
- * to `matrix.version` BEFORE the `cargo build` step runs.
+ * Workflow-YAML contract: every `bundle_cli` cargo-build path in the
+ * reusable workflow must rewrite the cross-compiled crate's
+ * `[package].version` to `matrix.version` BEFORE the `cargo build` step
+ * runs.
  *
  * Why this exists (#366): `cargo build` bakes `CARGO_PKG_VERSION` into
  * the binary at compile time from whatever literal sits in the crate's
@@ -13,9 +14,15 @@
  * from `--version` — a silent version skew between the published
  * package and the artifact it ships.
  *
- * The fix: a `write-crate-version` step, invoked against
- * `matrix.bundle_cli.crate_path` with `matrix.version`, immediately
- * before the `bundle_cli — cargo build` step in the build matrix.
+ * #374: the same bug applies to pypi `[package.bundle_cli]` rows. The
+ * maturin `write-version` step bumps the Python package version source,
+ * not the separate CLI crate at `bundle_cli.crate_path`, so the staged
+ * binary can still report the stale crate literal.
+ *
+ * The fix: a `write-crate-version` step on both npm and pypi bundle_cli
+ * paths, invoked against `matrix.bundle_cli.crate_path` with
+ * `matrix.version`, immediately before the matching `bundle_cli — cargo
+ * build` step in the build matrix.
  */
 
 import { readFileSync } from 'node:fs';
@@ -47,20 +54,24 @@ function loadSteps(file: string, jobKey: string): Step[] {
   return job.steps ?? [];
 }
 
-/** The `bundle_cli — cargo build` step for the npm bundled-cli path. */
-function isNpmBundleCliCargoBuild(s: Step): boolean {
+/** The `bundle_cli — cargo build` step for one bundle_cli path. */
+function isBundleCliCargoBuild(s: Step, kind: 'npm' | 'pypi'): boolean {
   return (
     typeof s.if === 'string' &&
-    /matrix\.kind\s*==\s*['"]npm['"]/.test(s.if) &&
-    /matrix\.build\s*==\s*['"]bundled-cli['"]/.test(s.if) &&
+    new RegExp(`matrix\\.kind\\s*==\\s*['"]${kind}['"]`).test(s.if) &&
+    (kind === 'npm'
+      ? /matrix\.build\s*==\s*['"]bundled-cli['"]/.test(s.if)
+      : /matrix\.build\s*==\s*['"]maturin['"]/.test(s.if)) &&
     typeof s.run === 'string' &&
     /cargo\s+build/.test(s.run)
   );
 }
 
 /** A `write-crate-version` engine invocation. */
-function isWriteCrateVersion(s: Step): boolean {
+function isWriteCrateVersion(s: Step, kind: 'npm' | 'pypi'): boolean {
   return (
+    typeof s.if === 'string' &&
+    new RegExp(`matrix\\.kind\\s*==\\s*['"]${kind}['"]`).test(s.if) &&
     typeof s.uses === 'string' &&
     /putitoutthere/.test(s.uses) &&
     !!s.with &&
@@ -68,36 +79,42 @@ function isWriteCrateVersion(s: Step): boolean {
   );
 }
 
-describe('reusable workflow: npm bundled-cli embeds the release version (#366)', () => {
-  it('_matrix.yml writes the crate version before the npm bundled-cli cargo build', () => {
+describe('reusable workflow: bundle_cli binaries embed the release version (#366, #374)', () => {
+  it.each([
+    ['npm', 'bundled-cli'],
+    ['pypi', 'maturin bundle_cli'],
+  ] as const)('_matrix.yml writes the crate version before the %s %s cargo build', (kind) => {
     const steps = loadSteps('_matrix.yml', 'build');
 
-    const cargoIdx = steps.findIndex(isNpmBundleCliCargoBuild);
+    const cargoIdx = steps.findIndex((s) => isBundleCliCargoBuild(s, kind));
     expect(
       cargoIdx,
-      '_matrix.yml: could not find the npm bundled-cli `cargo build` step',
+      `_matrix.yml: could not find the ${kind} bundle_cli \`cargo build\` step`,
     ).toBeGreaterThanOrEqual(0);
 
-    const writeIdx = steps.findIndex(isWriteCrateVersion);
+    const writeIdx = steps.findIndex((s) => isWriteCrateVersion(s, kind));
     expect(
       writeIdx,
-      '_matrix.yml: npm bundled-cli has no `write-crate-version` step. Without it, ' +
+      `_matrix.yml: ${kind} bundle_cli has no \`write-crate-version\` step. Without it, ` +
         '`cargo build` bakes the stale on-disk `[package].version` into the binary, so the ' +
         'cross-compiled CLI reports the wrong version from `--version`.',
     ).toBeGreaterThanOrEqual(0);
 
     expect(
       writeIdx,
-      '_matrix.yml: the `write-crate-version` step must run BEFORE the npm bundled-cli ' +
+      `_matrix.yml: the \`write-crate-version\` step must run BEFORE the ${kind} bundle_cli ` +
         '`cargo build` step — `cargo build` reads `CARGO_PKG_VERSION` from Cargo.toml at ' +
         'compile time.',
     ).toBeLessThan(cargoIdx);
   });
 
-  it('_matrix.yml write-crate-version targets the crate path with matrix.version', () => {
+  it.each([
+    ['npm', 'bundled-cli'],
+    ['pypi', 'maturin bundle_cli'],
+  ] as const)('_matrix.yml %s %s write-crate-version targets the crate path with matrix.version', (kind) => {
     const steps = loadSteps('_matrix.yml', 'build');
-    const step = steps.find(isWriteCrateVersion);
-    expect(step, '_matrix.yml: no `write-crate-version` step found').toBeDefined();
+    const step = steps.find((s) => isWriteCrateVersion(s, kind));
+    expect(step, `_matrix.yml: no ${kind} \`write-crate-version\` step found`).toBeDefined();
     expect(
       step!.with!.working_directory,
       '_matrix.yml: `write-crate-version` must target `matrix.bundle_cli.crate_path` — the ' +
