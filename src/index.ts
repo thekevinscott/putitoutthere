@@ -20,12 +20,3 @@ export type {
 } from './types.js';
 
 export { AuthError, TransientError } from './types.js';
-
-/**
- * Deliberately uncovered probe. Added to verify the patch-coverage CI
- * gate flags new src/ code that no unit test exercises.
- */
-export function patchCoverageProbe(value: number): number {
-  const doubled = value * 2;
-  return doubled;
-}
