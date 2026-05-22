@@ -42,6 +42,29 @@ authorization per the git-safety protocol.
   - `notes/handoff/YYYY-MM-DD-<topic>.md` — handoff briefs.
   - `notes/migrations-pre-rewrite/` — stale per-library adoption plans drafted against the prior hand-written-`release.yml` model. Do not extend.
 
+## Engine code conventions
+
+The engine (`src/`) is **synchronous throughout**. File I/O uses the
+sync `node:fs` calls (`readFileSync`, `writeFileSync`, `cpSync`,
+`chmodSync`, `mkdtempSync`, …) and subprocesses use `execFileSync`.
+There is no `node:fs/promises` usage and no `await`ed I/O anywhere in
+`src/`.
+
+This is deliberate, not legacy. `putitoutthere` runs as a one-shot CLI
+invoked inside a GitHub Actions step: it does its work and exits. There
+is no server, no event loop to keep responsive, and no concurrent
+requests, so the usual reason to prefer async — not blocking other
+work — does not apply. The release pipeline is also inherently
+sequential (plan → build → preflight → publish), so async would not
+buy parallelism; and `execFileSync` blocks regardless, so the process
+is sync-shaped end to end already.
+
+New engine code stays synchronous — match the surrounding `*Sync` calls
+rather than introducing `await`ed I/O. Converting the engine to async
+fs is a repo-wide refactor with no runtime benefit; if it is ever
+wanted, it belongs in its own issue and PR, not bundled into a feature
+or bug-fix change.
+
 ## Design commitments
 
 Explicit non-goals that bound `putitoutthere`'s scope. Read before proposing

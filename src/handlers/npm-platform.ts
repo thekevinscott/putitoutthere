@@ -24,7 +24,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -238,6 +238,17 @@ function synthesizePlatformPackage(
 
   const { os, cpu, libc } = targetToOsCpu(target);
   const fileList = readdirSync(staging);
+  const mainFile = pickMainFile(fileList, entry.mode);
+
+  // #365: bundled-cli binaries ship as package data referenced via
+  // `main`, not as a `bin` entry, so npm never sets the executable bit —
+  // and it is stripped crossing the Actions artifact upload/download
+  // boundary regardless of the mode `cargo build` produced. Restore +x
+  // on the staged binary for non-Windows targets; without it the
+  // launcher's spawn of the resolved binary EACCESes at runtime.
+  if (entry.mode === 'bundled-cli' && !os.includes('win32')) {
+    chmodSync(join(staging, mainFile), 0o755);
+  }
 
   // npm provenance verifier compares package.json.repository.url against
   // the publishing GitHub repo URL baked into the sigstore bundle. A
@@ -253,7 +264,7 @@ function synthesizePlatformPackage(
     os,
     cpu,
     files: fileList,
-    main: pickMainFile(fileList, entry.mode),
+    main: mainFile,
     ...(libc !== undefined ? { libc } : {}),
     ...(mainPkg['repository'] !== undefined ? { repository: mainPkg['repository'] } : {}),
     ...(mainPkg['license'] !== undefined ? { license: mainPkg['license'] } : {}),
