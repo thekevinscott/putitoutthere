@@ -1196,7 +1196,13 @@ path = "src/main.rs"
     // `<member>/Cargo.toml`, so the member crate's `[[bin]]` is never
     // seen and the check false-fires for `crate_path = "."`.
     const root = dir;
-    writeCargoToml(root, '[workspace]', 'members = ["packages/*"]', 'resolver = "2"');
+    writeCargoToml(
+      root,
+      `[workspace]
+members = ["packages/*"]
+resolver = "2"
+`,
+    );
     writeCargoToml(
       join(root, 'packages', 'rust'),
       `[package]
