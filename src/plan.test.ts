@@ -644,7 +644,7 @@ targets = ["x86_64-unknown-linux-gnu"]
     expect(linux.artifact_path).toBe('packages/ts/build/x86_64-unknown-linux-gnu');
   });
 
-  it('throws at plan time when a napi target triple is unmapped (#170)', () => {
+  it('throws at plan time when a napi target triple is unmapped (#170)', async () => {
     // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
     // TRIPLE_MAP entry. Without this guard, the mistake surfaces only
     // mid-publish, after the CI matrix has already burned compute.
@@ -663,10 +663,7 @@ targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
     writeFileSync(join(repo, 'putitoutthere.toml'), unmappedToml, 'utf8');
     commit('feat: initial', { 'packages/ts/index.ts': 'x' });
 
-    // `plan()` throws synchronously from `rowsForPackage` before it
-    // can wrap the result in a Promise, so assert on the synchronous
-    // call rather than `.rejects`.
-    expect(() => plan({ cwd: repo })).toThrow(
+    await expect(plan({ cwd: repo })).rejects.toThrow(
       /lib-napi.*mips64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
     );
   });
@@ -1127,7 +1124,7 @@ globs   = ["pkg/**"]
     const wheels = matrix.filter(
       (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
     );
-    expect(wheels.map(pyVer).sort()).toEqual(['3.11', '3.12', '3.13']);
+    expect(wheels.map(pyVer).sort()).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
   it('suffixes wheel artifact names per python version when more than one applies', async () => {
@@ -1143,6 +1140,7 @@ globs   = ["pkg/**"]
     expect(wheels.map((r) => r.artifact_name).sort()).toEqual([
       'py-lib-wheel-x86_64-unknown-linux-gnu-py3.12',
       'py-lib-wheel-x86_64-unknown-linux-gnu-py3.13',
+      'py-lib-wheel-x86_64-unknown-linux-gnu-py3.14',
     ]);
   });
 
@@ -1177,7 +1175,7 @@ globs   = ["pkg/**"]
     expect(pypi.length).toBeGreaterThan(0);
     for (const row of pypi) expect(typeof pyVer(row)).toBe('string');
     const sdist = matrix.find((r) => r.kind === 'pypi' && r.target === 'sdist')!;
-    expect(pyVer(sdist)).toBe('3.13');
+    expect(pyVer(sdist)).toBe('3.14');
   });
 
   it('falls back to a single default version when requires-python is absent', async () => {
@@ -1277,13 +1275,11 @@ describe('plan: manual release (release-packages)', () => {
     expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
   });
 
-  it('throws when a named package is not declared in the config', () => {
+  it('throws when a named package is not declared in the config', async () => {
     writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
     commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
 
-    // Like `loadConfig`, the manual planner rejects bad input
-    // synchronously — before any promise is returned.
-    expect(() => plan({ cwd: repo, releasePackages: 'lib-ghost@minor' })).toThrow(
+    await expect(plan({ cwd: repo, releasePackages: 'lib-ghost@minor' })).rejects.toThrow(
       /lib-ghost/,
     );
   });

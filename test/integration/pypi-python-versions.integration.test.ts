@@ -20,8 +20,10 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { plan, type MatrixRow } from '../../src/plan.js';
+import { RELEASED_CPYTHON_VERSIONS_ENV } from '../../src/python-versions.js';
 
 let repo: string;
+const ENV_BAK = process.env[RELEASED_CPYTHON_VERSIONS_ENV];
 
 function git(args: string[]): void {
   execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -35,6 +37,7 @@ function write(rel: string, body: string): void {
 
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), 'piot-pyver-int-'));
+  process.env[RELEASED_CPYTHON_VERSIONS_ENV] = '3.8,3.9,3.10,3.11,3.12,3.13,3.14';
   git(['init', '-q', '-b', 'main']);
   git(['config', 'user.email', 'test@example.com']);
   git(['config', 'user.name', 'Test']);
@@ -44,6 +47,11 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  if (ENV_BAK === undefined) {
+    delete process.env[RELEASED_CPYTHON_VERSIONS_ENV];
+  } else {
+    process.env[RELEASED_CPYTHON_VERSIONS_ENV] = ENV_BAK;
+  }
 });
 
 function config(extra = ''): string {
@@ -82,7 +90,7 @@ describe('pypi multi-version wheels (#369) — integration', () => {
   it('infers the wheel matrix from requires-python in pyproject.toml', async () => {
     seed('', '[project]\nname = "demo-py"\nrequires-python = ">=3.11"\n');
     const matrix = await plan({ cwd: repo });
-    expect(wheelVersions(matrix)).toEqual(['3.11', '3.12', '3.13']);
+    expect(wheelVersions(matrix)).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
   it('honors a requires-python upper bound', async () => {
@@ -122,6 +130,7 @@ describe('pypi multi-version wheels (#369) — integration', () => {
     expect(names).toEqual([
       'demo-py-wheel-x86_64-unknown-linux-gnu-py3.12',
       'demo-py-wheel-x86_64-unknown-linux-gnu-py3.13',
+      'demo-py-wheel-x86_64-unknown-linux-gnu-py3.14',
     ]);
   });
 });

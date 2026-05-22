@@ -78,7 +78,7 @@ export interface PlanOptions {
   releasePackages?: string | undefined;
 }
 
-export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
+export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
   const config = loadConfig(cfgPath);
@@ -89,7 +89,7 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   // fix). The named packages — and only those — are planned.
   const manual = parseReleasePackages(opts.releasePackages);
   if (manual !== null) {
-    return Promise.resolve(planManual(config.packages, manual, cwd));
+    return planManual(config.packages, manual, cwd);
   }
 
   // What changed since the last release per package?
@@ -97,7 +97,7 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const trailer = resolveTrailer(head, cwd);
 
   if (trailer?.bump === 'skip') {
-    return Promise.resolve([]);
+    return [];
   }
 
   // Compute cascade. For each package with a last tag, diff against
@@ -116,16 +116,16 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const forced = new Set(trailer?.packages ?? []);
   for (const name of forced) cascaded.add(name);
 
-  if (cascaded.size === 0) return Promise.resolve([]);
+  if (cascaded.size === 0) return [];
 
   const rows: MatrixRow[] = [];
   for (const p of config.packages) {
     if (!cascaded.has(p.name)) continue;
     const version = nextVersion(p, trailer?.bump, cwd, forced);
-    const pkgRows = rowsForPackage(p, version, cwd);
+    const pkgRows = await rowsForPackage(p, version, cwd);
     rows.push(...pkgRows);
   }
-  return Promise.resolve(rows);
+  return rows;
 }
 
 /* ----------------------------- internals ----------------------------- */
@@ -137,11 +137,11 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
  * used verbatim, a bump keyword bumps the last tag (or first_version
  * when the package has no tag yet).
  */
-function planManual(
+async function planManual(
   packages: readonly Package[],
   manual: ReadonlyMap<string, ReleasePackagesEntry>,
   cwd: string,
-): MatrixRow[] {
+): Promise<MatrixRow[]> {
   const known = new Set(packages.map((p) => p.name));
   for (const name of manual.keys()) {
     if (!known.has(name)) {
@@ -156,7 +156,7 @@ function planManual(
   for (const p of packages) {
     const entry = manual.get(p.name);
     if (entry === undefined) continue;
-    rows.push(...rowsForPackage(p, manualVersion(p, entry, cwd), cwd));
+    rows.push(...await rowsForPackage(p, manualVersion(p, entry, cwd), cwd));
   }
   return rows;
 }
@@ -238,7 +238,7 @@ function nextVersion(
   return bumpVersion(lastVersion, bumpType);
 }
 
-function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[] {
+async function rowsForPackage(pkg: Package, version: string, cwd: string): Promise<MatrixRow[]> {
   // #230: actions/upload-artifact@v4 forbids `/` in artifact names, so
   // any package name containing a slash (the polyglot-monorepo
   // grouping shape, e.g. `py/foo`, `js/bar`) needs to be encoded
@@ -278,7 +278,7 @@ function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[]
       // Resolve the set — config `python_versions` override, else
       // `requires-python` inference, else a single default — and fan
       // the maturin per-target wheel rows across it.
-      const pyVersions = resolvePythonVersions(pkg, cwd);
+      const pyVersions = await resolvePythonVersions(pkg, cwd);
       const multiPy = pyVersions.length > 1;
       // The sdist and pure-Python hatch wheel are version-agnostic but
       // still need an interpreter to run the build; use the newest
