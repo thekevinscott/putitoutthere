@@ -9,17 +9,41 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_PYTHON_VERSION,
+  RELEASED_CPYTHON_VERSIONS_ENV,
   expandRequiresPython,
+  knownPythonVersions,
   resolvePythonVersions,
 } from './python-versions.js';
 
 describe('expandRequiresPython', () => {
+  const ENV_BAK = process.env[RELEASED_CPYTHON_VERSIONS_ENV];
+
+  afterEach(() => {
+    if (ENV_BAK === undefined) {
+      delete process.env[RELEASED_CPYTHON_VERSIONS_ENV];
+    } else {
+      process.env[RELEASED_CPYTHON_VERSIONS_ENV] = ENV_BAK;
+    }
+  });
+
   it('expands `>=3.10` to the released CPython set it allows', () => {
-    expect(expandRequiresPython('>=3.10')).toEqual(['3.10', '3.11', '3.12', '3.13']);
+    expect(expandRequiresPython('>=3.10')).toEqual([
+      '3.10',
+      '3.11',
+      '3.12',
+      '3.13',
+      '3.14',
+    ]);
   });
 
   it('includes the latest released CPython for open-ended lower bounds (#375)', () => {
     expect(expandRequiresPython('>=3.11')).toContain('3.14');
+  });
+
+  it('honors the workflow-provided released CPython list (#375)', () => {
+    process.env[RELEASED_CPYTHON_VERSIONS_ENV] = '3.11, 3.12, 3.13, 3.14, 3.15';
+    expect(knownPythonVersions()).toEqual(['3.11', '3.12', '3.13', '3.14', '3.15']);
+    expect(expandRequiresPython('>=3.13')).toEqual(['3.13', '3.14', '3.15']);
   });
 
   it('honours an upper bound', () => {
@@ -31,7 +55,7 @@ describe('expandRequiresPython', () => {
   });
 
   it('handles a `~=` compatible-release clause', () => {
-    expect(expandRequiresPython('~=3.11')).toEqual(['3.11', '3.12', '3.13']);
+    expect(expandRequiresPython('~=3.11')).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
   it('handles an exact `==` pin', () => {
@@ -47,7 +71,12 @@ describe('expandRequiresPython', () => {
   });
 
   it('handles a `!=` exclusion', () => {
-    expect(expandRequiresPython('>=3.10,!=3.12')).toEqual(['3.10', '3.11', '3.13']);
+    expect(expandRequiresPython('>=3.10,!=3.12')).toEqual([
+      '3.10',
+      '3.11',
+      '3.13',
+      '3.14',
+    ]);
   });
 
   it('handles an `==3.*` wildcard', () => {
@@ -58,11 +87,12 @@ describe('expandRequiresPython', () => {
       '3.11',
       '3.12',
       '3.13',
+      '3.14',
     ]);
   });
 
   it('tolerates a patch component in the spec version', () => {
-    expect(expandRequiresPython('>=3.11.0')).toEqual(['3.11', '3.12', '3.13']);
+    expect(expandRequiresPython('>=3.11.0')).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
   it('tolerates a bare-major spec version', () => {
@@ -73,11 +103,18 @@ describe('expandRequiresPython', () => {
       '3.11',
       '3.12',
       '3.13',
+      '3.14',
     ]);
   });
 
   it('tolerates whitespace and a `<4` major bound', () => {
-    expect(expandRequiresPython('>= 3.10, < 4')).toEqual(['3.10', '3.11', '3.12', '3.13']);
+    expect(expandRequiresPython('>= 3.10, < 4')).toEqual([
+      '3.10',
+      '3.11',
+      '3.12',
+      '3.13',
+      '3.14',
+    ]);
   });
 
   it('returns an empty array for an unparseable spec', () => {
@@ -115,7 +152,7 @@ describe('resolvePythonVersions', () => {
       '[project]\nrequires-python = ">=3.12"\n',
       'utf8',
     );
-    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual(['3.12', '3.13']);
+    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual(['3.12', '3.13', '3.14']);
   });
 
   it('falls back to the default when pyproject.toml is missing', () => {

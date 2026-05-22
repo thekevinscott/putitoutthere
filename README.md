@@ -259,19 +259,22 @@ version = 1   # required; only 1 is valid today
 | `build`      | enum                   | `maturin` \| `setuptools` \| `hatch`. Optional. Default `setuptools`. |
 | `targets`    | (string \| object)[]   | Required when `build = "maturin"`. Triples or `{ triple, runner }` objects. |
 | `bundle_cli` | table                  | Opt-in: cross-compile a Rust CLI per target and stage it into each wheel. Only valid with `build = "maturin"`. See [Recipes → Rust CLI inside a PyPI wheel](#rust-cli-inside-a-pypi-wheel). |
-| `python_versions` | string[]          | Optional override for the CPython versions wheels are built for, e.g. `["3.12", "3.13"]`. When omitted, the set is inferred from `[project].requires-python` (see below). |
+| `python_versions` | string[]          | Optional override for the CPython versions wheels are built for, e.g. `["3.12", "3.13"]`. When omitted, the set is inferred from `[project].requires-python` and the workflow's live released-CPython list (see below). |
 
 > [!NOTE]
 > **`kind = "pypi"` builds a wheel for every supported Python version.**
 > By default the version set is inferred from `[project].requires-python`
 > in your `pyproject.toml` — `requires-python = ">=3.10"` builds wheels
-> for `3.10, 3.11, 3.12, 3.13`. No configuration is needed: the common
-> case ships complete wheel coverage automatically. To pin an explicit
-> subset, set `python_versions` on the package. The build matrix fans
-> across the resolved set (per `maturin` target); the sdist and a
-> pure-Python `hatch` wheel are version-agnostic and built once. When
-> neither `python_versions` nor a parseable `requires-python` is
-> present, a single wheel is built for `3.12`.
+> for every released CPython minor version it allows. The reusable
+> workflow discovers that released-version list at plan time, so a newly
+> released CPython is included without a putitoutthere update. Local and
+> offline CLI runs use a bundled fallback list. No configuration is
+> needed: the common case ships complete wheel coverage automatically.
+> To pin an explicit subset, set `python_versions` on the package. The
+> build matrix fans across the resolved set (per `maturin` target); the
+> sdist and a pure-Python `hatch` wheel are version-agnostic and built
+> once. When neither `python_versions` nor a parseable `requires-python`
+> is present, a single wheel is built for `3.12`.
 
 > [!IMPORTANT]
 > **`pyproject.toml` MUST match the configured shape.** Preflight verifies

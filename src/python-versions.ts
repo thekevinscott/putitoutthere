@@ -20,21 +20,34 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 /**
- * Released CPython minor versions piot expands `requires-python`
- * against. Ascending. A `requires-python` clause selects a subset of
- * this list; versions outside it (pre-releases, EOL-and-pre-3.8,
- * unreleased) are never inferred. Bump the tail when a new CPython
- * ships and consumers want coverage for it without pinning
- * `python_versions` by hand.
+ * Workflow-provided released CPython minor versions. The reusable
+ * workflow populates this from endoflife.date at plan time so
+ * open-ended `requires-python` specs do not wait on a putitoutthere
+ * release for each new CPython.
  */
-export const KNOWN_PYTHON_VERSIONS = [
+export const RELEASED_CPYTHON_VERSIONS_ENV = 'PIOT_RELEASED_CPYTHON_VERSIONS';
+
+/**
+ * Bundled fallback for local/offline runs. Keep this current, but do
+ * not rely on it as the only source in CI.
+ */
+export const BUNDLED_PYTHON_VERSIONS = [
   '3.8',
   '3.9',
   '3.10',
   '3.11',
   '3.12',
   '3.13',
+  '3.14',
 ] as const;
+
+/**
+ * Released CPython minor versions piot expands `requires-python`
+ * against. Ascending. A `requires-python` clause selects a subset of
+ * this list; versions outside it (pre-releases, EOL-and-pre-3.8,
+ * unreleased) are never inferred.
+ */
+export const KNOWN_PYTHON_VERSIONS = BUNDLED_PYTHON_VERSIONS;
 
 /**
  * Fallback when neither `python_versions` nor a parseable
@@ -75,6 +88,20 @@ function parseClauses(spec: string): Clause[] {
   return clauses;
 }
 
+function normalizeKnownPythonVersions(raw: string | undefined): string[] {
+  if (raw === undefined) return [...BUNDLED_PYTHON_VERSIONS];
+  const versions = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => /^3\.\d+$/.test(s))
+    .sort(compareVersionStrings);
+  return versions.length > 0 ? versions : [...BUNDLED_PYTHON_VERSIONS];
+}
+
+export function knownPythonVersions(): string[] {
+  return normalizeKnownPythonVersions(process.env[RELEASED_CPYTHON_VERSIONS_ENV]);
+}
+
 type OpFn = (candidate: readonly number[], ver: readonly number[]) => boolean;
 
 // One predicate per PEP 440 specifier operator. The keys are exactly
@@ -102,15 +129,15 @@ function satisfies(candidate: readonly number[], clause: Clause): boolean {
 
 /**
  * Expand a `requires-python` specifier to the concrete CPython
- * versions from {@link KNOWN_PYTHON_VERSIONS} it allows. `">=3.10"`
- * → `["3.10", "3.11", "3.12", "3.13"]`. Returns `[]` when the spec
+ * versions from {@link knownPythonVersions} it allows. `">=3.10"`
+ * → `["3.10", "3.11", "3.12", "3.13", ...]`. Returns `[]` when the spec
  * is empty or carries no recognizable clause, so callers can fall
  * back.
  */
 export function expandRequiresPython(spec: string): string[] {
   const clauses = parseClauses(spec);
   if (clauses.length === 0) return [];
-  return KNOWN_PYTHON_VERSIONS.filter((kv) => {
+  return knownPythonVersions().filter((kv) => {
     const candidate = parseVersion(kv);
     return clauses.every((clause) => satisfies(candidate, clause));
   });

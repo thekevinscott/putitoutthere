@@ -1127,7 +1127,7 @@ globs   = ["pkg/**"]
     const wheels = matrix.filter(
       (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
     );
-    expect(wheels.map(pyVer).sort()).toEqual(['3.11', '3.12', '3.13']);
+    expect(wheels.map(pyVer).sort()).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
   it('suffixes wheel artifact names per python version when more than one applies', async () => {
@@ -1143,6 +1143,7 @@ globs   = ["pkg/**"]
     expect(wheels.map((r) => r.artifact_name).sort()).toEqual([
       'py-lib-wheel-x86_64-unknown-linux-gnu-py3.12',
       'py-lib-wheel-x86_64-unknown-linux-gnu-py3.13',
+      'py-lib-wheel-x86_64-unknown-linux-gnu-py3.14',
     ]);
   });
 
@@ -1177,7 +1178,7 @@ globs   = ["pkg/**"]
     expect(pypi.length).toBeGreaterThan(0);
     for (const row of pypi) expect(typeof pyVer(row)).toBe('string');
     const sdist = matrix.find((r) => r.kind === 'pypi' && r.target === 'sdist')!;
-    expect(pyVer(sdist)).toBe('3.13');
+    expect(pyVer(sdist)).toBe('3.14');
   });
 
   it('falls back to a single default version when requires-python is absent', async () => {

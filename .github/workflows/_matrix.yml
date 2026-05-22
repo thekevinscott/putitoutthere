@@ -83,6 +83,42 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
 
+      - name: Discover released CPython versions
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const endpoint = 'https://endoflife.date/api/python.json';
+          const response = await fetch(endpoint, {
+            headers: { 'user-agent': 'putitoutthere-cpython-version-discovery' },
+          });
+          if (!response.ok) {
+            throw new Error(`${endpoint} returned ${response.status}`);
+          }
+          const today = new Date().toISOString().slice(0, 10);
+          const versions = (await response.json())
+            .map((cycle) => ({
+              cycle: String(cycle.cycle),
+              releaseDate: String(cycle.releaseDate ?? ''),
+            }))
+            .filter(({ cycle, releaseDate }) => {
+              if (!/^3\.\d+$/.test(cycle) || releaseDate === '' || releaseDate > today) return false;
+              const [, minor] = cycle.split('.').map(Number);
+              return minor >= 8;
+            })
+            .map(({ cycle }) => cycle)
+            .sort((a, b) => {
+              const [amaj, amin] = a.split('.').map(Number);
+              const [bmaj, bmin] = b.split('.').map(Number);
+              return amaj - bmaj || amin - bmin;
+            });
+          if (versions.length === 0) {
+            throw new Error(`${endpoint} returned no released CPython 3.x versions`);
+          }
+          console.log(`PIOT_RELEASED_CPYTHON_VERSIONS=${versions.join(',')}`);
+          const fs = await import('node:fs');
+          fs.appendFileSync(process.env.GITHUB_ENV, `PIOT_RELEASED_CPYTHON_VERSIONS=${versions.join(',')}\n`);
+          NODE
+
       - id: plan
         uses: thekevinscott/putitoutthere@v0
         with:

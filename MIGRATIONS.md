@@ -21,6 +21,38 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### pypi `requires-python` uses live CPython discovery
+
+**Summary.** Open-ended `requires-python` inference now expands against
+a live list of released CPython 3.x minors in the reusable workflow,
+rather than only the planner's bundled fallback. The plan job fetches
+the released-version list from endoflife.date and passes it to the
+planner with `PIOT_RELEASED_CPYTHON_VERSIONS`. This fixes the stale-tail
+failure mode where `requires-python = ">=3.11"` emitted cp311/cp312/cp313
+wheels but omitted cp314 after Python 3.14 was released. Local/offline
+CLI runs still use a bundled fallback list, now current through `3.14`.
+
+**Required changes.** None.
+
+| Before | After |
+|--------|-------|
+| `requires-python = ">=3.11"` planned wheels only through the bundled fallback tail. | `requires-python = ">=3.11"` plans every released CPython minor discovered by the reusable workflow, unless `python_versions` is explicitly set. |
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Consumers with open-ended
+`requires-python` ranges may see an extra wheel row when a new CPython
+minor has been released. If the reusable workflow cannot fetch the live
+released-version list, the plan job fails instead of silently falling
+back to a stale matrix. Explicit `python_versions` overrides are
+unchanged and still pin the exact wheel set.
+
+**Verification.** Push a release for a `kind = "pypi"` package whose
+`pyproject.toml` declares `requires-python = ">=3.11"`; the plan job log
+should print `PIOT_RELEASED_CPYTHON_VERSIONS=...3.14...`, the build
+matrix should include a `python_version: "3.14"` row, and the published
+PyPI release should include a cp314 wheel.
+
 ### Manual release via `release_packages`
 
 **Summary.** `release.yml` gained an optional `release_packages`
@@ -99,7 +131,8 @@ is inert for pypi builds.
 
 **Verification.** Push a release for a `kind = "pypi"` package whose
 `pyproject.toml` declares `requires-python = ">=3.11"`; the build job
-fans into one wheel row per version (`3.11`, `3.12`, `3.13`), and the
+fans into one wheel row per released version (for example `3.11`,
+`3.12`, `3.13`, `3.14`), and the
 published PyPI release carries a wheel for each.
 
 ### npm bundled-cli binary embeds the release version
