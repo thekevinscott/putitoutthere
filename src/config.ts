@@ -156,6 +156,16 @@ const PYPI_PKG = z
     build: PYPI_BUILD.default('setuptools'),
     targets: z.array(TARGET_ENTRY).optional(),
     bundle_cli: BUNDLE_CLI.optional(),
+    // #369: explicit override for the set of CPython versions wheels
+    // are built for. When omitted, the planner infers the set from
+    // `[project].requires-python` in the package's `pyproject.toml`,
+    // falling back to a single default. Each entry is a `major.minor`
+    // string (e.g. "3.12"); patch components are not meaningful for
+    // wheel ABI selection.
+    python_versions: z
+      .array(z.string().regex(/^3\.\d+$/, 'python_versions entries must be `3.<minor>` strings'))
+      .min(1)
+      .optional(),
   })
   .strict()
   .refine(

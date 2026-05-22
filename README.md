@@ -79,7 +79,7 @@ Optional inputs — `with:` block at the call site:
 |------------------|--------------|--------------------------------------------------------------------------|
 | `environment`    | `release`    | Your GitHub deployment environment is named differently.                 |
 | `node_version`   | `24`         | You need a specific Node version for `kind = "npm"` build steps.         |
-| `python_version` | `3.12`       | You need a specific Python version for `kind = "pypi"` build steps.      |
+| `python_version` | `3.12`       | Deprecated — no longer affects `kind = "pypi"` builds. Wheel coverage is inferred from `requires-python` or pinned via [`python_versions`](#kind--pypi). |
 
 ### 1b. Recommended: drop in `.github/workflows/check.yml`
 
@@ -259,6 +259,19 @@ version = 1   # required; only 1 is valid today
 | `build`      | enum                   | `maturin` \| `setuptools` \| `hatch`. Optional. Default `setuptools`. |
 | `targets`    | (string \| object)[]   | Required when `build = "maturin"`. Triples or `{ triple, runner }` objects. |
 | `bundle_cli` | table                  | Opt-in: cross-compile a Rust CLI per target and stage it into each wheel. Only valid with `build = "maturin"`. See [Recipes → Rust CLI inside a PyPI wheel](#rust-cli-inside-a-pypi-wheel). |
+| `python_versions` | string[]          | Optional override for the CPython versions wheels are built for, e.g. `["3.12", "3.13"]`. When omitted, the set is inferred from `[project].requires-python` (see below). |
+
+> [!NOTE]
+> **`kind = "pypi"` builds a wheel for every supported Python version.**
+> By default the version set is inferred from `[project].requires-python`
+> in your `pyproject.toml` — `requires-python = ">=3.10"` builds wheels
+> for `3.10, 3.11, 3.12, 3.13`. No configuration is needed: the common
+> case ships complete wheel coverage automatically. To pin an explicit
+> subset, set `python_versions` on the package. The build matrix fans
+> across the resolved set (per `maturin` target); the sdist and a
+> pure-Python `hatch` wheel are version-agnostic and built once. When
+> neither `python_versions` nor a parseable `requires-python` is
+> present, a single wheel is built for `3.12`.
 
 > [!IMPORTANT]
 > **`pyproject.toml` MUST match the configured shape.** Preflight verifies

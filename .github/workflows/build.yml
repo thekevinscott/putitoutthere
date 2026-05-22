@@ -35,8 +35,11 @@ on:
         default: '24'
       python_version:
         description: >-
-          Python version for kind = "pypi" build steps. Default `3.12`.
-          Forwarded to `_matrix.yml`.
+          Deprecated (#369): `kind = "pypi"` builds now fan across the
+          Python versions inferred from each package's
+          `requires-python` (or pinned via `python_versions` in
+          `putitoutthere.toml`). This input no longer affects pypi
+          builds; it is retained only so existing callers don't break.
         type: string
         default: '3.12'
 

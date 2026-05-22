@@ -20,6 +20,7 @@ import {
   platformArtifactName,
   type NpmBuildField,
 } from './handlers/npm-platform.js';
+import { resolvePythonVersions } from './python-versions.js';
 import { parseTagVersion } from './tag-template.js';
 import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
@@ -54,6 +55,14 @@ export interface MatrixRow {
     features: string[];
     no_default_features: boolean;
   };
+  // #369 (pypi): the CPython version this row's build targets. Set on
+  // every pypi row — per-version on maturin per-target wheel rows
+  // (the matrix fans across the resolved version set), and the newest
+  // resolved version on the version-agnostic sdist / hatch wheel-any
+  // rows (which still need an interpreter to run the build). Absent on
+  // crates / npm rows. `_matrix.yml` feeds it to `actions/setup-python`
+  // and, for maturin, to the build's `--interpreter` selection.
+  python_version?: string;
 }
 
 export interface PlanOptions {
@@ -96,7 +105,7 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   for (const p of config.packages) {
     if (!cascaded.has(p.name)) continue;
     const version = nextVersion(p, trailer?.bump, cwd, forced);
-    const pkgRows = rowsForPackage(p, version);
+    const pkgRows = rowsForPackage(p, version, cwd);
     rows.push(...pkgRows);
   }
   return Promise.resolve(rows);
@@ -160,7 +169,7 @@ function nextVersion(
   return bumpVersion(lastVersion, bumpType);
 }
 
-function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
+function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[] {
   // #230: actions/upload-artifact@v4 forbids `/` in artifact names, so
   // any package name containing a slash (the polyglot-monorepo
   // grouping shape, e.g. `py/foo`, `js/bar`) needs to be encoded
@@ -196,24 +205,43 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
       const build = (pkg as { build?: string }).build;
       const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
       const bundleCli = (pkg as { bundle_cli?: MatrixRow['bundle_cli'] }).bundle_cli;
+      // #369: every wheel is built for a specific CPython version.
+      // Resolve the set — config `python_versions` override, else
+      // `requires-python` inference, else a single default — and fan
+      // the maturin per-target wheel rows across it.
+      const pyVersions = resolvePythonVersions(pkg, cwd);
+      const multiPy = pyVersions.length > 1;
+      // The sdist and pure-Python hatch wheel are version-agnostic but
+      // still need an interpreter to run the build; use the newest
+      // resolved version.
+      const buildPython = pyVersions[pyVersions.length - 1]!;
       const out: MatrixRow[] = [];
       if (build === 'maturin' && targets.length > 0) {
         for (const entry of targets) {
           const { triple, runner } = normalizeTarget(entry);
-          const row: MatrixRow = {
-            name: pkg.name,
-            kind: 'pypi',
-            version,
-            target: triple,
-            runs_on: runner ?? defaultRunsOn(triple),
-            artifact_name: `${safe}-wheel-${triple}`,
-            artifact_path: at('dist'),
-            path: pkg.path,
-            build,
-          };
-          // #217: per-target wheels carry bundle_cli; sdist does not.
-          if (bundleCli !== undefined) row.bundle_cli = bundleCli;
-          out.push(row);
+          for (const py of pyVersions) {
+            const row: MatrixRow = {
+              name: pkg.name,
+              kind: 'pypi',
+              version,
+              target: triple,
+              runs_on: runner ?? defaultRunsOn(triple),
+              // A single planned version keeps the historical
+              // unsuffixed artifact name; a multi-version fan adds a
+              // `-py<ver>` slot so per-version wheels for the same
+              // triple don't collide at upload.
+              artifact_name: multiPy
+                ? `${safe}-wheel-${triple}-py${py}`
+                : `${safe}-wheel-${triple}`,
+              artifact_path: at('dist'),
+              path: pkg.path,
+              build,
+              python_version: py,
+            };
+            // #217: per-target wheels carry bundle_cli; sdist does not.
+            if (bundleCli !== undefined) row.bundle_cli = bundleCli;
+            out.push(row);
+          }
         }
       }
       // Always emit an sdist row for pypi. Source-only — no staged
@@ -227,6 +255,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
         artifact_name: `${safe}-sdist`,
         artifact_path: at('dist'),
         path: pkg.path,
+        python_version: buildPython,
         ...(build !== undefined ? { build } : {}),
       });
       // #324: pure-Python hatch packages also emit a `wheel-any` row.
@@ -247,6 +276,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
           artifact_path: at('dist'),
           path: pkg.path,
           build,
+          python_version: buildPython,
         });
       }
       return out;
