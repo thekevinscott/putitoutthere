@@ -10,11 +10,13 @@
 import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -391,6 +393,39 @@ describe('publishPlatforms (bundled-cli)', () => {
       type: 'git',
       url: 'git+https://github.com/acme/demo-cli.git',
     });
+  });
+
+  it('staged bundled-cli binary is executable even when the artifact lost its mode bits', async () => {
+    // The GitHub Actions artifact upload/download boundary strips the
+    // executable bit, so the cross-compiled binary arrives at the publish
+    // job as 0644. The synthesized platform package must restore +x —
+    // npm only chmods `bin` entries, and the bundled binary is referenced
+    // via `main`, so without this the launcher's spawnSync EACCESes.
+    mkdirSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu'), { recursive: true });
+    const artifactBin = join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo-cli');
+    writeFileSync(artifactBin, Buffer.from('#!/bin/sh\n'));
+    chmodSync(artifactBin, 0o644); // simulate the lost executable bit
+
+    const stagedModes: number[] = [];
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      const folder = stagingDirArg(a);
+      if (folder) {
+        stagedModes.push(statSync(join(folder, 'demo-cli')).mode);
+      }
+      return Buffer.from('');
+    });
+
+    const pkg: PlatformPkg = basePkg({
+      build: [{ mode: 'bundled-cli', name: DEFAULT_NAME_TEMPLATE }],
+      targets: ['linux-x64-gnu'],
+    });
+    await publishPlatforms(pkg, '0.2.0', makeCtx());
+
+    expect(stagedModes).toHaveLength(1);
+    // At least one execute bit must be set on the staged binary.
+    expect(stagedModes[0]! & 0o111).not.toBe(0);
   });
 });
 
