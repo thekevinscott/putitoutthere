@@ -395,7 +395,11 @@ describe('publishPlatforms (bundled-cli)', () => {
     });
   });
 
-  it('staged bundled-cli binary is executable even when the artifact lost its mode bits', async () => {
+  // Skipped on Windows: NTFS does not carry POSIX execute bits, so
+  // `statSync().mode & 0o111` is always 0 there and the +x the fix sets
+  // is unobservable. npm platform publish runs on Linux runners; the
+  // ubuntu/macos unit legs exercise the behavior.
+  it.skipIf(process.platform === 'win32')('staged bundled-cli binary is executable even when the artifact lost its mode bits', async () => {
     // The GitHub Actions artifact upload/download boundary strips the
     // executable bit, so the cross-compiled binary arrives at the publish
     // job as 0644. The synthesized platform package must restore +x —
