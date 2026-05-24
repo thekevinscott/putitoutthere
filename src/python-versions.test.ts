@@ -11,13 +11,12 @@ import {
   DEFAULT_PYTHON_VERSION,
   RELEASED_CPYTHON_VERSIONS,
   expandRequiresPython,
-  knownPythonVersions,
   resolvePythonVersions,
 } from './python-versions.js';
 
 describe('expandRequiresPython', () => {
-  it('expands `>=3.10` to the released CPython set it allows', async () => {
-    await expect(expandRequiresPython('>=3.10')).resolves.toEqual([
+  it('expands `>=3.10` to the released CPython set it allows', () => {
+    expect(expandRequiresPython('>=3.10')).toEqual([
       '3.10',
       '3.11',
       '3.12',
@@ -26,40 +25,40 @@ describe('expandRequiresPython', () => {
     ]);
   });
 
-  it('includes the latest released CPython for open-ended lower bounds (#375)', async () => {
-    await expect(expandRequiresPython('>=3.11')).resolves.toContain('3.14');
+  it('includes the latest released CPython for open-ended lower bounds (#375)', () => {
+    expect(expandRequiresPython('>=3.11')).toContain('3.14');
   });
 
   it('uses the checked-in released CPython list (#375)', () => {
-    expect(knownPythonVersions()).toEqual([...RELEASED_CPYTHON_VERSIONS]);
+    expect(expandRequiresPython('==3.*')).toEqual([...RELEASED_CPYTHON_VERSIONS]);
   });
 
-  it('honours an upper bound', async () => {
-    await expect(expandRequiresPython('>=3.9,<3.12')).resolves.toEqual(['3.9', '3.10', '3.11']);
+  it('honours an upper bound', () => {
+    expect(expandRequiresPython('>=3.9,<3.12')).toEqual(['3.9', '3.10', '3.11']);
   });
 
-  it('treats `<3.12` as exclusive', async () => {
-    await expect(expandRequiresPython('>=3.11,<3.12')).resolves.toEqual(['3.11']);
+  it('treats `<3.12` as exclusive', () => {
+    expect(expandRequiresPython('>=3.11,<3.12')).toEqual(['3.11']);
   });
 
-  it('handles a `~=` compatible-release clause', async () => {
-    await expect(expandRequiresPython('~=3.11')).resolves.toEqual(['3.11', '3.12', '3.13', '3.14']);
+  it('handles a `~=` compatible-release clause', () => {
+    expect(expandRequiresPython('~=3.11')).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
-  it('handles an exact `==` pin', async () => {
-    await expect(expandRequiresPython('==3.12')).resolves.toEqual(['3.12']);
+  it('handles an exact `==` pin', () => {
+    expect(expandRequiresPython('==3.12')).toEqual(['3.12']);
   });
 
-  it('handles the arbitrary-equality `===` operator', async () => {
-    await expect(expandRequiresPython('===3.12')).resolves.toEqual(['3.12']);
+  it('handles the arbitrary-equality `===` operator', () => {
+    expect(expandRequiresPython('===3.12')).toEqual(['3.12']);
   });
 
-  it('handles exclusive `>` and inclusive `<=` bounds', async () => {
-    await expect(expandRequiresPython('>3.11,<=3.13')).resolves.toEqual(['3.12', '3.13']);
+  it('handles exclusive `>` and inclusive `<=` bounds', () => {
+    expect(expandRequiresPython('>3.11,<=3.13')).toEqual(['3.12', '3.13']);
   });
 
-  it('handles a `!=` exclusion', async () => {
-    await expect(expandRequiresPython('>=3.10,!=3.12')).resolves.toEqual([
+  it('handles a `!=` exclusion', () => {
+    expect(expandRequiresPython('>=3.10,!=3.12')).toEqual([
       '3.10',
       '3.11',
       '3.13',
@@ -67,8 +66,8 @@ describe('expandRequiresPython', () => {
     ]);
   });
 
-  it('handles an `==3.*` wildcard', async () => {
-    await expect(expandRequiresPython('==3.*')).resolves.toEqual([
+  it('handles an `==3.*` wildcard', () => {
+    expect(expandRequiresPython('==3.*')).toEqual([
       '3.8',
       '3.9',
       '3.10',
@@ -79,12 +78,12 @@ describe('expandRequiresPython', () => {
     ]);
   });
 
-  it('tolerates a patch component in the spec version', async () => {
-    await expect(expandRequiresPython('>=3.11.0')).resolves.toEqual(['3.11', '3.12', '3.13', '3.14']);
+  it('tolerates a patch component in the spec version', () => {
+    expect(expandRequiresPython('>=3.11.0')).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
-  it('tolerates a bare-major spec version', async () => {
-    await expect(expandRequiresPython('>=3')).resolves.toEqual([
+  it('tolerates a bare-major spec version', () => {
+    expect(expandRequiresPython('>=3')).toEqual([
       '3.8',
       '3.9',
       '3.10',
@@ -95,8 +94,8 @@ describe('expandRequiresPython', () => {
     ]);
   });
 
-  it('tolerates whitespace and a `<4` major bound', async () => {
-    await expect(expandRequiresPython('>= 3.10, < 4')).resolves.toEqual([
+  it('tolerates whitespace and a `<4` major bound', () => {
+    expect(expandRequiresPython('>= 3.10, < 4')).toEqual([
       '3.10',
       '3.11',
       '3.12',
@@ -105,12 +104,12 @@ describe('expandRequiresPython', () => {
     ]);
   });
 
-  it('returns an empty array for an unparseable spec', async () => {
-    await expect(expandRequiresPython('not-a-version')).resolves.toEqual([]);
+  it('returns an empty array for an unparseable spec', () => {
+    expect(expandRequiresPython('not-a-version')).toEqual([]);
   });
 
-  it('returns an empty array for an empty spec', async () => {
-    await expect(expandRequiresPython('')).resolves.toEqual([]);
+  it('returns an empty array for an empty spec', () => {
+    expect(expandRequiresPython('')).toEqual([]);
   });
 });
 
@@ -123,51 +122,51 @@ describe('resolvePythonVersions', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('prefers an explicit python_versions override, sorted ascending', async () => {
+  it('prefers an explicit python_versions override, sorted ascending', () => {
     writeFileSync(
       join(dir, 'pyproject.toml'),
       '[project]\nrequires-python = ">=3.10"\n',
       'utf8',
     );
-    await expect(
+    expect(
       resolvePythonVersions({ path: '.', python_versions: ['3.13', '3.9'] }, dir),
-    ).resolves.toEqual(['3.9', '3.13']);
+    ).toEqual(['3.9', '3.13']);
   });
 
-  it('infers from requires-python when no override is given', async () => {
+  it('infers from requires-python when no override is given', () => {
     writeFileSync(
       join(dir, 'pyproject.toml'),
       '[project]\nrequires-python = ">=3.12"\n',
       'utf8',
     );
-    await expect(resolvePythonVersions({ path: '.' }, dir)).resolves.toEqual(['3.12', '3.13', '3.14']);
+    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual(['3.12', '3.13', '3.14']);
   });
 
-  it('falls back to the default when pyproject.toml is missing', async () => {
-    await expect(resolvePythonVersions({ path: '.' }, dir)).resolves.toEqual([DEFAULT_PYTHON_VERSION]);
+  it('falls back to the default when pyproject.toml is missing', () => {
+    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when requires-python is absent', async () => {
+  it('falls back to the default when requires-python is absent', () => {
     writeFileSync(join(dir, 'pyproject.toml'), '[project]\nname = "x"\n', 'utf8');
-    await expect(resolvePythonVersions({ path: '.' }, dir)).resolves.toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when pyproject.toml has no [project] table', async () => {
+  it('falls back to the default when pyproject.toml has no [project] table', () => {
     writeFileSync(join(dir, 'pyproject.toml'), '[build-system]\nrequires = []\n', 'utf8');
-    await expect(resolvePythonVersions({ path: '.' }, dir)).resolves.toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when pyproject.toml is malformed TOML', async () => {
+  it('falls back to the default when pyproject.toml is malformed TOML', () => {
     writeFileSync(join(dir, 'pyproject.toml'), 'this is not = = valid toml [[', 'utf8');
-    await expect(resolvePythonVersions({ path: '.' }, dir)).resolves.toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when requires-python is unparseable', async () => {
+  it('falls back to the default when requires-python is unparseable', () => {
     writeFileSync(
       join(dir, 'pyproject.toml'),
       '[project]\nrequires-python = "banana"\n',
       'utf8',
     );
-    await expect(resolvePythonVersions({ path: '.' }, dir)).resolves.toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 });

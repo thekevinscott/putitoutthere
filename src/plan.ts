@@ -122,7 +122,7 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   for (const p of config.packages) {
     if (!cascaded.has(p.name)) continue;
     const version = nextVersion(p, trailer?.bump, cwd, forced);
-    const pkgRows = await rowsForPackage(p, version, cwd);
+    const pkgRows = rowsForPackage(p, version, cwd);
     rows.push(...pkgRows);
   }
   return rows;
@@ -137,11 +137,11 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
  * used verbatim, a bump keyword bumps the last tag (or first_version
  * when the package has no tag yet).
  */
-async function planManual(
+function planManual(
   packages: readonly Package[],
   manual: ReadonlyMap<string, ReleasePackagesEntry>,
   cwd: string,
-): Promise<MatrixRow[]> {
+): MatrixRow[] {
   const known = new Set(packages.map((p) => p.name));
   for (const name of manual.keys()) {
     if (!known.has(name)) {
@@ -156,7 +156,7 @@ async function planManual(
   for (const p of packages) {
     const entry = manual.get(p.name);
     if (entry === undefined) continue;
-    rows.push(...await rowsForPackage(p, manualVersion(p, entry, cwd), cwd));
+    rows.push(...rowsForPackage(p, manualVersion(p, entry, cwd), cwd));
   }
   return rows;
 }
@@ -238,7 +238,7 @@ function nextVersion(
   return bumpVersion(lastVersion, bumpType);
 }
 
-async function rowsForPackage(pkg: Package, version: string, cwd: string): Promise<MatrixRow[]> {
+function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[] {
   // #230: actions/upload-artifact@v4 forbids `/` in artifact names, so
   // any package name containing a slash (the polyglot-monorepo
   // grouping shape, e.g. `py/foo`, `js/bar`) needs to be encoded
@@ -278,7 +278,7 @@ async function rowsForPackage(pkg: Package, version: string, cwd: string): Promi
       // Resolve the set — config `python_versions` override, else
       // `requires-python` inference, else a single default — and fan
       // the maturin per-target wheel rows across it.
-      const pyVersions = await resolvePythonVersions(pkg, cwd);
+      const pyVersions = resolvePythonVersions(pkg, cwd);
       const multiPy = pyVersions.length > 1;
       // The sdist and pure-Python hatch wheel are version-agnostic but
       // still need an interpreter to run the build; use the newest
