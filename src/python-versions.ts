@@ -68,10 +68,6 @@ function parseClauses(spec: string): Clause[] {
   return clauses;
 }
 
-export function knownPythonVersions(): string[] {
-  return [...RELEASED_CPYTHON_VERSIONS];
-}
-
 type OpFn = (candidate: readonly number[], ver: readonly number[]) => boolean;
 
 // One predicate per PEP 440 specifier operator. The keys are exactly
@@ -99,19 +95,18 @@ function satisfies(candidate: readonly number[], clause: Clause): boolean {
 
 /**
  * Expand a `requires-python` specifier to the concrete CPython
- * versions from {@link knownPythonVersions} it allows. `">=3.10"`
- * → `["3.10", "3.11", "3.12", "3.13", ...]`. Returns `[]` when the spec
+ * versions from {@link RELEASED_CPYTHON_VERSIONS} it allows. `">=3.10"`
+ * → `["3.10", "3.11", "3.12", "3.13", "3.14"]`. Returns `[]` when the spec
  * is empty or carries no recognizable clause, so callers can fall
  * back.
  */
-export function expandRequiresPython(spec: string): Promise<string[]> {
+export function expandRequiresPython(spec: string): string[] {
   const clauses = parseClauses(spec);
-  if (clauses.length === 0) return Promise.resolve([]);
-  const versions = knownPythonVersions();
-  return Promise.resolve(versions.filter((kv) => {
+  if (clauses.length === 0) return [];
+  return RELEASED_CPYTHON_VERSIONS.filter((kv) => {
     const candidate = parseVersion(kv);
     return clauses.every((clause) => satisfies(candidate, clause));
-  }));
+  });
 }
 
 /** Ascending numeric comparator for `"3.x"` version strings. */
@@ -144,16 +139,16 @@ function readRequiresPython(pyprojectPath: string): string | null {
  * wheels should be built for. Config override wins; otherwise
  * `requires-python` is inferred; otherwise a single default.
  */
-export async function resolvePythonVersions(
+export function resolvePythonVersions(
   pkg: { path: string; python_versions?: readonly string[] | undefined },
   cwd: string,
-): Promise<string[]> {
+): string[] {
   if (pkg.python_versions !== undefined) {
     return [...pkg.python_versions].sort(compareVersionStrings);
   }
   const requiresPython = readRequiresPython(join(cwd, pkg.path, 'pyproject.toml'));
   if (requiresPython !== null) {
-    const expanded = await expandRequiresPython(requiresPython);
+    const expanded = expandRequiresPython(requiresPython);
     if (expanded.length > 0) return expanded;
   }
   return [DEFAULT_PYTHON_VERSION];
