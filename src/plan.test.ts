@@ -644,7 +644,7 @@ targets = ["x86_64-unknown-linux-gnu"]
     expect(linux.artifact_path).toBe('packages/ts/build/x86_64-unknown-linux-gnu');
   });
 
-  it('throws at plan time when a napi target triple is unmapped (#170)', async () => {
+  it('throws at plan time when a napi target triple is unmapped (#170)', () => {
     // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
     // TRIPLE_MAP entry. Without this guard, the mistake surfaces only
     // mid-publish, after the CI matrix has already burned compute.
@@ -663,7 +663,10 @@ targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
     writeFileSync(join(repo, 'putitoutthere.toml'), unmappedToml, 'utf8');
     commit('feat: initial', { 'packages/ts/index.ts': 'x' });
 
-    await expect(plan({ cwd: repo })).rejects.toThrow(
+    // `plan()` throws synchronously from `rowsForPackage` before it
+    // can wrap the result in a Promise, so assert on the synchronous
+    // call rather than `.rejects`.
+    expect(() => plan({ cwd: repo })).toThrow(
       /lib-napi.*mips64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
     );
   });
@@ -1275,11 +1278,13 @@ describe('plan: manual release (release-packages)', () => {
     expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
   });
 
-  it('throws when a named package is not declared in the config', async () => {
+  it('throws when a named package is not declared in the config', () => {
     writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
     commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
 
-    await expect(plan({ cwd: repo, releasePackages: 'lib-ghost@minor' })).rejects.toThrow(
+    // Like `loadConfig`, the manual planner rejects bad input
+    // synchronously — before any promise is returned.
+    expect(() => plan({ cwd: repo, releasePackages: 'lib-ghost@minor' })).toThrow(
       /lib-ghost/,
     );
   });

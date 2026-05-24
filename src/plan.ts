@@ -78,7 +78,7 @@ export interface PlanOptions {
   releasePackages?: string | undefined;
 }
 
-export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
+export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
   const config = loadConfig(cfgPath);
@@ -89,7 +89,7 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   // fix). The named packages — and only those — are planned.
   const manual = parseReleasePackages(opts.releasePackages);
   if (manual !== null) {
-    return planManual(config.packages, manual, cwd);
+    return Promise.resolve(planManual(config.packages, manual, cwd));
   }
 
   // What changed since the last release per package?
@@ -97,7 +97,7 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const trailer = resolveTrailer(head, cwd);
 
   if (trailer?.bump === 'skip') {
-    return [];
+    return Promise.resolve([]);
   }
 
   // Compute cascade. For each package with a last tag, diff against
@@ -116,7 +116,7 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const forced = new Set(trailer?.packages ?? []);
   for (const name of forced) cascaded.add(name);
 
-  if (cascaded.size === 0) return [];
+  if (cascaded.size === 0) return Promise.resolve([]);
 
   const rows: MatrixRow[] = [];
   for (const p of config.packages) {
@@ -125,7 +125,7 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
     const pkgRows = rowsForPackage(p, version, cwd);
     rows.push(...pkgRows);
   }
-  return rows;
+  return Promise.resolve(rows);
 }
 
 /* ----------------------------- internals ----------------------------- */
