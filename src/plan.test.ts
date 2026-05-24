@@ -11,9 +11,33 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { plan } from './plan.js';
+
+// Mock resolvePythonVersions so plan.test.ts is insulated from
+// RELEASED_CPYTHON_VERSIONS growing. What the planner does with the
+// version list is what these tests cover; the resolution logic itself
+// is covered by python-versions.test.ts and the integration suite.
+vi.mock('./python-versions.js', () => ({
+  resolvePythonVersions: (
+    pkg: { python_versions?: readonly string[] },
+    _cwd: string,
+  ): string[] => {
+    if (pkg.python_versions !== undefined) {
+      return [...pkg.python_versions].sort((a, b) => {
+        const av = a.split('.').map(Number);
+        const bv = b.split('.').map(Number);
+        for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+          const d = (av[i] ?? 0) - (bv[i] ?? 0);
+          if (d !== 0) return d;
+        }
+        return 0;
+      });
+    }
+    return ['3.12'];
+  },
+}));
 
 let repo: string;
 function git(args: string[]): string {
@@ -1117,10 +1141,10 @@ globs   = ["pkg/**"]
   const pyVer = (r: unknown): string | undefined =>
     (r as Record<string, unknown>)['python_version'] as string | undefined;
 
-  it('infers the wheel matrix from requires-python in pyproject.toml', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+  it('fans the wheel matrix across the resolved python version set', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), `${TOML}python_versions = ["3.11", "3.12", "3.13"]\n`, 'utf8');
     commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.11"\n',
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
       'pkg/lib.rs': '// rust',
     });
     const matrix = await plan({ cwd: repo });
@@ -1131,9 +1155,9 @@ globs   = ["pkg/**"]
   });
 
   it('suffixes wheel artifact names per python version when more than one applies', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    writeFileSync(join(repo, 'putitoutthere.toml'), `${TOML}python_versions = ["3.12", "3.13"]\n`, 'utf8');
     commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.12"\n',
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
       'pkg/lib.rs': '// rust',
     });
     const matrix = await plan({ cwd: repo });
@@ -1167,9 +1191,9 @@ globs   = ["pkg/**"]
   });
 
   it('every pypi row carries a python_version, including the sdist row', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    writeFileSync(join(repo, 'putitoutthere.toml'), `${TOML}python_versions = ["3.11", "3.12", "3.13"]\n`, 'utf8');
     commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.12"\n',
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
       'pkg/lib.rs': '// rust',
     });
     const matrix = await plan({ cwd: repo });

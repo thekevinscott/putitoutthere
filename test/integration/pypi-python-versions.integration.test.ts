@@ -82,7 +82,7 @@ describe('pypi multi-version wheels (#369) — integration', () => {
   it('infers the wheel matrix from requires-python in pyproject.toml', async () => {
     seed('', '[project]\nname = "demo-py"\nrequires-python = ">=3.11"\n');
     const matrix = await plan({ cwd: repo });
-    expect(wheelVersions(matrix)).toEqual(['3.11', '3.12', '3.13']);
+    expect(wheelVersions(matrix)).toEqual(['3.11', '3.12', '3.13', '3.14']);
   });
 
   it('honors a requires-python upper bound', async () => {
@@ -122,6 +122,7 @@ describe('pypi multi-version wheels (#369) — integration', () => {
     expect(names).toEqual([
       'demo-py-wheel-x86_64-unknown-linux-gnu-py3.12',
       'demo-py-wheel-x86_64-unknown-linux-gnu-py3.13',
+      'demo-py-wheel-x86_64-unknown-linux-gnu-py3.14',
     ]);
   });
 });
