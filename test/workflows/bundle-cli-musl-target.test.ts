@@ -1,0 +1,209 @@
+/**
+ * Workflow-YAML contract: every `bundle_cli` cargo-build path in the
+ * reusable workflow (and its e2e mirror) must compile the binary against
+ * a musl target on Linux, regardless of the gnu triple the package
+ * declares.
+ *
+ * Why this exists (#381): `cargo build --target $TARGET` runs directly
+ * on the GitHub-hosted runner. `ubuntu-latest` resolves to Ubuntu 24.04
+ * (glibc 2.39), so the produced binary carries a GLIBC_2.39 symbol
+ * requirement and fails at runtime on any older Linux:
+ *
+ *   ./bin: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+ *
+ * The fix: derive a `BINARY_TARGET` from `TARGET` that swaps
+ * `-linux-gnu*` to `-linux-musl*`, and use `BINARY_TARGET` for the
+ * three bundle_cli steps that compile and locate the binary
+ * (`rustup target add`, `cargo build --target`, and the stage step's
+ * `src=…/target/<triple>/…` path). `TARGET` itself stays unchanged
+ * everywhere else (npm package naming, napi build, wheel tag, artifact
+ * name), so the package's declared triple and the bundled binary's
+ * compile triple become independent concerns. Static musl binaries
+ * have no glibc floor and run on any Linux ≥ kernel 3.2.
+ *
+ * The contract this test enforces is the *visible substitution*: in
+ * each of the three steps per bundle_cli path, the `run:` block must
+ * reference `linux-gnu` and `linux-musl` together (a substitution
+ * pattern between them, e.g. `${TARGET//-linux-gnu/-linux-musl}`),
+ * and the cargo / rustup / stage operations must consume the derived
+ * binary triple rather than `$TARGET` directly. The test deliberately
+ * does not pin the exact shell syntax — a future refactor that uses
+ * `case`, `sed`, or another mechanism for the swap stays passing as
+ * long as the substitution is visible and the derived variable is the
+ * one passed downstream.
+ */
+
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+
+interface Step {
+  if?: string;
+  name?: string;
+  env?: Record<string, string>;
+  run?: string;
+  uses?: string;
+  with?: Record<string, unknown>;
+  'working-directory'?: string;
+  shell?: string;
+}
+
+function loadSteps(file: string, jobKey: string): Step[] {
+  const path = join(repoRoot, '.github/workflows', file);
+  const doc = parseYaml(readFileSync(path, 'utf8')) as {
+    jobs: Record<string, { steps?: Step[] }>;
+  };
+  const job = doc.jobs[jobKey];
+  if (!job) throw new Error(`${file}: job "${jobKey}" not found`);
+  return job.steps ?? [];
+}
+
+type Kind = 'npm' | 'pypi';
+
+function gatesOnBundleCliKind(s: Step, kind: Kind): boolean {
+  if (typeof s.if !== 'string') return false;
+  const ifText = s.if;
+  if (!new RegExp(`matrix\\.kind\\s*==\\s*['"]${kind}['"]`).test(ifText)) return false;
+  if (!/matrix\.bundle_cli\b/.test(ifText)) return false;
+  if (kind === 'npm') {
+    return /matrix\.build\s*==\s*['"]bundled-cli['"]/.test(ifText);
+  }
+  return /matrix\.build\s*==\s*['"]maturin['"]/.test(ifText);
+}
+
+function nameMatches(s: Step, pattern: RegExp): boolean {
+  return typeof s.name === 'string' && pattern.test(s.name);
+}
+
+function findStep(
+  steps: Step[],
+  kind: Kind,
+  namePattern: RegExp,
+  runRequirement?: RegExp,
+): Step | undefined {
+  return steps.find(
+    (s) =>
+      gatesOnBundleCliKind(s, kind) &&
+      nameMatches(s, namePattern) &&
+      (runRequirement === undefined || (typeof s.run === 'string' && runRequirement.test(s.run))),
+  );
+}
+
+/** Asserts the run block visibly substitutes `linux-gnu` → `linux-musl`. */
+function expectGnuToMuslSubstitution(run: string, contextMsg: string): void {
+  expect(
+    run,
+    `${contextMsg}: the step must derive a musl-mapped triple from \`$TARGET\`. ` +
+      'Expected to find both `linux-gnu` and `linux-musl` in the shell block ' +
+      '(e.g. `BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"`) so that Linux ' +
+      "binaries are compiled as static musl regardless of the package's declared " +
+      'target triple. Without this, the binary picks up the build runner\'s glibc ' +
+      'version (#381) and fails at runtime on any older Linux.',
+  ).toMatch(/linux-gnu[\s\S]*linux-musl|linux-musl[\s\S]*linux-gnu/);
+}
+
+/**
+ * Asserts the run block uses the derived binary triple — *not* bare
+ * `$TARGET` — in the position that matters for this step (cargo
+ * --target, rustup target add, or the stage `src=` path).
+ */
+function expectDerivedTripleUsed(
+  run: string,
+  consumerPattern: RegExp,
+  contextMsg: string,
+): void {
+  expect(
+    run,
+    `${contextMsg}: the operation must consume the derived musl-mapped triple, ` +
+      'not `$TARGET` directly. The whole point of the derivation is to feed it ' +
+      'into this step (#381).',
+  ).toMatch(consumerPattern);
+}
+
+describe('reusable workflow: bundle_cli Linux binaries are compiled as static musl (#381)', () => {
+  const paths = [
+    {
+      label: '_matrix.yml pypi maturin bundle_cli',
+      file: '_matrix.yml',
+      job: 'build',
+      kind: 'pypi' as Kind,
+    },
+    {
+      label: '_matrix.yml npm bundled-cli',
+      file: '_matrix.yml',
+      job: 'build',
+      kind: 'npm' as Kind,
+    },
+    {
+      label: 'e2e-fixture-job.yml npm bundled-cli',
+      file: 'e2e-fixture-job.yml',
+      job: 'build',
+      kind: 'npm' as Kind,
+    },
+  ];
+
+  it.each(paths)('$label: `rustup target add` uses the musl-mapped triple', ({ file, job, kind, label }) => {
+    const steps = loadSteps(file, job);
+    const step = findStep(steps, kind, /add Rust target/i, /rustup\s+target\s+add/);
+    expect(
+      step,
+      `${label}: could not locate the \`bundle_cli — add Rust target\` step. ` +
+        'Expected a step gated on this build path whose name contains "add Rust target" ' +
+        'and whose run block calls `rustup target add`.',
+    ).toBeDefined();
+    const run = step!.run!;
+    expectGnuToMuslSubstitution(run, `${label}: rustup-target-add`);
+    expectDerivedTripleUsed(
+      run,
+      /rustup\s+target\s+add\s+"\$\{?[A-Z_]*(BINARY|MUSL)[A-Z_]*\}?"/,
+      `${label}: rustup-target-add`,
+    );
+  });
+
+  it.each(paths)('$label: `cargo build --target` uses the musl-mapped triple', ({ file, job, kind, label }) => {
+    const steps = loadSteps(file, job);
+    // Lookup by name only — `cargo build` uniquely identifies this step
+    // among the bundle_cli path's gated steps. A run-block predicate that
+    // requires `cargo` before `build` would miss the pypi shape, where
+    // the invocation is split (`args=(build …); cargo "${args[@]}"`).
+    const step = findStep(steps, kind, /cargo build/i);
+    expect(
+      step,
+      `${label}: could not locate the \`bundle_cli — cargo build\` step. ` +
+        'Expected a step gated on this build path whose name contains "cargo build".',
+    ).toBeDefined();
+    expect(
+      step!.run,
+      `${label}: cargo-build step has no \`run:\` block`,
+    ).toBeDefined();
+    const run = step!.run!;
+    expectGnuToMuslSubstitution(run, `${label}: cargo-build`);
+    expectDerivedTripleUsed(
+      run,
+      /--target\s+"\$\{?[A-Z_]*(BINARY|MUSL)[A-Z_]*\}?"/,
+      `${label}: cargo-build`,
+    );
+  });
+
+  it.each(paths)('$label: stage step reads from the musl-mapped target dir', ({ file, job, kind, label }) => {
+    const steps = loadSteps(file, job);
+    const step = findStep(steps, kind, /stage binary/i, /src=/);
+    expect(
+      step,
+      `${label}: could not locate the \`bundle_cli — stage binary\` step. ` +
+        'Expected a step gated on this build path whose name contains "stage binary" ' +
+        'and whose run block sets a `src=` variable.',
+    ).toBeDefined();
+    const run = step!.run!;
+    expectGnuToMuslSubstitution(run, `${label}: stage-binary`);
+    expectDerivedTripleUsed(
+      run,
+      /target\/\$\{?[A-Z_]*(BINARY|MUSL)[A-Z_]*\}?\/release/,
+      `${label}: stage-binary`,
+    );
+  });
+});
