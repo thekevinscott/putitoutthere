@@ -658,6 +658,35 @@ per-target binary (the launcher above is committed source).
 > don't fit the recipe — write your own release workflow
 > instead.
 
+> [!NOTE]
+> **Linux binaries are statically linked against musl.** A
+> binary compiled directly against the GitHub-hosted runner's
+> glibc carries that glibc's version as a hard runtime
+> requirement, so the package would break on any older Linux.
+> The reusable workflow sidesteps that by swapping the Linux
+> compile triple from `*-linux-gnu*` to `*-linux-musl*` before
+> `cargo build` runs (the package's declared triple, the npm
+> platform-package name, and everything else consumer-visible
+> stay on the original `*-linux-gnu*`; only the binary inside
+> switches). Your CLI crate must be musl-compatible:
+>
+> - If it makes HTTPS calls, prefer `reqwest` with `rustls-tls`
+>   features (the default since reqwest v0.13).
+> - If it links openssl directly, enable the `vendored` feature
+>   on the `openssl` crate.
+> - If it uses `git2`, enable `vendored-openssl` /
+>   `vendored-libgit2`.
+> - If it uses `rusqlite` / `libsqlite3-sys`, enable the
+>   `bundled` feature.
+> - If it uses `libpq-sys` / `mysqlclient-sys` (Postgres /
+>   MySQL clients), prefer a pure-Rust alternative
+>   (`sqlx` with `rustls`, `postgres-native-tls` swapped for
+>   `postgres-rustls`) — these crates have no clean static path.
+>
+> The musl build fails loudly at release time with a linker
+> error if any of the above is missed, so a forgotten feature
+> never produces a broken release — only a blocked one.
+
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover
 `my-cli-x86_64-unknown-linux-gnu`).
@@ -777,8 +806,14 @@ no_default_features = false
 ```
 
 The reusable workflow cross-compiles the binary per target and stages it
-into the package source tree before maturin runs. Your `pyproject.toml`
-ties the staged binary into a `console_scripts` entry:
+into the package source tree before maturin runs. The same musl
+compatibility requirement that applies to bundled-cli npm packages
+applies here — see [Linux binaries are statically linked against
+musl](#bundled-cli-npm-family) above for the list of Cargo features to
+flip when the build fails on a system-library dependency.
+
+Your `pyproject.toml` ties the staged binary into a `console_scripts`
+entry:
 
 ```toml
 [project.scripts]

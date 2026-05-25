@@ -174,12 +174,26 @@ jobs:
       # darwin on macos-latest, windows on windows-2022 (pinned; see #354).
       # Rust is pre-installed on all GHA runners; we only `rustup target add`
       # to make the triple known.
+      # #381: compile bundle_cli Linux binaries against the musl-mapped
+      # triple. cargo build runs directly on the runner; ubuntu-latest's
+      # glibc (currently 2.39 on 24.04) gets baked into the binary as a
+      # version requirement, so any older Linux at install time fails
+      # with `version 'GLIBC_2.x' not found`. Statically-linked musl has
+      # no glibc floor and runs on any Linux ≥ kernel 3.2. The package's
+      # declared target triple (used for npm package naming, napi build,
+      # wheel tag, artifact name) stays unchanged; only the bundled
+      # binary inside it switches compile triple. Non-Linux and already-
+      # musl triples pass through unchanged (`-linux-gnu` substring
+      # absent → no-op substitution).
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — add Rust target
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
-        run: rustup target add "$TARGET"
+        run: |
+          set -euo pipefail
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          rustup target add "$BINARY_TARGET"
 
       # #374: bump the separate bundle_cli crate's `[package].version`
       # before `cargo build` runs. The maturin `write-version` step
@@ -219,7 +233,9 @@ jobs:
         # the crate participates in a `[workspace]`.
         run: |
           set -euo pipefail
-          args=(build --release --target "$TARGET" --bin "$BIN" --target-dir target)
+          # #381: see the `add Rust target` step above for the gnu→musl rationale.
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          args=(build --release --target "$BINARY_TARGET" --bin "$BIN" --target-dir target)
           if [ -n "$FEATURES" ]; then args+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then args+=(--no-default-features); fi
           cargo "${args[@]}"
@@ -235,12 +251,14 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          # #381: read from the musl-mapped target dir cargo built into.
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
           if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
-          src="${CRATE_PATH}/target/${TARGET}/release/${BIN}${ext}"
+          src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
           dst_dir="${PKG_PATH}/${STAGE_TO}"
           if [ ! -f "$src" ]; then
             echo "::error::cargo build did not produce ${src}"
-            ls -la "${CRATE_PATH}/target/${TARGET}/release/" || true
+            ls -la "${CRATE_PATH}/target/${BINARY_TARGET}/release/" || true
             exit 1
           fi
           mkdir -p "$dst_dir"
@@ -414,12 +432,17 @@ jobs:
       # `src/plan.ts`, so cargo cross-compile linkers are not needed.
       # The `main` target row is the noarch top-level package — it has
       # no per-target binary to compile.
+      # #381: see the pypi/maturin `add Rust target` step's banner above
+      # for the gnu→musl mapping rationale. Same rule applies here.
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — add Rust target
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
-        run: rustup target add "$TARGET"
+        run: |
+          set -euo pipefail
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          rustup target add "$BINARY_TARGET"
 
       # #366: bump the crate's `[package].version` to matrix.version
       # before `cargo build` runs. `cargo build` bakes CARGO_PKG_VERSION
@@ -465,7 +488,9 @@ jobs:
         # target-dir bug shape, same resolution.
         run: |
           set -euo pipefail
-          cmd=(cargo build --release --target "$TARGET" --bin "$BIN" --target-dir target)
+          # #381: cross-compile against the musl-mapped triple on Linux.
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          cmd=(cargo build --release --target "$BINARY_TARGET" --bin "$BIN" --target-dir target)
           if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
@@ -480,11 +505,13 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          # #381: read from the musl-mapped target dir cargo built into.
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
           if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
-          src="${CRATE_PATH}/target/${TARGET}/release/${BIN}${ext}"
+          src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
           if [ ! -f "$src" ]; then
             echo "::error::cross-compile did not produce ${src}"
-            ls -la "${CRATE_PATH}/target/${TARGET}/release/" || true
+            ls -la "${CRATE_PATH}/target/${BINARY_TARGET}/release/" || true
             exit 1
           fi
           mkdir -p "$DEST_DIR"

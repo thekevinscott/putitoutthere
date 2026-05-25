@@ -166,12 +166,19 @@ describe('reusable workflow: bundle_cli Linux binaries are compiled as static mu
 
   it.each(paths)('$label: `cargo build --target` uses the musl-mapped triple', ({ file, job, kind, label }) => {
     const steps = loadSteps(file, job);
-    const step = findStep(steps, kind, /cargo build/i, /cargo[\s\S]*build/);
+    // Lookup by name only — `cargo build` uniquely identifies this step
+    // among the bundle_cli path's gated steps. A run-block predicate that
+    // requires `cargo` before `build` would miss the pypi shape, where
+    // the invocation is split (`args=(build …); cargo "${args[@]}"`).
+    const step = findStep(steps, kind, /cargo build/i);
     expect(
       step,
       `${label}: could not locate the \`bundle_cli — cargo build\` step. ` +
-        'Expected a step gated on this build path whose name contains "cargo build" ' +
-        'and whose run block invokes cargo.',
+        'Expected a step gated on this build path whose name contains "cargo build".',
+    ).toBeDefined();
+    expect(
+      step!.run,
+      `${label}: cargo-build step has no \`run:\` block`,
     ).toBeDefined();
     const run = step!.run!;
     expectGnuToMuslSubstitution(run, `${label}: cargo-build`);
