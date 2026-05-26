@@ -207,3 +207,62 @@ describe('reusable workflow: bundle_cli Linux binaries are compiled as static mu
     );
   });
 });
+
+describe('reusable workflow: bundle_cli musl builds install musl-tools C compiler', () => {
+  // `rustup target add` installs the Rust musl target but not the C cross-compiler.
+  // Crates that compile C source (libsqlite3-sys --bundled, openssl-sys, etc.) invoke
+  // x86_64-linux-musl-gcc at cargo build time. That binary lives in the musl-tools apt
+  // package, which is absent on ubuntu-latest. Without it, cargo fails with:
+  //   failed to find tool "x86_64-linux-musl-gcc": No such file or directory
+  const paths = [
+    {
+      label: '_matrix.yml pypi maturin bundle_cli',
+      file: '_matrix.yml',
+      job: 'build',
+      kind: 'pypi' as Kind,
+    },
+    {
+      label: '_matrix.yml npm bundled-cli',
+      file: '_matrix.yml',
+      job: 'build',
+      kind: 'npm' as Kind,
+    },
+    {
+      label: 'e2e-fixture-job.yml npm bundled-cli',
+      file: 'e2e-fixture-job.yml',
+      job: 'build',
+      kind: 'npm' as Kind,
+    },
+  ];
+
+  it('a musl-tools install step exists and precedes cargo build in every bundle_cli path', () => {
+    for (const { file, job, kind, label } of paths) {
+      const steps = loadSteps(file, job);
+
+      const musltoolsIdx = steps.findIndex(
+        (s) => typeof s.run === 'string' && /musl.?tools/.test(s.run),
+      );
+
+      expect(
+        musltoolsIdx,
+        `${label}: no step installs musl-tools. ` +
+          'Crates that compile C source (e.g. libsqlite3-sys with features = ["bundled"]) ' +
+          'need x86_64-linux-musl-gcc, which the musl-tools apt package provides. ' +
+          'It is not pre-installed on ubuntu-latest, so cargo build fails with: ' +
+          '"failed to find tool \\"x86_64-linux-musl-gcc\\"". ' +
+          'Add a step with `sudo apt-get install -y musl-tools` gated on the Linux ' +
+          'musl target path, ordered before the cargo build step.',
+      ).toBeGreaterThanOrEqual(0);
+
+      const cargoStep = findStep(steps, kind, /cargo build/i);
+      expect(cargoStep, `${label}: cargo build step not found`).toBeDefined();
+      const cargoBuildIdx = steps.indexOf(cargoStep!);
+
+      expect(
+        musltoolsIdx,
+        `${label}: musl-tools install step (index ${musltoolsIdx}) must appear ` +
+          `before cargo build (index ${cargoBuildIdx}).`,
+      ).toBeLessThan(cargoBuildIdx);
+    }
+  });
+});
