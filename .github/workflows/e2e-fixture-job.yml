@@ -320,6 +320,20 @@ jobs:
           BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
           rustup target add "$BINARY_TARGET"
 
+      # Mirror of the _matrix.yml musl-tools step: install the C
+      # cross-compiler so crates with C source deps build successfully.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main' && contains(matrix.target, 'linux')
+        name: bundle_cli — install musl C toolchain
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          sudo apt-get install -y musl-tools
+          triple_under="${BINARY_TARGET//-/_}"
+          echo "CC_${triple_under}=musl-gcc" >> "$GITHUB_ENV"
+
       # #366: mirror of the _matrix.yml write-crate-version step. Bump
       # the crate's `[package].version` to matrix.version before
       # `cargo build` bakes CARGO_PKG_VERSION into the binary, so the

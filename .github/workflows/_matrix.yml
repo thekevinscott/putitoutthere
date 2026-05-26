@@ -195,6 +195,23 @@ jobs:
           BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
           rustup target add "$BINARY_TARGET"
 
+      # `rustup target add` registers the musl Rust target but does not
+      # install the C cross-compiler that crates with C source deps
+      # (libsqlite3-sys --bundled, openssl-sys, etc.) need at build time.
+      # musl-tools provides musl-gcc; CC_<triple> tells cargo to use it.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist' && contains(matrix.target, 'linux')
+        name: bundle_cli — install musl C toolchain
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          sudo apt-get install -y musl-tools
+          # cargo reads CC_<triple_with_underscores> to find the C cross-compiler.
+          triple_under="${BINARY_TARGET//-/_}"
+          echo "CC_${triple_under}=musl-gcc" >> "$GITHUB_ENV"
+
       # #374: bump the separate bundle_cli crate's `[package].version`
       # before `cargo build` runs. The maturin `write-version` step
       # above bumps the Python package's version source; it does not
@@ -443,6 +460,20 @@ jobs:
           set -euo pipefail
           BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
           rustup target add "$BINARY_TARGET"
+
+      # Mirror of the pypi path above: musl-tools + CC export so crates
+      # with C source deps can cross-compile to the musl target.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main' && contains(matrix.target, 'linux')
+        name: bundle_cli — install musl C toolchain
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          sudo apt-get install -y musl-tools
+          triple_under="${BINARY_TARGET//-/_}"
+          echo "CC_${triple_under}=musl-gcc" >> "$GITHUB_ENV"
 
       # #366: bump the crate's `[package].version` to matrix.version
       # before `cargo build` runs. `cargo build` bakes CARGO_PKG_VERSION
