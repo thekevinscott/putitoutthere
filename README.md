@@ -687,6 +687,17 @@ per-target binary (the launcher above is committed source).
 > error if any of the above is missed, so a forgotten feature
 > never produces a broken release — only a blocked one.
 
+> [!WARNING]
+> **Do not run `cargo build` in `npm run build` when `[package.bundle_cli]` is configured.**
+> The reusable workflow compiles the Rust binary and stages it **after**
+> your `npm run build` step, so the engine's musl binary always overwrites
+> whatever `npm run build` staged. A build script that also runs cargo with
+> the raw `-linux-gnu` triple and copies to `build/<triple>/` does wasted
+> work silently. If you migrated from a hand-authored `scripts/build.cjs`
+> to `[package.bundle_cli]`, remove the cargo invocation; keep only steps
+> that compile or generate genuinely separate artifacts (TypeScript, assets,
+> etc.).
+
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover
 `my-cli-x86_64-unknown-linux-gnu`).
