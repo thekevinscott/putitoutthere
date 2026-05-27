@@ -208,6 +208,45 @@ describe('reusable workflow: bundle_cli Linux binaries are compiled as static mu
   });
 });
 
+describe('e2e fixture: bundle_cli verify step asserts the Linux binary is statically linked (#384)', () => {
+  // The bundle_cli — verify step in e2e-fixture-job.yml currently only checks
+  // that the staged binary *exists*. A dynamically-linked glibc binary passes
+  // that check silently and ships to npm consumers, where it breaks at runtime
+  // on any Linux with glibc < 2.39 (#384). The verify step must also assert
+  // the binary is statically linked (ldd / file check) so a regression
+  // reintroducing glibc linkage is caught in CI before the artifact is published.
+  it(
+    'bundle_cli — verify step in e2e-fixture-job.yml checks that the Linux binary ' +
+      'is not dynamically linked against glibc',
+    () => {
+      const steps = loadSteps('e2e-fixture-job.yml', 'build');
+      const verifyStep = steps.find(
+        (s) =>
+          gatesOnBundleCliKind(s, 'npm') &&
+          nameMatches(s, /verify/i) &&
+          typeof s.run === 'string',
+      );
+      expect(
+        verifyStep,
+        'e2e-fixture-job.yml: could not find the `bundle_cli — verify` step. ' +
+          'Expected a step gated on npm/bundled-cli whose name contains "verify" ' +
+          'and whose run block checks the staged binary.',
+      ).toBeDefined();
+      const run = verifyStep!.run!;
+      expect(
+        run,
+        'e2e-fixture-job.yml bundle_cli — verify: the run block must assert that ' +
+          'the Linux binary is statically linked — not just that it exists. ' +
+          'Expected to find `ldd` or a reference to "dynamically linked" / ' +
+          '"statically linked" / "static-pie" in the shell block so that a ' +
+          'glibc-linked binary (#384) causes the e2e build job to fail before ' +
+          "the artifact is uploaded. Without this check a regression that reintroduces " +
+          'dynamic glibc linkage ships silently to npm consumers.',
+      ).toMatch(/\bldd\b|dynamically.linked|statically.linked|static.pie/i);
+    },
+  );
+});
+
 describe('reusable workflow: bundle_cli musl builds install musl-tools C compiler', () => {
   // `rustup target add` installs the Rust musl target but not the C cross-compiler.
   // Crates that compile C source (libsqlite3-sys --bundled, openssl-sys, etc.) invoke
