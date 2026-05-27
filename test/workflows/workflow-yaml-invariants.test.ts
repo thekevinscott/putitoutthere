@@ -760,9 +760,9 @@ describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => 
   // The npm consumer-build step in `_matrix.yml` is the single
   // consolidated `if: matrix.kind == 'npm'` step that runs
   // `npm install` + `npm run build --if-present`. Bundle_cli staging
-  // must precede it so `npm run build` (when present) sees the
-  // already-populated `build/<triple>/` directory rather than racing
-  // to produce its contents.
+  // must FOLLOW it (#384) so the engine's musl binary always overwrites
+  // any glibc-linked binary a consumer build script stages to the same
+  // `build/<triple>/` path during `npm run build`.
   function isNpmConsumerBuildStep(step: Step): boolean {
     if (typeof step.if !== 'string') return false;
     if (!step.if.includes("matrix.kind == 'npm'")) return false;
@@ -863,20 +863,20 @@ describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => 
     ).toEqual([]);
   });
 
-  it('every npm consumer-build step is preceded by a bundle_cli stage step', () => {
+  it('every npm consumer-build step is followed by a bundle_cli stage step', () => {
     const offenders: string[] = [];
     buildSteps.forEach((step, idx) => {
       if (!isNpmConsumerBuildStep(step)) return;
-      const earlier = buildSteps.slice(0, idx);
-      if (!earlier.some(isStageStep)) {
+      const later = buildSteps.slice(idx + 1);
+      if (!later.some(isStageStep)) {
         offenders.push(
-          `step #${idx} (if=${step.if ?? '(none)'}) has no preceding bundle_cli stage step`,
+          `step #${idx} (if=${step.if ?? '(none)'}) has no following bundle_cli stage step`,
         );
       }
     });
     expect(
       offenders,
-      `each npm consumer-build step needs a preceding step gated on the same condition that copies the cross-compiled binary into \${{ matrix.artifact_path }}/ (i.e. matrix.path + build/<triple> for single-mode or build/<mode>-<triple> for multi-mode):\n${offenders.join('\n')}`,
+      `each npm consumer-build step needs a following step gated on the same condition that copies the cross-compiled binary into \${{ matrix.artifact_path }}/ so the engine's musl binary overwrites any glibc binary the consumer build script staged (#384):\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 
