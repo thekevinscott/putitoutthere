@@ -458,7 +458,24 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          # #387: matrix.target for npm rows is an napi-rs-flavor triple
+          # (linux-x64-gnu, darwin-arm64, win32-x64-msvc, …). Map it to the
+          # corresponding Rust triple before the gnu→musl swap — the bare
+          # ${TARGET//-linux-gnu/-linux-musl} substitution is a no-op on npm
+          # triples because linux-x64-gnu lacks the -linux-gnu suffix.
+          case "$TARGET" in
+            linux-x64-gnu)    RUST_TARGET=x86_64-unknown-linux-gnu ;;
+            linux-arm64-gnu)  RUST_TARGET=aarch64-unknown-linux-gnu ;;
+            linux-x64-musl)   RUST_TARGET=x86_64-unknown-linux-musl ;;
+            linux-arm64-musl) RUST_TARGET=aarch64-unknown-linux-musl ;;
+            darwin-x64)       RUST_TARGET=x86_64-apple-darwin ;;
+            darwin-arm64)     RUST_TARGET=aarch64-apple-darwin ;;
+            win32-x64-msvc)   RUST_TARGET=x86_64-pc-windows-msvc ;;
+            win32-arm64-msvc) RUST_TARGET=aarch64-pc-windows-msvc ;;
+            win32-ia32-msvc)  RUST_TARGET=i686-pc-windows-msvc ;;
+            *)                RUST_TARGET="$TARGET" ;;
+          esac
+          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
           rustup target add "$BINARY_TARGET"
 
       # Mirror of the pypi path above: musl-tools + CC export so crates
@@ -470,7 +487,17 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          # #387: map npm-flavor triple to Rust triple before deriving the
+          # CC_ env var; otherwise CC_linux_x64_musl is set instead of
+          # CC_x86_64_unknown_linux_musl, and cargo can't find the C compiler.
+          case "$TARGET" in
+            linux-x64-gnu)    RUST_TARGET=x86_64-unknown-linux-gnu ;;
+            linux-arm64-gnu)  RUST_TARGET=aarch64-unknown-linux-gnu ;;
+            linux-x64-musl)   RUST_TARGET=x86_64-unknown-linux-musl ;;
+            linux-arm64-musl) RUST_TARGET=aarch64-unknown-linux-musl ;;
+            *)                RUST_TARGET="$TARGET" ;;
+          esac
+          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
           sudo apt-get install -y musl-tools
           triple_under="${BINARY_TARGET//-/_}"
           echo "CC_${triple_under}=musl-gcc" >> "$GITHUB_ENV"
@@ -519,8 +546,21 @@ jobs:
         # target-dir bug shape, same resolution.
         run: |
           set -euo pipefail
+          # #387: map npm-flavor triple to Rust triple before the gnu→musl swap.
+          case "$TARGET" in
+            linux-x64-gnu)    RUST_TARGET=x86_64-unknown-linux-gnu ;;
+            linux-arm64-gnu)  RUST_TARGET=aarch64-unknown-linux-gnu ;;
+            linux-x64-musl)   RUST_TARGET=x86_64-unknown-linux-musl ;;
+            linux-arm64-musl) RUST_TARGET=aarch64-unknown-linux-musl ;;
+            darwin-x64)       RUST_TARGET=x86_64-apple-darwin ;;
+            darwin-arm64)     RUST_TARGET=aarch64-apple-darwin ;;
+            win32-x64-msvc)   RUST_TARGET=x86_64-pc-windows-msvc ;;
+            win32-arm64-msvc) RUST_TARGET=aarch64-pc-windows-msvc ;;
+            win32-ia32-msvc)  RUST_TARGET=i686-pc-windows-msvc ;;
+            *)                RUST_TARGET="$TARGET" ;;
+          esac
           # #381: cross-compile against the musl-mapped triple on Linux.
-          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
           cmd=(cargo build --release --target "$BINARY_TARGET" --bin "$BIN" --target-dir target)
           if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
@@ -585,8 +625,21 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          # #387: map npm-flavor triple to Rust triple before the gnu→musl swap.
+          case "$TARGET" in
+            linux-x64-gnu)    RUST_TARGET=x86_64-unknown-linux-gnu ;;
+            linux-arm64-gnu)  RUST_TARGET=aarch64-unknown-linux-gnu ;;
+            linux-x64-musl)   RUST_TARGET=x86_64-unknown-linux-musl ;;
+            linux-arm64-musl) RUST_TARGET=aarch64-unknown-linux-musl ;;
+            darwin-x64)       RUST_TARGET=x86_64-apple-darwin ;;
+            darwin-arm64)     RUST_TARGET=aarch64-apple-darwin ;;
+            win32-x64-msvc)   RUST_TARGET=x86_64-pc-windows-msvc ;;
+            win32-arm64-msvc) RUST_TARGET=aarch64-pc-windows-msvc ;;
+            win32-ia32-msvc)  RUST_TARGET=i686-pc-windows-msvc ;;
+            *)                RUST_TARGET="$TARGET" ;;
+          esac
           # #381: read from the musl-mapped target dir cargo built into.
-          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
           if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
           src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
           if [ ! -f "$src" ]; then
