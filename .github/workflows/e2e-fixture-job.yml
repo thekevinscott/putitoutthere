@@ -358,11 +358,14 @@ jobs:
           FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
           NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
         # See _matrix.yml's twin step for the bash-3.2-on-macOS rationale.
+        # #337: pin --target-dir target so the binary lands at
+        # <crate_path>/target/<triple>/release/<bin> regardless of workspace
+        # structure. Mirrors the same fix in _matrix.yml.
         run: |
           set -euo pipefail
           # #381: cross-compile against the musl-mapped triple on Linux.
           BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
-          cmd=(cargo build --release --target "$BINARY_TARGET" --bin "$BIN")
+          cmd=(cargo build --release --target "$BINARY_TARGET" --bin "$BIN" --target-dir target)
           if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
@@ -449,6 +452,10 @@ jobs:
           # linked" for glibc binaries and "statically linked" / "static-pie
           # linked" for musl static builds.
           if [ "$RUNNER_OS" != "Windows" ]; then
+            command -v file >/dev/null 2>&1 || {
+              echo "::error::required command 'file' not found on this runner — cannot assert static linking"
+              exit 1
+            }
             if file "$expected" | grep -q 'dynamically linked'; then
               echo "::error::bundle_cli binary ${expected} is dynamically linked — expected statically-linked musl build (#384)"
               file "$expected"

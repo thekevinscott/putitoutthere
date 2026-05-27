@@ -633,6 +633,10 @@ jobs:
           # linked" for glibc binaries and "statically linked" / "static-pie
           # linked" for musl static builds.
           if [ "$RUNNER_OS" != "Windows" ]; then
+            command -v file >/dev/null 2>&1 || {
+              echo "::error::required command 'file' not found on this runner — cannot assert static linking"
+              exit 1
+            }
             if file "$expected" | grep -q 'dynamically linked'; then
               echo "::error::bundle_cli binary ${expected} is dynamically linked — expected statically-linked musl build (#384)"
               file "$expected"
