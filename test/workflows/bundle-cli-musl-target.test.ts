@@ -247,6 +247,89 @@ describe('e2e fixture: bundle_cli verify step asserts the Linux binary is static
   );
 });
 
+describe('reusable workflow: bundle_cli stage binary runs AFTER npm run build (#384)', () => {
+  // The root cause of #384: the engine stages the musl binary BEFORE
+  // `npm run build`. A consumer build script that also runs cargo
+  // with the raw TARGET (a -linux-gnu triple) and stages to the same
+  // `build/<triple>/` path will overwrite the musl binary with a
+  // glibc binary. The verify step then passes the existence check but
+  // ships a dynamically-linked artifact. Fix: move the stage step to
+  // AFTER npm run build so the engine's musl binary always wins.
+  const paths = [
+    { label: '_matrix.yml', file: '_matrix.yml', job: 'build', kind: 'npm' as Kind },
+    { label: 'e2e-fixture-job.yml', file: 'e2e-fixture-job.yml', job: 'build', kind: 'npm' as Kind },
+  ];
+
+  it.each(paths)(
+    '$label: bundle_cli — stage binary step appears after the npm install+build step',
+    ({ file, job, kind, label }) => {
+      const steps = loadSteps(file, job);
+      const stageStep = findStep(steps, kind, /stage binary/i, /src=/);
+      expect(
+        stageStep,
+        `${label}: could not locate the \`bundle_cli — stage binary\` step. ` +
+          'Expected a step gated on npm/bundled-cli whose name contains "stage binary" ' +
+          'and whose run block sets a `src=` variable.',
+      ).toBeDefined();
+      const stageIdx = steps.indexOf(stageStep!);
+
+      const npmBuildIdx = steps.findIndex(
+        (s) => typeof s.run === 'string' && s.run.includes('npm run build --if-present'),
+      );
+      expect(
+        npmBuildIdx,
+        `${label}: no step containing \`npm run build --if-present\` found in the build job`,
+      ).toBeGreaterThanOrEqual(0);
+
+      expect(
+        stageIdx,
+        `${label}: \`bundle_cli — stage binary\` (step index ${stageIdx}) must appear ` +
+          `AFTER the npm install+build step (index ${npmBuildIdx}). ` +
+          'When staging runs first, a consumer build script that stages a glibc binary ' +
+          'under the same `build/<triple>/` path overwrites the engine\'s musl binary. ' +
+          'The verify step then sees a dynamically-linked artifact that fails at runtime ' +
+          'on any Linux with glibc < 2.39 (#384).',
+      ).toBeGreaterThan(npmBuildIdx);
+    },
+  );
+});
+
+describe('reusable workflow: _matrix.yml bundle_cli verify step asserts static linking (#384)', () => {
+  // The e2e-fixture-job.yml verify step (added in #384 / PR #385) already checks
+  // that the Linux binary is statically linked. The consumer-facing _matrix.yml
+  // must carry the same guard so real consumers' build jobs catch a dynamically-
+  // linked regression before the artifact is uploaded to the registry.
+  it(
+    '_matrix.yml bundle_cli — verify step checks that the Linux binary is not dynamically linked',
+    () => {
+      const steps = loadSteps('_matrix.yml', 'build');
+      const verifyStep = steps.find(
+        (s) =>
+          gatesOnBundleCliKind(s, 'npm') &&
+          nameMatches(s, /verify/i) &&
+          typeof s.run === 'string',
+      );
+      expect(
+        verifyStep,
+        '_matrix.yml: could not find the `bundle_cli — verify` step. ' +
+          'Expected a step gated on npm/bundled-cli whose name contains "verify" ' +
+          'and whose run block checks the staged binary.',
+      ).toBeDefined();
+      const run = verifyStep!.run!;
+      expect(
+        run,
+        '_matrix.yml bundle_cli — verify: the run block must assert that ' +
+          'the Linux binary is statically linked — not just that it exists. ' +
+          'Expected to find `ldd` or a reference to "dynamically linked" / ' +
+          '"statically linked" / "static-pie" in the shell block so that a ' +
+          'glibc-linked binary causes the build job to fail before upload. ' +
+          'The e2e-fixture-job.yml verify step already has this check; the ' +
+          'consumer-facing _matrix.yml must carry it too (#384).',
+      ).toMatch(/\bldd\b|dynamically.linked|statically.linked|static.pie/i);
+    },
+  );
+});
+
 describe('reusable workflow: bundle_cli musl builds install musl-tools C compiler', () => {
   // `rustup target add` installs the Rust musl target but not the C cross-compiler.
   // Crates that compile C source (libsqlite3-sys --bundled, openssl-sys, etc.) invoke

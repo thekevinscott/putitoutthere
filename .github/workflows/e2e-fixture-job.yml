@@ -303,13 +303,14 @@ jobs:
 
       # #298: mirror of the _matrix.yml bundle_cli steps. The e2e fixture
       # job carries its own copy of the build steps (parallel to the
-      # consumer-facing _matrix.yml); these three steps cross-compile
-      # the Rust binary the same way before the consumer's `npm run build`
-      # runs. Without these, the js-bundled-cli fixture (which migrated
-      # off `scripts/build.cjs` in #298) uploads an empty `build/<triple>/`
-      # and the publish job fails downstream.
+      # consumer-facing _matrix.yml). The cross-compile steps run before
+      # `npm run build` so the crate is compiled with the right version
+      # before the consumer's build script can execute.
       # #381: mirror of the _matrix.yml gnu→musl mapping; see that file's
       # bundle_cli `add Rust target` step for the rationale.
+      # #384: the stage step runs AFTER `npm run build` so the engine's
+      # musl binary overwrites any glibc binary a consumer build script
+      # stages to `build/<triple>/` under the same path.
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — add Rust target
         shell: bash
@@ -357,37 +358,17 @@ jobs:
           FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
           NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
         # See _matrix.yml's twin step for the bash-3.2-on-macOS rationale.
+        # #337: pin --target-dir target so the binary lands at
+        # <crate_path>/target/<triple>/release/<bin> regardless of workspace
+        # structure. Mirrors the same fix in _matrix.yml.
         run: |
           set -euo pipefail
           # #381: cross-compile against the musl-mapped triple on Linux.
           BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
-          cmd=(cargo build --release --target "$BINARY_TARGET" --bin "$BIN")
+          cmd=(cargo build --release --target "$BINARY_TARGET" --bin "$BIN" --target-dir target)
           if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
-
-      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
-        name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
-        shell: bash
-        env:
-          CRATE_PATH: fixture-tree/${{ matrix.bundle_cli.crate_path }}
-          DEST_DIR: fixture-tree/${{ matrix.artifact_path }}
-          BIN: ${{ matrix.bundle_cli.bin }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          # #381: read from the musl-mapped target dir cargo built into.
-          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
-          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
-          src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
-          if [ ! -f "$src" ]; then
-            echo "::error::cross-compile did not produce ${src}"
-            ls -la "${CRATE_PATH}/target/${BINARY_TARGET}/release/" || true
-            exit 1
-          fi
-          mkdir -p "$DEST_DIR"
-          cp "$src" "$DEST_DIR/"
-          echo "staged: $src -> $DEST_DIR/${BIN}${ext}"
 
       - if: matrix.kind == 'npm'
         working-directory: fixture-tree/${{ matrix.path }}
@@ -423,6 +404,31 @@ jobs:
           fi
           npm run build --if-present
 
+      # #384: stage AFTER npm run build so the engine's musl binary
+      # overwrites any glibc binary the consumer build script staged.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
+        shell: bash
+        env:
+          CRATE_PATH: fixture-tree/${{ matrix.bundle_cli.crate_path }}
+          DEST_DIR: fixture-tree/${{ matrix.artifact_path }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          # #381: read from the musl-mapped target dir cargo built into.
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
+          if [ ! -f "$src" ]; then
+            echo "::error::cross-compile did not produce ${src}"
+            ls -la "${CRATE_PATH}/target/${BINARY_TARGET}/release/" || true
+            exit 1
+          fi
+          mkdir -p "$DEST_DIR"
+          cp "$src" "$DEST_DIR/"
+          echo "staged: $src -> $DEST_DIR/${BIN}${ext}"
+
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — verify ${{ matrix.artifact_path }}/${{ matrix.bundle_cli.bin }}
         shell: bash
@@ -446,6 +452,10 @@ jobs:
           # linked" for glibc binaries and "statically linked" / "static-pie
           # linked" for musl static builds.
           if [ "$RUNNER_OS" != "Windows" ]; then
+            command -v file >/dev/null 2>&1 || {
+              echo "::error::required command 'file' not found on this runner — cannot assert static linking"
+              exit 1
+            }
             if file "$expected" | grep -q 'dynamically linked'; then
               echo "::error::bundle_cli binary ${expected} is dynamically linked — expected statically-linked musl build (#384)"
               file "$expected"

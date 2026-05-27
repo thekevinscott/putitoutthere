@@ -526,29 +526,6 @@ jobs:
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
 
-      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
-        name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
-        shell: bash
-        env:
-          CRATE_PATH: ${{ matrix.bundle_cli.crate_path }}
-          DEST_DIR: ${{ matrix.artifact_path }}
-          BIN: ${{ matrix.bundle_cli.bin }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          # #381: read from the musl-mapped target dir cargo built into.
-          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
-          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
-          src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
-          if [ ! -f "$src" ]; then
-            echo "::error::cross-compile did not produce ${src}"
-            ls -la "${CRATE_PATH}/target/${BINARY_TARGET}/release/" || true
-            exit 1
-          fi
-          mkdir -p "$DEST_DIR"
-          cp "$src" "$DEST_DIR/"
-          echo "staged: $src -> $DEST_DIR/${BIN}${ext}"
-
       - if: matrix.kind == 'npm'
         working-directory: ${{ matrix.path }}
         # Build matrix can target Windows runners; default shell there is
@@ -595,6 +572,32 @@ jobs:
           fi
           npm run build --if-present
 
+      # #384: stage the musl binary AFTER npm run build so the engine's
+      # statically-linked binary always wins over any glibc-linked binary
+      # a consumer build script stages to `build/<triple>/` first.
+      - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
+        name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
+        shell: bash
+        env:
+          CRATE_PATH: ${{ matrix.bundle_cli.crate_path }}
+          DEST_DIR: ${{ matrix.artifact_path }}
+          BIN: ${{ matrix.bundle_cli.bin }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          # #381: read from the musl-mapped target dir cargo built into.
+          BINARY_TARGET="${TARGET//-linux-gnu/-linux-musl}"
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
+          if [ ! -f "$src" ]; then
+            echo "::error::cross-compile did not produce ${src}"
+            ls -la "${CRATE_PATH}/target/${BINARY_TARGET}/release/" || true
+            exit 1
+          fi
+          mkdir -p "$DEST_DIR"
+          cp "$src" "$DEST_DIR/"
+          echo "staged: $src -> $DEST_DIR/${BIN}${ext}"
+
       # ---- crates ----
       # cargo publish builds on the registry side; no artifact needed
       # at build time. The publish job invokes cargo directly.
@@ -623,6 +626,25 @@ jobs:
             exit 1
           fi
           echo "ok bundle_cli: ${expected} present"
+          # #384: verify the Linux binary is statically linked (musl), not
+          # dynamically linked against the build runner's glibc. A glibc-linked
+          # binary passes the existence check above but fails at runtime on any
+          # Linux with glibc < 2.39. The `file` command outputs "dynamically
+          # linked" for glibc binaries and "statically linked" / "static-pie
+          # linked" for musl static builds.
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            command -v file >/dev/null 2>&1 || {
+              echo "::error::required command 'file' not found on this runner — cannot assert static linking"
+              exit 1
+            }
+            if file "$expected" | grep -q 'dynamically linked'; then
+              echo "::error::bundle_cli binary ${expected} is dynamically linked — expected statically-linked musl build (#384)"
+              file "$expected"
+              ldd "$expected" 2>&1 || true
+              exit 1
+            fi
+            echo "ok bundle_cli: ${expected} is statically linked"
+          fi
 
       - if: matrix.kind != 'crates'
         uses: actions/upload-artifact@v7
