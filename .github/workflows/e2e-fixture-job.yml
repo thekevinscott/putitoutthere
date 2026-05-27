@@ -439,6 +439,21 @@ jobs:
             exit 1
           fi
           echo "ok bundle_cli: ${expected} present"
+          # #384: verify the Linux binary is statically linked (musl), not
+          # dynamically linked against the build runner's glibc. A glibc-linked
+          # binary passes the existence check above but fails at runtime on any
+          # Linux with glibc < 2.39. The `file` command outputs "dynamically
+          # linked" for glibc binaries and "statically linked" / "static-pie
+          # linked" for musl static builds.
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            if file "$expected" | grep -q 'dynamically linked'; then
+              echo "::error::bundle_cli binary ${expected} is dynamically linked — expected statically-linked musl build (#384)"
+              file "$expected"
+              ldd "$expected" 2>&1 || true
+              exit 1
+            fi
+            echo "ok bundle_cli: ${expected} is statically linked"
+          fi
 
       # ---- crates ----
       # cargo publish builds on the registry side; no artifact needed
