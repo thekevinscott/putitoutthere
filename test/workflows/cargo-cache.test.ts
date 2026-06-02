@@ -173,3 +173,91 @@ describe('reusable workflow: cargo-heavy build steps run with Swatinem/rust-cach
     }
   });
 });
+
+/**
+ * The same contract, asserted against the e2e mirror.
+ *
+ * `e2e-fixture-job.yml` is the in-PR mirror of `_matrix.yml` — it reproduces
+ * the engine's per-target build steps against the fixture suite so PR CI can
+ * catch divergence before consumers do. The mirror exists precisely so a
+ * regression in the engine path surfaces here, in PR CI, instead of in a
+ * downstream consumer's release pipeline.
+ *
+ * The cache step #391 added to `_matrix.yml` therefore has to land in the
+ * mirror too. Without it:
+ *
+ *   1. PR CI here exercises a cargo path consumers don't run (cold), so any
+ *      future change that depends on a populated `~/.cargo/registry` or
+ *      `target/` dir would pass here and break in the wild — the exact
+ *      failure mode the mirror was built to prevent.
+ *   2. #391's acceptance criterion ("a second matrix run with no Cargo.lock
+ *      change finishes the Rust compile step in < 1 min per cell on cache
+ *      hit") has no in-repo measurement. The only way to verify warm-cache
+ *      behavior on the same matrix shape consumers run is to mirror the
+ *      cache here too.
+ */
+describe('e2e mirror: cargo-heavy build steps run with Swatinem/rust-cache (#391)', () => {
+  it('e2e-fixture-job.yml: a Swatinem/rust-cache step precedes the npm bundled-cli `cargo build`', () => {
+    const steps = loadSteps('e2e-fixture-job.yml', 'build');
+    const cargoIdx = findCargoBuildIdx(steps, 'npm');
+    expect(
+      cargoIdx,
+      'e2e-fixture-job.yml: could not find the npm bundled-cli `cargo build` step. ' +
+        'Expected a step gated on this build path whose `name:` contains "cargo build". ' +
+        'If the mirror no longer has this step, the test premise is stale — but more likely ' +
+        'the cargo build moved and the cache contract needs to follow it.',
+    ).toBeGreaterThanOrEqual(0);
+
+    const cacheIdx = steps.slice(0, cargoIdx).findIndex(isRustCacheStep);
+    expect(
+      cacheIdx,
+      `e2e-fixture-job.yml: no \`Swatinem/rust-cache\` step found before the npm bundled-cli ` +
+        `\`cargo build\` step (index ${cargoIdx}). The engine (\`_matrix.yml\`) caches this ` +
+        'path via #391; the mirror diverges if it does not. Add a `Swatinem/rust-cache@v2` ' +
+        'step before this `cargo build`, with the same gates and `shared-key: ${{ matrix.target }}` ' +
+        'as the engine, so PR CI exercises (and measures) the warm-cache behavior consumers see.',
+    ).toBeGreaterThanOrEqual(0);
+  });
+
+  it('e2e-fixture-job.yml: a Swatinem/rust-cache step precedes the `maturin build` step', () => {
+    const steps = loadSteps('e2e-fixture-job.yml', 'build');
+    const maturinIdx = findMaturinBuildIdx(steps);
+    expect(
+      maturinIdx,
+      'e2e-fixture-job.yml: could not find the `PyO3/maturin-action` step with `command: build`. ' +
+        'This is the pypi/maturin path in the mirror; if it is gone, the mirror has diverged ' +
+        'from the engine in a way unrelated to caching and the test premise needs a refresh.',
+    ).toBeGreaterThanOrEqual(0);
+
+    const cacheIdx = steps.slice(0, maturinIdx).findIndex(isRustCacheStep);
+    expect(
+      cacheIdx,
+      `e2e-fixture-job.yml: no \`Swatinem/rust-cache\` step found before the \`maturin build\` ` +
+        `step (index ${maturinIdx}). Maturin shells out to cargo, so the same cache step that ` +
+        'guards `_matrix.yml`\'s maturin row (via #391) must guard the mirror\'s. Without it, ' +
+        'every pypi target row in the e2e suite recompiles pyo3 cold on every PR — and the ' +
+        'mirror silently diverges from the engine\'s cached behavior.',
+    ).toBeGreaterThanOrEqual(0);
+  });
+
+  it('e2e-fixture-job.yml: every Swatinem/rust-cache step in the build job partitions by matrix.target via shared-key', () => {
+    const steps = loadSteps('e2e-fixture-job.yml', 'build');
+    const caches = steps.filter(isRustCacheStep);
+    expect(
+      caches.length,
+      'e2e-fixture-job.yml: no `Swatinem/rust-cache` step found in the build job at all. ' +
+        'See the cargo-build and maturin-build cases above for why mirroring this matters (#391).',
+    ).toBeGreaterThan(0);
+
+    for (const cache of caches) {
+      const sharedKey = cache.with?.['shared-key'];
+      const sharedKeyStr = typeof sharedKey === 'string' ? sharedKey : '';
+      expect(
+        sharedKeyStr,
+        'e2e-fixture-job.yml: every `Swatinem/rust-cache` step must set `shared-key` to a value ' +
+          'derived from `matrix.target` (same rationale as the engine — without per-target ' +
+          'partitioning, sibling target writes clobber each other\'s slots).',
+      ).toMatch(/matrix\.target/);
+    }
+  });
+});
