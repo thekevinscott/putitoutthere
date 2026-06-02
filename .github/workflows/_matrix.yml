@@ -120,6 +120,41 @@ jobs:
         with:
           fetch-depth: 0
 
+      # #391: prime ~/.cargo and target/ from the previous matching run's
+      # cache so per-target matrix cells don't cold-compile their full
+      # Cargo dep graph on every PR — the dominant cost on bundle_cli,
+      # napi, and maturin matrices (observed at 4-6 min per cell with no
+      # Rust changes on a downstream consumer; full release-precheck
+      # workflow ~8 min).
+      #
+      # Gated to fire only on rows that actually invoke cargo:
+      #   - pypi/maturin non-sdist: maturin shells out to cargo (and
+      #     covers the pypi bundle_cli sub-build, same row).
+      #   - npm/napi: the consumer's `napi build` script calls cargo.
+      #   - npm/bundled-cli non-main: engine's `cargo build` for the
+      #     staged CLI binary.
+      # Pure-Python sdist, pure-Python hatch wheels, npm vanilla, and
+      # the bundled-cli `main` row produce no cargo work and skip the
+      # cache.
+      #
+      # `shared-key: matrix.target` partitions the cache slot per target
+      # triple so a write to one target's slot doesn't blow away the
+      # next cell's. `workspaces` enumerates every Cargo.toml-bearing
+      # path the matrix may touch: `matrix.path` for the consumer's
+      # package crate (maturin / napi / single-crate bundled-cli) plus
+      # `matrix.bundle_cli.crate_path` for the bundle_cli crate when
+      # it lives in a separate dir from `matrix.path` (the dirsql shape).
+      # The second line resolves to empty when bundle_cli is unset and
+      # Swatinem silently skips it.
+      - if: (matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist') || (matrix.kind == 'npm' && matrix.build == 'napi') || (matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.target != 'main')
+        name: cargo cache (#391)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
+          workspaces: |
+            ${{ matrix.path }}
+            ${{ matrix.bundle_cli.crate_path }}
+
       # ---- pypi ----
       # #369: each pypi row carries its own `python_version` (the
       # planner fans the matrix across the package's supported set,

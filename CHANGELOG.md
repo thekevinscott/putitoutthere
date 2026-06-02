@@ -10,6 +10,10 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ## Unreleased
 
+### Changed
+
+- Changed: `_matrix.yml`'s build job now primes a cargo cache via `Swatinem/rust-cache@v2` on every row that invokes cargo (pypi/maturin non-sdist, npm/napi, npm/bundled-cli non-main), partitioned by `matrix.target` via `shared-key`. Previously every per-target matrix cell cold-compiled its full Cargo dep graph on every PR — observed at 4-6 min per cell and ~8 min wall-clock on a downstream consumer's `release-precheck` run (thekevinscott/dirsql run #125, a typical no-Rust-change PR), leaving the gate one bad runner-queue minute away from tripping a 10-min CI budget with no headroom. The cache step is gated to skip rows that produce no cargo work (pypi sdist, pure-Python hatch wheels, npm vanilla, bundled-cli `main`), and the per-target `shared-key` prevents one target's writer from blowing away the next cell's cache slot. `workspaces` enumerates both `matrix.path` (the consumer's package crate) and `matrix.bundle_cli.crate_path` (the bundle_cli crate when it lives in a separate dir), so the dirsql shape and single-crate layouts both cache their target dirs. #391. (verified by: unit/cargo-cache)
+
 ### Fixed
 
 - Fixed: `kind = "npm"` `build = "bundled-cli"` `bundle_cli — add Rust target`, `cargo build`, and `stage binary` steps now correctly map npm-flavor triples (`linux-x64-gnu`, `darwin-arm64`, `win32-x64-msvc`, …) to their Rust equivalents (`x86_64-unknown-linux-musl`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, …) before calling `rustup target add` and `cargo build --target`. Previously the bare `${TARGET//-linux-gnu/-linux-musl}` substitution was a no-op on npm-flavor triples — the substring `-linux-gnu` does not appear in `linux-x64-gnu` — so `rustup` received the raw npm triple and all five bundle_cli matrix rows failed immediately: `error: toolchain '...' does not support target 'linux-x64-gnu'`. (verified by: unit/bundle-cli-musl-target)
