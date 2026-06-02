@@ -193,6 +193,28 @@ jobs:
                -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
             | xargs -0 perl -i -pe "s/__VERSION__/0.0.1/g"
 
+      # #391: mirror of `_matrix.yml`'s cargo cache step. The e2e mirror
+      # is supposed to faithfully reproduce the engine path against the
+      # fixture suite, so divergence surfaces here in PR CI rather than
+      # in a downstream consumer's release pipeline. Without this step
+      # the mirror would silently run cold while the engine runs warm —
+      # both leaving #391's warm-cache acceptance unmeasurable on PR CI
+      # and letting any future cache-dependent change pass here and
+      # break in the wild. Gates, `shared-key`, and `workspaces` shape
+      # match the engine step exactly; only the workspace paths gain a
+      # `fixture-tree/` prefix because the e2e job materializes the
+      # fixture under that directory just above (the "Materialize
+      # fixture" step). See `_matrix.yml`'s twin step for the gate
+      # rationale.
+      - if: (matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist') || (matrix.kind == 'npm' && matrix.build == 'napi') || (matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.target != 'main')
+        name: cargo cache (#391)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
+          workspaces: |
+            fixture-tree/${{ matrix.path }}
+            fixture-tree/${{ matrix.bundle_cli.crate_path }}
+
       # ---- pypi ----
       - if: matrix.kind == 'pypi'
         uses: actions/setup-python@v6
