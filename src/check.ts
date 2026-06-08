@@ -38,6 +38,7 @@ import { assertTripleSupported } from './handlers/npm-platform.js';
 import {
   checkCargoShape,
   checkCratesMetadata,
+  checkPackageJsonShape,
   checkProvenanceMetadata,
   checkPyprojectShape,
   checkPypiVersionSource,
@@ -109,6 +110,7 @@ export function runChecks(opts: CheckOptions): CheckFinding[] {
   checkPypiVersion(packages, findings);
   checkPyprojectShapeFindings(packages, findings);
   checkCargoShapeFindings(packages, cwd, findings);
+  checkPackageJsonShapeFindings(packages, findings);
   checkNpmTargetTriples(packages, findings);
   checkRepoUrlMatchFindings(packages, findings);
 
@@ -154,6 +156,18 @@ function checkCargoShapeFindings(
     findings.push({
       package: f.package,
       message: `[${f.code}] ${f.cargoTomlPath}: ${f.detail}`,
+    });
+  }
+}
+
+function checkPackageJsonShapeFindings(
+  packages: readonly Package[],
+  findings: CheckFinding[],
+): void {
+  for (const f of checkPackageJsonShape(packages)) {
+    findings.push({
+      package: f.package,
+      message: `[${f.code}] ${f.packageJsonPath}: ${f.detail}`,
     });
   }
 }

@@ -328,6 +328,19 @@ version = 1   # required; only 1 is valid today
 > (`"repository": "git+https://github.com/<owner>/<repo>.git"`) is also
 > accepted.
 
+> [!IMPORTANT]
+> **`package.json`'s `name` MUST match the configured shape.** Preflight
+> verifies this at PR time (via `check.yml`) and again before any publish
+> side effect:
+>
+> - `name` matches `[[package]].name` (or the `npm` override) —
+>   `PIOT_NPM_NAME_MISMATCH`. `npm publish` packs the manifest `name`, but
+>   `putitoutthere`'s idempotency check (`npm view <name>`) and the tag /
+>   release-URL bookkeeping use the configured name; a divergence breaks
+>   idempotency and can publish under an unexpected name. Use the `npm`
+>   override when the registered name differs from `[[package]].name`
+>   (e.g. a scoped `@scope/foo`).
+
 ### Example: polyglot Rust library
 
 One Rust crate feeds three artifacts:
@@ -910,6 +923,7 @@ line. Grep the run log for the code, then look it up here.
 | Code | What trips it | Where it fires |
 |------|---------------|----------------|
 | `PIOT_NPM_MISSING_REPOSITORY` | An npm package's `package.json` is missing a non-empty `repository` field. Required by `npm publish --provenance`. | PR-time (`check.yml`) and publish-time preflight. See [`kind = "npm"`](#kind--npm). |
+| `PIOT_NPM_NAME_MISMATCH` | `package.json`'s `name` disagrees with the configured `[[package]].name` (or `npm` override). `npm publish` packs the manifest name while piot's idempotency/tag bookkeeping uses the configured name. | PR-time and publish-time. See [`kind = "npm"`](#kind--npm). |
 | `PIOT_CRATES_NAME_MISMATCH` | `Cargo.toml`'s `[package].name` disagrees with the configured `[[package]].name` (or `crate` override). | PR-time and publish-time. See [`kind = "crates"`](#kind--crates). |
 | `PIOT_CRATES_MISSING_METADATA` | `Cargo.toml` lacks `[package].description` and/or `license` (or `license-file`). crates.io 400s without it. | PR-time and publish-time. |
 | `PIOT_CRATES_FEATURE_NOT_DECLARED` | A `features` entry (on the package or in `bundle_cli.features`) is not declared in the crate's `[features]` table. | PR-time and publish-time. |

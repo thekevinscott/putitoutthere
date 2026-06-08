@@ -37,6 +37,15 @@ export const ErrorCodes = {
    *  declares. Failing at preflight prevents wasting a build run on
    *  a precondition checkable in milliseconds. #280. */
   NPM_MISSING_REPOSITORY: 'PIOT_NPM_MISSING_REPOSITORY',
+  /** An npm package's `package.json` declares a `name` that differs from
+   *  the `[[package]].name` configured in `putitoutthere.toml` (or the
+   *  `npm` override when set). `npm publish` packs the manifest `name`,
+   *  but the engine's idempotency probe (`npm view <name>`) and the
+   *  tag/URL bookkeeping use the configured name — so a divergence
+   *  silently breaks idempotency and can publish under an unexpected
+   *  name. The npm analogue of PIOT_PYPI_NAME_MISMATCH /
+   *  PIOT_CRATES_NAME_MISMATCH. #301. */
+  NPM_NAME_MISMATCH: 'PIOT_NPM_NAME_MISMATCH',
   /** A crates package's `Cargo.toml` is missing one or more
    *  required `[package]` metadata fields (`description` and
    *  `license`/`license-file`). crates.io rejects the publish with
@@ -147,6 +156,7 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.AUTH_NO_TOKEN,
   ErrorCodes.PUBLISH_EMPTY_PLAN,
   ErrorCodes.NPM_MISSING_REPOSITORY,
+  ErrorCodes.NPM_NAME_MISMATCH,
   ErrorCodes.CRATES_MISSING_METADATA,
   ErrorCodes.PYPI_STATIC_VERSION,
   ErrorCodes.PYPI_NAME_MISMATCH,

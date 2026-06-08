@@ -216,6 +216,57 @@ globs = ["packages/ts/**"]
     ).toBe(true);
   });
 
+  it("flags PIOT_NPM_NAME_MISMATCH when package.json name disagrees with configured name", () => {
+    write('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "js/lib"
+kind  = "npm"
+path  = "packages/ts"
+globs = ["packages/ts/**"]
+`);
+    write('packages/ts/package.json', JSON.stringify({
+      name: 'lib',
+      version: '0.0.0',
+      repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
+    }));
+    write('packages/ts/index.ts', 'x');
+    commit();
+    const findings = runChecks({ cwd });
+    expect(
+      findings.some(
+        (f) =>
+          f.package === 'js/lib' &&
+          /PIOT_NPM_NAME_MISMATCH/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("clears PIOT_NPM_NAME_MISMATCH when the `npm` override matches package.json", () => {
+    write('putitoutthere.toml', `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "js/lib"
+kind  = "npm"
+npm   = "lib"
+path  = "packages/ts"
+globs = ["packages/ts/**"]
+`);
+    write('packages/ts/package.json', JSON.stringify({
+      name: 'lib',
+      version: '0.0.0',
+      repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
+    }));
+    write('packages/ts/index.ts', 'x');
+    commit();
+    const findings = runChecks({ cwd });
+    expect(findings.some((f) => /PIOT_NPM_NAME_MISMATCH/.test(f.message))).toBe(false);
+  });
+
   it("flags crates packages whose Cargo.toml is missing description/license", () => {
     write('putitoutthere.toml', `
 [putitoutthere]
