@@ -31,6 +31,7 @@ import {
   requireAuth,
   requireCargoShape,
   requireCratesMetadata,
+  requirePackageJsonShape,
   requireProvenanceMetadata,
   requirePyprojectShape,
   requirePypiVersionSource,
@@ -127,12 +128,16 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     would silently ship the previous release's wheel/sdist.
   requirePypiVersionSource(selectedPackages);
 
-  // 2e. Pre-flight pyproject.toml + Cargo.toml shape: catch the
-  //     {pypi/crates}-manifest mismatches that would otherwise surface
-  //     10-20 minutes into a release run when maturin / setuptools /
-  //     hatchling / cargo finally tripped on them. #301.
+  // 2e. Pre-flight pyproject.toml + Cargo.toml + package.json shape: catch
+  //     the {pypi/crates/npm}-manifest name (and related) mismatches that
+  //     would otherwise surface 10-20 minutes into a release run when
+  //     maturin / setuptools / hatchling / cargo finally tripped on them —
+  //     or, for npm, publish under an unexpected name with broken
+  //     idempotency (`npm publish` packs the manifest name while the engine
+  //     tracks the configured name). #301.
   requirePyprojectShape(selectedPackages);
   requireCargoShape(selectedPackages, { cwd });
+  requirePackageJsonShape(selectedPackages);
 
   // 2f. Pre-flight manifest repository URL vs GITHUB_REPOSITORY: catches
   //     the npm-provenance 422 ("repository.url is X, expected to match Y

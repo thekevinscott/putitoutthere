@@ -12,6 +12,7 @@ import {
   checkAuth,
   checkCargoShape,
   checkCratesMetadata,
+  checkPackageJsonShape,
   checkProvenanceMetadata,
   checkPyprojectShape,
   checkRepoPublic,
@@ -19,6 +20,7 @@ import {
   requireAuth,
   requireCargoShape,
   requireCratesMetadata,
+  requirePackageJsonShape,
   requireProvenanceMetadata,
   requirePyprojectShape,
   requireRepoPublic,
@@ -1358,6 +1360,115 @@ default = []
 
   it('requireCargoShape returns silently when there are no crates / bundle_cli packages', () => {
     expect(() => requireCargoShape([pkg('npm')])).not.toThrow();
+  });
+});
+
+/* ----------------------- package.json shape (npm) ----------------------- */
+
+describe('checkPackageJsonShape / requirePackageJsonShape', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'piot-pkgjson-shape-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function npmPkg(name: string, path: string, overrides: Partial<Package> = {}): Package {
+    return pkg('npm', { name, path, ...overrides });
+  }
+
+  function writePkgJson(path: string, body: unknown): void {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'package.json'), JSON.stringify(body), 'utf8');
+  }
+
+  it('passes when package.json name matches the configured name', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, { name: 'a', version: '0.0.0' });
+    expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
+    expect(() => requirePackageJsonShape([npmPkg('a', p)])).not.toThrow();
+  });
+
+  it('flags PIOT_NPM_NAME_MISMATCH when package.json name differs from configured name', () => {
+    const p = join(dir, 'foo');
+    writePkgJson(p, { name: 'foo', version: '0.0.0' });
+    const findings = checkPackageJsonShape([npmPkg('js/foo', p)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.code).toBe('PIOT_NPM_NAME_MISMATCH');
+    expect(findings[0]!.detail).toContain('foo');
+    expect(findings[0]!.detail).toContain('"js/foo"');
+  });
+
+  it('honors the `npm` override when checking package.json name', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, { name: 'pkg-name', version: '0.0.0' });
+    const pkgs = [npmPkg('js/foo', p, { npm: 'pkg-name' })];
+    expect(checkPackageJsonShape(pkgs)).toEqual([]);
+  });
+
+  it('matches a scoped npm name set via the override', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, { name: '@scope/foo', version: '0.0.0' });
+    const pkgs = [npmPkg('js/foo', p, { npm: '@scope/foo' })];
+    expect(checkPackageJsonShape(pkgs)).toEqual([]);
+  });
+
+  it('flags a scoped-name mismatch when the override disagrees with package.json', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, { name: '@scope/foo', version: '0.0.0' });
+    const findings = checkPackageJsonShape([npmPkg('foo', p, { npm: '@scope/bar' })]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.code).toBe('PIOT_NPM_NAME_MISMATCH');
+  });
+
+  it('skips a missing package.json (a different failure surface)', () => {
+    const p = join(dir, 'does-not-exist');
+    expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
+  });
+
+  it('skips a malformed package.json (build tooling surfaces those)', () => {
+    const p = join(dir, 'a');
+    mkdirSync(p, { recursive: true });
+    writeFileSync(join(p, 'package.json'), '{ not json', 'utf8');
+    expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
+  });
+
+  it('skips a package.json with no name field', () => {
+    const p = join(dir, 'a');
+    writePkgJson(p, { version: '0.0.0' });
+    expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
+  });
+
+  it('skips non-npm packages entirely', () => {
+    expect(checkPackageJsonShape([pkg('crates'), pkg('pypi')])).toEqual([]);
+  });
+
+  it('reports every failing npm package, not just the first', () => {
+    const a = join(dir, 'a');
+    const b = join(dir, 'b');
+    writePkgJson(a, { name: 'wrong-a', version: '0.0.0' });
+    writePkgJson(b, { name: 'wrong-b', version: '0.0.0' });
+    const findings = checkPackageJsonShape([npmPkg('a', a), npmPkg('b', b)]);
+    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
+  });
+
+  it('requirePackageJsonShape throws naming the failing package + the error code', () => {
+    const p = join(dir, 'foo');
+    writePkgJson(p, { name: 'foo', version: '0.0.0' });
+    try {
+      requirePackageJsonShape([npmPkg('js/foo', p)]);
+      throw new Error('expected requirePackageJsonShape to throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('PIOT_NPM_NAME_MISMATCH');
+      expect(msg).toContain('js/foo');
+      expect(msg).toContain(join(p, 'package.json'));
+    }
+  });
+
+  it('requirePackageJsonShape returns silently when there are no npm packages', () => {
+    expect(() => requirePackageJsonShape([pkg('crates'), pkg('pypi')])).not.toThrow();
   });
 });
 

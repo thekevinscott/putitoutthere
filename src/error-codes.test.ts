@@ -59,6 +59,10 @@ describe('error-codes', () => {
     expect(ErrorCodes.CRATES_WORKSPACE_VERSION_MISMATCH).toBe('PIOT_CRATES_WORKSPACE_VERSION_MISMATCH');
   });
 
+  it('exposes the npm-shape preflight code surfaced by requirePackageJsonShape', () => {
+    expect(ErrorCodes.NPM_NAME_MISMATCH).toBe('PIOT_NPM_NAME_MISMATCH');
+  });
+
   it('ErrorCode type alias resolves to the union of literal strings', () => {
     // Compile-time assertion that every value passes the type check.
     const sample: ErrorCode = ErrorCodes.AUTH_NO_TOKEN;
