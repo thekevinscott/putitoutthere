@@ -634,12 +634,13 @@ The engine publishes a per-platform sub-package per target
 at the published version. npm's resolver installs exactly one sub-package
 at consumer install time.
 
-The reusable workflow generates the per-platform launcher and the
-matching `package.json#bin` entry for you at build time — both writes
-are skipped when the consumer already has either piece committed, so
-overrides remain trivial. To override, commit your own
-`bin/<bundle_cli.bin>.js` at the package root (or set `package.json#bin`
-explicitly); the workflow leaves both alone when present.
+With `[package.bundle_cli]` declared (below), the reusable workflow
+generates the per-platform launcher and the matching `package.json#bin`
+entry for you at build time — both writes are skipped when the consumer
+already has either piece committed, so overrides remain trivial. To
+override, commit your own `bin/<bundle_cli.bin>.js` at the package root
+(or set `package.json#bin` explicitly); the workflow leaves both alone
+when present.
 
 Declare `[package.bundle_cli]` so the reusable workflow runs the
 cross-compile for you:
