@@ -164,12 +164,25 @@ export function writeLauncherFromConfig(
   const buildEntries = normalizeBuild(npmPkg.build);
   const bundledCli = buildEntries.find((e) => e.mode === 'bundled-cli');
   if (!bundledCli) return [];
-  // Schema (config.ts) guarantees `targets` is non-empty AND
-  // `[package.bundle_cli]` is declared when at least one bundled-cli
-  // entry exists in `build`; the non-null assertions document that
-  // contract.
+  // `[package.bundle_cli]` is optional on a bundled-cli npm package — #298
+  // kept the table opt-in. When it's declared the reusable workflow
+  // cross-compiles the Rust binary and we author the launcher from
+  // `bundle_cli.bin`. When it's absent the consumer is on the legacy
+  // "bring your own scripts/build.cjs + bin/<bin>.js" path: the
+  // cross-compile step already skips them (it gates on `matrix.bundle_cli`),
+  // and the engine has no binary name to author a launcher from. No-op so
+  // the consumer's committed launcher + package.json#bin stand untouched.
+  // The workflow can't make this distinction — the main row this runs on
+  // never carries `bundle_cli` (plan.ts attaches it only to per-target
+  // bundled-cli rows) — so the gate lives here, where the full config is
+  // loaded. Skipping it dereferenced the absent table and crashed every
+  // legacy bundled-cli package's main row once #299 moved launcher
+  // generation into the engine.
+  const bundleCli = npmPkg.bundle_cli;
+  if (bundleCli === undefined) return [];
+  // bundle_cli present ⇒ `targets` is non-empty (config.ts refinement), so
+  // the assertion is sound on this path.
   const targets = npmPkg.targets!;
-  const bundleCli = npmPkg.bundle_cli!;
   const triples = targets.map((t) => (typeof t === 'string' ? t : t.triple));
   const npmName = npmPkg.npm ?? npmPkg.name;
   return writeLauncher({
