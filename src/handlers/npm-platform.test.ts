@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_NAME_TEMPLATE,
   looksLikePublishOverRace,
+  looksLikeTlogDuplicate,
   normalizeBuild,
   platformArtifactName,
   publishPlatforms,
@@ -724,6 +725,33 @@ describe('looksLikePublishOverRace', () => {
   it('returns false on undefined / empty', () => {
     expect(looksLikePublishOverRace(undefined)).toBe(false);
     expect(looksLikePublishOverRace('')).toBe(false);
+  });
+});
+
+describe('looksLikeTlogDuplicate', () => {
+  it('matches npm\'s TLOG_CREATE_ENTRY_ERROR code', () => {
+    expect(
+      looksLikeTlogDuplicate(
+        'npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) ...',
+      ),
+    ).toBe(true);
+  });
+
+  it('matches the Rekor "equivalent entry already exists" prose even without the code', () => {
+    expect(
+      looksLikeTlogDuplicate(
+        'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID 108e9186e8c5677a',
+      ),
+    ).toBe(true);
+  });
+
+  it('returns false on an unrelated bare 409 (not the tlog dedupe shape)', () => {
+    expect(looksLikeTlogDuplicate('npm error code E409\nnpm error 409 Conflict')).toBe(false);
+  });
+
+  it('returns false on undefined / empty', () => {
+    expect(looksLikeTlogDuplicate(undefined)).toBe(false);
+    expect(looksLikeTlogDuplicate('')).toBe(false);
   });
 });
 
