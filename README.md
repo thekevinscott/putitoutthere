@@ -271,8 +271,13 @@ version = 1   # required; only 1 is valid today
 > To pin an explicit subset, set `python_versions` on the package. The
 > build matrix fans across the resolved set (per `maturin` target); the
 > sdist and a pure-Python `hatch` wheel are version-agnostic and built
-> once. When neither `python_versions` nor a parseable `requires-python`
-> is present, a single wheel is built for `3.12`.
+> once. A `maturin` wheel that is itself Python-version-independent —
+> `[tool.maturin].bindings = "bin"` (a `py3-none` Rust-binary wheel) or a
+> pyo3 `abi3` extension (a `cp3x-abi3` wheel) — is likewise built once, on
+> the newest resolved interpreter, instead of duplicated across the set
+> (the duplicates otherwise collide at the `pypi-publish` download). When
+> neither `python_versions` nor a parseable `requires-python` is present, a
+> single wheel is built for `3.12`.
 
 > [!IMPORTANT]
 > **`pyproject.toml` MUST match the configured shape.** Preflight verifies
