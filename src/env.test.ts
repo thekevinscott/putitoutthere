@@ -35,7 +35,7 @@ describe('buildSubprocessEnv (#138)', () => {
   });
   afterEach(() => {
     for (const k of Object.keys(process.env)) {
-      if (!(k in ENV_BAK)) delete process.env[k];
+      if (!(k in ENV_BAK)) {delete process.env[k];}
     }
     Object.assign(process.env, ENV_BAK);
   });

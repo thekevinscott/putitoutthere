@@ -112,7 +112,7 @@ function emitGhaAnnotation(
   ctx: FailureContext,
   redactedMsg: string,
 ): void {
-  if (process.env.GITHUB_ACTIONS !== 'true') return;
+  if (process.env.GITHUB_ACTIONS !== 'true') {return;}
   void err; // arity preserved for future callers; redactedMsg drives output
   const codeMatch = /\[(PIOT_[A-Z0-9_]+)\]/.exec(redactedMsg);
   const codeTag = codeMatch ? ` [${codeMatch[1]}]` : '';
@@ -183,7 +183,7 @@ function renderMarkdown(err: Error, ctx: FailureContext): string {
 }
 
 function truncate(md: string): string {
-  if (md.length <= SUMMARY_CAP) return md;
+  if (md.length <= SUMMARY_CAP) {return md;}
   // Keep the head (error + command + versions) — the most useful
   // bytes. Tail bytes are usually repeated noise at this size.
   const head = md.slice(0, SUMMARY_CAP - TRUNC_NOTE.length);
@@ -192,6 +192,6 @@ function truncate(md: string): string {
 
 function writeSummary(md: string): void {
   const path = process.env.GITHUB_STEP_SUMMARY;
-  if (!path) return; // local runs / non-GHA CI — summary is a no-op
+  if (!path) {return;} // local runs / non-GHA CI — summary is a no-op
   appendFileSync(path, md, 'utf8');
 }

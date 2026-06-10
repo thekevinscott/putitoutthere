@@ -111,12 +111,12 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     /* v8 ignore next -- ?? fallback is for malformed argv; tests always pass the value */
-    if (a === '--cwd') out.cwd = argv[++i] ?? out.cwd;
-    else if (a === '--config') out.config = argv[++i];
-    else if (a === '--json') out.json = true;
-    else if (a === '--path') out.path = argv[++i];
-    else if (a === '--version') out.version = argv[++i];
-    else if (a === '--release-packages') out.releasePackages = argv[++i];
+    if (a === '--cwd') {out.cwd = argv[++i] ?? out.cwd;}
+    else if (a === '--config') {out.config = argv[++i];}
+    else if (a === '--json') {out.json = true;}
+    else if (a === '--path') {out.path = argv[++i];}
+    else if (a === '--version') {out.version = argv[++i];}
+    else if (a === '--release-packages') {out.releasePackages = argv[++i];}
     else if (a === '--dry-run') {
       // Removed in #244. Publishing is the library's only job; a
       // non-publishing flavor of `publish` is a coverage hole, not
@@ -132,7 +132,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
   // relative — e.g. `--cwd fixture-tree` from the JS action — those
   // file paths would resolve as `fixture-tree/fixture-tree/...` from
   // the subprocess's vantage. Anchor here once.
-  if (!isAbsolute(out.cwd)) out.cwd = resolve(out.cwd);
+  if (!isAbsolute(out.cwd)) {out.cwd = resolve(out.cwd);}
   return out;
 }
 
@@ -231,7 +231,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // place; consumer overrides are preserved. No-op for non-npm
         // packages and for npm packages without a bundled-cli build
         // entry, so the build job can invoke this on every main row.
-        if (!flags.path) throw new Error('write-launcher: --path <pkg-dir> is required');
+        if (!flags.path) {throw new Error('write-launcher: --path <pkg-dir> is required');}
         const written = writeLauncherFromConfig({
           cwd: flags.cwd,
           packagePath: flags.path,
@@ -252,8 +252,8 @@ export async function run(argv: readonly string[]): Promise<number> {
         // env override, so the manifest must match the planned
         // version before maturin runs. crates / npm bump at publish;
         // setuptools-scm / hatch-vcs use SETUPTOOLS_SCM_PRETEND_VERSION.
-        if (!flags.path) throw new Error('write-version: --path <pkg-dir> is required');
-        if (!flags.version) throw new Error('write-version: --version <v> is required');
+        if (!flags.path) {throw new Error('write-version: --path <pkg-dir> is required');}
+        if (!flags.version) {throw new Error('write-version: --version <v> is required');}
         const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
         const written = writeVersionForBuild(target, flags.version);
         process.stdout.write(
@@ -268,8 +268,8 @@ export async function run(argv: readonly string[]): Promise<number> {
         // manifest must match the planned version before the
         // cross-compile runs — otherwise the bundled binary reports the
         // stale on-disk literal from `--version`.
-        if (!flags.path) throw new Error('write-crate-version: --path <crate-dir> is required');
-        if (!flags.version) throw new Error('write-crate-version: --version <v> is required');
+        if (!flags.path) {throw new Error('write-crate-version: --path <crate-dir> is required');}
+        if (!flags.version) {throw new Error('write-crate-version: --version <v> is required');}
         const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
         const written = writeCrateVersionForBuild(target, flags.version);
         process.stdout.write(

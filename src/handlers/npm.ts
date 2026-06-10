@@ -81,7 +81,7 @@ function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<stri
       new Error(`package.json JSON parse error: ${err instanceof Error ? err.message : String(err)}`),
     );
   }
-  if (parsed.version === version) return Promise.resolve([]);
+  if (parsed.version === version) {return Promise.resolve([]);}
   parsed.version = version;
   // Preserve the existing indentation shape (2-space default if we
   // can't detect) and the trailing newline when present.
@@ -145,9 +145,9 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
 
   const access = pkg.access ?? 'public';
   const args: string[] = ['publish', `--access=${access}`];
-  if (pkg.tag) args.push(`--tag=${pkg.tag}`);
-  if (hasOidc) args.push('--provenance');
-  if (registryOverride) args.push(`--registry=${registryOverride}`);
+  if (pkg.tag) {args.push(`--tag=${pkg.tag}`);}
+  if (hasOidc) {args.push('--provenance');}
+  if (registryOverride) {args.push(`--registry=${registryOverride}`);}
 
   try {
     execFileSync('npm', args, {
@@ -229,7 +229,7 @@ function assertRepositoryField(path: string): void {
 
 /** Heuristic match on npm's auth-related stderr shapes. */
 function looksLikeAuthFailure(stderr: string | undefined): boolean {
-  if (!stderr) return false;
+  if (!stderr) {return false;}
   return /\b(E401|E403|ENEEDAUTH|EAUTH|need auth|not authori[sz]ed|unauthorized|forbidden)\b/i.test(
     stderr,
   );
@@ -273,9 +273,9 @@ export async function isBootstrapPublish(name: string): Promise<boolean> {
 function detectIndent(source: string): number | string {
   const m = /^(?<indent>[ \t]+)"/m.exec(source);
   /* v8 ignore next -- JSON.parse of valid JSON always has at least one indented line when pretty-printed */
-  if (!m?.groups?.indent) return 2;
+  if (!m?.groups?.indent) {return 2;}
   const indent = m.groups.indent;
-  if (indent.includes('\t')) return '\t';
+  if (indent.includes('\t')) {return '\t';}
   return indent.length;
 }
 

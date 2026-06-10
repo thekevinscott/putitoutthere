@@ -356,8 +356,8 @@ describe('publish: handler failure', () => {
       expect(md).toContain('twine 5.1.0');
       expect(md).toContain('Python 3.12.6');
     } finally {
-      if (prev === undefined) delete process.env.GITHUB_STEP_SUMMARY;
-      else process.env.GITHUB_STEP_SUMMARY = prev;
+      if (prev === undefined) {delete process.env.GITHUB_STEP_SUMMARY;}
+      else {process.env.GITHUB_STEP_SUMMARY = prev;}
     }
   });
 });

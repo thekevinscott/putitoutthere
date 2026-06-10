@@ -193,7 +193,7 @@ function checkGlobsMatchTrackedFiles(
   const tracked = listTrackedFiles(cwd);
   /* v8 ignore next -- tests always seed a git repo; defensive against
      callers outside one */
-  if (tracked === null) return;
+  if (tracked === null) {return;}
   for (const p of packages) {
     const matched = tracked.some((f) => matchesAny(p.globs, f));
     if (!matched) {
@@ -267,7 +267,7 @@ function checkPyprojectAndBundleCli(
   findings: CheckFinding[],
 ): void {
   for (const p of packages) {
-    if (p.kind !== 'pypi') continue;
+    if (p.kind !== 'pypi') {continue;}
     const pyprojectPath = join(p.path, 'pyproject.toml');
     if (!existsSync(pyprojectPath)) {
       findings.push({
@@ -276,7 +276,7 @@ function checkPyprojectAndBundleCli(
       });
       continue;
     }
-    if (p.build !== 'maturin' || p.bundle_cli === undefined) continue;
+    if (p.build !== 'maturin' || p.bundle_cli === undefined) {continue;}
     const bundleCli = p.bundle_cli;
     // `bundle_cli.crate_path` is documented as relative to the repo
     // root (see config.ts: default = "."). Resolve against `cwd`,
@@ -326,9 +326,9 @@ function checkNpmTargetTriples(
   findings: CheckFinding[],
 ): void {
   for (const p of packages) {
-    if (p.kind !== 'npm') continue;
+    if (p.kind !== 'npm') {continue;}
     const targets = (p as { targets?: TargetEntry[] }).targets;
-    if (!targets) continue;
+    if (!targets) {continue;}
     for (const t of targets) {
       const { triple } = normalizeTarget(t);
       try {
@@ -360,7 +360,7 @@ function listTrackedFiles(cwd: string): string[] | null {
 
 function readDeclaredBins(cargoTomlPath: string): string[] {
   const parsed = parseCargoToml(cargoTomlPath);
-  if (parsed === null) return [];
+  if (parsed === null) {return [];}
   const result = collectBinsFromManifest(parsed);
   // Workspace manifests delegate [[bin]] declarations to member crates
   // (#337). `cargo build --bin X` from anywhere in the workspace
@@ -374,9 +374,9 @@ function readDeclaredBins(cargoTomlPath: string): string[] {
   // own diagnostics own surfacing those.
   for (const memberManifest of workspaceMemberManifests(parsed, cargoTomlPath)) {
     const memberParsed = parseCargoToml(memberManifest);
-    if (memberParsed === null) continue;
+    if (memberParsed === null) {continue;}
     for (const b of collectBinsFromManifest(memberParsed)) {
-      if (!result.includes(b)) result.push(b);
+      if (!result.includes(b)) {result.push(b);}
     }
   }
   return result;
@@ -387,9 +387,9 @@ function workspaceMemberManifests(
   cargoTomlPath: string,
 ): string[] {
   const workspace = parsed.workspace;
-  if (typeof workspace !== 'object' || workspace === null) return [];
+  if (typeof workspace !== 'object' || workspace === null) {return [];}
   const members = (workspace as { members?: unknown }).members;
-  if (!Array.isArray(members)) return [];
+  if (!Array.isArray(members)) {return [];}
   const workspaceDir = dirname(cargoTomlPath);
   const out: string[] = [];
   for (const m of members) {
@@ -423,7 +423,7 @@ function collectBinsFromManifest(parsed: Record<string, unknown>): string[] {
     for (const entry of bins) {
       if (typeof entry === 'object' && entry !== null) {
         const name = (entry as { name?: unknown }).name;
-        if (typeof name === 'string') result.push(name);
+        if (typeof name === 'string') {result.push(name);}
       }
     }
   }
@@ -434,7 +434,7 @@ function collectBinsFromManifest(parsed: Record<string, unknown>): string[] {
   // doesn't spuriously fail this check.
   if (result.length === 0) {
     const pkg = parsed.package as { name?: unknown } | undefined;
-    if (pkg && typeof pkg.name === 'string') result.push(pkg.name);
+    if (pkg && typeof pkg.name === 'string') {result.push(pkg.name);}
   }
   return result;
 }

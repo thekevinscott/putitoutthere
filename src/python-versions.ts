@@ -47,7 +47,7 @@ function cmp(a: readonly number[], b: readonly number[]): number {
   for (let i = 0; i < len; i++) {
     const av = a[i] ?? 0;
     const bv = b[i] ?? 0;
-    if (av !== bv) return av < bv ? -1 : 1;
+    if (av !== bv) {return av < bv ? -1 : 1;}
   }
   return 0;
 }
@@ -102,7 +102,7 @@ function satisfies(candidate: readonly number[], clause: Clause): boolean {
  */
 export function expandRequiresPython(spec: string): string[] {
   const clauses = parseClauses(spec);
-  if (clauses.length === 0) return [];
+  if (clauses.length === 0) {return [];}
   return RELEASED_CPYTHON_VERSIONS.filter((kv) => {
     const candidate = parseVersion(kv);
     return clauses.every((clause) => satisfies(candidate, clause));
@@ -129,7 +129,7 @@ function readRequiresPython(pyprojectPath: string): string | null {
     return null;
   }
   const project = parsed.project;
-  if (typeof project !== 'object') return null;
+  if (typeof project !== 'object') {return null;}
   const req = (project as Record<string, unknown>)['requires-python'];
   return typeof req === 'string' ? req : null;
 }
@@ -149,7 +149,7 @@ export function resolvePythonVersions(
   const requiresPython = readRequiresPython(join(cwd, pkg.path, 'pyproject.toml'));
   if (requiresPython !== null) {
     const expanded = expandRequiresPython(requiresPython);
-    if (expanded.length > 0) return expanded;
+    if (expanded.length > 0) {return expanded;}
   }
   return [DEFAULT_PYTHON_VERSION];
 }

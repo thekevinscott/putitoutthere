@@ -76,7 +76,7 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
   ];
 
   const emit = (level: Level, msg: string, fields: Record<string, unknown>): void => {
-    if (LEVEL_ORDER[level] < minLevel) return;
+    if (LEVEL_ORDER[level] < minLevel) {return;}
     const record = { level, time: new Date().toISOString(), msg, ...fields };
     const raw = pretty ? formatPretty(record) : `${JSON.stringify(record)}\n`;
     stream.write(redact(raw, sources));
@@ -104,9 +104,9 @@ function formatPretty(record: Record<string, unknown>): string {
 }
 
 function formatScalar(v: unknown): string {
-  if (typeof v === 'string') return v;
+  if (typeof v === 'string') {return v;}
   /* v8 ignore next -- null/boolean primitive branches not all hit by current tests */
-  if (typeof v === 'number' || typeof v === 'boolean' || v === null) return String(v);
+  if (typeof v === 'number' || typeof v === 'boolean' || v === null) {return String(v);}
   return JSON.stringify(v);
 }
 
@@ -175,7 +175,7 @@ function scanSource(src: EnvSource): readonly string[] {
   const sig = `${keys.length}:${acc}`;
 
   const cached = SCAN_CACHE.get(src);
-  if (cached !== undefined && cached.sig === sig) return cached.values;
+  if (cached !== undefined && cached.sig === sig) {return cached.values;}
 
   const values: string[] = [];
   for (const k of keys) {
@@ -183,13 +183,13 @@ function scanSource(src: EnvSource): readonly string[] {
     // `undefined` is rare (read-after-delete race in tests). Treat
     // as absent; skip without a dedicated branch so coverage stays
     // tight.
-    if (!v) continue;
-    if (!SECRET_KEY.test(k)) continue;
+    if (!v) {continue;}
+    if (!SECRET_KEY.test(k)) {continue;}
     // #137 length floor. Short values mangle every matching character
     // in unrelated log text. Real tokens clear 8 easily; short values
     // that happen to share a name shape with a credential aren't worth
     // defending.
-    if (v.length < MIN_OPAQUE_LEN) continue;
+    if (v.length < MIN_OPAQUE_LEN) {continue;}
     values.push(v);
   }
   // Longest-first: redacting a substring first would leave the
@@ -217,7 +217,7 @@ export function redact(
   let out = s;
   for (const src of sources) {
     for (const v of scanSource(src)) {
-      if (!out.includes(v)) continue;
+      if (!out.includes(v)) {continue;}
       // String.replaceAll expects a literal or a RegExp; use split/join to
       // avoid regex escaping every secret value. Repeats across sources
       // are a no-op (the value's already gone after the first pass).

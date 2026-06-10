@@ -60,8 +60,8 @@ async function isPublishedImpl(
     method: 'GET',
     headers: { 'user-agent': USER_AGENT },
   });
-  if (res.status === 200) return true;
-  if (res.status === 404) return false;
+  if (res.status === 200) {return true;}
+  if (res.status === 404) {return false;}
   if (res.status >= 500) {
     throw new TransientError(`pypi.org GET ${url} returned ${res.status}`);
   }

@@ -40,9 +40,9 @@ const BUMPS = new Set<Bump>(['patch', 'minor', 'major']);
 export function parseReleasePackages(
   spec: string | undefined,
 ): Map<string, ReleasePackagesEntry> | null {
-  if (spec === undefined) return null;
+  if (spec === undefined) {return null;}
   const trimmed = spec.trim();
-  if (trimmed === '') return null;
+  if (trimmed === '') {return null;}
 
   const out = new Map<string, ReleasePackagesEntry>();
   for (const raw of trimmed.split(',')) {

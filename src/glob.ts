@@ -28,7 +28,7 @@ export function matchesGlob(pattern: string, path: string): boolean {
 
 export function matchesAny(patterns: readonly string[], path: string): boolean {
   for (const p of patterns) {
-    if (matchesGlob(p, path)) return true;
+    if (matchesGlob(p, path)) {return true;}
   }
   return false;
 }

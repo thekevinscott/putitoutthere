@@ -30,7 +30,7 @@ vi.mock('./python-versions.js', () => ({
         const bv = b.split('.').map(Number);
         for (let i = 0; i < Math.max(av.length, bv.length); i++) {
           const d = (av[i] ?? 0) - (bv[i] ?? 0);
-          if (d !== 0) return d;
+          if (d !== 0) {return d;}
         }
         return 0;
       });
@@ -187,7 +187,7 @@ globs   = ["js/cachetta/**"]
     const names = matrix.map((r) => r.artifact_name);
 
     // No artifact_name should contain a forward slash.
-    for (const n of names) expect(n).not.toMatch(/\//);
+    for (const n of names) {expect(n).not.toMatch(/\//);}
 
     // Spot-check the encoded shapes per slot.
     expect(matrix.find((r) => r.name === 'rust/core')!.artifact_name).toBe(
@@ -1199,7 +1199,7 @@ globs   = ["pkg/**"]
     const matrix = await plan({ cwd: repo });
     const pypi = matrix.filter((r) => r.kind === 'pypi');
     expect(pypi.length).toBeGreaterThan(0);
-    for (const row of pypi) expect(typeof pyVer(row)).toBe('string');
+    for (const row of pypi) {expect(typeof pyVer(row)).toBe('string');}
     const sdist = matrix.find((r) => r.kind === 'pypi' && r.target === 'sdist')!;
     expect(pyVer(sdist)).toBe('3.13');
   });

@@ -226,7 +226,7 @@ const NPM_NAME_TEMPLATE_VARS = ['name', 'scope', 'base', 'triple', 'mode'] as co
 const NPM_NAME_TEMPLATE_PLACEHOLDER_RE = /\{([^}]+)\}/g;
 
 function validateNameTemplate(template: string): string | null {
-  if (template.length === 0) return 'name template must not be empty';
+  if (template.length === 0) {return 'name template must not be empty';}
   if (!template.includes('{triple}')) {
     return 'name template must contain {triple} (otherwise platform packages would collide)';
   }
@@ -234,7 +234,7 @@ function validateNameTemplate(template: string): string | null {
   const unknown: string[] = [];
   for (const match of template.matchAll(NPM_NAME_TEMPLATE_PLACEHOLDER_RE)) {
     const v = match[1]!;
-    if (!allowed.has(v)) unknown.push(v);
+    if (!allowed.has(v)) {unknown.push(v);}
   }
   if (unknown.length > 0) {
     return `name template contains unknown placeholder(s): ${[...new Set(unknown)].map((u) => `{${u}}`).join(', ')} (allowed: ${NPM_NAME_TEMPLATE_VARS.map((v) => `{${v}}`).join(', ')})`;
@@ -295,7 +295,7 @@ const NPM_PKG = z
       const dupModes: string[] = [];
       for (const e of p.build) {
         const mode = typeof e === 'string' ? e : e.mode;
-        if (seenModes.has(mode)) dupModes.push(mode);
+        if (seenModes.has(mode)) {dupModes.push(mode);}
         seenModes.add(mode);
       }
       if (dupModes.length > 0) {
@@ -439,7 +439,7 @@ export function loadConfig(path: string): Config {
 // Triggered by the integration failure in #integration-2026-05.
 function detectCommonMistakes(raw: unknown): string[] {
   const hints: string[] = [];
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return hints;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {return hints;}
   const root = raw as Record<string, unknown>;
 
   if (!('putitoutthere' in root) && 'version' in root) {
@@ -456,7 +456,7 @@ function detectCommonMistakes(raw: unknown): string[] {
   const pkgs = root.package ?? root.packages;
   if (Array.isArray(pkgs)) {
     pkgs.forEach((p, i) => {
-      if (typeof p !== 'object' || p === null) return;
+      if (typeof p !== 'object' || p === null) {return;}
       const pp = p as Record<string, unknown>;
       if ('registry' in pp && !('kind' in pp)) {
         hints.push(`package[${i}]: \`registry = ...\` is not a valid field; did you mean \`kind\`?`);

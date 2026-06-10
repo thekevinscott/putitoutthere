@@ -49,6 +49,6 @@ export function writeCrateVersionForBuild(crateDir: string, version: string): st
     throw err;
   }
   const updated = replaceCargoVersion(original, version);
-  if (updated !== original) writeFileSync(cargoPath, updated, 'utf8');
+  if (updated !== original) {writeFileSync(cargoPath, updated, 'utf8');}
   return [cargoPath];
 }

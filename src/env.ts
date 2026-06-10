@@ -88,13 +88,13 @@ export function buildSubprocessEnv(
   const out: Record<string, string> = {};
   for (const name of DEFAULT_ENV_PASSTHROUGH) {
     const v = process.env[name];
-    if (typeof v === 'string') out[name] = v;
+    if (typeof v === 'string') {out[name] = v;}
   }
   for (const [k, v] of Object.entries(ctxEnv)) {
-    if (typeof v === 'string') out[k] = v;
+    if (typeof v === 'string') {out[k] = v;}
   }
   for (const [k, v] of Object.entries(extras)) {
-    if (typeof v === 'string') out[k] = v;
+    if (typeof v === 'string') {out[k] = v;}
   }
   return out;
 }

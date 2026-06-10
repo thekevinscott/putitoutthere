@@ -44,10 +44,10 @@ export function checkCratesPackageSize(
 ): CheckFinding[] {
   const findings: CheckFinding[] = [];
   for (const p of packages) {
-    if (p.kind !== 'crates') continue;
+    if (p.kind !== 'crates') {continue;}
     const cargoTomlPath = join(p.path, 'Cargo.toml');
     const compressedBytes = packagedCrateBytes(cargoTomlPath);
-    if (compressedBytes === null) continue;
+    if (compressedBytes === null) {continue;}
     if (compressedBytes > CRATES_MAX_UPLOAD_BYTES) {
       findings.push({
         package: p.name,
@@ -77,8 +77,8 @@ function packagedCrateBytes(cargoTomlPath: string): number | null {
   } catch {
     return null;
   }
-  if (result.error !== undefined) return null;
-  if (result.status !== 0) return null;
+  if (result.error !== undefined) {return null;}
+  if (result.status !== 0) {return null;}
   return parseCargoCompressedBytes(result.stderr);
 }
 
@@ -91,10 +91,10 @@ function parseCargoCompressedBytes(cargoStderr: string): number | null {
   const m = /Packaged\b[^\n]*?\(\s*(\d+(?:\.\d+)?)\s*([A-Za-z]+)\s+compressed\s*\)/.exec(
     cargoStderr,
   );
-  if (m === null) return null;
+  if (m === null) {return null;}
   const [, rawValue, rawUnit] = m as unknown as [string, string, string];
   const unit = CARGO_SIZE_UNIT_BYTES[rawUnit];
-  if (unit === undefined) return null;
+  if (unit === undefined) {return null;}
   return Math.round(Number.parseFloat(rawValue) * unit);
 }
 

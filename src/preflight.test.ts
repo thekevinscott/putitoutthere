@@ -52,12 +52,12 @@ const AUTH_VARS = [
 ];
 
 beforeEach(() => {
-  for (const k of AUTH_VARS) delete process.env[k];
+  for (const k of AUTH_VARS) {delete process.env[k];}
 });
 
 afterEach(() => {
   for (const k of Object.keys(process.env)) {
-    if (!(k in ENV_BAK)) delete process.env[k];
+    if (!(k in ENV_BAK)) {delete process.env[k];}
   }
   Object.assign(process.env, ENV_BAK);
 });

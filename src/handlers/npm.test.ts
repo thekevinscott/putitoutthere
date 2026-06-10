@@ -61,7 +61,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const k of Object.keys(process.env)) {
-    if (!(k in ENV_BAK)) delete process.env[k];
+    if (!(k in ENV_BAK)) {delete process.env[k];}
   }
   Object.assign(process.env, ENV_BAK);
 });
@@ -230,7 +230,7 @@ describe('npm.publish', () => {
         viewCalls.push(String(a[1]));
         throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
       }
-      if (a[0] === 'publish') publishCwds.push(cwd);
+      if (a[0] === 'publish') {publishCwds.push(cwd);}
       return Buffer.from('');
     });
 
