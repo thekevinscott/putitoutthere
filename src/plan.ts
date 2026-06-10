@@ -110,17 +110,17 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const cascaded = new Set(
     computeCascade(config.packages, changesByPackage).map((p) => p.name),
   );
-  for (const name of firstRelease) cascaded.add(name);
+  for (const name of firstRelease) {cascaded.add(name);}
 
   // Trailer can additionally force-include packages by name.
   const forced = new Set(trailer?.packages ?? []);
-  for (const name of forced) cascaded.add(name);
+  for (const name of forced) {cascaded.add(name);}
 
-  if (cascaded.size === 0) return Promise.resolve([]);
+  if (cascaded.size === 0) {return Promise.resolve([]);}
 
   const rows: MatrixRow[] = [];
   for (const p of config.packages) {
-    if (!cascaded.has(p.name)) continue;
+    if (!cascaded.has(p.name)) {continue;}
     const version = nextVersion(p, trailer?.bump, cwd, forced);
     const pkgRows = rowsForPackage(p, version, cwd);
     rows.push(...pkgRows);
@@ -155,7 +155,7 @@ function planManual(
   const rows: MatrixRow[] = [];
   for (const p of packages) {
     const entry = manual.get(p.name);
-    if (entry === undefined) continue;
+    if (entry === undefined) {continue;}
     rows.push(...rowsForPackage(p, manualVersion(p, entry, cwd), cwd));
   }
   return rows;
@@ -171,13 +171,13 @@ function manualVersion(
   // the prior publish failed before reaching the registry, and the
   // publish-phase `isPublished` check is the right place to refuse a
   // genuine collision.
-  if (entry.version !== undefined) return entry.version;
+  if (entry.version !== undefined) {return entry.version;}
 
   // A bump keyword bumps the last tag, or first_version when the named
   // package has never been released. `parseTagVersion` is non-null
   // here: `lastTag` only ever returns a tag the format already matched.
   const tag = lastTag(pkg.name, pkg.tag_format, { cwd });
-  if (tag === null) return firstVersion(pkg);
+  if (tag === null) {return firstVersion(pkg);}
   const lastVersion = parseTagVersion(pkg.tag_format, pkg.name, tag)!;
   return bumpVersion(lastVersion, entry.bump!);
 }
@@ -308,7 +308,7 @@ function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[]
               python_version: py,
             };
             // #217: per-target wheels carry bundle_cli; sdist does not.
-            if (bundleCli !== undefined) row.bundle_cli = bundleCli;
+            if (bundleCli !== undefined) {row.bundle_cli = bundleCli;}
             out.push(row);
           }
         }
@@ -476,13 +476,13 @@ function defaultRunsOn(target: string): string {
  */
 function resolveTrailer(head: string, cwd: string): Trailer | null {
   const direct = parseTrailer(commitBody(head, { cwd }));
-  if (direct) return direct;
+  if (direct) {return direct;}
   const parents = commitParents(head, { cwd });
-  if (parents.length < 2) return null;
+  if (parents.length < 2) {return null;}
   for (let i = 1; i < parents.length; i++) {
     const parentSha = parents[i]!;
     const t = parseTrailer(commitBody(parentSha, { cwd }));
-    if (t) return t;
+    if (t) {return t;}
   }
   return null;
 }

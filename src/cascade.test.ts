@@ -18,7 +18,7 @@ import type { Package } from './config.js';
 function everyPkgSees(packages: readonly Package[], files: readonly string[]): ChangedFilesByPackage {
   const m = new Map<string, ReadonlySet<string>>();
   const set = new Set(files);
-  for (const p of packages) m.set(p.name, set);
+  for (const p of packages) {m.set(p.name, set);}
   return m;
 }
 

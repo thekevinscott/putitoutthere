@@ -50,8 +50,8 @@ async function isPublishedImpl(
     method: 'GET',
     headers: { 'user-agent': USER_AGENT },
   });
-  if (res.status === 200) return true;
-  if (res.status === 404) return false;
+  if (res.status === 200) {return true;}
+  if (res.status === 404) {return false;}
   if (res.status >= 500) {
     throw new TransientError(`crates.io GET ${url} returned ${res.status}`);
   }
@@ -81,7 +81,7 @@ function writeVersionImpl(
   } catch (err) {
     return Promise.reject(err instanceof Error ? err : new Error(String(err)));
   }
-  if (updated === original) return Promise.resolve([]);
+  if (updated === original) {return Promise.resolve([]);}
   writeFileSync(cargoPath, updated, 'utf8');
   return Promise.resolve([cargoPath]);
 }
@@ -254,7 +254,7 @@ async function publishImpl(
  * wouldn't trigger the fallback.
  */
 function isRateLimited(stderr: string | undefined): boolean {
-  if (!stderr) return false;
+  if (!stderr) {return false;}
   return /status\s+429\b/i.test(stderr) || /429\s+Too\s+Many\s+Requests/i.test(stderr);
 }
 
@@ -273,8 +273,8 @@ function isRateLimited(stderr: string | undefined): boolean {
  * the 404 status.
  */
 export function looksLikeFirstPublishTpRejection(stderr: string | undefined): boolean {
-  if (!stderr) return false;
-  if (!/status\s+404\b/i.test(stderr)) return false;
+  if (!stderr) {return false;}
+  if (!/status\s+404\b/i.test(stderr)) {return false;}
   return (
     /crate\s+`[^`]+`\s+does\s+not\s+exist/i.test(stderr) ||
     /trusted\s+publish/i.test(stderr)
@@ -304,7 +304,7 @@ export function replaceCargoVersion(source: string, version: string): string {
     throw new Error('Cargo.toml: no [package].version field found');
   }
   const [, pre, prefix, old, suffix] = m as unknown as [string, string, string, string, string];
-  if (old === version) return source;
+  if (old === version) {return source;}
   const start = m.index + pre.length;
   const end = start + prefix.length + old.length + suffix.length;
   return source.slice(0, start) + prefix + version + suffix + source.slice(end);
@@ -330,7 +330,7 @@ export function scanDirtyOutsideManifest(
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    if (!topOut.trim()) return null;
+    if (!topOut.trim()) {return null;}
   } catch {
     return null;
   }
@@ -379,12 +379,12 @@ export function scanDirtyOutsideManifest(
   const siblingRels: string[] = [];
   for (const p of siblingPackagePaths ?? []) {
     const r = relative(cwd, p);
-    if (r === '' || r.startsWith('..')) continue;
+    if (r === '' || r.startsWith('..')) {continue;}
     siblingRels.push(r.replace(/\\/g, '/'));
   }
   const unexpected: string[] = [];
   for (const raw of porcelain.split('\n')) {
-    if (raw.length < 4) continue;
+    if (raw.length < 4) {continue;}
     // Porcelain v1: "XY path" or "XY old -> new" for renames. Index 3+
     // is the path; strip quoting if git applied any.
     const rest = raw.slice(3);
@@ -392,7 +392,7 @@ export function scanDirtyOutsideManifest(
     const path = rest.includes(' -> ') ? rest.split(' -> ').pop()! : rest;
     /* v8 ignore next -- quoted-path rendering not exercised by current tests */
     const normalized = path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path;
-    if (normalized === managedRel) continue;
+    if (normalized === managedRel) {continue;}
     if (
       artifactsRel !== '' &&
       (normalized === artifactsRel ||

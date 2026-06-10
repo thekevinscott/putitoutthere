@@ -109,7 +109,7 @@ export function writeLauncher(opts: WriteLauncherOptions): string[] {
     writeFileSync(launcherPath, generateLauncherSource(opts), { encoding: 'utf8', flag: 'wx' });
     written.push(launcherPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {throw err;}
   }
 
   const pkgJsonPath = join(opts.pkgDir, 'package.json');
@@ -158,12 +158,12 @@ export function writeLauncherFromConfig(
       `write-launcher: no [[package]] entry with path "${opts.packagePath}" in ${opts.configPath ?? join(opts.cwd, 'putitoutthere.toml')}`,
     );
   }
-  if (pkg.kind !== 'npm') return [];
+  if (pkg.kind !== 'npm') {return [];}
 
   const npmPkg: NpmPackage = pkg;
   const buildEntries = normalizeBuild(npmPkg.build);
   const bundledCli = buildEntries.find((e) => e.mode === 'bundled-cli');
-  if (!bundledCli) return [];
+  if (!bundledCli) {return [];}
   // `[package.bundle_cli]` is optional on a bundled-cli npm package — #298
   // kept the table opt-in. When it's declared the reusable workflow
   // cross-compiles the Rust binary and we author the launcher from
@@ -179,7 +179,7 @@ export function writeLauncherFromConfig(
   // legacy bundled-cli package's main row once #299 moved launcher
   // generation into the engine.
   const bundleCli = npmPkg.bundle_cli;
-  if (bundleCli === undefined) return [];
+  if (bundleCli === undefined) {return [];}
   // bundle_cli present ⇒ `targets` is non-empty (config.ts refinement), so
   // the assertion is sound on this path.
   const targets = npmPkg.targets!;
@@ -224,7 +224,7 @@ export function nodePlatformKey(triple: string): string {
   // napi-rs short form (`linux-x64-gnu`) already starts with the Node
   // platform + arch; lop off the libc suffix if present.
   for (const [prefix, key] of NAPI_PREFIXES) {
-    if (t.startsWith(prefix)) return key;
+    if (t.startsWith(prefix)) {return key;}
   }
   // Rust target triples — explicit lookup.
   const rust = RUST_TARGET_KEYS[t];
@@ -266,8 +266,8 @@ function jsString(s: string): string {
 /** 2 / 4 / tab. Defaults to 2 when undetectable. Mirrors npm.ts. */
 export function detectIndent(source: string): number | string {
   const m = /^(?<indent>[ \t]+)"/m.exec(source);
-  if (!m?.groups?.indent) return 2;
+  if (!m?.groups?.indent) {return 2;}
   const indent = m.groups.indent;
-  if (indent.includes('\t')) return '\t';
+  if (indent.includes('\t')) {return '\t';}
   return indent.length;
 }

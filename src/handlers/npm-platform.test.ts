@@ -78,11 +78,11 @@ function basePkg(over: Partial<PlatformPkg> = {}): PlatformPkg {
 // package.json without depending on `cwd` (which now points at the
 // consumer's pkg.path so npm honors the local .npmrc).
 function stagingDirArg(args: string[]): string | undefined {
-  if (args[0] !== 'publish') return undefined;
+  if (args[0] !== 'publish') {return undefined;}
   // Skip args[0]='publish'; folder is the lone trailing non-flag arg.
   for (let i = args.length - 1; i >= 1; i -= 1) {
     const a = args[i]!;
-    if (!a.startsWith('-')) return a;
+    if (!a.startsWith('-')) {return a;}
   }
   return undefined;
 }
@@ -267,7 +267,7 @@ describe('publishPlatforms (napi)', () => {
     // All `npm publish` calls → succeed (return Buffer).
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
 
@@ -286,8 +286,8 @@ describe('publishPlatforms (napi)', () => {
   it('skips platform packages that are already published', async () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view' && String(a[1]).includes('linux-x64-gnu')) return Buffer.from('0.2.0\n');
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view' && String(a[1]).includes('linux-x64-gnu')) {return Buffer.from('0.2.0\n');}
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
 
@@ -309,8 +309,8 @@ describe('publishPlatforms (napi)', () => {
     execMock.mockImplementation((_cmd, args) => {
       calls++;
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
-      if (a[0] === 'publish') throw Object.assign(new Error('boom'), { status: 1, stderr: Buffer.from('registry error') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
+      if (a[0] === 'publish') {throw Object.assign(new Error('boom'), { status: 1, stderr: Buffer.from('registry error') });}
       return Buffer.from('');
     });
 
@@ -332,7 +332,7 @@ describe('publishPlatforms (bundled-cli)', () => {
     const stagingPkgJsons: Record<string, unknown>[] = [];
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       // #305: `npm publish <folder>` — staging dir is the last positional
       // arg; cwd is the consumer's pkg.path (so npm finds the consumer's
       // .npmrc for auth). Inspect package.json by parsing the folder arg.
@@ -374,7 +374,7 @@ describe('publishPlatforms (bundled-cli)', () => {
     const stagingPkgJsons: Record<string, unknown>[] = [];
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       const folder = stagingDirArg(a);
       if (folder) {
         stagingPkgJsons.push(JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>);
@@ -413,7 +413,7 @@ describe('publishPlatforms (bundled-cli)', () => {
     const stagedModes: number[] = [];
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       const folder = stagingDirArg(a);
       if (folder) {
         stagedModes.push(statSync(join(folder, 'demo-cli')).mode);
@@ -453,7 +453,7 @@ describe('publishPlatforms — cwd is pkg.path so npm finds the consumer .npmrc 
     }[] = [];
     execMock.mockImplementation((_cmd, args, opts) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       if (a[0] === 'publish') {
         // Capture staging-dir state at call time — `publishPlatforms` cleans
         // up the tempdir in a `finally` after each publish, so post-hoc
@@ -512,7 +512,7 @@ describe('publishPlatforms: publish flags', () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       calls.push(a);
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
     await publishPlatforms(
@@ -531,7 +531,7 @@ describe('publishPlatforms: publish flags', () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       calls.push(a);
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
     await publishPlatforms(
@@ -549,7 +549,7 @@ describe('publishPlatforms: publish flags', () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       calls.push(a);
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
     await publishPlatforms(
@@ -575,7 +575,7 @@ describe('publishPlatforms: publish flags', () => {
     );
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
     await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
@@ -603,7 +603,7 @@ describe('artifact path resolution', () => {
     writeFileSync(join(dir, 'cachetta.linux-x64-gnu.node'), Buffer.from('napi-bytes'));
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
     const r = await publishPlatforms(
@@ -626,7 +626,7 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
 
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
 
@@ -658,7 +658,7 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
     const stagingByName = new Map<string, Record<string, unknown>>();
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       const folder = stagingDirArg(a);
       if (folder) {
         const json = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>;
@@ -690,7 +690,7 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
 
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       return Buffer.from('');
     });
 

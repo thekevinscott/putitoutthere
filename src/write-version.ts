@@ -96,7 +96,7 @@ export function writeVersionForBuild(pkgDir: string, version: string): string[] 
     throw err;
   }
   const cargoUpdated = replaceCargoVersion(cargoOriginal, version);
-  if (cargoUpdated !== cargoOriginal) writeFileSync(cargoPath, cargoUpdated, 'utf8');
+  if (cargoUpdated !== cargoOriginal) {writeFileSync(cargoPath, cargoUpdated, 'utf8');}
   return [cargoPath];
 }
 

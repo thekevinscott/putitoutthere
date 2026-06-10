@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import stylistic from '@stylistic/eslint-plugin';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -8,6 +9,9 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
+    plugins: {
+      '@stylistic': stylistic,
+    },
     languageOptions: {
       parserOptions: {
         project: './tsconfig.json',
@@ -18,6 +22,11 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
+      // Always require semicolons. `semi` is a deprecated core rule (removed in
+      // ESLint v11); @stylistic is the maintained, TS-aware home for it.
+      '@stylistic/semi': ['error', 'always'],
+      // Always require braces around control-statement bodies.
+      curly: ['error', 'all'],
     },
   },
   {

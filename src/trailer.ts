@@ -43,7 +43,7 @@ export function parseTrailer(commitBody: string): Trailer | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     const match = TRAILER_LINE.exec(line);
-    if (!match) continue;
+    if (!match) {continue;}
     const payload = match[1];
     if (payload === undefined || payload === '') {
       // `release:` with no value — malformed.
@@ -69,7 +69,7 @@ function parsePayload(payload: string): Trailer | null {
 
   const listText = payload.slice(bracketIdx);
   const packages = parsePackageList(listText);
-  if (packages === null) return null;
+  if (packages === null) {return null;}
   return { bump: valueText, packages };
 }
 
@@ -80,16 +80,16 @@ function isValidValue(s: string): s is Value {
 function parsePackageList(s: string): string[] | null {
   // Must open with `[` and close with `]`; nothing after the close.
   /* v8 ignore next -- only called when bracketIdx is defined; defensive */
-  if (!s.startsWith('[')) return null;
+  if (!s.startsWith('[')) {return null;}
   const closeIdx = s.indexOf(']');
-  if (closeIdx === -1) return null;
+  if (closeIdx === -1) {return null;}
   const tail = s.slice(closeIdx + 1).trim();
-  if (tail.length > 0) return null; // stray text after list
+  if (tail.length > 0) {return null;} // stray text after list
   const inner = s.slice(1, closeIdx).trim();
-  if (inner === '') return []; // `release: minor []` → no packages
+  if (inner === '') {return [];} // `release: minor []` → no packages
   const parts = inner.split(',').map((p) => p.trim());
   for (const name of parts) {
-    if (name === '' || !PACKAGE_NAME.test(name)) return null;
+    if (name === '' || !PACKAGE_NAME.test(name)) {return null;}
   }
   return parts;
 }

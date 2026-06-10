@@ -44,7 +44,7 @@ export function parseTagVersion(
 ): string | null {
   const re = templateToRegex(template, name);
   const m = re.exec(tag);
-  if (!m) return null;
+  if (!m) {return null;}
   const versionPart = m[1]!;
   try {
     parseSemver(versionPart);

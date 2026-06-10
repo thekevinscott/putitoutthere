@@ -65,7 +65,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const k of Object.keys(process.env)) {
-    if (!(k in ENV_BAK)) delete process.env[k];
+    if (!(k in ENV_BAK)) {delete process.env[k];}
   }
   Object.assign(process.env, ENV_BAK);
 });
@@ -247,7 +247,7 @@ describe('crates.publish', () => {
     // null from the first rev-parse short-circuits that scan so only the
     // cargo invocation we care about lands in the mock calls list.
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
@@ -271,7 +271,7 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
@@ -293,7 +293,7 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
@@ -315,7 +315,7 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
@@ -337,7 +337,7 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
@@ -359,7 +359,7 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
@@ -381,7 +381,7 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
@@ -407,7 +407,7 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') throw new Error('not a git repo');
+      if (file === 'git') {throw new Error('not a git repo');}
       return Buffer.from('ok');
     });
     process.env.UNRELATED_AWS_SECRET = 'parent-leak-should-not-ship';
@@ -450,7 +450,7 @@ describe('crates.publish', () => {
       );
       let cargoCalls = 0;
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         cargoCalls += 1;
         if (cargoCalls === 1) {
           throw Object.assign(new Error('exit 1'), {
@@ -496,7 +496,7 @@ describe('crates.publish', () => {
       );
       let cargoCalls = 0;
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         cargoCalls += 1;
         if (cargoCalls === 1) {
           throw Object.assign(new Error('exit 1'), {
@@ -538,7 +538,7 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         throw Object.assign(new Error('exit 1'), {
           stderr: Buffer.from('status 429 Too Many Requests'),
         });
@@ -562,7 +562,7 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         throw Object.assign(new Error('exit 1'), {
           stderr: Buffer.from('error: authentication required'),
         });
@@ -592,7 +592,7 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         return Buffer.from('ok');
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
@@ -623,7 +623,7 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         throw Object.assign(new Error('exit 1'), {
           stderr: Buffer.from('status 429 Too Many Requests'),
         });
@@ -681,7 +681,7 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         throw Object.assign(new Error('exit 1'), { stderr: Buffer.from(STDERR) });
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
@@ -722,7 +722,7 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         throw Object.assign(new Error('exit 1'), {
           stderr: Buffer.from('error: could not compile `demo-crate` due to previous error'),
         });
@@ -755,7 +755,7 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') throw new Error('not a git repo');
+        if (file === 'git') {throw new Error('not a git repo');}
         throw Object.assign(new Error('exit 1'), { stderr: Buffer.from(STDERR) });
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
@@ -845,7 +845,7 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     // Route execFileSync('git', ...) back to the real binary. mockReset
     // in the parent beforeEach stripped the implementation.
     const realGit = (file: string, args: readonly string[] = [], options: { cwd?: string; encoding?: string } = {}): Buffer | string => {
-      if (file !== 'git') throw new Error(`unexpected exec: ${file}`);
+      if (file !== 'git') {throw new Error(`unexpected exec: ${file}`);}
       const r = spawnSync('git', args as string[], {
         cwd: options.cwd,
         encoding: (options.encoding as BufferEncoding | undefined) ?? 'utf8',

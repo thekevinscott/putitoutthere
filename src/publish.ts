@@ -72,7 +72,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   // monorepo orchestrators) live elsewhere. Anchor pkg.path to opts.cwd
   // up front so every downstream fs op points at the right tree.
   for (const p of config.packages) {
-    if (!isAbsolute(p.path)) p.path = resolve(cwd, p.path);
+    if (!isAbsolute(p.path)) {p.path = resolve(cwd, p.path);}
   }
   /* v8 ignore next -- tests always inject handlerFor */
   const handlerFor = opts.handlerFor ?? defaultHandlerFor;
@@ -260,7 +260,7 @@ function artifactsRoot(cwd: string): string {
 function mustGet(packages: readonly Package[], name: string): Package {
   const p = packages.find((x) => x.name === name);
   /* v8 ignore next -- name came from the plan output; always exists */
-  if (!p) throw new Error(`publish: unknown package: ${name}`);
+  if (!p) {throw new Error(`publish: unknown package: ${name}`);}
   return p;
 }
 
@@ -296,11 +296,11 @@ function publishOrder(packages: readonly Package[], selected: readonly string[])
   const order: string[] = [];
   const visited = new Set<string>();
   const visit = (name: string): void => {
-    if (visited.has(name)) return;
+    if (visited.has(name)) {return;}
     visited.add(name);
-    for (const d of deps.get(name) ?? []) visit(d);
+    for (const d of deps.get(name) ?? []) {visit(d);}
     order.push(name);
   };
-  for (const n of selected) visit(n);
+  for (const n of selected) {visit(n);}
   return order;
 }

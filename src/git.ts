@@ -80,7 +80,7 @@ export function commitParents(sha: string, opts: GitOptions = {}): string[] {
   // %P = parent SHAs, space-separated. Merge commits have ≥2;
   // plain commits have 1; root commits have 0.
   const out = run(['log', '-1', '--format=%P', sha], opts);
-  if (out === '') return [];
+  if (out === '') {return [];}
   return out.split(' ').filter((s) => s.length > 0);
 }
 
@@ -90,7 +90,7 @@ export function diffNames(
   opts: GitOptions = {},
 ): string[] {
   const out = run(['diff', '--name-only', `${from}..${to}`], opts);
-  if (out === '') return [];
+  if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
 
@@ -98,7 +98,7 @@ export function diffNames(
 
 export function tagList(glob: string, opts: GitOptions = {}): string[] {
   const out = run(['tag', '-l', glob], opts);
-  if (out === '') return [];
+  if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
 
@@ -138,7 +138,7 @@ export function lastTag(
   let best: { tag: string; version: Semver } | null = null;
   for (const tag of candidates) {
     const versionPart = parseTagVersion(tagFormat, packageName, tag);
-    if (versionPart === null) continue;
+    if (versionPart === null) {continue;}
     let parsed: Semver;
     try {
       parsed = parseSemver(versionPart);
@@ -155,7 +155,7 @@ export function lastTag(
 
 function greater(a: Semver, b: Semver): boolean {
   /* v8 ignore next 2 -- comparison branches not all reachable from current test data */
-  if (a.major !== b.major) return a.major > b.major;
-  if (a.minor !== b.minor) return a.minor > b.minor;
+  if (a.major !== b.major) {return a.major > b.major;}
+  if (a.minor !== b.minor) {return a.minor > b.minor;}
   return a.patch > b.patch;
 }

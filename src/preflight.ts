@@ -85,7 +85,7 @@ export function checkAuth(packages: readonly Package[]): AuthStatus {
 
 export function requireAuth(packages: readonly Package[]): void {
   const status = checkAuth(packages);
-  if (status.ok) return;
+  if (status.ok) {return;}
   const missing = status.results.filter((r) => r.via === 'missing');
   const lines = missing.map((r) => {
     const vars = r.acceptedEnvVars.join(' or ');
@@ -141,7 +141,7 @@ export function checkProvenanceMetadata(
 ): ProvenanceFinding[] {
   const findings: ProvenanceFinding[] = [];
   for (const p of packages) {
-    if (p.kind !== 'npm') continue;
+    if (p.kind !== 'npm') {continue;}
     const pkgJsonPath = join(p.path, 'package.json');
     let raw: string;
     try {
@@ -167,7 +167,7 @@ export function checkProvenanceMetadata(
 }
 
 function hasNonEmptyRepository(value: unknown): boolean {
-  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'string') {return value.trim().length > 0;}
   if (value !== null && typeof value === 'object') {
     const url = (value as { url?: unknown }).url;
     return typeof url === 'string' && url.trim().length > 0;
@@ -188,7 +188,7 @@ function hasNonEmptyRepository(value: unknown): boolean {
  */
 export function requireProvenanceMetadata(packages: readonly Package[]): void {
   const findings = checkProvenanceMetadata(packages);
-  if (findings.length === 0) return;
+  if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.NPM_MISSING_REPOSITORY}] npm publish requires a non-empty \`repository\` field in package.json.`,
     '',
@@ -258,7 +258,7 @@ export function checkCratesMetadata(
 ): CratesMetadataFinding[] {
   const findings: CratesMetadataFinding[] = [];
   for (const p of packages) {
-    if (p.kind !== 'crates') continue;
+    if (p.kind !== 'crates') {continue;}
     const cargoTomlPath = join(p.path, 'Cargo.toml');
     let raw: string;
     try {
@@ -292,7 +292,7 @@ export function checkCratesMetadata(
       'license-file',
     );
     const missing: CratesRequiredField[] = [];
-    if (!nonEmptyString(description)) missing.push('description');
+    if (!nonEmptyString(description)) {missing.push('description');}
     if (!nonEmptyString(license) && !nonEmptyString(licenseFile)) {
       missing.push('license');
     }
@@ -346,7 +346,7 @@ export function checkPypiVersionSource(
 ): PypiVersionFinding[] {
   const findings: PypiVersionFinding[] = [];
   for (const p of packages) {
-    if (p.kind !== 'pypi') continue;
+    if (p.kind !== 'pypi') {continue;}
     const pyprojectPath = join(p.path, 'pyproject.toml');
     let raw: string;
     try {
@@ -363,8 +363,8 @@ export function checkPypiVersionSource(
     const project = parsed.project as
       | { version?: unknown; dynamic?: unknown }
       | undefined;
-    if (project === undefined) continue;
-    if (declaresDynamicVersion(project)) continue;
+    if (project === undefined) {continue;}
+    if (declaresDynamicVersion(project)) {continue;}
     if (typeof project.version === 'string') {
       findings.push({ package: p.name, pyprojectPath });
     }
@@ -390,7 +390,7 @@ function declaresDynamicVersion(project: { dynamic?: unknown }): boolean {
  */
 export function requirePypiVersionSource(packages: readonly Package[]): void {
   const findings = checkPypiVersionSource(packages);
-  if (findings.length === 0) return;
+  if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.PYPI_STATIC_VERSION}] pyproject.toml must declare \`[project].dynamic = ["version"]\` instead of a static \`[project].version = "..."\` literal.`,
     '',
@@ -461,27 +461,16 @@ function readWorkspacePackageTable(
   let dir = dirname(crateDir);
   while (dir && dir !== rootMarker) {
     const manifest = join(dir, 'Cargo.toml');
-    let raw: string;
+    let parsed: Record<string, unknown> | undefined;
     try {
-      raw = readFileSync(manifest, 'utf8');
+      parsed = parseToml(readFileSync(manifest, 'utf8'));
     } catch {
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-      continue;
+      // Missing or malformed Cargo.toml at this level — skip it and keep
+      // walking up. (Cargo surfaces a real parse error itself; we just
+      // don't crash the workspace lookup on an unreadable ancestor.)
+      parsed = undefined;
     }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = parseToml(raw);
-    } catch {
-      // Cargo will surface the parser error; just skip this manifest
-      // for workspace lookup so we don't crash on a malformed parent.
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-      continue;
-    }
-    if (parsed.workspace !== undefined) {
+    if (parsed !== undefined && parsed.workspace !== undefined) {
       const ws = parsed.workspace as Record<string, unknown>;
       const wsPkg = ws.package;
       if (wsPkg !== undefined && typeof wsPkg === 'object') {
@@ -490,8 +479,11 @@ function readWorkspacePackageTable(
       // Workspace root found, but no shared metadata — stop walking.
       return undefined;
     }
+    // Advance one directory toward the filesystem root. The fixpoint
+    // guard terminates the walk for relative crate paths, where
+    // dirname() settles on '.' rather than reaching rootMarker.
     const parent = dirname(dir);
-    if (parent === dir) break;
+    if (parent === dir) {break;}
     dir = parent;
   }
   return undefined;
@@ -510,7 +502,7 @@ function readWorkspacePackageTable(
  */
 export function requireCratesMetadata(packages: readonly Package[]): void {
   const findings = checkCratesMetadata(packages);
-  if (findings.length === 0) return;
+  if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.CRATES_MISSING_METADATA}] cargo publish requires the following Cargo.toml [package] fields: description, and license (or license-file).`,
     '',
@@ -597,7 +589,7 @@ export function checkPyprojectShape(
 ): PyprojectShapeFinding[] {
   const findings: PyprojectShapeFinding[] = [];
   for (const p of packages) {
-    if (p.kind !== 'pypi') continue;
+    if (p.kind !== 'pypi') {continue;}
     const pyprojectPath = join(p.path, 'pyproject.toml');
     let raw: string;
     try {
@@ -697,29 +689,29 @@ export function checkPyprojectShape(
 function maturinIncludeCovers(includes: readonly unknown[], stageTo: string): boolean {
   for (const entry of includes) {
     const path = extractIncludePath(entry);
-    if (path === undefined) continue;
+    if (path === undefined) {continue;}
     // Strip trailing glob segments so `a/bin/*` and `a/bin/**` both
     // cover `a/bin`.
     const normalized = path.replace(/\/?\*+$/, '').replace(/\/$/, '');
-    if (normalized === stageTo) return true;
-    if (normalized.length > 0 && stageTo.startsWith(normalized + '/')) return true;
-    if (path.startsWith(stageTo + '/') || path === stageTo) return true;
+    if (normalized === stageTo) {return true;}
+    if (normalized.length > 0 && stageTo.startsWith(normalized + '/')) {return true;}
+    if (path.startsWith(stageTo + '/') || path === stageTo) {return true;}
   }
   return false;
 }
 
 function extractIncludePath(entry: unknown): string | undefined {
-  if (typeof entry === 'string') return entry;
+  if (typeof entry === 'string') {return entry;}
   if (typeof entry === 'object' && entry !== null) {
     const path = (entry as { path?: unknown }).path;
-    if (typeof path === 'string') return path;
+    if (typeof path === 'string') {return path;}
   }
   return undefined;
 }
 
 export function requirePyprojectShape(packages: readonly Package[]): void {
   const findings = checkPyprojectShape(packages);
-  if (findings.length === 0) return;
+  if (findings.length === 0) {return;}
   const lines: string[] = [
     'Pre-flight pyproject.toml shape check failed:',
     '',
@@ -760,7 +752,7 @@ function collectCratesPackageFindings(
 ): void {
   const cargoTomlPath = join(p.path, 'Cargo.toml');
   const parsed = readToml(cargoTomlPath);
-  if (parsed === null) return;
+  if (parsed === null) {return;}
   const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
   const expectedName = p.crate ?? p.name;
 
@@ -814,7 +806,7 @@ function collectBundleCliCrateFindings(
     : resolve(cwd, bundleCli.crate_path);
   const cargoTomlPath = join(cratePathAbs, 'Cargo.toml');
   const parsed = readToml(cargoTomlPath);
-  if (parsed === null) return;
+  if (parsed === null) {return;}
 
   // CRATES_MISSING_BIN
   const declaredBins = readDeclaredBinNames(parsed, cargoTomlPath);
@@ -873,9 +865,9 @@ function readDeclaredBinNames(
   // exist in a member.
   for (const memberManifest of workspaceMemberManifests(cargoToml, cargoTomlPath)) {
     const memberParsed = readToml(memberManifest);
-    if (memberParsed === null) continue;
+    if (memberParsed === null) {continue;}
     for (const b of collectBinsFromManifest(memberParsed)) {
-      if (!result.includes(b)) result.push(b);
+      if (!result.includes(b)) {result.push(b);}
     }
   }
   return result;
@@ -886,9 +878,9 @@ function workspaceMemberManifests(
   cargoTomlPath: string,
 ): string[] {
   const workspace = cargoToml.workspace;
-  if (typeof workspace !== 'object' || workspace === null) return [];
+  if (typeof workspace !== 'object' || workspace === null) {return [];}
   const members = (workspace as { members?: unknown }).members;
-  if (!Array.isArray(members)) return [];
+  if (!Array.isArray(members)) {return [];}
   const workspaceDir = dirname(cargoTomlPath);
   const out: string[] = [];
   for (const m of members) {
@@ -911,7 +903,7 @@ function collectBinsFromManifest(cargoToml: Record<string, unknown>): string[] {
     for (const entry of bins) {
       if (typeof entry === 'object' && entry !== null) {
         const name = (entry as { name?: unknown }).name;
-        if (typeof name === 'string') result.push(name);
+        if (typeof name === 'string') {result.push(name);}
       }
     }
   }
@@ -922,7 +914,7 @@ function collectBinsFromManifest(cargoToml: Record<string, unknown>): string[] {
   // positives on the common single-bin shape.
   if (result.length === 0) {
     const pkg = cargoToml.package as { name?: unknown } | undefined;
-    if (pkg && typeof pkg.name === 'string') result.push(pkg.name);
+    if (pkg && typeof pkg.name === 'string') {result.push(pkg.name);}
   }
   return result;
 }
@@ -953,7 +945,7 @@ function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): boolean {
         return nonEmptyString(wsPkg.version);
       }
     }
-    if (cur === cwdAbs || cur === dirname(cur)) return false;
+    if (cur === cwdAbs || cur === dirname(cur)) {return false;}
     cur = dirname(cur);
   }
 }
@@ -1002,14 +994,14 @@ export function checkRepoUrlMatch(
   options: RepoUrlMatchOptions = {},
 ): RepoUrlMatchFinding[] {
   const expectedOwnerRepo = normalizeOwnerRepo(options.githubRepository);
-  if (expectedOwnerRepo === null) return [];
+  if (expectedOwnerRepo === null) {return [];}
   const findings: RepoUrlMatchFinding[] = [];
   for (const p of packages) {
     const declared = readDeclaredRepoUrl(p);
-    if (declared === null) continue;
+    if (declared === null) {continue;}
     const declaredOwnerRepo = parseOwnerRepo(declared.url);
-    if (declaredOwnerRepo === null) continue;
-    if (declaredOwnerRepo.toLowerCase() === expectedOwnerRepo.toLowerCase()) continue;
+    if (declaredOwnerRepo === null) {continue;}
+    if (declaredOwnerRepo.toLowerCase() === expectedOwnerRepo.toLowerCase()) {continue;}
     findings.push({
       package: p.name,
       manifestPath: declared.manifestPath,
@@ -1026,7 +1018,7 @@ export function requireRepoUrlMatch(
   options: RepoUrlMatchOptions = {},
 ): void {
   const findings = checkRepoUrlMatch(packages, options);
-  if (findings.length === 0) return;
+  if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.REPO_URL_MISMATCH}] manifest repository URL does not match GITHUB_REPOSITORY.`,
     '',
@@ -1065,7 +1057,7 @@ function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
     case 'npm': {
       const manifestPath = join(p.path, 'package.json');
       const parsed = readJson(manifestPath);
-      if (parsed === null) return null;
+      if (parsed === null) {return null;}
       const repository = (parsed as { repository?: unknown }).repository;
       if (typeof repository === 'string' && repository.trim().length > 0) {
         return { url: repository.trim(), manifestPath };
@@ -1081,7 +1073,7 @@ function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
     case 'crates': {
       const manifestPath = join(p.path, 'Cargo.toml');
       const parsed = readTomlDoc(manifestPath);
-      if (parsed === null) return null;
+      if (parsed === null) {return null;}
       const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
       const repo = pkgTable.repository;
       if (typeof repo === 'string' && repo.trim().length > 0) {
@@ -1092,7 +1084,7 @@ function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
     case 'pypi': {
       const manifestPath = join(p.path, 'pyproject.toml');
       const parsed = readTomlDoc(manifestPath);
-      if (parsed === null) return null;
+      if (parsed === null) {return null;}
       const project = (parsed.project ?? {}) as Record<string, unknown>;
       const urls = (project.urls ?? {}) as Record<string, unknown>;
       // PEP 621 leaves the key casing to the project, and PyPI normalises
@@ -1140,9 +1132,9 @@ function readTomlDoc(path: string): Record<string, unknown> | null {
 }
 
 function normalizeOwnerRepo(value: string | undefined): string | null {
-  if (value === undefined) return null;
+  if (value === undefined) {return null;}
   const trimmed = value.trim();
-  if (trimmed.length === 0) return null;
+  if (trimmed.length === 0) {return null;}
   // Tolerate accidental wrapping (e.g. `https://github.com/owner/repo`
   // landed in the GITHUB_REPOSITORY env var by misconfiguration); the
   // GHA-provided value is always `owner/repo` so this is defence in
@@ -1169,7 +1161,7 @@ function parseOwnerRepo(url: string): string | null {
   const match = stripped.match(
     /github\.com[/:]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/,
   );
-  if (match === null) return null;
+  if (match === null) {return null;}
   return `${match[1]}/${match[2]}`;
 }
 
@@ -1268,7 +1260,7 @@ export async function requireRepoPublic(
   options: RepoVisibilityOptions = {},
 ): Promise<void> {
   const finding = await checkRepoPublic(options);
-  if (finding === null) return;
+  if (finding === null) {return;}
   const lines: string[] = [
     `[${ErrorCodes.REPO_PRIVATE}] refusing to publish from a private GitHub repository (${finding.githubRepository}).`,
     '',
@@ -1296,7 +1288,7 @@ export function requireCargoShape(
   options: CargoShapeOptions = {},
 ): void {
   const findings = checkCargoShape(packages, options);
-  if (findings.length === 0) return;
+  if (findings.length === 0) {return;}
   const lines: string[] = [
     'Pre-flight Cargo.toml shape check failed:',
     '',
@@ -1339,7 +1331,7 @@ export function checkPackageJsonShape(
 ): PackageJsonShapeFinding[] {
   const findings: PackageJsonShapeFinding[] = [];
   for (const p of packages) {
-    if (p.kind !== 'npm') continue;
+    if (p.kind !== 'npm') {continue;}
     const packageJsonPath = join(p.path, 'package.json');
     let raw: string;
     try {
@@ -1373,7 +1365,7 @@ export function checkPackageJsonShape(
 
 export function requirePackageJsonShape(packages: readonly Package[]): void {
   const findings = checkPackageJsonShape(packages);
-  if (findings.length === 0) return;
+  if (findings.length === 0) {return;}
   const lines: string[] = [
     'Pre-flight package.json shape check failed:',
     '',

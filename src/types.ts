@@ -29,7 +29,7 @@ export type TargetEntry = string | { triple: string; runner?: string };
  * it's absent.
  */
 export function normalizeTarget(entry: TargetEntry): { triple: string; runner?: string } {
-  if (typeof entry === 'string') return { triple: entry };
+  if (typeof entry === 'string') {return { triple: entry };}
   return entry.runner !== undefined
     ? { triple: entry.triple, runner: entry.runner }
     : { triple: entry.triple };
@@ -154,7 +154,7 @@ export function attachHandlerMeta<E extends Error>(err: E, meta: HandlerErrorMet
  *  undefined for non-Error values, plain Errors, and Errors without
  *  attached meta. */
 export function readHandlerMeta(value: unknown): HandlerErrorMeta | undefined {
-  if (!(value instanceof Error)) return undefined;
+  if (!(value instanceof Error)) {return undefined;}
   const carrier = value as Error & { [HANDLER_META_KEY]?: HandlerErrorMeta };
   return carrier[HANDLER_META_KEY];
 }

@@ -42,13 +42,13 @@ export function computeCascade(
   assertNoCycles(packages);
 
   const byName = new Map<string, Package>();
-  for (const p of packages) byName.set(p.name, p);
+  for (const p of packages) {byName.set(p.name, p);}
 
   // Pass 1: direct glob matches against this package's own diff.
   const cascaded = new Set<string>();
   for (const p of packages) {
     const files = changedFilesByPackage.get(p.name);
-    if (!files) continue;
+    if (!files) {continue;}
     for (const f of files) {
       if (matchesAny(p.globs, f)) {
         cascaded.add(p.name);
@@ -62,7 +62,7 @@ export function computeCascade(
   while (changed) {
     changed = false;
     for (const p of packages) {
-      if (cascaded.has(p.name)) continue;
+      if (cascaded.has(p.name)) {continue;}
       /* v8 ignore next -- depends_on default is always [] from the Zod schema */
       const deps = p.depends_on ?? [];
       if (deps.some((d) => cascaded.has(d))) {
@@ -84,15 +84,15 @@ export function computeCascade(
  */
 export function assertNoCycles(packages: readonly Package[]): void {
   const byName = new Map<string, Package>();
-  for (const p of packages) byName.set(p.name, p);
+  for (const p of packages) {byName.set(p.name, p);}
 
   type Color = 'white' | 'gray' | 'black';
   const color = new Map<string, Color>();
-  for (const p of packages) color.set(p.name, 'white');
+  for (const p of packages) {color.set(p.name, 'white');}
 
   const visit = (name: string, path: string[]): void => {
     const c = color.get(name);
-    if (c === 'black') return;
+    if (c === 'black') {return;}
     if (c === 'gray') {
       const cycle = [...path.slice(path.indexOf(name)), name].join(' → ');
       throw new Error(`putitoutthere.toml: depends_on cycle: ${cycle}`);
@@ -103,7 +103,7 @@ export function assertNoCycles(packages: readonly Package[]): void {
     // a name we iterated over packages for — that list IS the keys of
     // byName, so this branch is unreachable under normal use. Defensive.
     /* v8 ignore next */
-    if (!node) return;
+    if (!node) {return;}
     /* v8 ignore next -- depends_on default is always [] from the Zod schema */
     for (const dep of node.depends_on ?? []) {
       if (!byName.has(dep)) {

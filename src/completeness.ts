@@ -84,7 +84,7 @@ export function requireCompleteness(
 ): void {
   const results = checkCompleteness(matrix, artifactsRoot);
   const failed = [...results.entries()].filter(([, r]) => !r.ok);
-  if (failed.length === 0) return;
+  if (failed.length === 0) {return;}
 
   const lines: string[] = ['Artifact completeness check failed:'];
   for (const [pkg, result] of failed) {
@@ -111,13 +111,13 @@ function verifyRow(row: MatrixRow, artifactsRoot: string): string | null {
   // directly — the reusable workflow never uploads a `.crate` artifact
   // (release.yml's upload step is `if: matrix.kind != 'crates'`), so
   // there is nothing here to verify. Same logic as vanilla npm below.
-  if (row.kind === 'crates') return null;
+  if (row.kind === 'crates') {return null;}
   // Vanilla npm publishes from the source tree directly; the build
   // step never produced a separate artifact for this kind, so there's
   // nothing to check here. Same goes for a missing artifactsRoot --
   // local `putitoutthere publish` runs (no CI download step) don't
   // have one.
-  if (row.kind === 'npm' && row.target === 'noarch') return null;
+  if (row.kind === 'npm' && row.target === 'noarch') {return null;}
 
   const dir = join(artifactsRoot, row.artifact_name);
   if (!existsSync(dir)) {

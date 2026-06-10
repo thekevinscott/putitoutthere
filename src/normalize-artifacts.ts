@@ -43,18 +43,18 @@ export function normalizeArtifactLayout(
   const expected = matrix.filter(
     (r) => r.kind !== 'crates' && !(r.kind === 'npm' && r.target === 'noarch'),
   );
-  if (expected.length !== 1) return;
+  if (expected.length !== 1) {return;}
 
   const row = expected[0]!;
   const targetDir = join(artifactsRoot, row.artifact_name);
   // Already in the documented layout — either a multi-artifact run
   // earlier in the same job, or a developer running locally with the
   // engine's contract honored. Either way, leave it alone.
-  if (existsSync(targetDir)) return;
-  if (!existsSync(artifactsRoot)) return;
+  if (existsSync(targetDir)) {return;}
+  if (!existsSync(artifactsRoot)) {return;}
 
   const dumped = readdirSync(artifactsRoot);
-  if (dumped.length === 0) return;
+  if (dumped.length === 0) {return;}
 
   mkdirSync(targetDir, { recursive: true });
   for (const entry of dumped) {

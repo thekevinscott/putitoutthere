@@ -68,7 +68,7 @@ export type NpmBuildField =
  * "vanilla — no platform packages".
  */
 export function normalizeBuild(build: NpmBuildField): readonly NpmBuildEntry[] {
-  if (build === undefined) return [];
+  if (build === undefined) {return [];}
   const arr = typeof build === 'string' ? [build] : build;
   return arr.map((e) =>
     typeof e === 'string'
@@ -292,9 +292,9 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
     );
   const access = pkg.access ?? 'public';
   const args: string[] = ['publish', `--access=${access}`];
-  if (pkg.tag) args.push(`--tag=${pkg.tag}`);
-  if (hasOidc) args.push('--provenance');
-  if (registryOverride) args.push(`--registry=${registryOverride}`);
+  if (pkg.tag) {args.push(`--tag=${pkg.tag}`);}
+  if (hasOidc) {args.push('--provenance');}
+  if (registryOverride) {args.push(`--registry=${registryOverride}`);}
   // #305: pass the synthesized package directory as a positional <folder>
   // arg to `npm publish`, not as the cwd. npm reads `.npmrc` from cwd
   // upward, and any auth the consumer wrote alongside their package
@@ -343,7 +343,7 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
  * write.
  */
 export function looksLikePublishOverRace(stderr: string | undefined): boolean {
-  if (!stderr) return false;
+  if (!stderr) {return false;}
   return /cannot publish over the previously published versions/i.test(stderr);
 }
 

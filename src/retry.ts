@@ -62,23 +62,23 @@ export async function withRetry<T>(
 }
 
 function isRetryable(err: unknown): boolean {
-  if (err instanceof AuthError) return false;
-  if (err instanceof TransientError) return true;
+  if (err instanceof AuthError) {return false;}
+  if (err instanceof TransientError) {return true;}
   // Network-ish error codes used by Node's net/http stack.
   const code = extractProp(err, 'code');
-  if (code === 'ECONNRESET' || code === 'ETIMEDOUT') return true;
+  if (code === 'ECONNRESET' || code === 'ETIMEDOUT') {return true;}
   // HTTP-status-tagged errors: retry 5xx and 429.
   const status = extractProp(err, 'status');
   if (typeof status === 'number') {
-    if (status === 429) return true;
-    if (status >= 500 && status < 600) return true;
+    if (status === 429) {return true;}
+    if (status >= 500 && status < 600) {return true;}
   }
   return false;
 }
 
 function retryAfterMs(err: unknown): number {
   const ra = extractProp(err, 'retryAfter');
-  if (typeof ra === 'number' && ra > 0) return ra * 1000;
+  if (typeof ra === 'number' && ra > 0) {return ra * 1000;}
   return 0;
 }
 
@@ -91,7 +91,7 @@ function extractProp(err: unknown, key: string): unknown {
 
 function jitterOffset(baseDelay: number, fraction: number): number {
   /* v8 ignore next -- default jitter is 0.25; the <=0 guard isn't exercised */
-  if (fraction <= 0) return 0;
+  if (fraction <= 0) {return 0;}
   // ±fraction of the base delay.
   const amp = baseDelay * fraction;
   return (Math.random() * 2 - 1) * amp;

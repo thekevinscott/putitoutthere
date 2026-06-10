@@ -40,17 +40,17 @@ export async function main(): Promise<void> {
   // line; there's no structured output to consume.
   const argv = ['node', 'putitoutthere', command];
   if (command === 'write-version' || command === 'write-crate-version') {
-    if (workingDirectory) argv.push('--path', workingDirectory);
-    if (versionInput) argv.push('--version', versionInput);
+    if (workingDirectory) {argv.push('--path', workingDirectory);}
+    if (versionInput) {argv.push('--version', versionInput);}
   } else if (command === 'write-launcher') {
-    if (workingDirectory) argv.push('--path', workingDirectory);
+    if (workingDirectory) {argv.push('--path', workingDirectory);}
   } else {
     argv.push('--json');
-    if (workingDirectory) argv.push('--cwd', workingDirectory);
+    if (workingDirectory) {argv.push('--cwd', workingDirectory);}
     // Manual release: forward `release_packages` to the CLI. Only
     // `plan` / `publish` act on it; the flag parses harmlessly for the
     // other commands that land in this branch.
-    if (releasePackages) argv.push('--release-packages', releasePackages);
+    if (releasePackages) {argv.push('--release-packages', releasePackages);}
   }
 
   const code = await run(argv);
