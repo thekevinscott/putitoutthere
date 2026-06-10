@@ -362,6 +362,40 @@ globs = ["packages/ts/**"]
     expect(existsSync(join(repo, 'packages/ts/bin'))).toBe(false);
   });
 
+  it('is a no-op for a bundled-cli npm package that omits [package.bundle_cli] (legacy bring-your-own-launcher path)', () => {
+    // #298 kept the legacy bundled-cli path opt-in: a package may omit
+    // [package.bundle_cli] and ship its own scripts/build.cjs plus a
+    // hand-authored bin/<bin>.js (package.json#bin). The cross-compile step
+    // already skips such packages — it gates on `matrix.bundle_cli` — so
+    // launcher generation must do the same. Without the table the engine has
+    // no binary name to author a launcher from, so it must no-op rather than
+    // dereference the absent block. This is the exact shape of the
+    // `polyglot-everything` fixture (and any freshly scaffolded consumer that
+    // hasn't adopted the declarative block); before this guard #299's
+    // writeLauncherFromConfig died with "Cannot read properties of undefined
+    // (reading 'bin')" on the bundled-cli main row.
+    writeRepo(
+      `[putitoutthere]
+version = 1
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+build = [
+  "bundled-cli",
+  { mode = "napi", name = "{name}-napi-{triple}" },
+]
+targets = ["x86_64-unknown-linux-gnu"]
+`,
+      'my-cli',
+    );
+
+    const written = writeLauncherFromConfig({ cwd: repo, packagePath: 'packages/ts' });
+    expect(written).toEqual([]);
+    expect(existsSync(join(repo, 'packages/ts/bin'))).toBe(false);
+  });
+
   it('handles a single-line (un-indented) package.json without losing the bin field', () => {
     // `detectIndent`'s fallback returns 2 when no indented quote
     // matches. Exercising it here also pins the runtime contract:
