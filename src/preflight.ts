@@ -461,27 +461,16 @@ function readWorkspacePackageTable(
   let dir = dirname(crateDir);
   while (dir && dir !== rootMarker) {
     const manifest = join(dir, 'Cargo.toml');
-    let raw: string;
+    let parsed: Record<string, unknown> | undefined;
     try {
-      raw = readFileSync(manifest, 'utf8');
+      parsed = parseToml(readFileSync(manifest, 'utf8'));
     } catch {
-      const parent = dirname(dir);
-      if (parent === dir) {break;}
-      dir = parent;
-      continue;
+      // Missing or malformed Cargo.toml at this level — skip it and keep
+      // walking up. (Cargo surfaces a real parse error itself; we just
+      // don't crash the workspace lookup on an unreadable ancestor.)
+      parsed = undefined;
     }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = parseToml(raw);
-    } catch {
-      // Cargo will surface the parser error; just skip this manifest
-      // for workspace lookup so we don't crash on a malformed parent.
-      const parent = dirname(dir);
-      if (parent === dir) {break;}
-      dir = parent;
-      continue;
-    }
-    if (parsed.workspace !== undefined) {
+    if (parsed !== undefined && parsed.workspace !== undefined) {
       const ws = parsed.workspace as Record<string, unknown>;
       const wsPkg = ws.package;
       if (wsPkg !== undefined && typeof wsPkg === 'object') {
@@ -490,6 +479,9 @@ function readWorkspacePackageTable(
       // Workspace root found, but no shared metadata — stop walking.
       return undefined;
     }
+    // Advance one directory toward the filesystem root. The fixpoint
+    // guard terminates the walk for relative crate paths, where
+    // dirname() settles on '.' rather than reaching rootMarker.
     const parent = dirname(dir);
     if (parent === dir) {break;}
     dir = parent;
