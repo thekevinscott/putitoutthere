@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { normalizeTarget, type Ctx, type Handler, type PublishResult, type TargetEntry } from '../types.js';
 import {
   looksLikePublishOverRace,
+  looksLikeTlogDuplicate,
   normalizeBuild,
   publishPlatforms,
   type NpmBuildField,
@@ -171,6 +172,28 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
         status: 'already-published',
         url: `https://www.npmjs.com/package/${name}/v/${version}`,
       };
+    }
+    // Attestation edition of the publish-over race: npm's retry re-submits
+    // an identical --provenance attestation and Sigstore/Rekor rejects the
+    // duplicate (TLOG_CREATE_ENTRY_ERROR, 409). A 409 alone doesn't prove
+    // the upload landed, so re-probe the registry: present => the publish
+    // actually succeeded; absent => a genuine partial publish that a fresh
+    // run (new attestation) resolves.
+    if (looksLikeTlogDuplicate(stderr)) {
+      if (await isPublishedImpl(pkg, version, ctx)) {
+        return {
+          status: 'already-published',
+          url: `https://www.npmjs.com/package/${name}/v/${version}`,
+        };
+      }
+      throw new Error(
+        `npm publish failed: Sigstore transparency-log dedupe ` +
+          `(TLOG_CREATE_ENTRY_ERROR) and ${name}@${version} is not on the ` +
+          `registry — npm's provenance retry re-submitted an identical ` +
+          `attestation. Re-run the release to mint a fresh attestation.` +
+          `${stderr ? `\n${stderr}` : ''}`,
+        { cause: err },
+      );
     }
     // npm trusted publishing (OIDC) requires the package to already
     // exist on the registry; the first-ever publish must go through a

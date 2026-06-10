@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_NAME_TEMPLATE,
   looksLikePublishOverRace,
+  looksLikeTlogDuplicate,
   normalizeBuild,
   platformArtifactName,
   publishPlatforms,
@@ -727,6 +728,33 @@ describe('looksLikePublishOverRace', () => {
   });
 });
 
+describe('looksLikeTlogDuplicate', () => {
+  it('matches npm\'s TLOG_CREATE_ENTRY_ERROR code', () => {
+    expect(
+      looksLikeTlogDuplicate(
+        'npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) ...',
+      ),
+    ).toBe(true);
+  });
+
+  it('matches the Rekor "equivalent entry already exists" prose even without the code', () => {
+    expect(
+      looksLikeTlogDuplicate(
+        'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID 108e9186e8c5677a',
+      ),
+    ).toBe(true);
+  });
+
+  it('returns false on an unrelated bare 409 (not the tlog dedupe shape)', () => {
+    expect(looksLikeTlogDuplicate('npm error code E409\nnpm error 409 Conflict')).toBe(false);
+  });
+
+  it('returns false on undefined / empty', () => {
+    expect(looksLikeTlogDuplicate(undefined)).toBe(false);
+    expect(looksLikeTlogDuplicate('')).toBe(false);
+  });
+});
+
 describe('publishPlatforms: npm CLI retry race (#dirsql)', () => {
   it('treats E403 over-publish as success and continues to rewrite optionalDependencies', async () => {
     // npm CLI retried a successful PUT after a transient response and the
@@ -761,5 +789,71 @@ describe('publishPlatforms: npm CLI retry race (#dirsql)', () => {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
+  });
+});
+
+describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
+  // The attestation edition of the E403 retry race above. npm re-submits a
+  // byte-identical `--provenance` attestation and Sigstore/Rekor rejects the
+  // duplicate with TLOG_CREATE_ENTRY_ERROR (HTTP 409). A 409 here does NOT by
+  // itself prove the platform package landed (the first submit may have
+  // written the Rekor entry but failed the registry PUT), so the handler
+  // re-probes `npm view`: present => benign dup (counts as published);
+  // absent => actionable throw that a fresh run resolves.
+
+  it('counts the platform package as published when TLOG 409 fires but the package IS on the registry', async () => {
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+    let viewCount = 0;
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        viewCount += 1;
+        // 1st view: pre-publish idempotency probe (not yet published).
+        // 2nd view: catch-block re-probe (the attestation's submit landed it).
+        if (viewCount === 1) {
+          throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        }
+        return Buffer.from('0.2.0\n');
+      }
+      throw Object.assign(new Error('publish failed'), {
+        status: 1,
+        stderr: Buffer.from(
+          'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
+            'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID 108e9186e8c5677a',
+        ),
+      });
+    });
+
+    const r = await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
+    expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
+    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+      optionalDependencies: Record<string, string>;
+    };
+    expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
+  });
+
+  it('throws an actionable re-run error on TLOG 409 when the platform package is NOT on the registry, before rewriting main', async () => {
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        // Both probes miss: the attestation was orphaned, the PUT never landed.
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      }
+      throw Object.assign(new Error('publish failed'), {
+        status: 1,
+        stderr: Buffer.from(
+          'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
+            'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+        ),
+      });
+    });
+
+    await expect(
+      publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx()),
+    ).rejects.toThrow(/Re-run the release to mint a fresh attestation/);
+    // Failed before the rewrite: main package.json must NOT carry optionalDependencies.
+    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as Record<string, unknown>;
+    expect(pkgJson.optionalDependencies).toBeUndefined();
   });
 });

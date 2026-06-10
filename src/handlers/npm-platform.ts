@@ -326,6 +326,27 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
     if (looksLikePublishOverRace(stderr)) {
       return;
     }
+    // Attestation edition of the same retry race: npm re-submits an
+    // identical provenance attestation and Sigstore/Rekor rejects the
+    // duplicate with TLOG_CREATE_ENTRY_ERROR (409). A 409 alone does not
+    // prove the registry upload landed, so re-probe `npm view` before
+    // deciding: present => the publish actually succeeded (benign dup);
+    // absent => a genuine partial publish that a fresh run (new
+    // attestation) resolves.
+    if (looksLikeTlogDuplicate(stderr)) {
+      const staged = readStagedIdentity(stagingDir);
+      if (platformPublishedSync(staged.name, staged.version, ctx)) {
+        return;
+      }
+      throw new Error(
+        `npm publish (platform) failed: Sigstore transparency-log dedupe ` +
+          `(TLOG_CREATE_ENTRY_ERROR) and ${staged.name}@${staged.version} is not ` +
+          `on the registry — npm's provenance retry re-submitted an identical ` +
+          `attestation. Re-run the release to mint a fresh attestation.` +
+          `${stderr ? `\n${stderr}` : ''}`,
+        { cause: err },
+      );
+    }
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(
       `npm publish (platform) failed${stderr ? `:\n${stderr}` : `: ${base}`}`,
@@ -345,6 +366,50 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
 export function looksLikePublishOverRace(stderr: string | undefined): boolean {
   if (!stderr) {return false;}
   return /cannot publish over the previously published versions/i.test(stderr);
+}
+
+/**
+ * Match npm's Sigstore/Rekor transparency-log dedupe error. The same
+ * retry-on-transient-network-error that produces the publish-over race
+ * (above) also re-submits an identical `--provenance` attestation; Rekor
+ * rejects the duplicate with `TLOG_CREATE_ENTRY_ERROR` / "an equivalent
+ * entry already exists in the transparency log". Unlike the publish-over
+ * race, a 409 here does NOT by itself prove the package landed (the first
+ * submit may have written the Rekor entry but failed the registry PUT),
+ * so callers must re-probe `npm view` to disambiguate.
+ */
+export function looksLikeTlogDuplicate(stderr: string | undefined): boolean {
+  if (!stderr) {return false;}
+  return /TLOG_CREATE_ENTRY_ERROR|equivalent entry already exists in the transparency log/i.test(
+    stderr,
+  );
+}
+
+/**
+ * Synchronous `npm view <name>@<version>` existence probe. Mirrors
+ * `isPlatformPublished` without the Promise wrapper so it can run inside
+ * the (execFileSync-based) publish catch.
+ */
+function platformPublishedSync(name: string, version: string, ctx: Ctx): boolean {
+  try {
+    execFileSync('npm', ['view', `${name}@${version}`, 'version'], {
+      cwd: ctx.cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Read the synthesized platform package's name + version back from its
+ *  staged package.json (written by `synthesizePlatformPackage`). */
+function readStagedIdentity(stagingDir: string): { name: string; version: string } {
+  const pkg = JSON.parse(readFileSync(join(stagingDir, 'package.json'), 'utf8')) as {
+    name: string;
+    version: string;
+  };
+  return { name: pkg.name, version: pkg.version };
 }
 
 function rewriteOptionalDependencies(
