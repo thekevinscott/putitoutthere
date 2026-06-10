@@ -758,4 +758,69 @@ describe('npm.publish', () => {
     expect(result.status).toBe('already-published');
     expect(result.url).toBe('https://www.npmjs.com/package/demo-npm/v/0.1.0');
   });
+
+  // #399: the Sigstore/Rekor transparency-log edition of the same retry
+  // race the E403 test above covers. npm's retry-on-transient-network-error
+  // re-submits a byte-identical `--provenance` attestation and Rekor rejects
+  // the duplicate with TLOG_CREATE_ENTRY_ERROR (HTTP 409). Unlike the E403
+  // "publish over" shape, a 409 here does NOT by itself prove the package
+  // landed — the first submit may have written the Rekor entry but failed the
+  // registry PUT — so the handler must re-probe `npm view` to disambiguate.
+
+  it('treats TLOG_CREATE_ENTRY_ERROR (409) as already-published when the package IS on the registry (#399)', async () => {
+    let viewCount = 0;
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        viewCount += 1;
+        // 1st view: the pre-publish idempotency probe — not yet published
+        // from our perspective. 2nd view: the catch-block re-probe — the
+        // attestation's first submit landed the package, so it's present now.
+        if (viewCount === 1) {
+          throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        }
+        return Buffer.from('0.1.0\n');
+      }
+      // publish: the Rekor duplicate 409.
+      throw Object.assign(new Error('publish failed'), {
+        status: 1,
+        stderr: Buffer.from(
+          'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
+            'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID 108e9186e8c5677a',
+        ),
+      });
+    });
+    const result = await npm.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
+    );
+    expect(result.status).toBe('already-published');
+    expect(result.url).toBe('https://www.npmjs.com/package/demo-npm/v/0.1.0');
+  });
+
+  it('throws an actionable re-run error on TLOG_CREATE_ENTRY_ERROR (409) when the package is NOT on the registry (#399)', async () => {
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        // Both the pre-publish probe and the catch-block re-probe miss: the
+        // attestation was orphaned, the registry PUT never landed.
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      }
+      throw Object.assign(new Error('publish failed'), {
+        status: 1,
+        stderr: Buffer.from(
+          'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
+            'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+        ),
+      });
+    });
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
+      ),
+    ).rejects.toThrow(/Re-run the release to mint a fresh attestation/);
+  });
 });
