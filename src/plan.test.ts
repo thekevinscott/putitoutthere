@@ -1220,6 +1220,72 @@ globs   = ["pkg/**"]
   });
 });
 
+describe('plan: version-independent maturin wheels collapse the fan (#401)', () => {
+  // `isVersionIndependentWheel` is NOT mocked here (only resolvePythonVersions
+  // is), so these tests write a real `pkg/pyproject.toml` / `pkg/Cargo.toml`
+  // and assert the planner collapses a genuine multi-version fan (3 versions)
+  // to a single wheel row — the N→1 reduction, not the 1→1 no-op the maturin
+  // fixture happens to exercise.
+  const TOML = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "py-lib"
+kind    = "pypi"
+path    = "pkg"
+build   = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+globs   = ["pkg/**"]
+python_versions = ["3.11", "3.12", "3.13"]
+`;
+
+  const pyVer = (r: unknown): string | undefined =>
+    (r as Record<string, unknown>)['python_version'] as string | undefined;
+  const wheelRows = (matrix: Awaited<ReturnType<typeof plan>>): Awaited<ReturnType<typeof plan>> =>
+    matrix.filter((r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu');
+
+  it('collapses a `bindings = "bin"` wheel to one unsuffixed row despite a 3-version fan', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n\n[tool.maturin]\nbindings = "bin"\n',
+      'pkg/lib.rs': '// rust',
+    });
+    const wheels = wheelRows(await plan({ cwd: repo }));
+    expect(wheels).toHaveLength(1);
+    expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
+    expect(pyVer(wheels[0]!)).toBe('3.13');
+  });
+
+  it('collapses a pyo3 abi3 Cargo wheel to one unsuffixed row despite a 3-version fan', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
+      'pkg/Cargo.toml':
+        '[package]\nname = "py-lib"\n\n[dependencies]\npyo3 = { version = "0.22", features = ["extension-module", "abi3-py38"] }\n',
+    });
+    const wheels = wheelRows(await plan({ cwd: repo }));
+    expect(wheels).toHaveLength(1);
+    expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
+    expect(pyVer(wheels[0]!)).toBe('3.13');
+  });
+
+  it('keeps the full fan for a plain extension module (no abi3, no bin bindings)', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
+    commit('feat: initial', {
+      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
+      'pkg/Cargo.toml':
+        '[package]\nname = "py-lib"\n\n[dependencies]\npyo3 = { version = "0.22", features = ["extension-module"] }\n',
+    });
+    const wheels = wheelRows(await plan({ cwd: repo }));
+    expect(wheels.map((r) => r.artifact_name).sort()).toEqual([
+      'py-lib-wheel-x86_64-unknown-linux-gnu-py3.11',
+      'py-lib-wheel-x86_64-unknown-linux-gnu-py3.12',
+      'py-lib-wheel-x86_64-unknown-linux-gnu-py3.13',
+    ]);
+  });
+});
+
 describe('plan: manual release (release-packages)', () => {
   // The motivating case: putitoutthere shipped a release bug, it was
   // fixed, and downstream consumers must re-release packages that have
