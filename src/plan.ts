@@ -21,6 +21,7 @@ import {
   type NpmBuildField,
 } from './handlers/npm-platform.js';
 import { resolvePythonVersions } from './python-versions.js';
+import { isVersionIndependentWheel } from './wheel-abi.js';
 import { parseTagVersion } from './tag-template.js';
 import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
@@ -279,16 +280,27 @@ function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[]
       // `requires-python` inference, else a single default — and fan
       // the maturin per-target wheel rows across it.
       const pyVersions = resolvePythonVersions(pkg, cwd);
-      const multiPy = pyVersions.length > 1;
       // The sdist and pure-Python hatch wheel are version-agnostic but
       // still need an interpreter to run the build; use the newest
       // resolved version.
       const buildPython = pyVersions[pyVersions.length - 1]!;
+      // #401: a maturin wheel that is Python-version-independent — a
+      // `bindings = "bin"` Rust-binary wheel (`py3-none`) or a pyo3 abi3
+      // extension (`cp3x-abi3`) — is byte-identical across the resolved
+      // interpreter set. Fanning the build across it produces N
+      // duplicate wheels that then race-corrupt at the consumer's
+      // `merge-multiple` download. Collapse the fan to a single wheel
+      // built on the newest resolved interpreter.
+      const wheelPyVersions =
+        build === 'maturin' && isVersionIndependentWheel(pkg.path, cwd)
+          ? [buildPython]
+          : pyVersions;
+      const multiPy = wheelPyVersions.length > 1;
       const out: MatrixRow[] = [];
       if (build === 'maturin' && targets.length > 0) {
         for (const entry of targets) {
           const { triple, runner } = normalizeTarget(entry);
-          for (const py of pyVersions) {
+          for (const py of wheelPyVersions) {
             const row: MatrixRow = {
               name: pkg.name,
               kind: 'pypi',
