@@ -19,7 +19,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { classify, computeStatus, formatStatusRow, type StatusRow } from './status.js';
+import { classify } from './status-classify.js';
+import { formatStatusRow } from './status-format.js';
+import type { StatusRow } from './status-types.js';
+import { computeStatus } from './status.js';
 import type { Handler, PackageConfig } from './types.js';
 
 describe('classify', () => {
