@@ -3,11 +3,12 @@ name: first-release
 description: >-
   Interactive, repo-aware walkthrough for a first release with putitoutthere.
   Detects what the repo publishes, writes putitoutthere.toml and the release
-  workflows, walks trusted-publisher registration and the first-publish token
-  bootstrap per registry (crates.io, PyPI, npm), then drives the first release
-  push and verifies it. Use when the user says "walk me through the first
-  release", "set up my first release", "onboard to putitoutthere", "help me
-  publish for the first time", or is configuring putitoutthere from scratch.
+  workflows, validates at PR time, previews exactly what will publish, walks
+  trusted-publisher registration and the first-publish token bootstrap per
+  registry (crates.io, PyPI, npm), drives the first release push, and diagnoses
+  failures. Use when the user says "walk me through the first release", "set up
+  my first release", "onboard to putitoutthere", "help me publish for the first
+  time", or is configuring putitoutthere from scratch.
 ---
 
 # Walk me through the first release
@@ -15,14 +16,15 @@ description: >-
 You are guiding someone through their **first** release with putitoutthere —
 a reusable GitHub Actions workflow that publishes to crates.io, PyPI, and npm.
 The first release is the fraught moment: config that doesn't match the
-manifests, trusted publishers that aren't registered, the first-publish
-token bootstrap. Your job is to surface every one of those *before* the
-release runs, so the release itself is boring.
+manifests, trusted publishers that aren't registered, the first-publish token
+bootstrap, and a toolchain getting exercised end to end for the first time.
+Your job is to surface every one of those *before* the release runs, so the
+release itself is boring.
 
-This skill bundles the canonical templates and a trusted-publisher reference
-beside this file, so it works whether it lives in the putitoutthere repo or is
-copied into a consumer's repo. The authoritative source is always the
-putitoutthere README; if a detail here looks stale, check there.
+This skill bundles the canonical templates and two references beside this file,
+so it works whether it lives in the putitoutthere repo or is copied into a
+consumer's repo. The authoritative source is always the putitoutthere README
+and `src/error-codes.ts`; if a detail here looks stale, check there.
 
 ## How to run this
 
@@ -31,12 +33,19 @@ putitoutthere README; if a detail here looks stale, check there.
 - **Be repo-aware, not generic.** Read the actual manifests and write config
   that matches them. Never invent package names, paths, or targets you didn't
   observe or confirm with the user.
-- **Confirm before outward or hard-to-undo actions** — opening a PR, pushing
-  to `main`, anything that hits a registry. Generating local files is fine to
-  do and then show.
+- **Verify from authoritative state; never infer.** This is the lesson both
+  recorded first-release sessions paid for. Before any irreversible step, and
+  before claiming any step succeeded, check the real source — `plan` output, a
+  CI run's actual conclusion, the registry API, the git tags — not a guess from
+  adjacent evidence. "It's probably green" / "the version's already published
+  so it's a no-op" is exactly where it goes wrong.
+- **Confirm before outward or hard-to-undo actions** — opening a PR, merging to
+  `main` (that is the publish trigger), anything that hits a registry,
+  publishing a package name (names are permanent). Generating local files is
+  fine to do and then show.
 - **Never touch secrets.** Tokens go into GitHub repository secrets by the
-  *user*, in the GitHub UI. Never ask for a token in chat, never write one to
-  a file, never echo one.
+  *user*, in the GitHub UI. Never ask for a token in chat, never write one to a
+  file, never echo one.
 - **Prefer defaults.** putitoutthere's whole design is "as little config as
   possible." Only set a field when the detected reality requires it.
 - **Stay in scope.** This skill sets up a release; it is not a place to add
@@ -54,10 +63,12 @@ putitoutthere catches what it can as early as it can. Mirror that:
 2. Validate them **at PR time** with `check.yml` (and `build.yml`) — green
    there means "a release from this commit would not surface
    configuration-level surprises."
-3. Only then register publishers and push the release.
+3. **Preview exactly what will publish** with `plan` / the `build-check.yml`
+   run, and confirm it.
+4. Only then register publishers and push the release.
 
-Do not jump straight to a release-on-`main`. The PR validation gate is the
-point.
+Do not jump straight to a release-on-`main`. The PR validation gate and the
+plan preview are the point.
 
 ---
 
@@ -65,11 +76,20 @@ point.
 
 1. Confirm you're in the repo that will publish (not putitoutthere itself,
    unless they're dogfooding). Note the GitHub `owner/repo` — you'll need it
-   for trusted publishers.
-2. Read any existing `putitoutthere.toml`, `.github/workflows/release.yml`,
-   `check.yml`, `build.yml`. If setup is partly done, adapt — don't clobber.
-   Show the user what already exists before changing it.
-3. Ask what they want to publish if it isn't obvious from the tree.
+   for trusted publishers and URL matching.
+2. **Confirm the repo is public.** putitoutthere refuses to publish from a
+   private repo (`PIOT_REPO_PRIVATE`) — npm provenance attestations embed a
+   source pointer consumers can't dereference when the repo is private. If it's
+   private, stop and surface that before doing anything else.
+3. Read any existing `putitoutthere.toml`, `.github/workflows/release.yml`,
+   `check.yml`, `build-check.yml`. If setup is partly done, adapt — don't
+   clobber. Show the user what already exists before changing it. Track what's
+   already done so you don't re-ask or redo it.
+4. Note two things that bite mid-flight: the reusable workflow is pinned at
+   `@v0`, a **moving tag** whose behavior can shift between runs; and if this
+   repo was recently **transferred or renamed**, manifest URLs and trusted
+   publishers may still point at the old owner (see Step 2 and Step 6).
+5. Ask what they want to publish if it isn't obvious from the tree.
 
 ## Step 1 — Detect what this repo publishes
 
@@ -85,8 +105,7 @@ Decide **single-package vs. polyglot/multi**:
 
 - One manifest → one `[[package]]`.
 - A Rust crate wrapped by a wheel and/or npm package → a cascade: the crate is
-  the root, the wrappers `depends_on` it. Confirm the dependency direction
-  with the user.
+  the root, the wrappers `depends_on` it. Confirm the dependency direction.
 - Several independent packages → one `[[package]]` each, `depends_on` only
   where one genuinely builds on another.
 
@@ -96,37 +115,42 @@ Summarize what you found and have the user confirm before writing config.
 
 Start from `templates/putitoutthere.toml` (beside this file) and fill it from
 what you detected. Keep it minimal. Per package set `name`, `kind`, `path`,
-`globs`; add the rest only when needed:
+`globs`; add `tag_format` (single-package repos usually want `"v{version}"`),
+`build` / `targets` (required for maturin / napi / bundled-cli), and
+`depends_on` (real build deps only) when needed.
 
-- **`tag_format`** — single-package repos usually want `"v{version}"` (default
-  is `"{name}-v{version}"`). Ask which they prefer.
-- **`globs`** — the paths whose changes should cascade a release. For a
-  wrapper that rebuilds when the core changes, include the core's path too
-  (e.g. the npm package's globs include `crates/my-core/**`).
-- **`build` / `targets`** — required for `maturin` (pypi) and for
-  `napi` / `bundled-cli` (npm). List the platform triples they ship.
-- **`depends_on`** — only real build dependencies.
+**Names are permanent — get them right now.** A crates.io or npm name, once
+published, is effectively yours forever; there is no clean rename or reclaim.
+Watch for scaffold/template leftovers (a stray `-cli` suffix, the template's
+own name) that would otherwise ship for good. Confirm every name is the final
+intended one with the user — this is a "confirm before irreversible" gate.
 
-**Avoid the four schema gotchas** (the engine hints on these, but don't trip
-them): `[putitoutthere]` table with `version = 1` inside (not at root);
-`[[package]]` singular (not `[[packages]]`); `kind = "crates"` (not
-`registry =`); `globs =` (not `files =`).
+**Avoid the four schema gotchas:** `[putitoutthere]` table with `version = 1`
+inside (not at root); `[[package]]` singular (not `[[packages]]`);
+`kind = "crates"` (not `registry =`); `globs =` (not `files =`).
 
 **Make the manifests agree with the config now** — preflight rejects these at
-PR time and again before any publish, so fix them while you're here:
+PR time and again before any publish side effect, so fix them while you're
+here. The authoritative code list is `src/error-codes.ts`; the ones that bite a
+first release:
 
-- **npm**: `package.json` needs a non-empty `repository` field
-  (`PIOT_NPM_MISSING_REPOSITORY`) and its `name` must equal the package name
-  or the `npm` override (`PIOT_NPM_NAME_MISMATCH`).
-- **crates**: `Cargo.toml` `[package].name` must match (or `crate` override);
-  `description` and `license` (or `license-file`) must be set
-  (`PIOT_CRATES_*`).
-- **pypi**: `pyproject.toml` must declare `dynamic = ["version"]` — a static
-  `version = "..."` is rejected (`PIOT_PYPI_STATIC_VERSION`) because
-  putitoutthere never edits `pyproject.toml`. The blessed shape is `hatch-vcs`
-  (`[tool.hatch.version] source = "vcs"`); `setuptools-scm` and maturin
+- **Repo URL match** — each manifest's repository URL must resolve to *this*
+  `owner/repo` (`PIOT_REPO_URL_MISMATCH`): `package.json#repository`,
+  `Cargo.toml [package].repository`, `pyproject.toml [project.urls]`. The
+  classic cause is a repo transfer/rename leaving the old owner in the
+  manifests.
+- **npm**: non-empty `repository` field (`PIOT_NPM_MISSING_REPOSITORY`); `name`
+  equals the package name or `npm` override (`PIOT_NPM_NAME_MISMATCH`).
+- **crates**: `[package].name` matches (or `crate` override); `description` +
+  `license`/`license-file` set (`PIOT_CRATES_MISSING_METADATA`); features
+  declared; `[[bin]]` present when `bundle_cli.bin` is set; the packaged
+  `.crate` stays under crates.io's 10 MiB limit (`PIOT_CRATES_PACKAGE_TOO_LARGE`
+  — a tracked symlink into a build dir is the usual culprit).
+- **pypi**: `dynamic = ["version"]` (a static `version = "..."` is rejected,
+  `PIOT_PYPI_STATIC_VERSION`, because putitoutthere never edits
+  `pyproject.toml`). Blessed shape is `hatch-vcs`; `setuptools-scm` and maturin
   (version from the sibling `Cargo.toml`) are also accepted. `[project].name`
-  must match (or `pypi` override).
+  matches (or `pypi` override).
 
 Write the file, show it, confirm.
 
@@ -138,38 +162,58 @@ Copy from `templates/` beside this file:
   **verbatim even if you don't publish to PyPI** (its `if:` gate self-skips).
   It must run in the caller's context; PyPI TP can't validate a token minted
   inside the reusable workflow.
-- **`.github/workflows/check.yml`** — recommended. Runs every pre-merge config
-  check in seconds on each PR. This is your fast surprise-catcher.
-- **`.github/workflows/build-check.yml`** — recommended. Runs the real
-  plan+build matrix on each PR (compiles every per-target wheel/binary) to
-  catch what `check.yml` can't.
+- **`.github/workflows/check.yml`** — recommended. Every pre-merge config check
+  in seconds on each PR. Your fast surprise-catcher.
+- **`.github/workflows/build-check.yml`** — recommended, and load-bearing for
+  Step 5: it runs the *real plan + build matrix* with the publish job
+  structurally absent, so it both compiles every per-target artifact and gives
+  you a publish-free preview of what would release.
 
 Keep all `@v0` refs and filenames exactly — TP records encode the `release.yml`
 filename; renaming it later silently breaks trust.
 
 **Warn loudly:** `release.yml` should be the **only** workflow triggered on
-`push: branches: [main]`. If they have per-language CI (`rust.yml`, `node.yml`,
-…), move it to `pull_request:` only. Duplicate `push: main` runs contend for
-runners and delay the release.
+`push: branches: [main]`. Move any per-language CI (`rust.yml`, `node.yml`, …)
+to `pull_request:` only — duplicate `push: main` runs contend for runners and
+delay the release.
 
-## Step 4 — Validate at PR time (the gate that matters)
+## Step 4 — Validate at PR time
 
 Open a PR with the config + workflows (confirm before opening). Let `check.yml`
-and `build-check.yml` run and go **green** before any release:
+and `build-check.yml` run and go **green** before anything releases:
 
 - `check.yml` green = config and manifests agree; no config-level surprise.
 - `build-check.yml` green = every per-target wheel/binary actually builds.
 
-If anything is red, fix it here — that's the whole point of catching it at PR
-time instead of at release. Don't proceed to a release on red.
+If anything is red, fix it here — that is the whole point of catching it at PR
+time instead of at release. Don't proceed on red.
 
-## Step 5 — Register trusted publishers + first-publish bootstrap
+## Step 5 — Preview exactly what will publish, and confirm
 
-This is the trickiest part. Read `reference/trusted-publishers.md` beside this
-file and follow the section for each registry you publish to. The short of it:
+The most expensive recorded first-release mistake was asserting a merge's
+release effect without checking — and being wrong. **Never assert what a merge
+will publish. Read it from an authoritative dry-run, then confirm with the
+user.** See `reference/plan-and-recovery.md` for the full mechanics; the core:
 
-- **PyPI** — register a *pending* publisher. **No token needed.** Cleanest
-  path.
+- Use **`plan`** (putitoutthere's dry-run, being built) and/or the
+  **`build-check.yml` run on the PR** (same plan a release computes, no publish
+  job) to get the exact `{package → version}` set the merge would produce.
+- Sanity-check it against how the planner decides: on the **very first release
+  (no tags yet) every declared package ships at its `first_version`** — globs
+  do not gate run one, so expect *everything* to publish. On later releases a
+  package is planned only if files matching *its own* globs changed since *its
+  own* last tag (plus `depends_on` and `release:` trailer). Default bump is
+  `patch`.
+- State the predicted plan back — "this publishes my-rust 0.1.0 and my-py
+  0.1.0" — and get explicit confirmation before merging. Reason from globs and
+  tags, **never** from "is the version already published."
+
+## Step 6 — Register trusted publishers + first-publish bootstrap
+
+Read `reference/trusted-publishers.md` beside this file and follow the section
+for each registry. The short of it:
+
+- **PyPI** — register a *pending* publisher. **No token needed.** Cleanest.
 - **crates.io** — TP binds to an existing crate, so the first publish needs a
   one-time `CARGO_REGISTRY_TOKEN` secret (or a local `cargo publish`).
 - **npm** — TP binds to an existing package, so the first publish needs a
@@ -178,36 +222,51 @@ file and follow the section for each registry you publish to. The short of it:
 
 Walk the user to the registry web UI and the GitHub **secrets** UI; have *them*
 paste any token. Register every TP against **their** repo + `release.yml` (not
-against putitoutthere). For npm families, every per-platform sub-package needs
-its own TP.
-
+against putitoutthere), with the correct *current* owner if the repo was
+transferred. For npm families, every per-platform sub-package needs its own TP.
 If a bootstrap secret is needed for this first run, add the matching `secrets:`
 block to the `release` job at the call site (examples in the reference). It
-comes back out in Step 7.
+comes back out in Step 9.
 
-## Step 6 — Push the first release
+## Step 7 — Push the first release
 
-When the PR is green and publishers are registered (pending publishers count
-for PyPI), merge to `main`. Default behavior: any package whose `globs` matched
-the changed files cascades and ships at `patch`. To bump differently, put a
-trailer in the merge commit body:
-
-```
-release: minor
-```
-
-(`patch` | `minor` | `major` | `skip`; optional `[pkg, …]` scope; last trailer
-wins.) For a first release the default `patch` off `first_version` is usually
-fine — confirm the intended version with the user.
+When the PR is green, the plan is confirmed, and publishers are registered
+(pending publishers count for PyPI), merge to `main` — **this is the
+irreversible publish trigger; confirm intent first.** Put any non-default bump
+trailer where your merge strategy surfaces it (squash → the one commit; merge
+commit → the branch tip): `release: minor` etc.
 
 Watch the `Release` run. The reusable workflow plans → builds → preflights →
-publishes in dependency order, and creates a GitHub Release per tag with
-auto-generated notes. If it fails, read the `PIOT_*` code in the run log and
-look it up in the README's error-code table before retrying — re-running is
-safe (each handler's first move is an `isPublished` check that skips
-already-published versions cleanly).
+publishes in dependency order, then creates a GitHub Release per tag.
 
-## Step 7 — Reach the secure steady state
+**Set expectations:** a first release exercises the whole toolchain for the
+first time and may surface a *cascade* of issues, each masking the next. That
+is normal. Don't declare success from a glance — confirm from the run's actual
+conclusion, the registries, and the tags (Step 10).
+
+## Step 8 — If a run fails: diagnose, fix, re-run
+
+First-release failures are almost always real, not flakes. Work them per
+`reference/plan-and-recovery.md`:
+
+- **Grep the run log for the `PIOT_*` code** and look it up in
+  `src/error-codes.ts` (the README table is a subset). Each code names the
+  mechanism and the fix.
+- **Re-running is safe** — every handler's first publish move is an
+  `isPublished` check, so re-runs skip already-published versions cleanly.
+- **The PyPI partial-tag trap** is the most repeated friction: the engine tags
+  a pypi package in its publish job, but the *upload* runs in your caller-side
+  `pypi-publish` job afterward. If that upload fails, the **tag exists but PyPI
+  is empty**, and the next run excludes the now-tagged package from the plan
+  (`has_pypi=false`) → stuck. Recover with the **`release_packages` override at
+  a bumped version** (`my-py@0.0.2`) — the clean path, and the general tool for
+  re-releasing after any pipeline fix.
+- **Scoped-env limits:** git access may be branch-scoped (`403` on tag pushes
+  or other branches). Route tag backfills/deletions to the user, or sidestep
+  them with the `release_packages` bump. Don't claim a fix landed via a path
+  the environment blocks.
+
+## Step 9 — Reach the secure steady state
 
 After the first publish succeeds and the packages exist on the registries:
 
@@ -220,15 +279,20 @@ After the first publish succeeds and the packages exist on the registries:
 3. For npm families, confirm a TP exists for **every** per-platform
    sub-package, not just the top-level.
 
-## Step 8 — Verify
+## Step 10 — Verify from authoritative sources
 
-Confirm the release actually landed:
+Confirm the release actually landed — by checking, not assuming:
 
-- The version is live on the registry (crates.io / PyPI / npmjs.com).
-- The git tag exists (`{name}-v{version}` or your `tag_format`).
-- A GitHub Release was created for the tag with generated notes.
-- (Recommended) The next no-op change to `main` does **not** trigger a publish,
-  and a real change publishes via OIDC with no secret present.
+- The version is **live on the registry** (crates.io / PyPI / npmjs.com) — for
+  pypi, confirm the artifact is actually installable, not just that a tag
+  exists (the partial-tag trap). Use the registry API / a real `install`.
+- The **git tag** exists (`{name}-v{version}` or your `tag_format`).
+- A **GitHub Release** was created for the tag.
+- Tag, registry, and run conclusion **agree** for every package. If a tag
+  claims a version the registry doesn't have, that's the partial-tag trap —
+  go to Step 8.
+- (Recommended) A no-op change to `main` does **not** trigger a publish, and a
+  real change publishes via OIDC with no secret present.
 
 When all of that holds, the first release is done and the repo is in the
 zero-secret steady state.
@@ -237,13 +301,20 @@ zero-secret steady state.
 
 ## Guardrails
 
+- **Verify, don't assume, for anything irreversible or outward** — publish
+  state, "it's green," signatures, what a merge will release. Read the
+  authoritative source.
+- **Never infer a "no-op" from "the version is already published."** Releases
+  are decided by globs-since-last-tag, not registry state. Use `plan` /
+  build-check.
+- **Names and first publishes are permanent.** Confirm every registered name
+  before the first publish.
 - **Secrets never appear in chat, files, or commits.** The user pastes tokens
   into the GitHub secrets UI; you never see or store them.
 - **Confirm before:** opening a PR, merging to `main`, anything that publishes.
 - **Never propose merging on red CI**, skipping a failing check, or relaxing
   all-or-nothing publishing to "ship the parts that worked."
 - **Don't expand scope.** No build hooks, no custom `steps:`, no per-check
-  inputs. A repo that doesn't fit a named build mode writes its own workflow —
-  say so plainly rather than bending putitoutthere around it.
+  inputs. A repo that doesn't fit a named build mode writes its own workflow.
 - **Don't rename `release.yml`** (or any release-path workflow) once a TP
   record points at it.

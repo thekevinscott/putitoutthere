@@ -36,7 +36,15 @@ build = "hatch"            # pypi: "maturin" | "setuptools" | "hatch" (default s
 #   * `kind = "crates"` — not `registry = "crates"`.
 #   * `globs = [...]` — not `files = [...]`.
 #
+# NAMES ARE PERMANENT: a published crates.io / npm name can't be renamed or
+# reclaimed. Double-check scaffold/template leftovers (a stray `-cli` suffix,
+# the template's own name) before the first publish.
+#
 # MANIFEST MUST MATCH THE CONFIG (preflight rejects mismatches at PR time):
+#   * all:    each manifest's repository URL must resolve to THIS owner/repo
+#             (package.json#repository, Cargo.toml [package].repository,
+#             pyproject [project.urls]). A repo transfer/rename is the classic
+#             cause of a stale URL — PIOT_REPO_URL_MISMATCH.
 #   * npm:    package.json needs a non-empty `repository` field and its
 #             `name` must equal this package's name (or the `npm` override).
 #   * crates: Cargo.toml `[package].name` must match (or the `crate` override),
@@ -44,6 +52,9 @@ build = "hatch"            # pypi: "maturin" | "setuptools" | "hatch" (default s
 #   * pypi:   pyproject.toml must use `dynamic = ["version"]` (NOT a static
 #             `version = "..."`), and `[project].name` must match (or the
 #             `pypi` override).
+#
+# The repo must be PUBLIC — putitoutthere refuses to publish from a private
+# repo (PIOT_REPO_PRIVATE), since npm provenance needs dereferenceable source.
 # ---------------------------------------------------------------------------
 
 # --- Polyglot example: one Rust crate feeding a wheel and an npm CLI. ------
