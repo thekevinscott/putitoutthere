@@ -25,9 +25,10 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -113,42 +114,21 @@ afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
 });
 
-/**
- * A polyglot family: one Rust crate wrapped by an npm and a PyPI
- * package. The crate's crates.io name (`mycrate`) differs from its piot
- * package id (`mycrate-rust`) — mirroring the incident, and exercising
- * the `crate`-override name resolution `status` must share with the
- * publish path's `isPublished`.
- */
+// The package family lives in an on-disk fixture so the test body stays
+// about behaviour, not config literals. The crate's crates.io name
+// (`mycrate`) differs from its piot id (`mycrate-rust`) on purpose — it
+// exercises the `crate`-override name resolution `status` shares with
+// the publish path's `isPublished`.
+const FIXTURE_CONFIG = join(
+  fileURLToPath(import.meta.url),
+  '..',
+  'fixtures',
+  'status',
+  'putitoutthere.toml',
+);
+
 function writeConfigAndCommit(): void {
-  writeFileSync(
-    join(repo, 'putitoutthere.toml'),
-    `
-[putitoutthere]
-version = 1
-
-[[package]]
-name  = "mycrate-rust"
-kind  = "crates"
-crate = "mycrate"
-path  = "packages/rust"
-globs = ["packages/rust/**"]
-
-[[package]]
-name  = "mycrate-npm"
-kind  = "npm"
-path  = "packages/npm"
-globs = ["packages/npm/**"]
-
-[[package]]
-name  = "mycrate-py"
-kind  = "pypi"
-build = "hatch"
-path  = "packages/py"
-globs = ["packages/py/**"]
-`,
-    'utf8',
-  );
+  cpSync(FIXTURE_CONFIG, join(repo, 'putitoutthere.toml'));
   gitInRepo(['add', '-A']);
   gitInRepo(['commit', '-q', '-m', 'config']);
 }
