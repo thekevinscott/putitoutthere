@@ -112,6 +112,11 @@ the e2e is non-optional. Mocks verify the wiring; reality verifies the
 contract. Ship both, kept similar enough that a reader sees one
 behaviour exercised at two fidelities.
 
+The e2e tier is **not** wired into CI — it carries a live-registry /
+real-tool dependency, so a blip there must never block a merge. Run it
+locally (`pnpm test:e2e`, which builds `dist/` first) to verify the
+real behaviour; the integration test is what gates the PR.
+
 ## Design commitments
 
 Explicit non-goals that bound `putitoutthere`'s scope. Read before proposing
