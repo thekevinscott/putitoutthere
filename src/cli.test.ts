@@ -162,6 +162,88 @@ globs = ["pkg/**"]
   });
 });
 
+describe('cli: status', () => {
+  let repo: string;
+
+  function git(args: string[]): string {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  }
+
+  const stdoutChunks: string[] = [];
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cli-status-'));
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'user.name', 'Test']);
+    git(['config', 'commit.gpgsign', 'false']);
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `[putitoutthere]
+version = 1
+[[package]]
+name  = "demo-rust"
+kind  = "crates"
+crate = "demo"
+path  = "."
+globs = ["**"]
+`,
+      'utf8',
+    );
+    git(['add', '-A']);
+    git(['commit', '-q', '-m', 'init']);
+
+    stdoutChunks.length = 0;
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  function mockCratesLatest(version: string): void {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ crate: { newest_version: version } }), { status: 200 }),
+    );
+  }
+
+  it('flags published-but-untagged drift and exits non-zero under --check (--json)', async () => {
+    // Crate live at 0.1.0 on the registry, but there is no demo-rust-v* tag.
+    mockCratesLatest('0.1.0');
+    const code = await run(['node', 'piot', 'status', '--check', '--json', '--cwd', repo]);
+    const parsed = JSON.parse(stdoutChunks.join('').trim()) as Array<{
+      package: string;
+      state: string;
+      drift: boolean;
+    }>;
+    expect(parsed[0]!.package).toBe('demo-rust');
+    expect(parsed[0]!.state).toBe('published, untagged');
+    expect(parsed[0]!.drift).toBe(true);
+    expect(code).toBe(1);
+  });
+
+  it('renders a human-readable table and exits zero when in sync', async () => {
+    git(['tag', '-a', '-m', 'demo-rust-v0.1.0', 'demo-rust-v0.1.0']);
+    mockCratesLatest('0.1.0');
+    const code = await run(['node', 'piot', 'status', '--check', '--cwd', repo]);
+    const out = stdoutChunks.join('');
+    expect(out).toContain('demo-rust');
+    expect(out).toContain('in sync');
+    expect(code).toBe(0);
+  });
+
+  it('without --check, drift is reported but the exit code stays zero', async () => {
+    mockCratesLatest('0.1.0'); // untagged → drift, but no gate requested
+    const code = await run(['node', 'piot', 'status', '--cwd', repo]);
+    expect(code).toBe(0);
+  });
+});
+
 describe('cli: plan', () => {
   let repo: string;
 
