@@ -1,0 +1,75 @@
+# putitoutthere.toml — lives at the repo root.
+#
+# This is a starter. Delete the comments and the examples you don't need.
+# The agent running the first-release skill fills this in from what your
+# repo actually publishes; the inline notes below flag the gotchas that
+# have tripped consumers before.
+#
+# Authoritative reference: the putitoutthere README "Configuration" section.
+
+[putitoutthere]
+version = 1   # required; only 1 is valid today
+
+# ---------------------------------------------------------------------------
+# One [[package]] block per releasable unit. Singular "package", not plural.
+# ---------------------------------------------------------------------------
+
+[[package]]
+name  = "my-lib"            # unique across this file
+kind  = "pypi"             # "crates" | "pypi" | "npm"  (NOT "registry = ...")
+path  = "."                # dir holding Cargo.toml / pyproject.toml / package.json
+globs = ["src/**", "pyproject.toml"]   # commits touching these cascade a release
+build = "hatch"            # pypi: "maturin" | "setuptools" | "hatch" (default setuptools)
+
+# Single-package repos almost always want the short tag. Default is
+# "{name}-v{version}"; uncomment for "v1.2.3"-style tags:
+# tag_format = "v{version}"
+
+# Optional. First release version when no tag exists yet. Default "0.1.0".
+# first_version = "0.1.0"
+
+# ---------------------------------------------------------------------------
+# COMMON GOTCHAS (each has bitten a consumer at least once):
+#   * `[putitoutthere]` table with `version = 1` INSIDE — not `version = 1`
+#     at the file root.
+#   * `[[package]]` singular — not `[[packages]]`.
+#   * `kind = "crates"` — not `registry = "crates"`.
+#   * `globs = [...]` — not `files = [...]`.
+#
+# MANIFEST MUST MATCH THE CONFIG (preflight rejects mismatches at PR time):
+#   * npm:    package.json needs a non-empty `repository` field and its
+#             `name` must equal this package's name (or the `npm` override).
+#   * crates: Cargo.toml `[package].name` must match (or the `crate` override),
+#             and `[package].description` + `license` must be set.
+#   * pypi:   pyproject.toml must use `dynamic = ["version"]` (NOT a static
+#             `version = "..."`), and `[project].name` must match (or the
+#             `pypi` override).
+# ---------------------------------------------------------------------------
+
+# --- Polyglot example: one Rust crate feeding a wheel and an npm CLI. ------
+# Delete if you publish a single package. A change to crates/my-rust/**
+# cascades: the crate ships first, then the dependents on top.
+#
+# [[package]]
+# name = "my-rust"
+# kind = "crates"
+# path = "crates/my-rust"
+# globs = ["crates/my-rust/**"]
+#
+# [[package]]
+# name       = "my-py"
+# kind       = "pypi"
+# path       = "py/my-py"
+# globs      = ["py/my-py/**"]
+# build      = "maturin"
+# targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+# depends_on = ["my-rust"]
+#
+# [[package]]
+# name       = "my-cli"
+# kind       = "npm"
+# path       = "packages/ts"
+# globs      = ["packages/ts/**"]
+# build      = "bundled-cli"
+# targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+# depends_on = ["my-rust"]
