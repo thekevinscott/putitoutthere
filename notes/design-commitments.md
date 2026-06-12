@@ -94,20 +94,30 @@ proposals that would absorb any of them, even when users ask for them.
 6. **Changelog generation.** Already solved upstream by release-please
    and friends. putitoutthere does not read or write changelogs.
 
-7. **Public CLI surface.** A putitoutthere CLI exists in this
-   repository. It is the call site the reusable workflow invokes
-   internally, and the affordance for unit-testing the engine outside
-   GitHub Actions. It is **not** a consumer-facing tool. Docs, README,
-   and getting-started copy describe only the reusable workflow. CLI
-   flag stability, help-text quality, and discoverability are explicit
-   non-priorities.
+7. **Diagnostic commands that reimplement the engine.** Read-mostly
+   CLI commands that expose release state deterministically —
+   tag-vs-registry drift, what a release would do from a ref,
+   publish/trust posture, tag reconciliation (#403) — are in scope.
+   They turn manual, deterministic drift-diagnosis into one command
+   that can run in CI with the release job's permissions, and they are
+   wanted. The non-goal is narrower than "a CLI": it is **parallel
+   logic.** None of these commands may carry their own copy of the
+   cascade, version, tag, or registry logic — each is a thin reader
+   over the exact functions the release path runs, so diagnostics and
+   reality can never disagree. An earlier diagnostic CLI was removed
+   because it was maintained *alongside* the workflows and drifted from
+   them; the safeguard is "one shared engine, no parallel
+   reimplementation," not "no commands."
 
-8. **Parallel diagnostic surfaces.** "No release surprises" is met by
-   exposing one reusable workflow per release-path phase, no more.
-   Internal validations live in the engine, not in a parallel
-   diagnostic surface (a `doctor` CLI subcommand promoted to public,
-   a step-level action, per-check workflow inputs) that a consumer
-   has to remember to wire up check-by-check.
+8. **Fragmented diagnostic surfaces.** "No release surprises" is met by
+   exposing release-state checks through the shared engine — a unified
+   command (e.g. `status --check`) or a single reusable-workflow phase
+   — not a scatter of surfaces a consumer must remember to wire up
+   check-by-check (per-check workflow inputs, a step-level action per
+   validation, a subcommand that re-runs checks the publish path
+   already owns). One command reading the engine is the opposite of
+   fragmentation and is in scope; N surfaces the consumer assembles by
+   hand is the non-goal.
 
 9. **Release backfill as a workflow shape.** Re-creating GitHub
    Releases for tags that pre-date putitoutthere is a one-off
