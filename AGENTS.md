@@ -65,6 +65,53 @@ fs is a repo-wide refactor with no runtime benefit; if it is ever
 wanted, it belongs in its own issue and PR, not bundled into a feature
 or bug-fix change.
 
+### One function per file
+
+New source files under `src/` define a **single function**. Trivial
+1–2 line helpers may share a file; anything longer earns its own. Types,
+interfaces, and module-level constants aren't functions — they may sit
+beside the file's function or in a `*-types.ts` sibling. Inline
+callbacks (`.map(fn)`, `it(...)` bodies) aren't top-level functions and
+don't count, so test files are exempt.
+
+When a function grows a private helper longer than ~2 lines, give the
+helper its own file and import it rather than stacking two substantial
+functions in one module — one named responsibility per file.
+
+Go-forward convention: the existing multi-function modules (`plan.ts`,
+`config.ts`, the handlers) are grandfathered; splitting them is its own
+opt-in refactor, not bundled into a feature change.
+
+### Start every PR with an e2e test against the real CLI
+
+Behaviour work starts at the **e2e tier**: a test that **shells out to
+the actual `putitoutthere` CLI** — a real subprocess
+(`node dist/cli-bin.js …`), not an in-process import — and exercises
+**real, unmocked** behaviour: the live registry, the real tool. This is
+the red test that proves the feature does the thing. It is the only tier
+that catches a wrong registry field name or a misread tool output; a
+mock that returns the shape you assumed cannot.
+
+Pair it with a **near-identical integration test** that drives the same
+behaviour **through the SDK** — in-process (`import { run } from
+'./cli.js'`, or the engine functions directly) — with the subprocess /
+`fetch` boundary mocked. The two are deliberately similar: same
+scenario, same assertions, two fidelities.
+
+| tier | runs the tool via | external surface | role |
+| --- | --- | --- | --- |
+| e2e — `test/e2e/**/*.e2e.test.ts` | shells out to the built CLI | real (live registry / tool) | proves the mock isn't lying |
+| integration — `test/integration/**/*.integration.test.ts` | the SDK, in-process | mocked (`execFileSync` / `fetch`) | the deterministic CI red→green gate |
+
+Write **both red first**. The integration test is the one that visibly
+fails in CI during the red phase (deterministic, no network); the e2e is
+the one you run to know the tool actually works end to end. A mock that
+encodes the same assumption the code makes proves self-consistency, not
+correctness — the two can be wrong together and stay green forever, so
+the e2e is non-optional. Mocks verify the wiring; reality verifies the
+contract. Ship both, kept similar enough that a reader sees one
+behaviour exercised at two fidelities.
+
 ## Design commitments
 
 Explicit non-goals that bound `putitoutthere`'s scope. Read before proposing
