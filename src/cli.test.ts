@@ -1,3 +1,4 @@
+import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,6 +6,23 @@ import { join } from 'node:path';
 import { isAbsolute } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseFlags, run } from './cli.js';
+
+// `plan` now always probes the registry via `isPublished` (#412). For npm
+// that is a `npm view` subprocess; stub it so the unit suite stays offline
+// (→ "not published" → PUBLISH verdict), while git — also execFileSync —
+// runs for real.
+const realCp = vi.hoisted(() => ({
+  execFileSync: undefined as unknown as typeof ChildProcess.execFileSync,
+}));
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  realCp.execFileSync = actual.execFileSync;
+  const patched = ((cmd: string, ...rest: unknown[]): unknown => {
+    if (cmd === 'npm') {throw new Error('npm stubbed offline (unit)');}
+    return (realCp.execFileSync as (...a: unknown[]) => unknown)(cmd, ...rest);
+  }) as typeof actual.execFileSync;
+  return { ...actual, execFileSync: patched };
+});
 
 describe('cli', () => {
   const stdoutChunks: string[] = [];
@@ -302,8 +320,8 @@ globs = ["packages/ts/**"]
     const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo, '--json']);
     expect(code).toBe(0);
     const out = stdoutChunks.join('').trim();
-    const parsed = JSON.parse(out) as Array<{ name: string }>;
-    expect(parsed.map((r) => r.name)).toContain('demo');
+    const parsed = JSON.parse(out) as { matrix: Array<{ name: string }> };
+    expect(parsed.matrix.map((r) => r.name)).toContain('demo');
   });
 
   it('honors --release-packages, planning only the named package', async () => {
@@ -321,12 +339,11 @@ globs = ["packages/ts/**"]
       '--release-packages', 'demo@minor',
     ]);
     expect(code).toBe(0);
-    const parsed = JSON.parse(stdoutChunks.join('').trim()) as Array<{
-      name: string;
-      version: string;
-    }>;
-    expect(parsed.map((r) => r.name)).toEqual(['demo']);
-    expect(parsed[0]!.version).toBe('1.1.0');
+    const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+      matrix: Array<{ name: string; version: string }>;
+    };
+    expect(parsed.matrix.map((r) => r.name)).toEqual(['demo']);
+    expect(parsed.matrix[0]!.version).toBe('1.1.0');
   });
 
   it('appends to $GITHUB_OUTPUT when set', async () => {

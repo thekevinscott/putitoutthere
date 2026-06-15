@@ -948,8 +948,9 @@ line. Grep the run log for the code, then look it up here.
 
 The registry is the source of truth; git tags are putitoutthere's record
 of what's been released (it derives "last released version" from them).
-A few features keep the two in sync — `status` reports drift, while
-`reconcile` and the publish-path auto-heal fix it.
+A few features keep the two in sync — `status` reports drift, `reconcile`
+and the publish-path auto-heal fix it, and `plan` previews what a release
+from the current ref would ship before you run one.
 
 ### `status` — registry-vs-tag drift report
 
@@ -1010,6 +1011,35 @@ checking out tags so `status` can compare them against the registry:
     fetch-depth: 0          # status compares local tags vs the registry
 - run: npx putitoutthere status --check
 ```
+
+### `plan` — preview what a release would ship
+
+`plan` answers "what would a release from this ref actually do?" Alongside
+the build matrix, it reports a verdict per package — `PUBLISH` (the
+planned version isn't on the registry yet), `SKIP` (already published), or
+`UNKNOWN` (the registry couldn't be reached) — using the same
+`isPublished` check the publish path runs, so the preview matches reality.
+It also flags **version skew**: a package that would `PUBLISH` while a
+dependency it `depends_on` would `SKIP` (a dependent shipping ahead of a
+stuck dependency — the drift that strands a release).
+
+```
+$ npx putitoutthere plan
+3 matrix row(s):
+  mypkg-rust  version=0.0.1  target=noarch  artifact=mypkg-rust-crate
+  mypkg-npm   version=0.0.2  target=noarch  artifact=mypkg-npm-pkg
+  mypkg-py    version=0.0.2  target=sdist   artifact=mypkg-py-sdist
+publish plan:
+  · mypkg-rust  0.0.1  SKIP
+  → mypkg-npm   0.0.2  PUBLISH
+  → mypkg-py    0.0.2  PUBLISH
+  ⚠ version skew: mypkg-npm would PUBLISH while its dependency mypkg-rust SKIPs
+```
+
+It's always on — no flag to remember — and degrades gracefully: an
+unreachable registry yields `UNKNOWN` and the matrix is still emitted, so
+`plan` never aborts. `--json` emits `{ matrix, verdicts, skew }` (the
+`matrix` field is the same array the reusable workflow consumes).
 
 ### `reconcile` — backfill missing tags on demand
 

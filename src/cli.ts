@@ -43,7 +43,7 @@
 import { isAbsolute, resolve } from 'node:path';
 
 import { runChecks } from './check.js';
-import { plan } from './plan.js';
+import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { reconcile } from './reconcile.js';
 import { formatStatusRow } from './status-format.js';
@@ -188,13 +188,19 @@ export async function run(argv: readonly string[]): Promise<number> {
     }
     switch (cmd) {
       case 'plan': {
-        const matrix = await plan({
+        // #412: `plan` always answers "what would a release from this ref
+        // ship?" — the build matrix plus a per-package PUBLISH/SKIP/
+        // UNKNOWN verdict (via the real `isPublished`) and a dependency-
+        // skew warning. Verdicts are additive: `matrix` below is
+        // byte-identical to bare plan output, so the GHA `outputs.matrix`
+        // contract the reusable workflow depends on is unchanged.
+        const { matrix, verdicts, skew } = await computePlanStatus({
           cwd: flags.cwd,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
           releasePackages: flags.releasePackages,
         });
         if (flags.json) {
-          process.stdout.write(JSON.stringify(matrix) + '\n');
+          process.stdout.write(JSON.stringify({ matrix, verdicts, skew }) + '\n');
         } else {
           if (matrix.length === 0) {
             process.stdout.write('no packages to release\n');
@@ -203,6 +209,16 @@ export async function run(argv: readonly string[]): Promise<number> {
             for (const row of matrix) {
               process.stdout.write(
                 `  ${row.name}  version=${row.version}  target=${row.target}  artifact=${row.artifact_name}\n`,
+              );
+            }
+            process.stdout.write('publish plan:\n');
+            for (const v of verdicts) {
+              const mark = v.verdict === 'skip' ? '·' : v.verdict === 'unknown' ? '?' : '→';
+              process.stdout.write(`  ${mark} ${v.package}  ${v.version}  ${v.verdict.toUpperCase()}\n`);
+            }
+            for (const s of skew) {
+              process.stdout.write(
+                `  ⚠ version skew: ${s.dependent} would PUBLISH while its dependency ${s.dependency} SKIPs\n`,
               );
             }
           }
