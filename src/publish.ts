@@ -22,11 +22,11 @@ import { loadConfig, type Package } from './config.js';
 import { checkCompleteness } from './completeness.js';
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ErrorCodes } from './error-codes.js';
-import { createTag, headCommit, pushTag } from './git.js';
+import { headCommit } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
-import { formatTag } from './tag-template.js';
+import { ensureTag } from './ensure-tag.js';
 import {
   requireAuth,
   requireCargoShape,
@@ -204,6 +204,10 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
     try {
       if (await withRetry(() => handler.isPublished(pkg, version, ctx))) {
         log.info(`publish: ${name}@${version} already published; skipping`);
+        // Auto-heal (#407): a version live on the registry but missing
+        // its tag (e.g. an earlier run died before tagging) would never
+        // self-heal — the skip path used to return before any tagging.
+        ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
         continue;
       }
       await handler.writeVersion(pkg, version, ctx);
@@ -211,14 +215,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       published.push({ package: name, version, result });
 
       if (result.status === 'published') {
-        const tagName = formatTag(pkg.tag_format, { name, version });
-        createTag(tagName, head, { cwd, message: `Release ${tagName}` });
-        try {
-          pushTag(tagName, { cwd });
-        } catch (err) {
-          /* v8 ignore next -- local tests use a throwaway repo without a remote */
-          log.warn(`publish: failed to push tag ${tagName}: ${err instanceof Error ? err.message : String(err)}`);
-        }
+        ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
         // GitHub Release creation is the reusable workflow's job
         // (`gh release create --generate-notes` after this step). The
         // engine cuts the tag and stops.
