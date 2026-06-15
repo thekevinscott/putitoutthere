@@ -1013,11 +1013,17 @@ checking out tags so `status` can compare them against the registry:
 ### Auto-heal
 
 The most common drift — a version live on the registry but missing its
-tag — heals itself: when `publish` finds a version already published, it
-writes the missing tag (at the release commit) instead of skipping
-silently. So a package stranded by an earlier half-failed run recovers
-on its next release run, with no manual tag surgery. Idempotent —
-already-tagged packages are untouched.
+tag — heals itself. **There's nothing to run**: when a release runs and
+`publish` finds a version already published, it writes the missing tag
+(at the release commit) instead of skipping silently. A package stranded
+by an earlier half-failed run recovers on its **next release run** — it
+has no tag, so it's force-selected into the plan, found already-published,
+and tagged. No manual tag surgery. Idempotent: already-tagged packages
+are untouched.
+
+If the repo has nothing else to release, heal the stuck package now by
+triggering a [manual release](#manual-release) for it
+(`release_packages`).
 
 ## Project layout
 
