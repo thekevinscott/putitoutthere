@@ -5,6 +5,13 @@ and npm from one repo. OIDC-first, cascade-aware, polyglot. The consumer
 surface is one config file plus one canonical YAML calling
 `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0`.
 
+> **Using Claude Code?** The [`first-release` skill](.claude/skills/first-release/SKILL.md)
+> drives this whole guide interactively — it detects what your repo publishes,
+> writes `putitoutthere.toml` and the release workflows, walks trusted-publisher
+> registration and the first-publish bootstrap, previews exactly what will
+> release with `plan`, and gets you to the zero-secret OIDC steady state
+> (`status` / `verify`). Just say *"walk me through the first release."*
+
 ## Quickstart
 
 ### 1. Drop in `.github/workflows/release.yml`
