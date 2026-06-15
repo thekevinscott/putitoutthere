@@ -1,0 +1,27 @@
+# Fixture config for the `status` drift integration test. A polyglot
+# family: a Rust crate (crates.io name `mycrate`, piot id `mycrate-rust`)
+# wrapped by an npm and a PyPI package. The crate's crates.io name
+# differs from its piot id on purpose, exercising the `crate`-override
+# name resolution `status` shares with the publish path's `isPublished`.
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "mycrate-rust"
+kind  = "crates"
+crate = "mycrate"
+path  = "packages/rust"
+globs = ["packages/rust/**"]
+
+[[package]]
+name  = "mycrate-npm"
+kind  = "npm"
+path  = "packages/npm"
+globs = ["packages/npm/**"]
+
+[[package]]
+name  = "mycrate-py"
+kind  = "pypi"
+build = "hatch"
+path  = "packages/py"
+globs = ["packages/py/**"]

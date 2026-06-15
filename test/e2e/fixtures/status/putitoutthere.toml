@@ -1,0 +1,31 @@
+# Real, long-lived packages on each registry. The e2e twin of
+# test/integration/fixtures/status/putitoutthere.toml: same scenario
+# (no local tags → every package is published-but-untagged), but against
+# the LIVE registries — so it verifies `status` parses each registry's
+# real "latest" shape (crates.io `crate.newest_version`, npm
+# `dist-tags.latest`, PyPI `info.version`), the thing the integration
+# test's mock cannot.
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "serde-rust"
+kind  = "crates"
+crate = "serde"
+path  = "packages/rust"
+globs = ["packages/rust/**"]
+
+[[package]]
+name  = "lodash-npm"
+kind  = "npm"
+npm   = "lodash"
+path  = "packages/npm"
+globs = ["packages/npm/**"]
+
+[[package]]
+name  = "six-py"
+kind  = "pypi"
+pypi  = "six"
+build = "hatch"
+path  = "packages/py"
+globs = ["packages/py/**"]

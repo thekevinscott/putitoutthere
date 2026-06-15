@@ -69,6 +69,7 @@ function makeHandler(over: Partial<Handler> = {}): Handler {
   return {
     kind: 'npm',
     isPublished: vi.fn().mockResolvedValue(false),
+    latestVersion: vi.fn().mockResolvedValue(null),
     writeVersion: vi.fn().mockResolvedValue([]),
     publish: vi.fn().mockResolvedValue({ status: 'published', url: 'https://npm/lib-js/0.1.0' }),
     ...over,

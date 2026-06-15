@@ -97,6 +97,44 @@ describe('npm.isPublished', () => {
   });
 });
 
+describe('npm.latestVersion', () => {
+  it('returns dist-tags.latest on 200', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ 'dist-tags': { latest: '2.0.1' } }), { status: 200 }),
+    );
+    expect(await npm.latestVersion(basePkg(), makeCtx())).toBe('2.0.1');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://registry.npmjs.org/demo-npm',
+      expect.objectContaining({ method: 'GET' }) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('returns null when the 200 body carries no dist-tags.latest', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 200 }),
+    );
+    expect(await npm.latestVersion(basePkg(), makeCtx())).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('returns null on 404 (never published)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    expect(await npm.latestVersion(basePkg(), makeCtx())).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('throws TransientError on 5xx', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('', { status: 502 }),
+    );
+    await expect(npm.latestVersion(basePkg(), makeCtx())).rejects.toThrow(/502/);
+    fetchSpy.mockRestore();
+  });
+});
+
 describe('npm.writeVersion', () => {
   let dir: string;
   beforeEach(() => {

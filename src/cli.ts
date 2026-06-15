@@ -41,6 +41,8 @@ import { isAbsolute, resolve } from 'node:path';
 import { runChecks } from './check.js';
 import { plan } from './plan.js';
 import { publish } from './publish.js';
+import { formatStatusRow } from './status-format.js';
+import { computeStatus } from './status.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
 import { writeLauncherFromConfig } from './write-launcher.js';
 import { writeVersionForBuild } from './write-version.js';
@@ -50,6 +52,7 @@ const COMMANDS = [
   'plan',
   'publish',
   'check',
+  'status',
   'write-version',
   'write-crate-version',
   'write-launcher',
@@ -70,6 +73,7 @@ function printUsage(): void {
       '  plan           Compute and emit the release plan',
       '  publish        Execute the plan',
       '  check          Pre-merge configuration validation (#319)',
+      '  status         Report registry-vs-tag drift (read-only; #403)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
@@ -81,6 +85,7 @@ function printUsage(): void {
       '  --path <dir>      package or crate directory (write-version / write-crate-version)',
       '  --version <v>     planned version (write-version / write-crate-version)',
       '  --release-packages <spec>  manual-release spec (plan / publish)',
+      '  --check           exit non-zero when status finds drift',
       '  --json            emit machine-readable output',
       '',
       'See https://github.com/thekevinscott/putitoutthere for docs.',
@@ -93,6 +98,9 @@ interface ParsedFlags {
   cwd: string;
   config?: string | undefined;
   json: boolean;
+  // `status --check`: exit non-zero when the report finds drift, so it
+  // can gate CI. Inert on other commands.
+  check: boolean;
   // #276 write-version inputs. Optional on the global flags type
   // because they're only meaningful for that subcommand; the dispatch
   // arm validates presence before use.
@@ -107,6 +115,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
   const out: ParsedFlags = {
     cwd: process.cwd(),
     json: false,
+    check: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -114,6 +123,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     if (a === '--cwd') {out.cwd = argv[++i] ?? out.cwd;}
     else if (a === '--config') {out.config = argv[++i];}
     else if (a === '--json') {out.json = true;}
+    else if (a === '--check') {out.check = true;}
     else if (a === '--path') {out.path = argv[++i];}
     else if (a === '--version') {out.version = argv[++i];}
     else if (a === '--release-packages') {out.releasePackages = argv[++i];}
@@ -224,6 +234,25 @@ export async function run(argv: readonly string[]): Promise<number> {
           }
         }
         return findings.length === 0 ? 0 : 1;
+      }
+      case 'status': {
+        // #403: read-only registry-vs-tag drift report. Reuses the same
+        // `lastTag` resolver and per-kind `latestVersion` handler the
+        // release path uses, so the report can't disagree with reality.
+        // `--check` makes drift a non-zero exit (a CI gate); without it
+        // status is a pure report that always exits 0.
+        const rows = await computeStatus({
+          cwd: flags.cwd,
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+        });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(rows) + '\n');
+        } else {
+          for (const row of rows) {
+            process.stdout.write(formatStatusRow(row) + '\n');
+          }
+        }
+        return flags.check && rows.some((r) => r.drift) ? 1 : 0;
       }
       case 'write-launcher': {
         // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli

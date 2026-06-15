@@ -110,6 +110,17 @@ export interface SmokeResult {
 export interface Handler {
   kind: Kind;
   isPublished(pkg: PackageConfig, version: string, ctx: Ctx): Promise<boolean>;
+  /**
+   * Latest version published to the registry for this package, or null
+   * when it has never been published (registry 404). Reads the registry's
+   * "newest version" endpoint — distinct from `isPublished`, which probes
+   * one specific version. Throws TransientError on a registry error so a
+   * read-only caller (`status`) can render "unreachable" rather than a
+   * bogus version. Shares each handler's registry-name resolution with
+   * `isPublished`, so diagnostics and the publish path can never disagree
+   * on which registry name a package maps to.
+   */
+  latestVersion(pkg: PackageConfig, ctx: Ctx): Promise<string | null>;
   writeVersion(pkg: PackageConfig, version: string, ctx: Ctx): Promise<string[]>;
   publish(pkg: PackageConfig, version: string, ctx: Ctx): Promise<PublishResult>;
   smokeTest?(pkg: PackageConfig, version: string, ctx: Ctx): Promise<SmokeResult>;

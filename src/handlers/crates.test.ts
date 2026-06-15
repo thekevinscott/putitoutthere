@@ -115,6 +115,44 @@ describe('crates.isPublished', () => {
   });
 });
 
+describe('crates.latestVersion', () => {
+  it('returns crate.newest_version on 200', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ crate: { newest_version: '1.4.2' } }), { status: 200 }),
+    );
+    expect(await crates.latestVersion(basePkg(), makeCtx())).toBe('1.4.2');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://crates.io/api/v1/crates/demo-crate',
+      expect.objectContaining({ method: 'GET' }) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('returns null when the 200 body carries no newest_version', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ crate: {} }), { status: 200 }),
+    );
+    expect(await crates.latestVersion(basePkg(), makeCtx())).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('returns null on 404 (never published)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    expect(await crates.latestVersion(basePkg(), makeCtx())).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('throws TransientError on 5xx', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('', { status: 503 }),
+    );
+    await expect(crates.latestVersion(basePkg(), makeCtx())).rejects.toThrow(/503/);
+    fetchSpy.mockRestore();
+  });
+});
+
 describe('crates.writeVersion', () => {
   let dir: string;
   beforeEach(() => {
