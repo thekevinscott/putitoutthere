@@ -1,9 +1,26 @@
+import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { main } from './action.js';
+
+// `plan` now always probes the registry via `isPublished` (#412). For npm
+// that is a `npm view` subprocess; stub it so the unit suite stays offline
+// (→ "not published" → PUBLISH verdict), while git runs for real.
+const realCp = vi.hoisted(() => ({
+  execFileSync: undefined as unknown as typeof ChildProcess.execFileSync,
+}));
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  realCp.execFileSync = actual.execFileSync;
+  const patched = ((cmd: string, ...rest: unknown[]): unknown => {
+    if (cmd === 'npm') {throw new Error('npm stubbed offline (unit)');}
+    return (realCp.execFileSync as (...a: unknown[]) => unknown)(cmd, ...rest);
+  }) as typeof actual.execFileSync;
+  return { ...actual, execFileSync: patched };
+});
 
 describe('action', () => {
   let stderrChunks: string[] = [];
@@ -121,12 +138,13 @@ globs = ["packages/ts/**"]
       // main() exits 0 on a successful plan (process.exit is mocked to
       // throw `exit:<code>`).
       await expect(main()).rejects.toThrow(/exit:0/);
-      const out = JSON.parse(stdoutChunks.join('').trim()) as Array<{
-        name: string;
-        version: string;
-      }>;
-      expect(out.map((r) => r.name)).toEqual(['demo']);
-      expect(out[0]!.version).toBe('1.1.0');
+      // #412: plan --json is now { matrix, verdicts, skew }; the action's
+      // `outputs.matrix` (written to $GITHUB_OUTPUT) stays the bare array.
+      const out = JSON.parse(stdoutChunks.join('').trim()) as {
+        matrix: Array<{ name: string; version: string }>;
+      };
+      expect(out.matrix.map((r) => r.name)).toEqual(['demo']);
+      expect(out.matrix[0]!.version).toBe('1.1.0');
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
