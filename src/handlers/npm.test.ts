@@ -862,3 +862,28 @@ describe('npm.publish', () => {
     ).rejects.toThrow(/Re-run the release to mint a fresh attestation/);
   });
 });
+
+describe('npm.trustPosture', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('oidc when the provenance attestations endpoint returns 200', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+    expect(await npm.trustPosture(basePkg(), '0.1.0', makeCtx())).toBe('oidc');
+    expect(spy).toHaveBeenCalledWith(
+      'https://registry.npmjs.org/-/npm/v1/attestations/demo-npm@0.1.0',
+      expect.any(Object) as object,
+    );
+  });
+
+  it('token when the attestations endpoint returns 404', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+    expect(await npm.trustPosture(basePkg(), '0.1.0', makeCtx())).toBe('token');
+  });
+
+  it('throws on a registry error', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 503 }));
+    await expect(npm.trustPosture(basePkg(), '0.1.0', makeCtx())).rejects.toThrow(/503/);
+  });
+});

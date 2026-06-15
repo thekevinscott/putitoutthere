@@ -107,6 +107,14 @@ export interface SmokeResult {
   output?: string;
 }
 
+/**
+ * How a published version authenticated to its registry, inferred from
+ * public trust attribution: `oidc` (trusted-publisher / provenance
+ * attestation present — safe to drop the long-lived token) or `token`.
+ * Issue #414.
+ */
+export type TrustPosture = 'oidc' | 'token';
+
 export interface Handler {
   kind: Kind;
   isPublished(pkg: PackageConfig, version: string, ctx: Ctx): Promise<boolean>;
@@ -121,6 +129,14 @@ export interface Handler {
    * on which registry name a package maps to.
    */
   latestVersion(pkg: PackageConfig, ctx: Ctx): Promise<string | null>;
+  /**
+   * How a specific published version authenticated to the registry, read
+   * from PUBLIC trust attribution — no secrets. Throws TransientError on a
+   * registry error so a read-only caller (`verify`) renders "unreachable".
+   * Shares each handler's registry-name resolution with `isPublished` /
+   * `latestVersion`. Issue #414.
+   */
+  trustPosture(pkg: PackageConfig, version: string, ctx: Ctx): Promise<TrustPosture>;
   writeVersion(pkg: PackageConfig, version: string, ctx: Ctx): Promise<string[]>;
   publish(pkg: PackageConfig, version: string, ctx: Ctx): Promise<PublishResult>;
   smokeTest?(pkg: PackageConfig, version: string, ctx: Ctx): Promise<SmokeResult>;
