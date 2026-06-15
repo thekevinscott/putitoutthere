@@ -4,13 +4,15 @@
  *
  * Where the integration test imports the engine in-process and mocks the
  * registry HTTP (msw), this one **shells out to the built CLI**
- * (`node dist/cli-bin.js status …`) and lets it hit crates.io / npm /
- * PyPI for real. Same scenario, same assertions — but nothing is mocked,
- * so this is the tier that fails if a registry's real "latest" shape
- * doesn't match what `latestVersion` parses. The integration test, which
- * mocks those shapes, cannot catch that.
+ * (`node dist/cli-bin.js status …`) and hits crates.io / npm / PyPI for
+ * real — pointed at piot's own stable fixture packages
+ * (`piot-fixture-zzz-*`, published to the real registries by the CI e2e
+ * suite; see test/fixtures/README.md). Same scenario, same assertions —
+ * but nothing is mocked, so this is the tier that fails if a registry's
+ * real "latest" shape doesn't match what `latestVersion` parses. The
+ * integration test, which mocks those shapes, cannot catch that.
  *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #403.
+ * Run via `pnpm test:e2e` (which builds `dist/` first). Issues #403, #406.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -79,18 +81,19 @@ describe('piot status against live registries (#403)', () => {
   it('fetches each package\'s real latest version and flags it published-but-untagged', () => {
     // No tags were created, so every package is live-on-registry but
     // untagged locally. The CLI must fetch a real latest version for each
-    // from the live registry and flag the drift.
+    // piot fixture from the live registry and flag the drift.
     const { code, stdout } = runCli(['status', '--check', '--json', '--cwd', repo]);
     const rows = JSON.parse(stdout) as Row[];
     const byName = Object.fromEntries(rows.map((r) => [r.package, r]));
 
-    for (const name of ['serde-rust', 'lodash-npm', 'six-py']) {
+    for (const name of ['fixture-rust', 'fixture-npm', 'fixture-py']) {
       const row = byName[name]!;
       expect(row.registryUnreachable).toBe(false);
-      // A real semver came back from the live registry — proof the
-      // field-shape parse is correct against reality (the assertion the
-      // mocked integration test structurally cannot make).
-      expect(row.registry).toMatch(/^\d+\.\d+\.\d+/);
+      // A real version came back from the live registry, in the fixture
+      // suite's `0.0.{unix_seconds}` scheme — proof the field-shape parse
+      // is correct against reality (the assertion the mocked integration
+      // test structurally cannot make).
+      expect(row.registry).toMatch(/^0\.0\.\d+$/);
       expect(row.state).toBe('published, untagged');
       expect(row.drift).toBe(true);
     }
