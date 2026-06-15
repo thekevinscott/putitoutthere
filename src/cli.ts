@@ -48,6 +48,8 @@ import { publish } from './publish.js';
 import { reconcile } from './reconcile.js';
 import { formatStatusRow } from './status-format.js';
 import { computeStatus } from './status.js';
+import { formatVerifyRow } from './verify-format.js';
+import { computeVerify } from './verify.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
 import { writeLauncherFromConfig } from './write-launcher.js';
 import { writeVersionForBuild } from './write-version.js';
@@ -59,6 +61,7 @@ const COMMANDS = [
   'check',
   'status',
   'reconcile',
+  'verify',
   'write-version',
   'write-crate-version',
   'write-launcher',
@@ -81,6 +84,7 @@ function printUsage(): void {
       '  check          Pre-merge configuration validation (#319)',
       '  status         Report registry-vs-tag drift (read-only; #403)',
       '  reconcile      Backfill missing tags for published-but-untagged packages (#403)',
+      '  verify         Report publish/trust posture — OIDC vs token, per registry (#403)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
@@ -308,6 +312,25 @@ export async function run(argv: readonly string[]): Promise<number> {
           process.stdout.write(`reconcile: ${verb} ${result.actions.length} tag(s)\n`);
         }
         return 0;
+      }
+      case 'verify': {
+        // #414: per-package publish/trust posture. Reads each package's
+        // latest release and its trust attribution — OIDC trusted
+        // publisher / provenance vs token — from public registry data,
+        // no secrets. `--check` gates on any token-dependent package;
+        // `--json` emits the rows.
+        const rows = await computeVerify({
+          cwd: flags.cwd,
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+        });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(rows) + '\n');
+        } else {
+          for (const row of rows) {
+            process.stdout.write(formatVerifyRow(row) + '\n');
+          }
+        }
+        return flags.check && rows.some((r) => r.posture === 'token') ? 1 : 0;
       }
       case 'write-launcher': {
         // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli

@@ -950,7 +950,9 @@ The registry is the source of truth; git tags are putitoutthere's record
 of what's been released (it derives "last released version" from them).
 A few features keep the two in sync — `status` reports drift, `reconcile`
 and the publish-path auto-heal fix it, and `plan` previews what a release
-from the current ref would ship before you run one.
+from the current ref would ship before you run one. `verify` rounds it out
+by reporting whether each package already publishes via OIDC or still
+depends on a long-lived token.
 
 ### `status` — registry-vs-tag drift report
 
@@ -1040,6 +1042,47 @@ It's always on — no flag to remember — and degrades gracefully: an
 unreachable registry yields `UNKNOWN` and the matrix is still emitted, so
 `plan` never aborts. `--json` emits `{ matrix, verdicts, skew }` (the
 `matrix` field is the same array the reusable workflow consumes).
+
+### `verify` — OIDC trusted publisher vs token, per registry
+
+`verify` answers "do I still need the registry token, or is OIDC trusted
+publishing active?" For each package it reads the latest release's trust
+attribution from the registry's **public** surface — no secrets — and
+classifies it:
+
+```
+$ npx putitoutthere verify
+mypkg-rust  0.0.1  ✓ oidc   trusted publisher (safe to drop the token)
+mypkg-npm   0.0.1  ✓ oidc   trusted publisher (safe to drop the token)
+mypkg-py    0.0.1  ⚠ token  token-dependent — no trusted publisher
+```
+
+| Posture | Meaning |
+|---------|---------|
+| `oidc` | the latest release carries a trusted-publisher / provenance attestation — the long-lived token is no longer needed |
+| `token` | no such attestation — still token-dependent |
+| `unpublished` | nothing published yet, so nothing to attribute |
+| `unreachable` | the registry couldn't be reached (reported, never gated) |
+
+The signal comes straight from each registry: crates.io's
+`version.trustpub_data`, npm's provenance attestations endpoint, and
+PyPI's PEP 740 provenance — read with the same name resolution the publish
+path uses.
+
+- `--check` exits non-zero while any package is still `token`-dependent —
+  gate CI on it to enforce the zero-secret OIDC steady state.
+- `--json` emits the rows.
+
+```bash
+# Report the trust posture of every package:
+npx putitoutthere verify
+
+# Fail CI until every package is on a trusted publisher:
+npx putitoutthere verify --check
+
+# Machine-readable rows:
+npx putitoutthere verify --json
+```
 
 ### `reconcile` — backfill missing tags on demand
 

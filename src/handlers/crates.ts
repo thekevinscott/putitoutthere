@@ -31,7 +31,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import type { Ctx, Handler, PublishResult } from '../types.js';
+import type { Ctx, Handler, PublishResult, TrustPosture } from '../types.js';
 import { TransientError } from '../types.js';
 import { ErrorCodes } from '../error-codes.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
@@ -444,10 +444,32 @@ async function latestVersionImpl(
   throw new TransientError(`crates.io GET ${url} returned ${res.status}`);
 }
 
+/**
+ * Trust posture for a published crate version (#414). crates.io's version
+ * endpoint exposes `trustpub_data` ({provider, repository, …}) when the
+ * version was published via Trusted Publishing (OIDC); a token publish
+ * leaves it null and names a `published_by` user.
+ */
+async function trustPostureImpl(
+  pkg: { name: string; crate?: string },
+  version: string,
+  _ctx: Ctx,
+): Promise<TrustPosture> {
+  const crateName = crateNameFor(pkg);
+  const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
+  const res = await fetch(url, { method: 'GET', headers: { 'user-agent': USER_AGENT } });
+  if (res.status === 200) {
+    const body = (await res.json()) as { version?: { trustpub_data?: unknown } };
+    return body.version?.trustpub_data ? 'oidc' : 'token';
+  }
+  throw new TransientError(`crates.io GET ${url} returned ${res.status}`);
+}
+
 export const crates: Handler = {
   kind: 'crates',
   isPublished: isPublishedImpl,
   latestVersion: latestVersionImpl,
+  trustPosture: trustPostureImpl,
   writeVersion: writeVersionImpl,
   publish: publishImpl,
 };

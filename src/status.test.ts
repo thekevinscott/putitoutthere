@@ -155,6 +155,7 @@ globs = ["c/**"]
       kind: 'npm',
       isPublished: vi.fn().mockResolvedValue(false),
       latestVersion: (pkg: PackageConfig) => latest(pkg.name),
+      trustPosture: vi.fn().mockResolvedValue('token'),
       writeVersion: vi.fn().mockResolvedValue([]),
       publish: vi.fn().mockResolvedValue({ status: 'published', url: 'x' }),
     };
