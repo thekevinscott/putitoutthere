@@ -7,7 +7,9 @@ coverage/
 .env
 .env.local
 *.tsbuildinfo
-.claude/
+# Personal Claude Code settings stay local; shared skills are checked in.
+.claude/*
+!.claude/skills/
 
 # Eval harness output — snapshots accumulate per run; a representative
 # snapshot triple is checked in explicitly via `git add -f`. All other

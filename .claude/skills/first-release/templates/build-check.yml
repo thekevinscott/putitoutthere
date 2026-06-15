@@ -1,0 +1,8 @@
+name: Build check
+
+on:
+  pull_request: {}
+
+jobs:
+  build-check:
+    uses: thekevinscott/putitoutthere/.github/workflows/build.yml@v0
