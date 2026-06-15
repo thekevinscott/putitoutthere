@@ -944,6 +944,159 @@ line. Grep the run log for the code, then look it up here.
 | `PIOT_AUTH_NO_TOKEN` | The publish job reached the registry-auth step with no token resolved (neither an OIDC-minted token nor a caller-provided long-lived token). Almost always means the reusable workflow's trusted-publisher exchange failed silently or the caller-provided secret was empty. | Publish-time only. |
 | `PIOT_PUBLISH_EMPTY_PLAN` | `publish` was invoked but `plan` returned zero rows for a reason other than `release: skip`. The reusable workflow's gate normally prevents this; if it fires, the gate was bypassed or the engine is inconsistent. | Publish-time only. |
 
+## Release health
+
+The registry is the source of truth; git tags are putitoutthere's record
+of what's been released (it derives "last released version" from them).
+A few features keep the two in sync — `status` reports drift, `reconcile`
+and the publish-path auto-heal fix it, and `plan` previews what a release
+from the current ref would ship before you run one.
+
+### `status` — registry-vs-tag drift report
+
+`status` reconciles, per package, the latest git tag against the
+registry's latest published version — over the public registry APIs
+(crates.io / npm / PyPI), no auth required — and flags any drift:
+
+```
+package     tag      registry  state
+mypkg-rust  —        0.0.1     ⚠ published, untagged
+mypkg-npm   0.0.1    0.0.1     ✓ in sync
+mypkg-py    0.0.1    0.0.1     ✓ in sync
+```
+
+| State | Meaning |
+|-------|---------|
+| `in sync` | the latest tag matches the registry's latest version |
+| `unreleased` | no tag, and nothing published |
+| `published, untagged` | live on the registry but no tag — the drift that strands a package |
+| `tagged, unpublished` | tagged, but the registry doesn't have that version |
+| `version mismatch` | the tag and the registry disagree on the latest version |
+| `registry unreachable` | the registry couldn't be reached (reported, never gated) |
+
+Why it matters: a half-failed run that publishes a version but never
+tags it leaves the package `published, untagged`. Because the planner
+reads "last released" from tags, that package then looks unreleased,
+skips its already-live version forever, and can never bump — while its
+dependents keep bumping past it. `status` surfaces that in one line.
+
+- `--check` exits non-zero on any drift state — run it as a CI gate so
+  drift can't merge unnoticed.
+- `--json` emits the rows as machine-readable JSON.
+
+`putitoutthere` is published to npm, so run it with `npx` (it reads your
+git tags, so make sure they're fetched):
+
+```bash
+# Report drift across every package in putitoutthere.toml:
+npx putitoutthere status
+
+# Exit non-zero if anything has drifted:
+npx putitoutthere status --check
+echo $?            # 1 when drifted, 0 when in sync
+
+# Machine-readable rows:
+npx putitoutthere status --json
+# [{"package":"mypkg-rust","kind":"crates","tag":null,"tagVersion":null,
+#   "registry":"0.0.1","registryUnreachable":false,
+#   "state":"published, untagged","drift":true}, …]
+```
+
+To gate every PR on release-state drift, add a step to any workflow —
+checking out tags so `status` can compare them against the registry:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # status compares local tags vs the registry
+- run: npx putitoutthere status --check
+```
+
+### `plan` — preview what a release would ship
+
+`plan` answers "what would a release from this ref actually do?" Alongside
+the build matrix, it reports a verdict per package — `PUBLISH` (the
+planned version isn't on the registry yet), `SKIP` (already published), or
+`UNKNOWN` (the registry couldn't be reached) — using the same
+`isPublished` check the publish path runs, so the preview matches reality.
+It also flags **version skew**: a package that would `PUBLISH` while a
+dependency it `depends_on` would `SKIP` (a dependent shipping ahead of a
+stuck dependency — the drift that strands a release).
+
+```
+$ npx putitoutthere plan
+3 matrix row(s):
+  mypkg-rust  version=0.0.1  target=noarch  artifact=mypkg-rust-crate
+  mypkg-npm   version=0.0.2  target=noarch  artifact=mypkg-npm-pkg
+  mypkg-py    version=0.0.2  target=sdist   artifact=mypkg-py-sdist
+publish plan:
+  · mypkg-rust  0.0.1  SKIP
+  → mypkg-npm   0.0.2  PUBLISH
+  → mypkg-py    0.0.2  PUBLISH
+  ⚠ version skew: mypkg-npm would PUBLISH while its dependency mypkg-rust SKIPs
+```
+
+It's always on — no flag to remember — and degrades gracefully: an
+unreachable registry yields `UNKNOWN` and the matrix is still emitted, so
+`plan` never aborts. `--json` emits `{ matrix, verdicts, skew }` (the
+`matrix` field is the same array the reusable workflow consumes).
+
+### `reconcile` — backfill missing tags on demand
+
+`reconcile` fixes the `published, untagged` drift `status` reports: for
+every package that is live on its registry but has no tag, it creates the
+missing tag (and pushes it). It's the on-demand companion to auto-heal —
+where auto-heal only fires for a package caught in a release run,
+`reconcile` heals an **already-stuck** package without a release, so you
+can run it the moment `status` flags drift.
+
+The tag is pointed at a sibling package already tagged at that version —
+the real release commit, e.g. a crate left untagged while its npm/PyPI
+siblings tagged the same merge — and at `HEAD` when no sibling tag exists.
+It reuses the exact drift detection `status` reports and the exact tagging
+`publish` heals with, so it can never create a tag a release wouldn't.
+
+- Idempotent: a re-run is a no-op (already-correct tags are untouched).
+- `--dry-run` reports what it would create without writing anything.
+- `--json` emits the actions.
+
+```bash
+# Backfill any missing tags across putitoutthere.toml:
+npx putitoutthere reconcile
+
+# Preview without writing:
+npx putitoutthere reconcile --dry-run
+# mypkg-rust: 0.0.1 live, no tag → would create mypkg-rust-v0.0.1 at a1b2c3d (sibling)
+
+# Machine-readable actions:
+npx putitoutthere reconcile --json
+```
+
+Run it in CI with the release job's permissions (it pushes the tag),
+checking out tags first:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # reconcile compares local tags vs the registry
+- run: npx putitoutthere reconcile
+```
+
+### Auto-heal
+
+The most common drift — a version live on the registry but missing its
+tag — heals itself. **There's nothing to run**: when a release runs and
+`publish` finds a version already published, it writes the missing tag
+(at the release commit) instead of skipping silently. A package stranded
+by an earlier half-failed run recovers on its **next release run** — it
+has no tag, so it's force-selected into the plan, found already-published,
+and tagged. No manual tag surgery. Idempotent: already-tagged packages
+are untouched.
+
+If the repo has nothing else to release, don't wait for the next run —
+heal the stuck package now with the `reconcile` command above, or trigger
+a [manual release](#manual-release) for it (`release_packages`).
+
 ## Project layout
 
 - [`CHANGELOG.md`](./CHANGELOG.md) — per-release changes.

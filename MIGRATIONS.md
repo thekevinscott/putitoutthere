@@ -21,6 +21,114 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### `status`: registry-vs-tag drift report
+
+**Summary.** New read-only command `putitoutthere status` reports, per
+package, whether the latest git tag matches the registry's latest
+published version, flagging drift — notably `published, untagged` (a
+version live on the registry but missing its tag, which strands the
+package). Reads public registry metadata only; no auth.
+
+**Required changes.** None. Additive — a new command.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None — new surface.
+
+**Verification.** Run `status` over a repo with a published-but-untagged
+package: that package shows `published, untagged` and `status --check`
+exits non-zero; a fully in-sync repo shows every package `in sync` and
+exits zero. `--json` emits the same rows as JSON.
+
+### plan: publish-skip verdict and skew
+
+**Summary.** `putitoutthere plan` now always reports, per planned package,
+whether a release from this ref would `PUBLISH` (the version is not yet on
+the registry), `SKIP` (already published), or `UNKNOWN` (the registry
+couldn't be reached) — and flags **version skew** when a package would
+`PUBLISH` while a `depends_on` dependency `SKIP`s. It reuses the real
+planner and the same `isPublished` the publish path runs, so the preview
+matches reality. Always-on — there is no flag.
+
+**Required changes.** None for consumers of the reusable workflow. The
+matrix the workflow consumes (`outputs.matrix`, from the JS action's
+`$GITHUB_OUTPUT`) is **unchanged** — a bare array of build rows, byte for
+byte. Only a caller that parses `plan --json` **stdout** directly is
+affected (see below).
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+| | Before | After |
+|---|---|---|
+| `plan --json` stdout | `[ …matrix rows… ]` | `{ "matrix": [ …matrix rows… ], "verdicts": [ … ], "skew": [ … ] }` |
+| `plan` human output | matrix rows only | matrix rows + a `publish plan:` section + a `⚠ version skew` line when applicable |
+| reusable-workflow `outputs.matrix` | bare array | bare array (unchanged) |
+
+The `matrix` field is identical to the old top-level array; a direct
+stdout reader migrates by reading `.matrix`. A registry blip degrades a
+verdict to `UNKNOWN` and still emits the matrix — `plan` never aborts on
+an unreachable registry.
+
+**Verification.** Run `plan` on a ref where one package's planned version
+is already published and a dependent's is not: the published one shows
+`SKIP`, the dependent `PUBLISH`, and a `version skew` warning names the
+pair. `plan --json` carries the same under `verdicts` / `skew`. The build
+matrix (and a real release) are unaffected.
+
+### reconcile: backfill missing tags
+
+**Summary.** New command `putitoutthere reconcile` backfills the missing
+git tag for every package that is live on its registry but untagged
+(`status`'s `published, untagged` drift). It is the on-demand companion to
+the publish-path auto-heal: auto-heal only fires for a package already in a
+publish run, so a package whose globs never change again stays stuck;
+`reconcile` heals it without a release. It reuses the same `computeStatus`
+detection `status` reports and the same idempotent `ensureTag` the publish
+path heals with — no parallel logic.
+
+**Required changes.** None. Additive — a new command.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** `--dry-run` is now accepted on
+`reconcile` (it previews the heal without writing). It remains rejected on
+`plan` / `publish`, unchanged from the #244 removal.
+
+**Verification.** On a repo with a published-but-untagged package, run
+`putitoutthere reconcile`: the missing tag is created (per the package's
+`tag_format`) — pointed at a sibling package's tag commit for that version
+when one exists, else `HEAD` — and pushed; `git tag` / GitHub show it, and
+`status` then reports the package `in sync`. A second `reconcile` run is a
+no-op. `reconcile --dry-run` reports what it would create without writing;
+`--json` emits the actions.
+
+### publish-path auto-heal: missing tags
+
+**Summary.** `putitoutthere publish` now self-heals a missing git tag: when
+a version is already live on the registry but has no tag, publish writes the
+tag instead of skipping silently. Previously the already-published branch
+returned before tagging, so a version that reached the registry on a
+half-failed run (published, then the run died before the tag step) was
+stranded published-but-untagged — and because piot derives "last released"
+from tags, it skipped forever and could never bump, while dependents drifted
+ahead into unflagged version skew.
+
+**Required changes.** None. Purely additive behavior on the publish path.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** On the next release run after
+upgrading, any package that is live on a registry but missing its tag has the
+tag created (and pushed) at the release commit, automatically. Idempotent:
+packages already correctly tagged are untouched.
+
+**Verification.** Re-run a release on a repo with a published-but-untagged
+package: the run now creates the missing tag (per the package's `tag_format`;
+visible via `git tag` / on GitHub) and the package resumes normal version
+bumping on later releases.
+
 ### pypi version-independent wheels build once
 
 **Summary.** A `kind = "pypi"` `build = "maturin"` package whose wheel is

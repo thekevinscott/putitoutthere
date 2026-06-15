@@ -117,6 +117,44 @@ describe('pypi.isPublished', () => {
   });
 });
 
+describe('pypi.latestVersion', () => {
+  it('returns info.version on 200', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ info: { version: '3.1.0' } }), { status: 200 }),
+    );
+    expect(await pypi.latestVersion(basePkg(), makeCtx())).toBe('3.1.0');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://pypi.org/pypi/demo-pkg/json',
+      expect.objectContaining({ method: 'GET' }) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('returns null when the 200 body carries no info.version', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ info: {} }), { status: 200 }),
+    );
+    expect(await pypi.latestVersion(basePkg(), makeCtx())).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('returns null on 404 (never published)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{"message":"Not Found"}', { status: 404 }),
+    );
+    expect(await pypi.latestVersion(basePkg(), makeCtx())).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('throws TransientError on 5xx', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('', { status: 500 }),
+    );
+    await expect(pypi.latestVersion(basePkg(), makeCtx())).rejects.toThrow(/500/);
+    fetchSpy.mockRestore();
+  });
+});
+
 describe('pypi.writeVersion', () => {
   let dir: string;
   beforeEach(() => {

@@ -55,11 +55,13 @@ jobs:
         run: node dist/cli-bin.js plan --json > plan.json
       - name: expose matrix
         run: |
+          # #412: plan --json is now { matrix, verdicts, skew }; the matrix
+          # output stays the bare array the publish gate + build consume.
           # shellcheck disable=SC2002
-          printf 'matrix=%s\n' "$(cat plan.json)" >> "$GITHUB_OUTPUT"
+          printf 'matrix=%s\n' "$(cat plan.json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(d).matrix)))")" >> "$GITHUB_OUTPUT"
           echo "Plan:"
           # shellcheck disable=SC2002
-          cat plan.json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log(m.length? m.map(r=>' - '+r.name+'@'+r.version+' ('+r.target+')').join('\n') : '(nothing to release)');})"
+          cat plan.json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d).matrix;console.log(m.length? m.map(r=>' - '+r.name+'@'+r.version+' ('+r.target+')').join('\n') : '(nothing to release)');})"
 
   publish:
     needs: plan
