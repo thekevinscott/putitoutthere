@@ -112,10 +112,12 @@ the e2e is non-optional. Mocks verify the wiring; reality verifies the
 contract. Ship both, kept similar enough that a reader sees one
 behaviour exercised at two fidelities.
 
-The e2e tier is **not** wired into CI — it carries a live-registry /
-real-tool dependency, so a blip there must never block a merge. Run it
-locally (`pnpm test:e2e`, which builds `dist/` first) to verify the
-real behaviour; the integration test is what gates the PR.
+The CLI e2e tier runs in CI (`e2e-cli.yml` → `pnpm test:e2e`) against
+piot's own `piot-fixture-zzz-*` fixtures, so its red→green is visible
+per-PR alongside the integration gate. It also runs locally
+(`pnpm test:e2e`, which builds `dist/` first). The separate, heavier
+fixture suite — `e2e.yml` over `test/fixtures/` — exercises real OIDC
+publishes and is CI-only; see `test/e2e/README.md`.
 
 ## Design commitments
 
