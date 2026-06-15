@@ -948,7 +948,8 @@ line. Grep the run log for the code, then look it up here.
 
 The registry is the source of truth; git tags are putitoutthere's record
 of what's been released (it derives "last released version" from them).
-Two features keep the two in sync.
+A few features keep the two in sync — `status` reports drift, while
+`reconcile` and the publish-path auto-heal fix it.
 
 ### `status` — registry-vs-tag drift report
 
@@ -1010,6 +1011,47 @@ checking out tags so `status` can compare them against the registry:
 - run: npx putitoutthere status --check
 ```
 
+### `reconcile` — backfill missing tags on demand
+
+`reconcile` fixes the `published, untagged` drift `status` reports: for
+every package that is live on its registry but has no tag, it creates the
+missing tag (and pushes it). It's the on-demand companion to auto-heal —
+where auto-heal only fires for a package caught in a release run,
+`reconcile` heals an **already-stuck** package without a release, so you
+can run it the moment `status` flags drift.
+
+The tag is pointed at a sibling package already tagged at that version —
+the real release commit, e.g. a crate left untagged while its npm/PyPI
+siblings tagged the same merge — and at `HEAD` when no sibling tag exists.
+It reuses the exact drift detection `status` reports and the exact tagging
+`publish` heals with, so it can never create a tag a release wouldn't.
+
+- Idempotent: a re-run is a no-op (already-correct tags are untouched).
+- `--dry-run` reports what it would create without writing anything.
+- `--json` emits the actions.
+
+```bash
+# Backfill any missing tags across putitoutthere.toml:
+npx putitoutthere reconcile
+
+# Preview without writing:
+npx putitoutthere reconcile --dry-run
+# mypkg-rust: 0.0.1 live, no tag → would create mypkg-rust-v0.0.1 at a1b2c3d (sibling)
+
+# Machine-readable actions:
+npx putitoutthere reconcile --json
+```
+
+Run it in CI with the release job's permissions (it pushes the tag),
+checking out tags first:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # reconcile compares local tags vs the registry
+- run: npx putitoutthere reconcile
+```
+
 ### Auto-heal
 
 The most common drift — a version live on the registry but missing its
@@ -1021,9 +1063,9 @@ has no tag, so it's force-selected into the plan, found already-published,
 and tagged. No manual tag surgery. Idempotent: already-tagged packages
 are untouched.
 
-If the repo has nothing else to release, heal the stuck package now by
-triggering a [manual release](#manual-release) for it
-(`release_packages`).
+If the repo has nothing else to release, don't wait for the next run —
+heal the stuck package now with the `reconcile` command above, or trigger
+a [manual release](#manual-release) for it (`release_packages`).
 
 ## Project layout
 
