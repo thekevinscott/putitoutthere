@@ -11,6 +11,9 @@
  *                    check knowable from the consumer's repo state alone.
  *                    Internal — invoked by the pre-merge reusable workflow;
  *                    not surfaced in user-facing docs per non-goal #7.
+ *   status         — read-only registry-vs-tag drift report (#403)
+ *   reconcile      — backfill missing tags for published-but-untagged
+ *                    packages; idempotent, supports `--dry-run` (#403)
  *   write-version  — bump a package's manifest to a planned version
  *                    (pre-build hook for maturin; #276)
  *   write-crate-version — bump a crate's Cargo.toml to a planned
@@ -30,10 +33,11 @@
  *   --path <dir>      package directory (where pyproject.toml lives)
  *   --version <v>     planned version to write
  *
- * `--dry-run` was removed deliberately (#244). The library's job is
- * publishing; a non-publishing mode of the publish command was a
- * coverage hole pretending to be a feature. Passing `--dry-run` now
- * errors out.
+ * `--dry-run` is rejected on every command except `reconcile`. It was
+ * removed from `plan` / `publish` deliberately (#244): the library's job
+ * is publishing, and a non-publishing mode of the publish command was a
+ * coverage hole pretending to be a feature. `reconcile` is read-then-tag,
+ * so a preview-only mode is meaningful there and is supported (#403).
  */
 
 import { isAbsolute, resolve } from 'node:path';
@@ -41,6 +45,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { runChecks } from './check.js';
 import { plan } from './plan.js';
 import { publish } from './publish.js';
+import { reconcile } from './reconcile.js';
 import { formatStatusRow } from './status-format.js';
 import { computeStatus } from './status.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
@@ -53,6 +58,7 @@ const COMMANDS = [
   'publish',
   'check',
   'status',
+  'reconcile',
   'write-version',
   'write-crate-version',
   'write-launcher',
@@ -74,6 +80,7 @@ function printUsage(): void {
       '  publish        Execute the plan',
       '  check          Pre-merge configuration validation (#319)',
       '  status         Report registry-vs-tag drift (read-only; #403)',
+      '  reconcile      Backfill missing tags for published-but-untagged packages (#403)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
@@ -86,6 +93,7 @@ function printUsage(): void {
       '  --version <v>     planned version (write-version / write-crate-version)',
       '  --release-packages <spec>  manual-release spec (plan / publish)',
       '  --check           exit non-zero when status finds drift',
+      '  --dry-run         report what reconcile would do without writing tags',
       '  --json            emit machine-readable output',
       '',
       'See https://github.com/thekevinscott/putitoutthere for docs.',
@@ -101,6 +109,10 @@ interface ParsedFlags {
   // `status --check`: exit non-zero when the report finds drift, so it
   // can gate CI. Inert on other commands.
   check: boolean;
+  // `reconcile --dry-run`: report what would be tagged without writing.
+  // Rejected on every other command (see `run`), preserving the #244
+  // removal from plan / publish.
+  dryRun: boolean;
   // #276 write-version inputs. Optional on the global flags type
   // because they're only meaningful for that subcommand; the dispatch
   // arm validates presence before use.
@@ -116,6 +128,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     cwd: process.cwd(),
     json: false,
     check: false,
+    dryRun: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -127,14 +140,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--path') {out.path = argv[++i];}
     else if (a === '--version') {out.version = argv[++i];}
     else if (a === '--release-packages') {out.releasePackages = argv[++i];}
-    else if (a === '--dry-run') {
-      // Removed in #244. Publishing is the library's only job; a
-      // non-publishing flavor of `publish` is a coverage hole, not
-      // a feature. Fail loudly so callers update their invocation.
-      throw new Error(
-        '--dry-run was removed. The CLI does not support a non-publishing publish mode; remove the flag from your invocation.',
-      );
-    }
+    else if (a === '--dry-run') {out.dryRun = true;}
   }
   // Always normalise --cwd to an absolute path. Downstream code joins
   // `cwd` with `artifacts/` to derive paths it then hands to subprocesses
@@ -172,6 +178,14 @@ export async function run(argv: readonly string[]): Promise<number> {
 
   try {
     const flags = parseFlags(rest);
+    // `--dry-run` is meaningful only for `reconcile` (read-then-tag).
+    // For every other command it stays removed (#244): a non-publishing
+    // flavor of `publish` was a coverage hole, not a feature.
+    if (flags.dryRun && cmd !== 'reconcile') {
+      throw new Error(
+        '--dry-run was removed. The CLI does not support a non-publishing publish mode; remove the flag from your invocation.',
+      );
+    }
     switch (cmd) {
       case 'plan': {
         const matrix = await plan({
@@ -253,6 +267,31 @@ export async function run(argv: readonly string[]): Promise<number> {
           }
         }
         return flags.check && rows.some((r) => r.drift) ? 1 : 0;
+      }
+      case 'reconcile': {
+        // #403 slice 3: backfill the missing tag for every
+        // published-but-untagged package. Reuses the same `computeStatus`
+        // drift detection `status` reports and the same `ensureTag`
+        // primitive the publish path heals with, so reconcile can't act
+        // on a drift status wouldn't show. Idempotent; `--dry-run`
+        // previews without writing.
+        const result = await reconcile({
+          cwd: flags.cwd,
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+          dryRun: flags.dryRun,
+        });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(result) + '\n');
+        } else {
+          const verb = result.dryRun ? 'would create' : 'created';
+          for (const a of result.actions) {
+            process.stdout.write(
+              `${a.package}: ${a.version} live, no tag → ${verb} ${a.tag} at ${a.commit.slice(0, 7)} (${a.source})\n`,
+            );
+          }
+          process.stdout.write(`reconcile: ${verb} ${result.actions.length} tag(s)\n`);
+        }
+        return 0;
       }
       case 'write-launcher': {
         // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli

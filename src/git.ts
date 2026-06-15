@@ -115,6 +115,14 @@ export function pushTag(name: string, opts: GitOptions = {}): void {
   run(['push', 'origin', name], opts);
 }
 
+/**
+ * The commit a tag points at. `rev-list -n 1` dereferences an annotated
+ * tag down to the commit it ultimately references.
+ */
+export function tagCommit(name: string, opts: GitOptions = {}): string {
+  return run(['rev-list', '-n', '1', name], opts);
+}
+
 /* -------------------------- last-tag resolver -------------------------- */
 
 /**
