@@ -982,6 +982,34 @@ dependents keep bumping past it. `status` surfaces that in one line.
   drift can't merge unnoticed.
 - `--json` emits the rows as machine-readable JSON.
 
+`putitoutthere` is published to npm, so run it with `npx` (it reads your
+git tags, so make sure they're fetched):
+
+```bash
+# Report drift across every package in putitoutthere.toml:
+npx putitoutthere status
+
+# Exit non-zero if anything has drifted:
+npx putitoutthere status --check
+echo $?            # 1 when drifted, 0 when in sync
+
+# Machine-readable rows:
+npx putitoutthere status --json
+# [{"package":"mypkg-rust","kind":"crates","tag":null,"tagVersion":null,
+#   "registry":"0.0.1","registryUnreachable":false,
+#   "state":"published, untagged","drift":true}, …]
+```
+
+To gate every PR on release-state drift, add a step to any workflow —
+checking out tags so `status` can compare them against the registry:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # status compares local tags vs the registry
+- run: npx putitoutthere status --check
+```
+
 ### Auto-heal
 
 The most common drift — a version live on the registry but missing its
