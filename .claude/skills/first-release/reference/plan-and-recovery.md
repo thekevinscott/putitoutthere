@@ -17,9 +17,11 @@ tags, never from registry state.
 So never assert what a merge will publish. Get it from an authoritative
 dry-run:
 
-- **`plan`** — putitoutthere's plan/dry-run surface (being built). Run it (or
-  read its output) to get the exact `{package → version}` rows a merge would
-  produce. This is the authoritative answer; prefer it when available.
+- **`plan`** — putitoutthere's plan/dry-run surface. Run `npx putitoutthere
+  plan` to get the exact `{package → version}` rows a merge would produce, each
+  with a `PUBLISH` / `SKIP` verdict and a `⚠ version-skew` warning when a
+  dependent would publish while a `depends_on` dependency is skipped. This is
+  the authoritative answer; prefer it.
 - **`build-check.yml` on the PR** — runs the *same* plan + build matrix a
   release runs, with the publish job structurally absent (no `id-token`, no
   registry auth — the publish bytes don't exist on that path). The plan it
@@ -69,9 +71,10 @@ normal, not bad luck. Work it methodically:
   check, so a re-run skips already-published versions cleanly. Fix and re-run
   without fear of double-publishing.
 - **Read authoritative status before declaring success.** "The build looks
-  green" / "it probably published" were repeated misses. Check the run's actual
-  conclusion, the registry API, and the git tags — and don't say "done" until
-  all three agree.
+  green" / "it probably published" were repeated misses. `npx putitoutthere
+  status --check` reconciles the git tags against the registry in one command
+  (non-zero exit on any drift); pair it with the run's actual conclusion. Don't
+  say "done" until `status` is clean.
 
 ## The PyPI partial-tag trap (the most repeated friction)
 
@@ -88,8 +91,12 @@ already tagged, finds no new glob changes, and **excludes it from the plan** →
 `has_pypi=false` → `pypi-publish` is skipped → the package is stuck empty while
 its tag claims success.
 
-Recognize it: the git tag (and GitHub Release) exist, but `pip install
-<pkg>==<version>` 404s and the PyPI project is empty.
+Recognize it: **`npx putitoutthere status` reports the package
+`tagged, unpublished`** — the git tag (and GitHub Release) exist, but `pip
+install <pkg>==<version>` 404s and the PyPI project is empty. This is the
+*opposite* of the `published, untagged` drift that `reconcile` and the
+publish-path auto-heal repair: here the tag is already present and the
+**publish** is what's missing, so `reconcile` does **not** help — re-release.
 
 Recover with the **`release_packages` manual override at a bumped version** —
 the clean path:

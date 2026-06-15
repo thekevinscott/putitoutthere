@@ -195,9 +195,12 @@ release effect without checking — and being wrong. **Never assert what a merge
 will publish. Read it from an authoritative dry-run, then confirm with the
 user.** See `reference/plan-and-recovery.md` for the full mechanics; the core:
 
-- Use **`plan`** (putitoutthere's dry-run, being built) and/or the
-  **`build-check.yml` run on the PR** (same plan a release computes, no publish
-  job) to get the exact `{package → version}` set the merge would produce.
+- Run **`npx putitoutthere plan`** (or read the **`build-check.yml` run on the
+  PR** — same planner, no publish job). `plan` prints the exact
+  `{package → version}` set the merge would produce, a per-package `PUBLISH` /
+  `SKIP` verdict, and a **⚠ version-skew** warning if a dependent would publish
+  while a dependency it `depends_on` is skipped — the up-front catch for the
+  worst cascade failure.
 - Sanity-check it against how the planner decides: on the **very first release
   (no tags yet) every declared package ships at its `first_version`** — globs
   do not gate run one, so expect *everything* to publish. On later releases a
@@ -254,17 +257,27 @@ First-release failures are almost always real, not flakes. Work them per
   mechanism and the fix.
 - **Re-running is safe** — every handler's first publish move is an
   `isPublished` check, so re-runs skip already-published versions cleanly.
-- **The PyPI partial-tag trap** is the most repeated friction: the engine tags
-  a pypi package in its publish job, but the *upload* runs in your caller-side
-  `pypi-publish` job afterward. If that upload fails, the **tag exists but PyPI
-  is empty**, and the next run excludes the now-tagged package from the plan
-  (`has_pypi=false`) → stuck. Recover with the **`release_packages` override at
-  a bumped version** (`my-py@0.0.2`) — the clean path, and the general tool for
-  re-releasing after any pipeline fix.
+- **Published-but-untagged drift self-heals.** If a run published a version but
+  died before (or lacked permission to) push the tag, the package would
+  otherwise stick — the planner reads "last released" from tags, so it looks
+  unreleased forever. The publish path now writes the missing tag on the next
+  release run automatically, and **`npx putitoutthere reconcile`** backfills it
+  on demand with no release (it creates the tag at the sibling packages'
+  release commit). `status` (Step 10) flags this as `published, untagged`.
+- **The PyPI partial-tag trap is the *opposite* drift and still needs a manual
+  recovery.** The engine tags a pypi package in its publish job, but the
+  *upload* runs in your caller-side `pypi-publish` job afterward. If that upload
+  fails, the **tag exists but PyPI is empty** — `status` shows
+  `tagged, unpublished` — and the next run excludes the now-tagged package from
+  the plan (`has_pypi=false`) → stuck. `reconcile` does **not** fix this (the
+  tag is already there; the *publish* is what's missing). Recover with the
+  **`release_packages` override at a bumped version** (`my-py@0.0.2`) — the
+  clean path, and the general tool for re-releasing after any pipeline fix.
 - **Scoped-env limits:** git access may be branch-scoped (`403` on tag pushes
-  or other branches). Route tag backfills/deletions to the user, or sidestep
-  them with the `release_packages` bump. Don't claim a fix landed via a path
-  the environment blocks.
+  or other branches). `reconcile` belongs in CI with the release job's
+  permissions; from a scoped agent, route tag backfills to the user or sidestep
+  with the `release_packages` bump. Don't claim a fix landed via a path the
+  environment blocks.
 
 ## Step 9 — Reach the secure steady state
 
@@ -273,29 +286,40 @@ After the first publish succeeds and the packages exist on the registries:
 1. Register the real trusted publishers against the now-existing crate / npm
    package(s) if you bootstrapped with a token (PyPI's pending publisher
    already converted itself).
-2. **Remove the `secrets:` block** from `release.yml` and **delete the
+2. **Confirm OIDC is actually active before deleting anything.** Run
+   **`npx putitoutthere verify`**: per package it reports `oidc` (a
+   trusted-publisher / provenance attestation is present — safe to drop the
+   token) or `token` (still token-dependent). Don't remove a secret until the
+   package reads `oidc`.
+3. **Remove the `secrets:` block** from `release.yml` and **delete the
    bootstrap secrets** (`CARGO_REGISTRY_TOKEN`, `NPM_TOKEN`). Subsequent
    publishes are then zero-secret OIDC — the secure default.
-3. For npm families, confirm a TP exists for **every** per-platform
-   sub-package, not just the top-level.
+4. For npm `bundled-cli` / `napi` families, each per-platform sub-package
+   (`@scope/cli-linux-x64-gnu`, …) needs its own TP. `verify` reports the
+   configured (main) package's posture, so confirm the sub-packages in the npm
+   UI. `verify --check` exits non-zero while the configured package is still
+   token-dependent — a one-line CI gate for the steady state.
 
 ## Step 10 — Verify from authoritative sources
 
-Confirm the release actually landed — by checking, not assuming:
+Confirm the release actually landed — by checking, not assuming. **`status`
+collapses the tag-vs-registry cross-check into one command:**
 
-- The version is **live on the registry** (crates.io / PyPI / npmjs.com) — for
-  pypi, confirm the artifact is actually installable, not just that a tag
-  exists (the partial-tag trap). Use the registry API / a real `install`.
-- The **git tag** exists (`{name}-v{version}` or your `tag_format`).
-- A **GitHub Release** was created for the tag.
-- Tag, registry, and run conclusion **agree** for every package. If a tag
-  claims a version the registry doesn't have, that's the partial-tag trap —
-  go to Step 8.
+- Run **`npx putitoutthere status --check`** (fetch tags first —
+  `git fetch --tags`). It reconciles every package's latest git tag against the
+  registry's latest published version and flags drift: `published, untagged`
+  (the tag push failed → `reconcile` it, Step 8), `tagged, unpublished` (the
+  **partial-tag trap** — tag exists, registry doesn't have it → re-release,
+  Step 8), or `version mismatch`. `--check` exits non-zero on any drift, so it
+  also works as a CI gate. **`in sync` on every package is the green light.**
+- Run **`npx putitoutthere verify`** to confirm trust posture — `oidc` means
+  the release authenticated via a trusted publisher, no token in the loop.
+- A **GitHub Release** was created for each tag.
 - (Recommended) A no-op change to `main` does **not** trigger a publish, and a
   real change publishes via OIDC with no secret present.
 
-When all of that holds, the first release is done and the repo is in the
-zero-secret steady state.
+When `status` shows every package `in sync` and `verify` shows `oidc`, the
+first release is done and the repo is in the zero-secret steady state.
 
 ---
 
