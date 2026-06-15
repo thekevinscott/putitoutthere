@@ -944,6 +944,87 @@ line. Grep the run log for the code, then look it up here.
 | `PIOT_AUTH_NO_TOKEN` | The publish job reached the registry-auth step with no token resolved (neither an OIDC-minted token nor a caller-provided long-lived token). Almost always means the reusable workflow's trusted-publisher exchange failed silently or the caller-provided secret was empty. | Publish-time only. |
 | `PIOT_PUBLISH_EMPTY_PLAN` | `publish` was invoked but `plan` returned zero rows for a reason other than `release: skip`. The reusable workflow's gate normally prevents this; if it fires, the gate was bypassed or the engine is inconsistent. | Publish-time only. |
 
+## Release health
+
+The registry is the source of truth; git tags are putitoutthere's record
+of what's been released (it derives "last released version" from them).
+Two features keep the two in sync.
+
+### `status` — registry-vs-tag drift report
+
+`status` reconciles, per package, the latest git tag against the
+registry's latest published version — over the public registry APIs
+(crates.io / npm / PyPI), no auth required — and flags any drift:
+
+```
+package     tag      registry  state
+mypkg-rust  —        0.0.1     ⚠ published, untagged
+mypkg-npm   0.0.1    0.0.1     ✓ in sync
+mypkg-py    0.0.1    0.0.1     ✓ in sync
+```
+
+| State | Meaning |
+|-------|---------|
+| `in sync` | the latest tag matches the registry's latest version |
+| `unreleased` | no tag, and nothing published |
+| `published, untagged` | live on the registry but no tag — the drift that strands a package |
+| `tagged, unpublished` | tagged, but the registry doesn't have that version |
+| `version mismatch` | the tag and the registry disagree on the latest version |
+| `registry unreachable` | the registry couldn't be reached (reported, never gated) |
+
+Why it matters: a half-failed run that publishes a version but never
+tags it leaves the package `published, untagged`. Because the planner
+reads "last released" from tags, that package then looks unreleased,
+skips its already-live version forever, and can never bump — while its
+dependents keep bumping past it. `status` surfaces that in one line.
+
+- `--check` exits non-zero on any drift state — run it as a CI gate so
+  drift can't merge unnoticed.
+- `--json` emits the rows as machine-readable JSON.
+
+`putitoutthere` is published to npm, so run it with `npx` (it reads your
+git tags, so make sure they're fetched):
+
+```bash
+# Report drift across every package in putitoutthere.toml:
+npx putitoutthere status
+
+# Exit non-zero if anything has drifted:
+npx putitoutthere status --check
+echo $?            # 1 when drifted, 0 when in sync
+
+# Machine-readable rows:
+npx putitoutthere status --json
+# [{"package":"mypkg-rust","kind":"crates","tag":null,"tagVersion":null,
+#   "registry":"0.0.1","registryUnreachable":false,
+#   "state":"published, untagged","drift":true}, …]
+```
+
+To gate every PR on release-state drift, add a step to any workflow —
+checking out tags so `status` can compare them against the registry:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # status compares local tags vs the registry
+- run: npx putitoutthere status --check
+```
+
+### Auto-heal
+
+The most common drift — a version live on the registry but missing its
+tag — heals itself. **There's nothing to run**: when a release runs and
+`publish` finds a version already published, it writes the missing tag
+(at the release commit) instead of skipping silently. A package stranded
+by an earlier half-failed run recovers on its **next release run** — it
+has no tag, so it's force-selected into the plan, found already-published,
+and tagged. No manual tag surgery. Idempotent: already-tagged packages
+are untouched.
+
+If the repo has nothing else to release, heal the stuck package now by
+triggering a [manual release](#manual-release) for it
+(`release_packages`).
+
 ## Project layout
 
 - [`CHANGELOG.md`](./CHANGELOG.md) — per-release changes.

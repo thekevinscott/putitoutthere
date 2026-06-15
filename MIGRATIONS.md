@@ -21,6 +21,50 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### `status`: registry-vs-tag drift report
+
+**Summary.** New read-only command `putitoutthere status` reports, per
+package, whether the latest git tag matches the registry's latest
+published version, flagging drift — notably `published, untagged` (a
+version live on the registry but missing its tag, which strands the
+package). Reads public registry metadata only; no auth.
+
+**Required changes.** None. Additive — a new command.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** None — new surface.
+
+**Verification.** Run `status` over a repo with a published-but-untagged
+package: that package shows `published, untagged` and `status --check`
+exits non-zero; a fully in-sync repo shows every package `in sync` and
+exits zero. `--json` emits the same rows as JSON.
+
+### publish-path auto-heal: missing tags
+
+**Summary.** `putitoutthere publish` now self-heals a missing git tag: when
+a version is already live on the registry but has no tag, publish writes the
+tag instead of skipping silently. Previously the already-published branch
+returned before tagging, so a version that reached the registry on a
+half-failed run (published, then the run died before the tag step) was
+stranded published-but-untagged — and because piot derives "last released"
+from tags, it skipped forever and could never bump, while dependents drifted
+ahead into unflagged version skew.
+
+**Required changes.** None. Purely additive behavior on the publish path.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** On the next release run after
+upgrading, any package that is live on a registry but missing its tag has the
+tag created (and pushed) at the release commit, automatically. Idempotent:
+packages already correctly tagged are untouched.
+
+**Verification.** Re-run a release on a repo with a published-but-untagged
+package: the run now creates the missing tag (per the package's `tag_format`;
+visible via `git tag` / on GitHub) and the package resumes normal version
+bumping on later releases.
+
 ### pypi version-independent wheels build once
 
 **Summary.** A `kind = "pypi"` `build = "maturin"` package whose wheel is
