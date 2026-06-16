@@ -389,82 +389,79 @@ describe('reusable workflow: bundle_cli musl builds install musl-tools C compile
   });
 });
 
-describe('reusable workflow: npm bundled-cli steps map npm-flavor triples to Rust triples before rustup/cargo (#387)', () => {
-  // `matrix.target` for npm bundled-cli rows is an napi-rs-flavor triple
-  // (linux-x64-gnu, darwin-arm64, win32-x64-msvc, …) — NOT a Rust triple.
-  //
-  // The bare `${TARGET//-linux-gnu/-linux-musl}` substitution in the
-  // affected steps is a no-op on npm triples: `linux-x64-gnu` does not
-  // contain the substring `-linux-gnu`, so BINARY_TARGET stays `linux-x64-gnu`
-  // and rustup receives it unchanged:
+describe('reusable workflow: npm bundled-cli reads the engine-resolved Rust triple from matrix.rust_target (#387)', () => {
+  // `matrix.target` for npm bundled-cli rows is an napi-rs short-form
+  // triple (linux-x64-gnu, darwin-arm64, win32-x64-msvc, …) — NOT a Rust
+  // triple. rustup / cargo only understand Rust triples, so the triple
+  // must be mapped (linux-x64-gnu → x86_64-unknown-linux-gnu) before any
+  // rustup / cargo invocation, otherwise:
   //
   //   error: toolchain 'stable-x86_64-unknown-linux-gnu' does not support
   //          target 'linux-x64-gnu'
   //
-  // The fix must map npm-flavor triples to their Rust equivalents BEFORE
-  // the gnu→musl swap and before any rustup / cargo invocation. The
-  // observable contract: each affected step's run block must contain a
-  // real Rust triple component (`unknown-linux`, `apple-darwin`, or
-  // `pc-windows-msvc`) that can only be present if an explicit lookup or
-  // mapping table is in the script. npm-flavor triples never contain these
-  // substrings, so their absence is a reliable signal that the mapping is
-  // missing (#387).
+  // That mapping belongs in the engine, not in shell. `plan.ts` resolves
+  // it once via `toRustTriple` and emits it on each bundled-cli row as
+  // `rust_target`; the workflow consumes `${{ matrix.rust_target }}`
+  // instead of re-deriving the correspondence inline. This keeps a single
+  // source of truth (the engine's TRIPLE_MAP / NAPI_TO_RUST), is
+  // unit-testable, and lets future musl-suffixed npm triples flow through
+  // the same map. Previously each affected step carried its own copy of
+  // the napi→rust `case` table — exactly the parallel reimplementation
+  // #387 removes.
+  //
+  // The observable contract, per affected step:
+  //   1. the step binds an env var to `${{ matrix.rust_target }}` (the
+  //      engine-resolved Rust triple) and consumes that, and
+  //   2. the run block carries NO inline napi→rust lookup — it contains
+  //      no literal Rust-triple component (`unknown-linux`,
+  //      `apple-darwin`, `pc-windows-msvc`). Those substrings appear only
+  //      if a `case` / lookup table survived in the shell; the gnu→musl
+  //      substitution `${RUST_TARGET//-linux-gnu/-linux-musl}` matches
+  //      none of them.
   const npmPaths = [
     { label: '_matrix.yml npm bundled-cli', file: '_matrix.yml', job: 'build' },
     { label: 'e2e-fixture-job.yml npm bundled-cli', file: 'e2e-fixture-job.yml', job: 'build' },
   ];
 
-  const rustTriplePattern = /unknown-linux|apple-darwin|pc-windows-msvc/;
+  // A literal Rust-triple component, present only if an inline napi→rust
+  // mapping survives in the shell.
+  const inlineRustTriple = /unknown-linux|apple-darwin|pc-windows-msvc/;
 
-  it.each(npmPaths)(
-    '$label: `add Rust target` run block contains a Rust triple (not a raw npm-flavor triple)',
-    ({ file, job, label }) => {
-      const steps = loadSteps(file, job);
-      const step = findStep(steps, 'npm', /add Rust target/i, /rustup\s+target\s+add/);
-      expect(step, `${label}: add Rust target step not found`).toBeDefined();
-      expect(
-        step!.run,
-        `${label}: add Rust target — run block must contain an explicit npm-to-rust ` +
-          'triple mapping (e.g. a case statement mapping linux-x64-gnu → ' +
-          'x86_64-unknown-linux-gnu). Without it, `${TARGET//-linux-gnu/-linux-musl}` ' +
-          'is a no-op on npm triples and rustup receives `linux-x64-gnu` unchanged, ' +
-          'which it rejects. Expected the run block to contain a Rust triple component ' +
-          'like `unknown-linux`, `apple-darwin`, or `pc-windows-msvc` (#387).',
-      ).toMatch(rustTriplePattern);
-    },
-  );
+  function envReferencesRustTarget(step: Step): boolean {
+    return Object.values(step.env ?? {}).some((v) => /matrix\.rust_target/.test(v));
+  }
 
-  it.each(npmPaths)(
-    '$label: `cargo build` run block contains a Rust triple (not a raw npm-flavor triple)',
-    ({ file, job, label }) => {
-      const steps = loadSteps(file, job);
-      const step = findStep(steps, 'npm', /cargo build/i);
-      expect(step, `${label}: cargo build step not found`).toBeDefined();
-      expect(
-        step!.run,
-        `${label}: cargo build — same npm→rust triple mapping required before ` +
-          '`--target`. Without it, cargo receives `linux-x64-gnu` (or `linux-x64-musl` ' +
-          'if the no-op gnu→musl swap ran) instead of `x86_64-unknown-linux-musl`, ' +
-          'and the build fails. Expected `unknown-linux`, `apple-darwin`, or ' +
-          '`pc-windows-msvc` in the run block (#387).',
-      ).toMatch(rustTriplePattern);
-    },
-  );
+  const affectedSteps: { label: string; find: (steps: Step[]) => Step | undefined }[] = [
+    { label: 'add Rust target', find: (s) => findStep(s, 'npm', /add Rust target/i, /rustup\s+target\s+add/) },
+    { label: 'cargo build', find: (s) => findStep(s, 'npm', /cargo build/i) },
+    { label: 'stage binary', find: (s) => findStep(s, 'npm', /stage binary/i, /src=/) },
+  ];
 
-  it.each(npmPaths)(
-    '$label: `stage binary` run block reads from a Rust triple target dir',
-    ({ file, job, label }) => {
-      const steps = loadSteps(file, job);
-      const step = findStep(steps, 'npm', /stage binary/i, /src=/);
-      expect(step, `${label}: stage binary step not found`).toBeDefined();
-      expect(
-        step!.run,
-        `${label}: stage binary — the src= path must be derived from a real Rust triple. ` +
-          'If cargo built to target/x86_64-unknown-linux-musl/… but the stage step reads ' +
-          'from target/linux-x64-gnu/… (or target/linux-x64-musl/…), the binary is not ' +
-          'found and the step fails. Expected `unknown-linux`, `apple-darwin`, or ' +
-          '`pc-windows-msvc` in the run block (#387).',
-      ).toMatch(rustTriplePattern);
-    },
-  );
+  for (const { label: fileLabel, file, job } of npmPaths) {
+    for (const { label: stepLabel, find } of affectedSteps) {
+      it(`${fileLabel}: \`${stepLabel}\` reads matrix.rust_target and carries no inline napi→rust mapping`, () => {
+        const step = find(loadSteps(file, job));
+        expect(step, `${fileLabel}: \`${stepLabel}\` step not found`).toBeDefined();
+
+        expect(
+          envReferencesRustTarget(step!),
+          `${fileLabel} \`${stepLabel}\`: the step must bind an env var to ` +
+            '`${{ matrix.rust_target }}` (the engine-resolved Rust triple from ' +
+            "plan.ts's toRustTriple) and consume it, instead of mapping the " +
+            'npm-flavor matrix.target to a Rust triple inline. Without this the ' +
+            "napi→rust correspondence is duplicated in shell and drifts from the " +
+            "engine's TRIPLE_MAP (#387).",
+        ).toBe(true);
+
+        expect(
+          step!.run ?? '',
+          `${fileLabel} \`${stepLabel}\`: the run block must NOT contain an inline ` +
+            'napi→rust lookup. A literal Rust-triple component (`unknown-linux`, ' +
+            '`apple-darwin`, `pc-windows-msvc`) only appears if a `case` / lookup ' +
+            'table survived in the shell — the mapping belongs in the engine ' +
+            '(plan.ts → matrix.rust_target), read here as `$RUST_TARGET` (#387).',
+        ).not.toMatch(inlineRustTriple);
+      });
+    }
+  }
 });

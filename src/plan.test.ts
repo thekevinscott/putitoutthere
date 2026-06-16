@@ -1123,6 +1123,131 @@ targets = ["x86_64-unknown-linux-gnu"]
   });
 });
 
+describe('plan: npm bundled-cli rust_target (#387)', () => {
+  // npm `targets` are napi-rs short form (linux-x64-gnu, darwin-arm64,
+  // win32-x64-msvc). The bundled-cli cross-compile feeds the triple to
+  // rustup / cargo, which only understand Rust triples. plan resolves the
+  // Rust triple once (via toRustTriple) and emits it as `rust_target` on
+  // each bundled-cli per-target row, so the workflow reads
+  // `matrix.rust_target` instead of mapping the npm-flavor triple inline.
+  // Absent on the main row and on napi rows in a multi-mode package.
+
+  // rust_target is a bundled-cli-npm-only matrix-row field; read it via the
+  // same cast idiom python_version uses above, so the assertion stands
+  // whether or not MatrixRow declares the field yet (red before the impl
+  // adds it, green after).
+  const rustTarget = (r: unknown): string | undefined =>
+    (r as Record<string, unknown>)['rust_target'] as string | undefined;
+
+  it('maps each napi-flavor target to its Rust triple on the bundled-cli rows, not the main row', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+build = "bundled-cli"
+targets = ["linux-x64-gnu", "darwin-arm64", "win32-x64-msvc"]
+
+[package.bundle_cli]
+bin = "my-cli"
+crate_path = "crates/my-cli"
+`,
+      'utf8',
+    );
+    commit('seed', { 'packages/ts/package.json': '{}' });
+
+    const matrix = await plan({ cwd: repo });
+
+    expect(rustTarget(matrix.find((r) => r.target === 'linux-x64-gnu'))).toBe(
+      'x86_64-unknown-linux-gnu',
+    );
+    expect(rustTarget(matrix.find((r) => r.target === 'darwin-arm64'))).toBe(
+      'aarch64-apple-darwin',
+    );
+    expect(rustTarget(matrix.find((r) => r.target === 'win32-x64-msvc'))).toBe(
+      'x86_64-pc-windows-msvc',
+    );
+
+    // The noarch top-level (main) row has no per-target binary to compile.
+    expect(rustTarget(matrix.find((r) => r.target === 'main'))).toBeUndefined();
+  });
+
+  it('passes a rust-flavor target through unchanged (identity)', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+build = "bundled-cli"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+crate_path = "crates/my-cli"
+`,
+      'utf8',
+    );
+    commit('seed', { 'packages/ts/package.json': '{}' });
+
+    const matrix = await plan({ cwd: repo });
+    expect(rustTarget(matrix.find((r) => r.target === 'x86_64-unknown-linux-gnu'))).toBe(
+      'x86_64-unknown-linux-gnu',
+    );
+  });
+
+  it('sets rust_target only on the bundled-cli row of a multi-mode (napi + bundled-cli) build', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "my-cli"
+kind = "npm"
+path = "packages/ts"
+globs = ["packages/ts/**"]
+build = [
+  { mode = "napi",        name = "@my-cli/lib-{triple}" },
+  { mode = "bundled-cli", name = "@my-cli/cli-{triple}" },
+]
+targets = ["linux-x64-gnu"]
+
+[package.bundle_cli]
+bin = "my-cli"
+crate_path = "crates/my-cli"
+`,
+      'utf8',
+    );
+    commit('seed', { 'packages/ts/package.json': '{}' });
+
+    const matrix = await plan({ cwd: repo });
+
+    // The bundled-cli row carries the mapped Rust triple…
+    expect(
+      rustTarget(matrix.find((r) => r.target === 'linux-x64-gnu' && r.build === 'bundled-cli')),
+    ).toBe('x86_64-unknown-linux-gnu');
+
+    // …the napi row does not — napi has its own toolchain and never
+    // shells out to `rustup target add` / `cargo build --target`.
+    expect(
+      rustTarget(matrix.find((r) => r.target === 'linux-x64-gnu' && r.build === 'napi')),
+    ).toBeUndefined();
+  });
+});
+
 describe('plan: pypi multi-version wheels (#369)', () => {
   const TOML = `
 [putitoutthere]
