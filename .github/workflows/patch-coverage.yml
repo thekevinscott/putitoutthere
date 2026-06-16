@@ -11,10 +11,8 @@ name: Patch coverage
 # markers in unchanged code are grandfathered; touching their region is
 # treated as a new introduction.
 #
-# This job must be named explicitly in branch protection: CI Gate's
-# aggregation can race past late-registering checks like this one, so it
-# can't be relied on to gate patch-coverage on its own (#417). See
-# .github/BRANCH_PROTECTION.md.
+# Aggregator (CI Gate) automatically requires this job once it appears, so
+# branch protection doesn't need updating to make it a merge prerequisite.
 
 on:
   pull_request:

@@ -1,16 +1,9 @@
 name: CI Gate
 
-# Aggregator check that turns green when every other check on this PR
-# has completed without failure. It covers the fast checks and the
-# path-filtered ones (actionlint, link-check) that can't be required
-# individually.
-#
-# NOT a sufficient sole gate. pr-monitor's poll loop only re-fetches the
-# check list while something is in progress, so heavier jobs that
-# register after the fast wave drains (integration, e2e, the fixture
-# matrix) can be missed and CI Gate goes green anyway (#417). Branch
-# protection must ALSO require those contexts explicitly -- see
-# .github/BRANCH_PROTECTION.md.
+# Aggregator check that turns green when every other required check on
+# this PR has passed. Set this as the single required status check in
+# branch protection rather than enumerating each workflow -- that way
+# adding a new workflow doesn't require updating branch protection.
 #
 # Mirrors dirsql's pr-monitor pattern.
 
