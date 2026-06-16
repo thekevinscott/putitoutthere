@@ -18,6 +18,7 @@ import {
   assertTripleSupported,
   normalizeBuild,
   platformArtifactName,
+  toRustTriple,
   type NpmBuildField,
 } from './handlers/npm-platform.js';
 import { resolvePythonVersions } from './python-versions.js';
@@ -65,6 +66,15 @@ export interface MatrixRow {
   // crates / npm rows. `_matrix.yml` feeds it to `actions/setup-python`
   // and, for maturin, to the build's `--interpreter` selection.
   python_version?: string;
+  // #387 (npm): the Rust (rustup/cargo) target triple for this row's
+  // bundled-cli cross-compile. npm `target` is an napi-rs short-form
+  // triple (`linux-x64-gnu`) that `rustup target add` / `cargo build
+  // --target` cannot consume; `plan` resolves it once via `toRustTriple`
+  // so the workflow reads `matrix.rust_target` instead of re-deriving the
+  // mapping in shell. Set ONLY on npm bundled-cli per-target rows. Absent
+  // on napi rows, the npm main row, and pypi/crates rows (pypi `targets`
+  // are already Rust triples — the workflow uses `matrix.target` there).
+  rust_target?: string;
 }
 
 export interface PlanOptions {
@@ -409,6 +419,11 @@ function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[]
             // binary to compile at the top-level).
             if (bundleCli !== undefined && bEntry.mode === 'bundled-cli') {
               row.bundle_cli = bundleCli;
+              // #387: resolve the npm-flavor triple to its Rust form once,
+              // here, so the cross-compile steps read `matrix.rust_target`
+              // instead of mapping inline in shell. `assertTripleSupported`
+              // above guarantees the triple is mapped, so this never throws.
+              row.rust_target = toRustTriple(triple);
             }
             out.push(row);
           }
