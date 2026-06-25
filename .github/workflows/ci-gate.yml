@@ -18,13 +18,14 @@ jobs:
     name: CI Gate
     runs-on: ubuntu-latest
     steps:
-      # SHA-pinned to pr-monitor's main HEAD rather than @v1. The v1 tag's
-      # action excludes its own job by name (the deprecated `job-name` input),
-      # so without job-name it monitors its own run, sits "in progress," and
-      # times out. This commit's TS action excludes its own workflow run
-      # automatically via context.runId (src/monitor.ts), so no job-name is
-      # needed and the gate no longer waits on itself. Immutable pin.
-      - uses: thekevinscott/pr-monitor@0dfd99aa5a1ea443e14a82ba0fc9a0977f5e83b3 # main
+      # Track pr-monitor's main HEAD (mutable ref, always latest) rather
+      # than @v1. The v1 tag's action excludes its own job by name (the
+      # deprecated `job-name` input), so without job-name it monitors its
+      # own run, sits "in progress," and times out. main's TS action
+      # excludes its own workflow run automatically via context.runId
+      # (src/monitor.ts), so no job-name is needed and the gate no longer
+      # waits on itself.
+      - uses: thekevinscott/pr-monitor@main
         with:
           # pr-monitor's default cap is 10 minutes; the full suite
           # (e2e fixtures + TestPyPI publish) runs ~10m, so the default
