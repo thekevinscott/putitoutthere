@@ -18,18 +18,19 @@ jobs:
     name: CI Gate
     runs-on: ubuntu-latest
     steps:
-      # Full-SHA-pinned to pr-monitor's main HEAD. A bare `@main` ref is
+      # Floating-major-tag pinned to pr-monitor's @v1. A bare `@main` ref is
       # rejected by this repo's own workflow-YAML invariant
       # (test/workflows/workflow-yaml-invariants.test.ts): external refs
-      # must pin a major tag, a full SHA, or a release/vN branch. The @v1
-      # tag's action excludes its own job by name (the deprecated `job-name`
-      # input), so without job-name it monitors its own run, sits "in
-      # progress," and times out. This commit's TS action excludes its own
-      # workflow run automatically via context.runId (src/monitor.ts), so no
-      # job-name is needed and the gate no longer waits on itself.
-      # Bump this SHA to adopt newer pr-monitor changes, or switch to @v1
-      # once that tag is re-pointed to a run-ID-exclusion commit.
-      - uses: thekevinscott/pr-monitor@0dfd99aa5a1ea443e14a82ba0fc9a0977f5e83b3 # main
+      # must pin a major tag, a full SHA, or a release/vN branch. A major
+      # tag is allowed, and pr-monitor keeps `v1` re-pointed to its main
+      # HEAD via a move-major-tag workflow, so `@v1` always tracks latest
+      # main while staying invariant-compliant. The current main action
+      # excludes its own workflow run automatically via context.runId
+      # (src/monitor.ts), so no `job-name` is needed and the gate no longer
+      # waits on itself (the older @v1 needed the deprecated `job-name`
+      # input to avoid monitoring its own job and timing out).
+      # v1 was bootstrapped to SHA 0dfd99aa5a1ea443e14a82ba0fc9a0977f5e83b3.
+      - uses: thekevinscott/pr-monitor@v1
         with:
           # pr-monitor's default cap is 10 minutes; the full suite
           # (e2e fixtures + TestPyPI publish) runs ~10m, so the default
