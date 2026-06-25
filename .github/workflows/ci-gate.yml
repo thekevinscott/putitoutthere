@@ -18,9 +18,20 @@ jobs:
     name: CI Gate
     runs-on: ubuntu-latest
     steps:
+      # Floating-major-tag pinned to pr-monitor's @v1. A bare `@main` ref is
+      # rejected by this repo's own workflow-YAML invariant
+      # (test/workflows/workflow-yaml-invariants.test.ts): external refs
+      # must pin a major tag, a full SHA, or a release/vN branch. A major
+      # tag is allowed, and pr-monitor keeps `v1` re-pointed to its main
+      # HEAD via a move-major-tag workflow, so `@v1` always tracks latest
+      # main while staying invariant-compliant. The current main action
+      # excludes its own workflow run automatically via context.runId
+      # (src/monitor.ts), so no `job-name` is needed and the gate no longer
+      # waits on itself (the older @v1 needed the deprecated `job-name`
+      # input to avoid monitoring its own job and timing out).
+      # v1 was bootstrapped to SHA 0dfd99aa5a1ea443e14a82ba0fc9a0977f5e83b3.
       - uses: thekevinscott/pr-monitor@v1
         with:
-          job-name: CI Gate
           # pr-monitor's default cap is 10 minutes; the full suite
           # (e2e fixtures + TestPyPI publish) runs ~10m, so the default
           # times out before the last job reports. Give it headroom.
