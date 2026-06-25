@@ -16,7 +16,7 @@ at `Settings → Branches → Add rule` (branch pattern: `main`).
 **Require status checks to pass before merging** ✓
 - Require branches to be up to date before merging ✓
 - Required status checks:
-  - `CI Gate` (only this one — aggregates every other check via `clankerbot/pr-monitor`)
+  - `CI Gate` (only this one — aggregates every other check via `thekevinscott/pr-monitor`)
 
 Do **not** enumerate each workflow individually. The aggregator turns
 green only when every other required check passes, so adding a new
