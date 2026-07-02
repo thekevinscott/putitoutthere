@@ -21,6 +21,33 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### napi `.node` embeds the release version
+
+**Summary.** `kind = "npm"` `build = "napi"` releases now rewrite the napi
+crate's version to the planned release version before `napi build` compiles
+the `.node`, mirroring the maturin (#276) and bundled-cli (#366) pre-build
+bumps. Previously the compiled `.node` embedded whatever `[package].version`
+literal sat on disk, so a library re-exposing the Rust core's `version()`
+through napi reported a version diverging from the published npm package
+(whose `package.json` version was already correct).
+
+**Required changes.** None. The bump is a workflow-internal step; consumers
+need no config change. A napi crate that inherits its version via
+`version.workspace = true` is handled by the #428 workspace resolver.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** For a napi package, the
+per-platform `.node` now reports the released version from any API sourced
+on `CARGO_PKG_VERSION` (e.g. a Rust `version()` re-exported through napi).
+The synthesized per-platform `package.json` version is unchanged (it was
+already `matrix.version`). Non-napi npm packages are unaffected.
+
+**Verification.** Release a napi package and read its Rust-sourced
+`version()` from the installed addon (or inspect the crate manifest the
+build rewrote): it matches the published npm version, not the pre-release
+on-disk literal.
+
 ### Version bump follows Cargo workspace inheritance
 
 **Summary.** piot's pre-build version rewrite — the maturin `write-version`

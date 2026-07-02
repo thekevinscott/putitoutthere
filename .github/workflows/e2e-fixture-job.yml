@@ -399,6 +399,18 @@ jobs:
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
 
+      # #429: mirror of the _matrix.yml napi write-crate-version step so the
+      # js-napi fixture exercises the same pre-build version bump a real napi
+      # consumer's release runs. Same gate and placement; `uses: ./` and a
+      # fixture-tree-relative working_directory per the e2e harness.
+      - if: matrix.kind == 'npm' && matrix.build == 'napi' && matrix.target != 'main'
+        name: napi — write crate version for ${{ matrix.name }}
+        uses: ./
+        with:
+          command: write-crate-version
+          working_directory: fixture-tree/${{ matrix.path }}
+          version: ${{ matrix.version }}
+
       - if: matrix.kind == 'npm'
         working-directory: fixture-tree/${{ matrix.path }}
         shell: bash

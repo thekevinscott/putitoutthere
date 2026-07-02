@@ -574,6 +574,28 @@ jobs:
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
 
+      # #429: bump the napi crate's version to matrix.version before
+      # `napi build` (inside `npm run build`) bakes CARGO_PKG_VERSION into
+      # the compiled `.node`. Mirror of the bundled-cli write-crate-version
+      # step above (#366) and the maturin write-version step (#276): without
+      # it the per-triple `.node` ships the stale on-disk crate literal, so
+      # a library re-exposing the Rust core's version() through napi reports
+      # a version diverging from the published npm package (whose synthesized
+      # package.json version is already correct). The napi crate is the
+      # package's own crate (napi-rs convention: Cargo.toml beside
+      # package.json), so the target is matrix.path — unlike bundled-cli,
+      # whose CLI crate can live at a separate bundle_cli.crate_path. #428:
+      # write-crate-version resolves `version.workspace = true` to the
+      # workspace root, so a polyglot-workspace napi crate is handled too.
+      # The noarch `main` row compiles no `.node`, so it is excluded.
+      - if: matrix.kind == 'npm' && matrix.build == 'napi' && matrix.target != 'main'
+        name: napi — write crate version for ${{ matrix.name }}
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: write-crate-version
+          working_directory: ${{ matrix.path }}
+          version: ${{ matrix.version }}
+
       - if: matrix.kind == 'npm'
         working-directory: ${{ matrix.path }}
         # Build matrix can target Windows runners; default shell there is
