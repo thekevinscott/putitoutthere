@@ -581,14 +581,33 @@ jobs:
       # it the per-triple `.node` ships the stale on-disk crate literal, so
       # a library re-exposing the Rust core's version() through napi reports
       # a version diverging from the published npm package (whose synthesized
-      # package.json version is already correct). The napi crate is the
-      # package's own crate (napi-rs convention: Cargo.toml beside
-      # package.json), so the target is matrix.path — unlike bundled-cli,
-      # whose CLI crate can live at a separate bundle_cli.crate_path. #428:
-      # write-crate-version resolves `version.workspace = true` to the
-      # workspace root, so a polyglot-workspace napi crate is handled too.
-      # The noarch `main` row compiles no `.node`, so it is excluded.
+      # package.json version is already correct). #428: write-crate-version
+      # resolves `version.workspace = true` to the workspace root, so a
+      # polyglot-workspace napi crate is handled too.
+      #
+      # The bump runs only when the napi crate's Cargo.toml is COLOCATED at
+      # the package path (the napi-rs single-crate default: Cargo.toml beside
+      # package.json — the shape template-lib and the js-napi fixture use). A
+      # multi-mode package (napi + bundled-cli) or one whose napi crate lives
+      # elsewhere has no Cargo.toml at matrix.path, and there is no per-napi
+      # `crate_path` config to point at it yet, so the bump is skipped with a
+      # notice rather than guessed. The noarch `main` row compiles no
+      # `.node`, so it is excluded.
       - if: matrix.kind == 'npm' && matrix.build == 'napi' && matrix.target != 'main'
+        name: napi — detect colocated crate for ${{ matrix.name }}
+        id: napi-crate
+        shell: bash
+        env:
+          PKG_PATH: ${{ matrix.path }}
+        run: |
+          set -euo pipefail
+          if [ -f "${PKG_PATH}/Cargo.toml" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::napi: no Cargo.toml at ${PKG_PATH} — skipping the pre-build crate-version write; the .node will embed its on-disk CARGO_PKG_VERSION. Colocate the napi crate's Cargo.toml with package.json to bake the release version in automatically (multi-mode / separate-crate napi is not yet auto-bumped)."
+          fi
+      - if: matrix.kind == 'npm' && matrix.build == 'napi' && matrix.target != 'main' && steps.napi-crate.outputs.present == 'true'
         name: napi — write crate version for ${{ matrix.name }}
         uses: thekevinscott/putitoutthere@v0
         with:

@@ -399,11 +399,27 @@ jobs:
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
 
-      # #429: mirror of the _matrix.yml napi write-crate-version step so the
-      # js-napi fixture exercises the same pre-build version bump a real napi
-      # consumer's release runs. Same gate and placement; `uses: ./` and a
-      # fixture-tree-relative working_directory per the e2e harness.
+      # #429: mirror of the _matrix.yml napi crate-version bump so the
+      # js-napi fixture exercises the same pre-build path a real napi
+      # consumer's release runs. Its Cargo.toml is colocated, so the write
+      # runs; the polyglot-everything multi-mode fixture has no Cargo.toml at
+      # packages/ts, so the guard skips it — same behavior as production.
+      # `uses: ./` and fixture-tree-relative paths per the e2e harness.
       - if: matrix.kind == 'npm' && matrix.build == 'napi' && matrix.target != 'main'
+        name: napi — detect colocated crate for ${{ matrix.name }}
+        id: napi-crate
+        shell: bash
+        env:
+          PKG_PATH: fixture-tree/${{ matrix.path }}
+        run: |
+          set -euo pipefail
+          if [ -f "${PKG_PATH}/Cargo.toml" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::napi: no Cargo.toml at ${PKG_PATH}; skipping pre-build crate-version write (multi-mode / separate-crate napi)."
+          fi
+      - if: matrix.kind == 'npm' && matrix.build == 'napi' && matrix.target != 'main' && steps.napi-crate.outputs.present == 'true'
         name: napi — write crate version for ${{ matrix.name }}
         uses: ./
         with:
