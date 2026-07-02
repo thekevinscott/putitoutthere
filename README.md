@@ -310,7 +310,7 @@ version = 1   # required; only 1 is valid today
 | `npm`     | string                 | Override `name` → npm name (for scoped packages).    |
 | `access`  | enum                   | `public` \| `restricted`. Default `public`.          |
 | `tag`     | string                 | dist-tag. Default `latest`.                          |
-| `build`   | string \| array        | `"napi"` \| `"bundled-cli"` (single mode), or an array of entries (each: a bare mode string or `{ mode, name }` with a [name template](#multi-mode-npm-family)). Omitted = vanilla. See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
+| `build`   | string \| array        | `"napi"` \| `"bundled-cli"` (single mode), or an array of entries (each: a bare mode string or `{ mode, name }` with a [name template](#multi-mode-npm-family)). Omitted = vanilla. See Recipes → [napi](#napi-npm-family) / [Bundled-CLI](#bundled-cli-npm-family) npm family. |
 | `targets` | (string \| object)[]   | Required when `build` is set.                        |
 | `[package.bundle_cli]` | sub-table | Declarative cross-compile for `build = "bundled-cli"` rows. Fields: `bin` (required), `crate_path` (default `"."`), `features` (default `[]`), `no_default_features` (default `false`). See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
 
@@ -746,6 +746,86 @@ registration (a policy on `my-cli` does not cover
 > `::warning::` line in the run log so the recovery is visible).
 > No consumer-side change is required; you can keep the lockfile
 > committed and the `optionalDependencies` declared.
+
+### napi npm family
+
+Ship a [napi-rs](https://napi.rs) Node addon (a `.node` native library) as
+an npm per-platform family — consumers `import` the package and Node loads
+the prebuilt binary for their platform. The `@node-rs/*` / `@swc/core`
+distribution shape.
+
+Config:
+
+```toml
+[[package]]
+name    = "my-addon"
+kind    = "npm"
+path    = "packages/node"
+build   = "napi"
+globs   = ["packages/node/**", "crates/core/**"]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+```
+
+The engine publishes a per-platform sub-package per target
+(`my-addon-<triple>`) plus a top-level package whose `optionalDependencies`
+pin them at the published version; napi-rs's loader resolves the matching
+one at runtime. The reusable workflow fans the build across your `targets`
+— one native runner per triple — so you never wire per-target steps
+yourself.
+
+**You own the build script.** Unlike `bundled-cli` — where the engine runs
+the cross-compile for you — the napi toolchain stays consumer-owned. For
+each per-target row the workflow runs your `package.json` `build` script
+with `TARGET` set to that triple (and `BUILD=napi`); your script runs
+`napi build` for it and stages the resulting `.node` under
+`build/<triple>/`, the directory the engine packages per-platform
+artifacts from:
+
+```js
+// scripts/build.cjs — invoked by your package.json "build" script
+const target = process.env.TARGET;
+// The noarch main row runs with TARGET=main (or unset) — nothing to build.
+if (!target || target === 'main' || target === 'noarch') process.exit(0);
+
+// napi-rs emits `<name>.<triple>.node`; stage it under build/<triple>/,
+// e.g.  napi build --release --target ${target} --output-dir build/${target}
+```
+
+The `main` (noarch) row carries no per-target binary — its build run is a
+no-op for the `.node` and compiles only your TypeScript / JS.
+
+> [!NOTE]
+> **Cross-compilation is yours to arrange.** Each target builds on a
+> native runner where one exists (`x86_64-linux` on `ubuntu-latest`,
+> `aarch64-linux` on `ubuntu-24.04-arm`, darwin on `macos-latest`,
+> windows on `windows-2022`), so the common triples need no cross
+> toolchain — `napi build --target <native triple>` just works. For a
+> target that isn't native to its runner (a `*-musl` triple, or an
+> x86_64 macOS build on the arm64 runner), your build script owns
+> `rustup target add <triple>` and any linker / C-toolchain setup. This
+> is the one place napi differs from `bundled-cli`, where the engine
+> performs the gnu→musl mapping and installs the musl toolchain for you.
+
+Each per-platform sub-package needs its own npm trusted-publisher
+registration (a policy on `my-addon` does not cover
+`my-addon-x86_64-unknown-linux-gnu`) — same as the bundled-cli family
+above.
+
+The **first-publish lockfile chicken-and-egg** note under
+[Bundled-CLI npm family](#bundled-cli-npm-family) applies identically to
+napi families: the reusable workflow's strict installs self-heal, so you
+can keep the lockfile committed and the `optionalDependencies` declared.
+
+> [!NOTE]
+> **Both modes at once.** A package that is *both* a `.node` addon and a
+> CLI declares `build` as an array — see
+> [Multi-mode npm family](#multi-mode-npm-family) below.
 
 ### Multi-mode npm family
 
