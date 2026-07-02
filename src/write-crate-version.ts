@@ -18,10 +18,10 @@
  * gate. This is that command.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { replaceCargoVersion } from './handlers/crates.js';
+import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
 
 /**
  * Rewrite `[package].version` in the crate at `crateDir` to `version`
@@ -48,7 +48,5 @@ export function writeCrateVersionForBuild(crateDir: string, version: string): st
     }
     throw err;
   }
-  const updated = replaceCargoVersion(original, version);
-  if (updated !== original) {writeFileSync(cargoPath, updated, 'utf8');}
-  return [cargoPath];
+  return writeResolvedCargoVersion(crateDir, original, version);
 }
