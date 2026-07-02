@@ -17,13 +17,13 @@
  * actionable error rather than building an under-versioned artifact.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
 import { ErrorCodes } from './error-codes.js';
-import { replaceCargoVersion } from './handlers/crates.js';
+import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
 
 const DYNAMIC_VERSION_DOC_POINTER =
   'https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions';
@@ -95,9 +95,7 @@ export function writeVersionForBuild(pkgDir: string, version: string): string[] 
     /* v8 ignore next -- non-ENOENT read errors surface as-is */
     throw err;
   }
-  const cargoUpdated = replaceCargoVersion(cargoOriginal, version);
-  if (cargoUpdated !== cargoOriginal) {writeFileSync(cargoPath, cargoUpdated, 'utf8');}
-  return [cargoPath];
+  return writeResolvedCargoVersion(pkgDir, cargoOriginal, version);
 }
 
 function isDynamicVersion(project: { dynamic?: unknown }): boolean {

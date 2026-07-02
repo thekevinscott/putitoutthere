@@ -57,4 +57,38 @@ describe('writeCrateVersionForBuild (#366)', () => {
     );
     expect(() => writeCrateVersionForBuild(dir, '0.3.5')).toThrow(/no \[package\]\.version/);
   });
+
+  // #428: a binding crate in a cargo workspace (the napi / pyo3 polyglot
+  // shape) sources its version from `[workspace.package].version` via
+  // `version.workspace = true` and carries no literal `[package].version`.
+  // The pre-build bump must rewrite the workspace root's
+  // `[workspace.package].version` rather than throw.
+  it('rewrites [workspace.package].version when the crate inherits it (version.workspace = true)', () => {
+    const crateDir = join(dir, 'packages', 'node');
+    mkdirSync(crateDir, { recursive: true });
+    writeFileSync(
+      join(dir, 'Cargo.toml'),
+      [
+        '[workspace]',
+        'members = ["packages/node"]',
+        'resolver = "2"',
+        '',
+        '[workspace.package]',
+        'version = "0.2.7"',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(crateDir, 'Cargo.toml'),
+      ['[package]', 'name = "template-lib-node"', 'version.workspace = true', ''].join('\n'),
+      'utf8',
+    );
+    const written = writeCrateVersionForBuild(crateDir, '0.3.5');
+    const rootCargo = join(dir, 'Cargo.toml');
+    expect(written).toContain(rootCargo);
+    expect(readFileSync(rootCargo, 'utf8')).toContain('version = "0.3.5"');
+    // Member manifest keeps inheriting — no literal version injected.
+    expect(readFileSync(join(crateDir, 'Cargo.toml'), 'utf8')).toContain('version.workspace = true');
+  });
 });
