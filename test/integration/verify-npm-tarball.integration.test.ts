@@ -91,10 +91,13 @@ function wire(
   execMock.mockImplementation((cmd, args, opts) => {
     const a = (args ?? []) as string[];
     if (a[0] === 'view') {
-      const key = String(a[1]);
+      // `npm view <spec> dist.tarball [--registry …]` — the spec sits
+      // right before `dist.tarball`. `npm view` is invoked with
+      // `encoding: 'utf8'`, so return a string, not a Buffer.
+      const key = a[a.indexOf('dist.tarball') - 1]!;
       const entry = viewUrls[key];
-      if (Array.isArray(entry)) return Buffer.from(`${entry.shift() ?? ''}\n`);
-      return Buffer.from(`${entry ?? ''}\n`);
+      if (Array.isArray(entry)) return `${entry.shift() ?? ''}\n`;
+      return `${entry ?? ''}\n`;
     }
     if (cmd === 'curl') {
       const url = a[a.length - 1]!;
@@ -106,6 +109,22 @@ function wire(
     // Real tar for extraction — the whole point of this tier.
     return realExec(cmd, args as string[], opts as ChildProcess.ExecFileSyncOptions);
   });
+}
+
+/**
+ * Drive a `run()` whose retry loop `await`s real-second sleeps without
+ * waiting real seconds: fake the timers, kick off the run, flush every
+ * pending timer + microtask, then await the result.
+ */
+async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
+  vi.useFakeTimers();
+  try {
+    const p = fn();
+    await vi.runAllTimersAsync();
+    return await p;
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 let repo: string;
@@ -197,15 +216,17 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
 
   it('fails when npm view never returns a tarball URL', async () => {
     writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    // Empty forever → exhausts the retry schedule.
+    // Empty forever → exhausts the retry schedule (driven by fake timers).
     wire({ '@scope/pkg@1.0.0': '' }, {});
 
-    const code = await run([
-      'node', 'piot', 'verify', 'npm-tarball',
-      '--registry', 'http://localhost:4873',
-      '--matrix', JSON.stringify([mainRow()]),
-      '--cwd', repo,
-    ]);
+    const code = await withFakeTimers(() =>
+      run([
+        'node', 'piot', 'verify', 'npm-tarball',
+        '--registry', 'http://localhost:4873',
+        '--matrix', JSON.stringify([mainRow()]),
+        '--cwd', repo,
+      ]),
+    );
 
     expect(out.join('')).toContain('never returned a tarball URL');
     expect(code).toBe(1);
@@ -216,12 +237,14 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
     // Empty on the first view, URL on the second → one retry sleep.
     wire({ '@scope/pkg@1.0.0': ['', 'https://reg/pkg.tgz'] }, { 'https://reg/pkg.tgz': tgz.withDist! });
 
-    const code = await run([
-      'node', 'piot', 'verify', 'npm-tarball',
-      '--registry', 'http://localhost:4873',
-      '--matrix', JSON.stringify([mainRow()]),
-      '--cwd', repo,
-    ]);
+    const code = await withFakeTimers(() =>
+      run([
+        'node', 'piot', 'verify', 'npm-tarball',
+        '--registry', 'http://localhost:4873',
+        '--matrix', JSON.stringify([mainRow()]),
+        '--cwd', repo,
+      ]),
+    );
 
     const text = out.join('');
     expect(text).toContain('packument lag: npm view returned empty (attempt 1/5)');

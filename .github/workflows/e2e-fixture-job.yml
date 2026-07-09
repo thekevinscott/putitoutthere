@@ -1000,130 +1000,32 @@ jobs:
           cat "${HOME}/.cargo/config.toml" 2>/dev/null || echo "(no config.toml)"
           echo "::endgroup::"
 
-      # Post-publish: download every main npm tarball from the registry and
-      # assert that directory entries declared in package.json `files` are
-      # actually present in the published artifact. Catches the cachetta
-      # 0.3.x failure mode — build job produces dist/, publish job ships
-      # from a fresh source tree without it, registry receives a tarball
-      # missing the compiled output. The publish step itself returns 0
-      # because npm publish doesn't validate `files` content; this is the
-      # only place that catches it end-to-end.
+      # Post-publish npm tarball verification lives in the engine now
+      # (`verify npm-tarball`, #443): the `files[]`-dir presence check, its
+      # packument-lag retry, and the local-state diagnostic are one
+      # colocated-tested command instead of inline bash. Catches the
+      # cachetta 0.3.x failure mode — build produces dist/, publish ships a
+      # fresh tree without it, and `npm publish` returns 0 anyway.
       - name: Verify published npm tarballs honor package.json files
         if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
         shell: bash
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
-          # #304: route the verify step's `npm view` at the same registry
-          # the engine just published to. Empty string for steady-state
-          # rows so the script falls back to its default (real npm + the
-          # CDN-propagation backoff schedule).
+          # #304: read from the same registry the engine just published to.
+          # Empty for steady-state rows → real npm with the generous
+          # CDN-propagation backoff; set for first-publish rows → Verdaccio
+          # with the tight, immediately-consistent schedule.
           REGISTRY_URL: ${{ endsWith(inputs.fixture, '-first-publish') && 'http://localhost:4873' || '' }}
         run: |
           set -euo pipefail
-          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
-          if [ -z "$rows" ]; then
-            echo "No npm main/noarch rows; nothing to verify."
-            exit 0
-          fi
-          # #304: select retry schedule based on which registry we're
-          # hitting. Real npm propagates packument metadata across its
-          # CDN asynchronously, so verify-immediately-after-publish needs
-          # generous backoff (~320s total). Verdaccio runs as a same-host
-          # service container — once `npm publish` returns, `npm view` is
-          # immediately consistent. Tight backoff there both shortens the
-          # e2e cycle and surfaces real failures faster.
-          if [ -n "${REGISTRY_URL:-}" ]; then
-            sleeps=(1 2 5 10)
-            registry_label="${REGISTRY_URL}"
-            view_flags=(--registry "${REGISTRY_URL}")
-          else
-            sleeps=(5 15 30 90 180)
-            registry_label='registry.npmjs.org'
-            view_flags=()
-          fi
-          fail=0
-          while IFS= read -r row; do
-            pkg_path=$(printf '%s' "$row" | jq -r '.path')
-            version=$(printf '%s' "$row" | jq -r '.version')
-            pkg_json="fixture-tree/${pkg_path}/package.json"
-            pkg_name=$(jq -r '.name' "$pkg_json")
-            # Heuristic: `files` entries without a dot are directories
-            # (dist, lib, build). Entries with a dot are individual files
-            # (README.md, index.js) and don't need a per-tree assertion.
-            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "$pkg_json")
-            if [ "${#dirs[@]}" -eq 0 ]; then
-              echo "[$pkg_name@$version] no directory entries in files[]; skipping."
-              continue
-            fi
-            echo "[$pkg_name@$version] verifying tarball at ${registry_label} contains: ${dirs[*]}"
-            tarball_url=""
-            # Attempts and sleeps stay in lockstep: N sleeps for N+1
-            # attempts, no sleep after the last attempt. Bumping one
-            # requires bumping the other.
-            attempts=$((${#sleeps[@]} + 1))
-            for attempt in $(seq 1 "$attempts"); do
-              tarball_url=$(npm view "${view_flags[@]}" "$pkg_name@$version" dist.tarball 2>/dev/null || true)
-              if [ -n "$tarball_url" ]; then break; fi
-              if [ "$attempt" -lt "$attempts" ]; then
-                sleep_for="${sleeps[$((attempt - 1))]}"
-                echo "  packument lag: npm view returned empty (attempt $attempt/$attempts); retrying in ${sleep_for}s"
-                sleep "$sleep_for"
-              fi
-            done
-            if [ -z "$tarball_url" ]; then
-              echo "::error::[$pkg_name@$version] npm view at ${registry_label} never returned a tarball URL after $attempts attempts. Either the publish didn't actually publish, or packument propagation is much slower than expected."
-              fail=1
-              continue
-            fi
-            tmp=$(mktemp -d)
-            # `--retry 5 --retry-all-errors --retry-delay 5`: npm's
-            # packument index and tarball blobs propagate across
-            # CloudFlare edges on independent schedules. The `npm view`
-            # retry above absorbs the packument race; this retry
-            # absorbs the tarball-blob race. `--retry-all-errors` is
-            # required because curl's default `--retry` ignores 4xx,
-            # but a cold-edge tarball miss surfaces as HTTP 404 — see
-            # PR #323 for the reproduction.
-            curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$tmp/pkg.tgz" "$tarball_url"
-            mkdir "$tmp/extracted"
-            tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
-            for d in "${dirs[@]}"; do
-              if [ -d "$tmp/extracted/package/$d" ] && \
-                 [ "$(find "$tmp/extracted/package/$d" -type f | wc -l)" -gt 0 ]; then
-                count=$(find "$tmp/extracted/package/$d" -type f | wc -l)
-                echo "  ok: package/$d/ ($count file(s))"
-              else
-                local_path="fixture-tree/${pkg_path}/${d}"
-                local_state="local ${local_path}: missing"
-                if [ -d "$local_path" ]; then
-                  local_count=$(find "$local_path" -type f 2>/dev/null | wc -l)
-                  local_state="local ${local_path}: present, ${local_count} file(s) — $(find "$local_path" -type f 2>/dev/null | tr '\n' ' ')"
-                fi
-                echo "::error::[$pkg_name@$version] tarball missing '$d'. ${local_state}"
-                fail=1
-              fi
-            done
-            rm -rf "$tmp"
-          done <<< "$rows"
-          exit "$fail"
+          args=(--matrix "$MATRIX" --cwd fixture-tree)
+          if [ -n "${REGISTRY_URL:-}" ]; then args+=(--registry "$REGISTRY_URL"); fi
+          node dist/cli-bin.js verify npm-tarball "${args[@]}"
 
-      # #306: per-triple tarball-verify gate for first-publish napi /
-      # bundled-cli fixtures. Symmetric with the main/noarch verify above:
-      # download the published platform tarball back from Verdaccio and
-      # assert each per-triple package was actually published with its
-      # synthesized binary (`.node` for napi, executable for bundled-cli)
-      # inside. The publish step itself returns 0 even if a synthesized
-      # platform package ships with only `package.json` and no binary
-      # (npm-platform's synthesizePlatformPackage emits `files: <readdir>`,
-      # so an empty artifact dir produces a tarball with just metadata);
-      # this step is the only place that catches that shape end-to-end.
-      #
-      # Default name template (`{name}-{triple}`) — every fixture in the
-      # tree uses it. If a future fixture overrides `build.<mode>.name`,
-      # the matrix row's `name` field would still be the main package;
-      # the per-triple name has to be resolved through the same template
-      # resolution the engine does. Revisit when a fixture exercises a
-      # non-default template.
+      # #306: per-triple tarball-verify for first-publish napi / bundled-cli
+      # fixtures. Symmetric with the main verify above and in the same engine
+      # command (#443): asserts each synthesized platform package shipped its
+      # binary (`.node` / executable), not a metadata-only tarball.
       - name: Verify published per-triple npm tarballs honor expected files
         if: endsWith(inputs.fixture, '-first-publish') && contains(needs.plan.outputs.matrix, '"kind":"npm"')
         shell: bash
@@ -1132,57 +1034,10 @@ jobs:
           REGISTRY_URL: http://localhost:4873
         run: |
           set -euo pipefail
-          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and .target != "main" and .target != "noarch")')
-          if [ -z "$rows" ]; then
-            echo "No npm per-triple rows; nothing to verify."
-            exit 0
-          fi
-          fail=0
-          while IFS= read -r row; do
-            main_name=$(printf '%s' "$row" | jq -r '.name')
-            triple=$(printf '%s' "$row" | jq -r '.target')
-            version=$(printf '%s' "$row" | jq -r '.version')
-            # Default template is `{name}-{triple}`; reconstructed here
-            # because the matrix row carries the main package name, not
-            # the synthesized platform name (synthesis is a publish-time
-            # concern in the engine's npm-platform handler).
-            platform_name="${main_name}-${triple}"
-            echo "[$platform_name@$version] verifying tarball at ${REGISTRY_URL}"
-            tarball_url=""
-            for attempt in 1 2 3 4 5; do
-              tarball_url=$(npm view --registry "${REGISTRY_URL}" "$platform_name@$version" dist.tarball 2>/dev/null || true)
-              if [ -n "$tarball_url" ]; then break; fi
-              if [ "$attempt" -lt 5 ]; then
-                echo "  packument lag: npm view returned empty (attempt $attempt/5); retrying in 2s"
-                sleep 2
-              fi
-            done
-            if [ -z "$tarball_url" ]; then
-              echo "::error::[$platform_name@$version] npm view at ${REGISTRY_URL} never returned a tarball URL. Either the platform publish didn't actually publish, or the synthesized name diverged from the default {name}-{triple} template."
-              fail=1
-              continue
-            fi
-            tmp=$(mktemp -d)
-            curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$tmp/pkg.tgz" "$tarball_url"
-            mkdir "$tmp/extracted"
-            tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
-            # Tarball layout: package/{package.json, <binary or .node>}.
-            # Assert at least one non-package.json file is present — the
-            # synthesis step's purpose is shipping that binary, and a
-            # tarball with only package.json is the failure mode this
-            # step exists to catch.
-            non_meta=$(find "$tmp/extracted/package" -mindepth 1 -maxdepth 1 -type f ! -name 'package.json' | wc -l)
-            if [ "$non_meta" -gt 0 ]; then
-              files=$(find "$tmp/extracted/package" -mindepth 1 -maxdepth 1 -type f ! -name 'package.json' -printf '%f ' )
-              echo "  ok: $non_meta non-metadata file(s): ${files}"
-            else
-              listing=$(find "$tmp/extracted/package" -mindepth 1 -type f -printf '%f ' )
-              echo "::error::[$platform_name@$version] tarball contains only package.json (no synthesized binary/.node staged). Tarball contents: ${listing}"
-              fail=1
-            fi
-            rm -rf "$tmp"
-          done <<< "$rows"
-          exit "$fail"
+          node dist/cli-bin.js verify npm-tarball --per-triple \
+            --matrix "$MATRIX" \
+            --cwd fixture-tree \
+            --registry "$REGISTRY_URL"
 
   # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
   # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside

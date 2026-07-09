@@ -49,6 +49,7 @@ import { reconcile } from './reconcile.js';
 import { formatStatusRow } from './status-format.js';
 import { computeStatus } from './status.js';
 import { formatVerifyRow } from './verify-format.js';
+import { verifyNpmTarball } from './verify-npm-tarball.js';
 import { computeVerify } from './verify.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
 import { writeLauncherFromConfig } from './write-launcher.js';
@@ -85,6 +86,7 @@ function printUsage(): void {
       '  status         Report registry-vs-tag drift (read-only; #403)',
       '  reconcile      Backfill missing tags for published-but-untagged packages (#403)',
       '  verify         Report publish/trust posture — OIDC vs token, per registry (#403)',
+      '  verify npm-tarball  Assert a published npm tarball honors package.json files[] (#443)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
@@ -96,6 +98,9 @@ function printUsage(): void {
       '  --path <dir>      package or crate directory (write-version / write-crate-version)',
       '  --version <v>     planned version (write-version / write-crate-version)',
       '  --release-packages <spec>  manual-release spec (plan / publish)',
+      '  --matrix <json>   plan matrix (verify npm-tarball)',
+      '  --registry <url>  registry to read from (verify npm-tarball); default real npm',
+      '  --per-triple      verify synthesized per-triple tarballs (verify npm-tarball)',
       '  --check           exit non-zero when status finds drift',
       '  --dry-run         report what reconcile would do without writing tags',
       '  --json            emit machine-readable output',
@@ -125,6 +130,12 @@ interface ParsedFlags {
   // Manual-release spec for `plan` / `publish`. Forwarded to the
   // planner; absent => normal change-detected planning.
   releasePackages?: string | undefined;
+  // `verify npm-tarball` inputs (#443). `matrix` is the plan matrix JSON
+  // the workflow already carries; `registry` selects the read target and
+  // backoff; `perTriple` switches to synthesized-binary verification.
+  matrix?: string | undefined;
+  registry?: string | undefined;
+  perTriple: boolean;
 }
 
 export function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -133,6 +144,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     json: false,
     check: false,
     dryRun: false,
+    perTriple: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -144,6 +156,9 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--path') {out.path = argv[++i];}
     else if (a === '--version') {out.version = argv[++i];}
     else if (a === '--release-packages') {out.releasePackages = argv[++i];}
+    else if (a === '--matrix') {out.matrix = argv[++i];}
+    else if (a === '--registry') {out.registry = argv[++i];}
+    else if (a === '--per-triple') {out.perTriple = true;}
     else if (a === '--dry-run') {out.dryRun = true;}
   }
   // Always normalise --cwd to an absolute path. Downstream code joins
@@ -314,6 +329,25 @@ export async function run(argv: readonly string[]): Promise<number> {
         return 0;
       }
       case 'verify': {
+        // #442/#443: `verify` is a command family. Bare `verify` (and
+        // `verify posture`) is the #414 publish/trust-posture check;
+        // `verify npm-tarball` is the extracted published-artifact
+        // verification. The subcommand is the first non-flag positional.
+        const sub = rest[0] !== undefined && !rest[0].startsWith('-') ? rest[0] : 'posture';
+        if (sub === 'npm-tarball') {
+          if (flags.matrix === undefined) {
+            throw new Error('verify npm-tarball requires --matrix <plan-matrix-json>');
+          }
+          return verifyNpmTarball({
+            cwd: flags.cwd,
+            matrix: flags.matrix,
+            registry: flags.registry,
+            perTriple: flags.perTriple,
+          });
+        }
+        if (sub !== 'posture') {
+          throw new Error(`unknown verify subcommand: ${sub}`);
+        }
         // #414: per-package publish/trust posture. Reads each package's
         // latest release and its trust attribution — OIDC trusted
         // publisher / provenance vs token — from public registry data,
