@@ -1,6 +1,7 @@
 import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { downloadNpmTarball } from './download.js';
@@ -25,16 +26,16 @@ describe('downloadNpmTarball', () => {
   it('curls the tarball, extracts it, and returns the package dir', () => {
     const { root, packageDir } = downloadNpmTarball('https://reg/pkg.tgz', 5);
     try {
-      expect(packageDir).toBe(`${root}/extracted/package`);
+      expect(packageDir).toBe(join(root, 'extracted', 'package'));
 
       const curl = execMock.mock.calls.find((c) => c[0] === 'curl')!;
       expect(curl[1]).toEqual([
         '-fsSL', '--retry', '5', '--retry-all-errors', '--retry-delay', '5',
-        '-o', `${root}/pkg.tgz`, 'https://reg/pkg.tgz',
+        '-o', join(root, 'pkg.tgz'), 'https://reg/pkg.tgz',
       ]);
 
       const tar = execMock.mock.calls.find((c) => c[0] === 'tar')!;
-      expect(tar[1]).toEqual(['-xzf', `${root}/pkg.tgz`, '-C', `${root}/extracted`]);
+      expect(tar[1]).toEqual(['-xzf', join(root, 'pkg.tgz'), '-C', join(root, 'extracted')]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

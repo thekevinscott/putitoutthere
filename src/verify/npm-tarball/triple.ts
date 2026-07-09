@@ -17,6 +17,7 @@
  */
 
 import { readdirSync, rmSync } from 'node:fs';
+import { basename } from 'node:path';
 
 import { downloadNpmTarball } from './download.js';
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
@@ -56,7 +57,7 @@ export async function verifyNpmTarballTriple(
     if (topLevel.length > 0) {
       process.stdout.write(`  ok: ${topLevel.length} non-metadata file(s): ${topLevel.join(' ')} \n`);
     } else {
-      const listing = listFilesRecursive(packageDir).map((p) => p.split('/').pop()).join(' ');
+      const listing = listFilesRecursive(packageDir).map((p) => basename(p)).join(' ');
       process.stdout.write(
         `::error::[${platformName}@${version}] tarball contains only package.json (no synthesized binary/.node staged). Tarball contents: ${listing} \n`,
       );
