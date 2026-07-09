@@ -2,7 +2,7 @@ import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveNpmTarballUrl } from './resolve-npm-tarball-url.js';
+import { resolveNpmTarballUrl } from './resolve-url.js';
 
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();

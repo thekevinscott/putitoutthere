@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./verify-npm-tarball-main.js', () => ({ verifyNpmTarballMain: vi.fn().mockResolvedValue(0) }));
-vi.mock('./verify-npm-tarball-triple.js', () => ({ verifyNpmTarballTriple: vi.fn().mockResolvedValue(1) }));
+vi.mock('./main.js', () => ({ verifyNpmTarballMain: vi.fn().mockResolvedValue(0) }));
+vi.mock('./triple.js', () => ({ verifyNpmTarballTriple: vi.fn().mockResolvedValue(1) }));
 
-import { verifyNpmTarball } from './verify-npm-tarball.js';
-import { verifyNpmTarballMain } from './verify-npm-tarball-main.js';
-import { verifyNpmTarballTriple } from './verify-npm-tarball-triple.js';
+import { verifyNpmTarball } from './index.js';
+import { verifyNpmTarballMain } from './main.js';
+import { verifyNpmTarballTriple } from './triple.js';
 
 const mainMock = vi.mocked(verifyNpmTarballMain);
 const tripleMock = vi.mocked(verifyNpmTarballTriple);

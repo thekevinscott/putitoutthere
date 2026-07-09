@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./resolve-npm-tarball-url.js', () => ({ resolveNpmTarballUrl: vi.fn() }));
-vi.mock('./download-npm-tarball.js', () => ({ downloadNpmTarball: vi.fn() }));
+vi.mock('./resolve-url.js', () => ({ resolveNpmTarballUrl: vi.fn() }));
+vi.mock('./download.js', () => ({ downloadNpmTarball: vi.fn() }));
 
-import { downloadNpmTarball } from './download-npm-tarball.js';
-import { resolveNpmTarballUrl } from './resolve-npm-tarball-url.js';
-import { verifyNpmTarballMain } from './verify-npm-tarball-main.js';
+import { downloadNpmTarball } from './download.js';
+import { resolveNpmTarballUrl } from './resolve-url.js';
+import { verifyNpmTarballMain } from './main.js';
 
 const resolveMock = vi.mocked(resolveNpmTarballUrl);
 const downloadMock = vi.mocked(downloadNpmTarball);

@@ -11,7 +11,7 @@
 
 import { existsSync, statSync } from 'node:fs';
 
-import { listFilesRecursive } from './list-files-recursive.js';
+import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 
 export function localDirState(localPath: string): string {
   if (existsSync(localPath) && statSync(localPath).isDirectory()) {

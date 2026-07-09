@@ -18,10 +18,10 @@
 
 import { readdirSync, rmSync } from 'node:fs';
 
-import { downloadNpmTarball } from './download-npm-tarball.js';
-import { listFilesRecursive } from './list-files-recursive.js';
-import { resolveNpmTarballUrl } from './resolve-npm-tarball-url.js';
-import type { TarballRow, VerifyNpmTarballOptions } from './verify-npm-tarball-types.js';
+import { downloadNpmTarball } from './download.js';
+import { listFilesRecursive } from '../../utils/list-files-recursive.js';
+import { resolveNpmTarballUrl } from './resolve-url.js';
+import type { TarballRow, VerifyNpmTarballOptions } from './types.js';
 
 export async function verifyNpmTarballTriple(
   rows: TarballRow[],

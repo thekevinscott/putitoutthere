@@ -14,9 +14,9 @@
  * it. Returns the process exit code (0 ok, 1 on any mismatch).
  */
 
-import { verifyNpmTarballMain } from './verify-npm-tarball-main.js';
-import { verifyNpmTarballTriple } from './verify-npm-tarball-triple.js';
-import type { TarballRow, VerifyNpmTarballOptions } from './verify-npm-tarball-types.js';
+import { verifyNpmTarballMain } from './main.js';
+import { verifyNpmTarballTriple } from './triple.js';
+import type { TarballRow, VerifyNpmTarballOptions } from './types.js';
 
 export async function verifyNpmTarball(opts: VerifyNpmTarballOptions): Promise<number> {
   const rows = JSON.parse(opts.matrix) as TarballRow[];

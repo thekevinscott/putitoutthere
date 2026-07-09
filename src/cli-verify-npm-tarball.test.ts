@@ -7,12 +7,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./verify-npm-tarball.js', () => ({ verifyNpmTarball: vi.fn().mockResolvedValue(0) }));
-vi.mock('./verify.js', () => ({ computeVerify: vi.fn().mockResolvedValue([]) }));
+vi.mock('./verify/npm-tarball/index.js', () => ({ verifyNpmTarball: vi.fn().mockResolvedValue(0) }));
+vi.mock('./verify/posture.js', () => ({ computeVerify: vi.fn().mockResolvedValue([]) }));
 
 import { parseFlags, run } from './cli.js';
-import { computeVerify } from './verify.js';
-import { verifyNpmTarball } from './verify-npm-tarball.js';
+import { computeVerify } from './verify/posture.js';
+import { verifyNpmTarball } from './verify/npm-tarball/index.js';
 
 const npmTarballMock = vi.mocked(verifyNpmTarball);
 const computeVerifyMock = vi.mocked(computeVerify);

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { downloadNpmTarball } from './download-npm-tarball.js';
+import { downloadNpmTarball } from './download.js';
 
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
