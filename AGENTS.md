@@ -344,6 +344,15 @@ contract to test — typo fixes, comment-only edits, dependency
 bumps with no code surface change, internal renames the type
 checker proves are safe. When in doubt, write the test.
 
+A **CI toolchain or dependency pin** is a dependency bump, and stays
+one even when it fixes an outage (an upstream release broke and the
+pin routes around it). The contract such a change satisfies is "the
+suite passes again," and the existing suite already expresses it —
+the PR's checks going green *is* the red→green evidence, on the same
+commits CI already ran. Land the pin as a single reviewed commit
+whose message cites the upstream breakage; do not author a new test
+that restates the pin (see **Workflow-contract tests are earned**).
+
 ### Why this shape exists
 
 Skipping phase 1 is the most common way agent-written PRs ship
@@ -360,6 +369,35 @@ The pattern applies equally to net-new features: the first commit
 defines, in test form, the contract the feature must satisfy.
 Reviewers debate the contract before the implementation exists,
 when redirecting is cheapest.
+
+## Workflow-contract tests are earned
+
+`test/workflows/` pins invariants in workflow YAML that a reviewer
+cannot see break: behavior wired through shell text that a refactor
+silently drops (`npm-install-fallback` — the `strict || lenient`
+self-heal), an `env:` whose absence degrades silently at runtime
+(`publish-github-token` — a missing `GITHUB_TOKEN` falls back to
+unauthenticated API calls that rate-limit), an ordering or absence
+whose violation only manifests under conditions no PR run reproduces
+(`github-release-step` — a tag fetch that fails only when another
+run moves a tag mid-job). The common shape: the regression is
+**silent in review and behavior-affecting in production**, so the
+test guards something no diff reader would catch.
+
+A contract test does **not** earn its place by restating a reviewed
+literal. A version pin (`npm@11`, `pnpm@9`), a runner label, a
+timeout value — these are visible in any diff that changes them, and
+a test asserting their text fails only when someone deliberately
+edits the value, at which point that edit's review is the gate. Such
+a test is a standing tax (every legitimate bump co-changes it) that
+buys no coverage. Put the reasoning where the value lives — a comment
+citing the upstream issue and, for a temporary pin, a dated follow-up
+issue naming when to revisit — and stop.
+
+The bar, stated once: before adding a `test/workflows/` file, name
+the regression it catches that a reviewer reading the diff would
+miss. If the answer is "someone might change the value," that is
+review's job, not a test's.
 
 ## Changelog and migration policy
 
