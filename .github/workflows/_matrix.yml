@@ -75,7 +75,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       has_pypi: ${{ steps.has-pypi.outputs.has_pypi }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -116,7 +116,7 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runs_on }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
