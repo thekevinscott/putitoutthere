@@ -5,7 +5,7 @@
  * Issue #414, #403 slice 5.
  */
 
-import type { Kind, TrustPosture } from './types.js';
+import type { Kind, TrustPosture } from '../types.js';
 
 /**
  * `oidc` / `token` come from the handler's trust read; `unpublished` when

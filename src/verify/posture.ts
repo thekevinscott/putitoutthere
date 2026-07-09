@@ -16,11 +16,11 @@
 
 import { join } from 'node:path';
 
-import { loadConfig } from './config.js';
-import { handlerFor } from './handlers/index.js';
-import { createLogger } from './log.js';
-import type { Ctx } from './types.js';
-import type { Posture, VerifyOptions, VerifyRow } from './verify-types.js';
+import { loadConfig } from '../config.js';
+import { handlerFor } from '../handlers/index.js';
+import { createLogger } from '../log.js';
+import type { Ctx } from '../types.js';
+import type { Posture, VerifyOptions, VerifyRow } from './posture-types.js';
 
 export async function computeVerify(opts: VerifyOptions): Promise<VerifyRow[]> {
   const cwd = opts.cwd;
