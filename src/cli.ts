@@ -46,6 +46,7 @@ import { runChecks } from './check.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { reconcile } from './reconcile.js';
+import { releaseGithub } from './release-github/index.js';
 import { formatStatusRow } from './status-format.js';
 import { computeStatus } from './status.js';
 import { formatVerifyRow } from './verify/posture-format.js';
@@ -63,6 +64,7 @@ const COMMANDS = [
   'status',
   'reconcile',
   'verify',
+  'release-github',
   'write-version',
   'write-crate-version',
   'write-launcher',
@@ -87,6 +89,7 @@ function printUsage(): void {
       '  reconcile      Backfill missing tags for published-but-untagged packages (#403)',
       '  verify         Report publish/trust posture — OIDC vs token, per registry (#403)',
       '  verify npm-tarball  Assert a published npm tarball honors package.json files[] (#443)',
+      '  release-github Cut a GitHub Release for each new tag on HEAD (#444)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
@@ -365,6 +368,15 @@ export async function run(argv: readonly string[]): Promise<number> {
           }
         }
         return flags.check && rows.some((r) => r.posture === 'token') ? 1 : 0;
+      }
+      case 'release-github': {
+        // #444: cut a GitHub Release for each new tag the engine created on
+        // HEAD, backfilling the /releases page (the engine tags + publishes
+        // but does not cut Releases). no-fetch / ref-scoped-push /
+        // idempotent-create per #436/#437, now ordinary engine code rather
+        // than inline bash. Reads GH_TOKEN from the environment for `gh`
+        // auth and operates on `--cwd` (the checked-out repo).
+        return releaseGithub({ cwd: flags.cwd });
       }
       case 'write-launcher': {
         // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli

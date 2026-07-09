@@ -19,7 +19,9 @@ import {
   headCommit,
   lastTag,
   pushTag,
+  pushTagRef,
   tagList,
+  tagsPointingAtHead,
 } from './git.js';
 
 let repo: string;
@@ -216,6 +218,71 @@ describe('pushTag', () => {
         encoding: 'utf8',
       }).trim();
       expect(remoteTags).toBe('v0.1.0');
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('tagsPointingAtHead', () => {
+  it('lists the tags whose commit is HEAD', () => {
+    const sha = commit('first');
+    createTag('pkg-v1.0.0', sha, { cwd: repo });
+    createTag('other-v2.0.0', sha, { cwd: repo });
+    expect(tagsPointingAtHead({ cwd: repo }).sort()).toEqual(['other-v2.0.0', 'pkg-v1.0.0']);
+  });
+
+  it('excludes tags left behind on an earlier commit', () => {
+    const first = commit('first');
+    createTag('pkg-v1.0.0', first, { cwd: repo });
+    commit('second'); // HEAD moves past the tagged commit
+    expect(tagsPointingAtHead({ cwd: repo })).toEqual([]);
+  });
+
+  it('returns empty when HEAD carries no tag', () => {
+    commit('first');
+    expect(tagsPointingAtHead({ cwd: repo })).toEqual([]);
+  });
+});
+
+describe('pushTagRef', () => {
+  it('pushes a single tag ref-scoped and is idempotent', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'putitoutthere-remote-'));
+    try {
+      execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: bare });
+      git(['remote', 'add', 'origin', bare]);
+      const sha = commit('first');
+      createTag('pkg-v1.0.0', sha, { cwd: repo });
+
+      pushTagRef('pkg-v1.0.0', { cwd: repo });
+      const remoteTags = () =>
+        execFileSync('git', ['tag', '-l'], { cwd: bare, encoding: 'utf8' }).trim();
+      expect(remoteTags()).toBe('pkg-v1.0.0');
+
+      // A second push of the same ref at the same commit is a clean no-op,
+      // not an error — the idempotency the release path relies on.
+      expect(() => pushTagRef('pkg-v1.0.0', { cwd: repo })).not.toThrow();
+      expect(remoteTags()).toBe('pkg-v1.0.0');
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('fails loudly when the remote already holds the tag at a different commit', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'putitoutthere-remote-'));
+    try {
+      execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: bare });
+      git(['remote', 'add', 'origin', bare]);
+      const a = commit('first');
+      createTag('pkg-v1.0.0', a, { cwd: repo });
+      pushTagRef('pkg-v1.0.0', { cwd: repo });
+
+      // Move the local tag to a new commit; the remote still holds the old
+      // one, so a ref-scoped push is a non-fast-forward tag update that
+      // git rejects — the "two runs released the same version" guard.
+      const b = commit('second');
+      git(['tag', '-f', '-a', '-m', 'move', 'pkg-v1.0.0', b]);
+      expect(() => pushTagRef('pkg-v1.0.0', { cwd: repo })).toThrow();
     } finally {
       rmSync(bare, { recursive: true, force: true });
     }
