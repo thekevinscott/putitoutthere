@@ -571,8 +571,13 @@ jobs:
       # so the OIDC-TP exchange path engages on `npm publish --provenance`
       # without a token (without this, the publish PUT goes out
       # unauthenticated and the registry returns 404 / 401-masked).
+      # Pinned to the 11.x major, not `latest`: a floating dist-tag breaks
+      # CI with no commit to blame when a broken major ships — npm 12.0.0's
+      # bundle is missing libnpmpublish's `sigstore` dependency, so every
+      # provenance publish dies at module load (#438). Bump the major here
+      # deliberately once a fixed 12.x is out.
       - name: Pin npm to a Trusted-Publishing-capable version
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       # PyPI: upload step runs in the caller-side `pypi-publish` job
       # (mirrors release.yml). No twine / setup-python in the publish
