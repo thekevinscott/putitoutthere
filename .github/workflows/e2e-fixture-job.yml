@@ -573,8 +573,8 @@ jobs:
       # unauthenticated and the registry returns 404 / 401-masked).
       # Pinned to the 11.x major, not `latest`: npm 12.0.0's bundle is
       # missing libnpmpublish's `sigstore` dependency, so every provenance
-      # publish dies at module load (npm/cli#9722, #438). Bump the major
-      # here once an npm 12.x with a fixed bundle ships.
+      # publish dies at module load (npm/cli#9722, #438). Revisit and
+      # unpin per #440 (dated 2026-08-09).
       - name: Pin npm to a Trusted-Publishing-capable version
         run: npm install -g npm@11
 
