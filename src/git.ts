@@ -116,6 +116,30 @@ export function pushTag(name: string, opts: GitOptions = {}): void {
 }
 
 /**
+ * The tags whose commit is HEAD — `git tag --points-at HEAD`. Lists exactly
+ * the tags the engine just created on this commit, with no fetch and no
+ * remote dependency (#444). Empty array when HEAD carries no tag.
+ */
+export function tagsPointingAtHead(opts: GitOptions = {}): string[] {
+  const out = run(['tag', '--points-at', 'HEAD'], opts);
+  if (out === '') {return [];}
+  return out.split('\n').filter((l) => l.length > 0);
+}
+
+/**
+ * Push a single tag ref-scoped: `git push origin refs/tags/<name>`. Scoped
+ * to the one ref so it is invisible to every other tag — a consumer's
+ * floating major tag moving mid-run can't make it fail (#436) — and
+ * idempotent (a no-op when the engine's warn-only push, #407, already
+ * landed it). A genuine conflict (the same tag at a different commit on the
+ * remote) still fails loudly, which the release concurrency group exists to
+ * prevent. Distinct from `pushTag`, which pushes by bare name (#444).
+ */
+export function pushTagRef(name: string, opts: GitOptions = {}): void {
+  run(['push', 'origin', `refs/tags/${name}`], opts);
+}
+
+/**
  * The commit a tag points at. `rev-list -n 1` dereferences an annotated
  * tag down to the commit it ultimately references.
  */

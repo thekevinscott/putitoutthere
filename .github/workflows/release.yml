@@ -290,36 +290,16 @@ jobs:
 
       # The engine creates annotated git tags + pushes to PyPI / npm /
       # crates.io but does NOT cut GitHub Releases. Backfill that here so
-      # the project's /releases page tracks the tag history. Auto-generated
-      # notes pull PR titles between this tag and the previous one.
+      # the project's /releases page tracks the tag history.
       #
-      # The step touches only refs it owns (#436). Local tag state is
-      # already complete without a fetch: checkout (fetch-depth: 0)
-      # fetched every remote tag, and the tags iterated here were created
-      # locally by the engine in this same job — an un-forced `--tags`
-      # fetch would reject any tag that moved since checkout (a consumer's
-      # floating major tag, force-moved mid-run by their promotion
-      # automation), failing the job after a fully successful publish.
-      # The ref-scoped push per tag is idempotent (a no-op when the
-      # engine's own push landed) and completes the engine's warn-only
-      # tag push (#407) in the same run, so `gh release create` always
-      # sees its tag on the remote.
+      # The no-fetch / ref-scoped-push / idempotent-create contract (#436,
+      # #437) now lives in the `release-github` engine command as tested
+      # code (`src/release-github/`), not inline bash — this step is pure
+      # wiring. `GH_TOKEN` authenticates `gh`; the checkout's persisted
+      # credentials authenticate the ref-scoped `git push`.
       - name: Create GitHub Release(s) for new tag(s)
+        uses: thekevinscott/putitoutthere@v0
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          new_tags=$(git tag --points-at HEAD)
-          if [ -z "$new_tags" ]; then
-            echo "No tags on HEAD; nothing to release on GitHub."
-            exit 0
-          fi
-          for tag in $new_tags; do
-            git push origin "refs/tags/$tag"
-            if gh release view "$tag" >/dev/null 2>&1; then
-              echo "GitHub Release $tag already exists; skipping."
-              continue
-            fi
-            gh release create "$tag" --title "$tag" --generate-notes
-            echo "Created GitHub Release for $tag"
-          done
+        with:
+          command: release-github
