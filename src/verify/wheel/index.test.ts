@@ -6,7 +6,7 @@
  * tiers. A real temp `dist/` dir drives the existence check.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,6 +50,26 @@ describe('verifyWheel: dist presence', () => {
     const code = verifyWheel(opts({ path: join(pkg, 'no-such-pkg') }));
     expect(out.join('')).toContain('no dist/ produced under');
     expect(code).toBe(1);
+  });
+
+  it('resolves a relative --path against cwd', () => {
+    // A relative path exercises the resolve(cwd, path) branch; it resolves
+    // under a cwd with no dist, so it reports the missing dist.
+    const code = verifyWheel(opts({ path: 'rel/pkg' }));
+    expect(out.join('')).toContain('no dist/ produced under');
+    expect(code).toBe(1);
+  });
+
+  it('fails when <path>/dist exists but is a file, not a directory', () => {
+    const p = mkdtempSync(join(tmpdir(), 'piot-wheel-distfile-'));
+    writeFileSync(join(p, 'dist'), 'not a dir');
+    try {
+      const code = verifyWheel(opts({ path: p }));
+      expect(out.join('')).toContain('no dist/ produced under');
+      expect(code).toBe(1);
+    } finally {
+      rmSync(p, { recursive: true, force: true });
+    }
   });
 });
 

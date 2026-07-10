@@ -27,9 +27,9 @@ export function readZipEntry(buf: Buffer, matches: (name: string) => boolean): B
 
   const count = buf.readUInt16LE(eocd + 10);
   let p = buf.readUInt32LE(eocd + 16); // central-directory offset
+  // The EOCD gives the exact entry count, and central-directory headers are
+  // contiguous, so read exactly `count` of them.
   for (let n = 0; n < count; n++) {
-    /* v8 ignore next -- defensive: a well-formed central dir always has the sig */
-    if (buf.readUInt32LE(p) !== 0x02014b50) {break;}
     const method = buf.readUInt16LE(p + 10);
     const compSize = buf.readUInt32LE(p + 20);
     const fnLen = buf.readUInt16LE(p + 28);
