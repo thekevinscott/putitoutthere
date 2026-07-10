@@ -1,6 +1,22 @@
 /**
- * Red coverage for issue #309. The evidence-check workflow is intentionally
- * absent until the pre-merge CHANGELOG evidence gate is implemented.
+ * Wiring contract for the CHANGELOG evidence-check gate (issues #309,
+ * #354; extraction #445, epic #442).
+ *
+ * The gate's DECISION logic — bucket validation, missing-clause and
+ * empty-reason failures, the poll/deadline race handling (#354) — now
+ * lives in the tested, I/O-free `checkEvidence` orchestrator under
+ * `src/ci/evidence-check/` and is covered by its colocated unit tests
+ * plus `test/integration/evidence-check.integration.test.ts`. Those
+ * contracts are NOT restated here.
+ *
+ * What this file guards is the WIRING that no unit test can see and a
+ * diff reader can silently break: the workflow must build the engine
+ * before invoking it (else `dist/` is missing and the boundary import
+ * fails only on a PR run), must hand the boundary the PR base/head SHAs
+ * and an authenticated `GH_TOKEN` (a missing token silently degrades to
+ * rate-limited unauthenticated API calls), and the boundary must diff
+ * CHANGELOG.md across the PR range, poll GitHub Actions via `gh`, and
+ * delegate to the built `checkEvidence` rather than re-implementing it.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -10,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const workflowPath = join(repoRoot, '.github/workflows/evidence-check.yml');
+const boundaryPath = join(repoRoot, '.github/workflows/evidence-check.mjs');
 const workflowExists = existsSync(workflowPath);
 const describeWhenWorkflowExists = workflowExists ? describe : describe.skip;
 
@@ -17,11 +34,22 @@ function readWorkflow(): string {
   return readFileSync(workflowPath, 'utf8');
 }
 
+function readBoundary(): string {
+  return readFileSync(boundaryPath, 'utf8');
+}
+
 describe('#309 CHANGELOG evidence-check workflow', () => {
   it('exists', () => {
     expect(
       workflowExists,
       'issue #309 requires .github/workflows/evidence-check.yml for the CHANGELOG evidence gate',
+    ).toBe(true);
+  });
+
+  it('ships the extracted boundary script the workflow invokes', () => {
+    expect(
+      existsSync(boundaryPath),
+      'the workflow delegates to .github/workflows/evidence-check.mjs',
     ).toBe(true);
   });
 });
@@ -41,80 +69,66 @@ describeWhenWorkflowExists('#309 CHANGELOG evidence-check workflow contract', ()
     );
   });
 
-  it('diffs CHANGELOG.md against the pull request base and checks only new Unreleased bullets', () => {
+  it('builds the engine before invoking the extracted checker', () => {
+    const text = readWorkflow();
+
+    // Without a build step the boundary's `import ... from '../../dist/...'`
+    // resolves to a missing file and the gate errors on every PR — a
+    // failure invisible in the workflow diff.
+    const buildIndex = text.indexOf('pnpm build');
+    const invokeIndex = text.indexOf('node .github/workflows/evidence-check.mjs');
+    expect(buildIndex, 'the workflow must build dist/ before running the boundary').toBeGreaterThan(
+      -1,
+    );
+    expect(invokeIndex, 'the workflow must invoke the boundary script via node').toBeGreaterThan(-1);
+    expect(buildIndex, 'the build must precede the boundary invocation').toBeLessThan(invokeIndex);
+  });
+
+  it('hands the boundary the PR base/head SHAs and an authenticated token', () => {
     const text = readWorkflow();
 
     expect(text).toContain('BASE_SHA: ${{ github.event.pull_request.base.sha }}');
     expect(text).toContain('HEAD_SHA: ${{ github.event.pull_request.head.sha }}');
-    expect(text, 'the workflow should diff CHANGELOG.md, not scan historical entries').toMatch(
-      /git\s+diff[\s\S]*\$\{?BASE_SHA\}?[\s\S]*\$\{?HEAD_SHA\}?[\s\S]*CHANGELOG\.md/,
-    );
-    expect(text, 'the workflow should scope enforcement to the Unreleased section').toMatch(
-      /Unreleased/,
-    );
-  });
-
-  it('accepts verified-by citations for every supported evidence bucket', () => {
-    const text = readWorkflow();
-
-    for (const bucket of ['e2e', 'integration', 'unit', 'consumer-template']) {
-      expect(text, `evidence-check must accept the ${bucket}/ citation bucket`).toMatch(
-        new RegExp(`\\b${bucket}/`),
-      );
-    }
-  });
-
-  it('fails missing or unknown verification clauses while allowing a reasoned no-fixture clause', () => {
-    const text = readWorkflow();
-
-    expect(text, 'missing verification clauses must be a hard failure').toMatch(
-      /missing|without.*(?:verified by|no fixture)/i,
-    );
-    expect(text, 'unknown citation buckets must be a hard failure').toMatch(
-      /unknown|unrecognized|unsupported/i,
-    );
-    expect(text, 'pure internal entries may opt out with a non-empty no-fixture reason').toMatch(
-      /\(no fixture:\s*<reason>\)|no fixture/i,
+    // A missing GH_TOKEN silently falls back to unauthenticated `gh api`
+    // calls that rate-limit — the same class of regression the
+    // publish-github-token contract guards.
+    expect(text, 'gh api needs GH_TOKEN to avoid unauthenticated rate limits').toMatch(
+      /GH_TOKEN:\s*\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}/,
     );
   });
 
-  it('queries GitHub Actions for cited evidence on the pull request head SHA', () => {
-    const text = readWorkflow();
+  it('diffs CHANGELOG.md across the PR range in the boundary', () => {
+    const text = readBoundary();
 
-    expect(text, 'cited evidence must be checked against this PR HEAD commit').toContain(
-      '${{ github.event.pull_request.head.sha }}',
-    );
-    expect(text, 'the workflow should call the GitHub API or gh to inspect workflow/job status').toMatch(
-      /gh\s+(?:api|run)|actions\/runs|listWorkflowRuns|workflow-runs/i,
-    );
-    expect(text, 'red or missing cited runs must fail the workflow').toMatch(
-      /conclusion|status|success|completed/i,
-    );
-  });
-
-  it('waits for cited workflow_runs to reach a terminal state before failing (#354)', () => {
-    // Without a wait, evidence-check races every workflow it cites:
-    // both fire on `pull_request:` in parallel, evidence-check completes
-    // in ~3-6s, the cited unit / integration / e2e workflows take 20s+,
-    // so on a fresh PR push the cited runs are still `in_progress` when
-    // this check first queries and the check fails with "no successful
-    // GitHub Actions run or job matched ..." even though the evidence
-    // is about to land. The fix is to poll cited runs until they reach
-    // a terminal state (success / failure / cancelled / timed_out) or
-    // a bounded deadline elapses, and only then make the success/fail
-    // decision against the final state.
-    const text = readWorkflow();
     expect(
       text,
-      'evidence-check must sleep+retry rather than failing on cited runs still in flight',
-    ).toMatch(/\bsleep\b/i);
-    expect(
-      text,
-      'the wait must be bounded by an explicit deadline',
-    ).toMatch(/deadline|timeout/i);
-    expect(
-      text,
-      'the wait must observe in-flight cited runs (queued / in_progress) to know when to stop',
-    ).toMatch(/in_progress|pending|queued/i);
+      'the boundary should diff CHANGELOG.md, not scan historical entries',
+    ).toMatch(/git['"][\s\S]*diff[\s\S]*CHANGELOG\.md/);
+    expect(text, 'the diff is scoped to the PR base..head range').toMatch(
+      /baseSha[\s\S]*headSha|BASE_SHA[\s\S]*HEAD_SHA/,
+    );
+  });
+
+  it('queries GitHub Actions via gh and polls with a real sleep in the boundary', () => {
+    const text = readBoundary();
+
+    expect(text, 'the boundary should call gh api to inspect workflow/job status').toMatch(
+      /gh['"],\s*\[['"]api/,
+    );
+    // The race-aware wait (#354) is decided in checkEvidence; the boundary
+    // must wire a real blocking sleep for it to actually pause between polls.
+    expect(text, 'the boundary must wire a real sleep for the poll wait (#354)').toMatch(/sleep/i);
+  });
+
+  it('delegates the decision to the built checkEvidence rather than re-implementing it', () => {
+    const text = readBoundary();
+
+    expect(text, 'the boundary imports the extracted, tested orchestrator').toMatch(
+      /import\s*\{\s*checkEvidence\s*\}\s*from\s*['"][^'"]*dist\/ci\/evidence-check\/index\.js['"]/,
+    );
+    expect(text, 'the boundary calls checkEvidence and exits with its code').toMatch(
+      /checkEvidence\(/,
+    );
+    expect(text).toMatch(/process\.exit\(/);
   });
 });

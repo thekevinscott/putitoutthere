@@ -3,6 +3,12 @@ name: Evidence check
 # Enforces AGENTS.md's "Verification policy": new CHANGELOG.md bullets
 # under ## Unreleased must cite machine-checked evidence, or explain why
 # no fixture applies.
+#
+# The decision logic lives in the tested, I/O-free `checkEvidence`
+# orchestrator under `src/ci/evidence-check/` (unit + integration
+# covered). This job builds it and runs the thin boundary
+# `.github/workflows/evidence-check.mjs`, which supplies the real
+# git-diff / `gh api` / sleep / clock dependencies.
 
 on:
   pull_request:
@@ -20,212 +26,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build engine
+        run: pnpm build
+
       - name: Enforce CHANGELOG evidence citations
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          git diff --unified=0 "${BASE_SHA}" "${HEAD_SHA}" -- CHANGELOG.md > /tmp/changelog.diff
-
-          node <<'NODE'
-          const { execFileSync } = require('node:child_process');
-          const { readFileSync } = require('node:fs');
-
-          const baseSha = process.env.BASE_SHA;
-          const headSha = process.env.HEAD_SHA;
-          const repository = process.env.GITHUB_REPOSITORY;
-          // Accepted citation buckets: e2e/, integration/, unit/, consumer-template/.
-          const allowedBuckets = new Set(['e2e', 'integration', 'unit', 'consumer-template']);
-
-          const changelog = readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/);
-          const patch = readFileSync('/tmp/changelog.diff', 'utf8').split(/\r?\n/);
-
-          function unreleasedLineRange() {
-            const start = changelog.findIndex((line) => /^##\s+Unreleased\s*$/.test(line));
-            if (start === -1) return null;
-            const next = changelog.findIndex((line, index) => index > start && /^##\s+/.test(line));
-            return { start: start + 1, end: next === -1 ? changelog.length + 1 : next + 1 };
-          }
-
-          function addedUnreleasedBullets() {
-            const range = unreleasedLineRange();
-            if (!range) return [];
-
-            const bullets = [];
-            let newLine = 0;
-
-            for (const raw of patch) {
-              const hunk = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-              if (hunk) {
-                newLine = Number(hunk[1]);
-                continue;
-              }
-
-              if (raw.startsWith('+++') || raw.startsWith('---')) continue;
-
-              if (raw.startsWith('+')) {
-                const text = raw.slice(1);
-                if (newLine >= range.start && newLine < range.end && /^\s*-\s+/.test(text)) {
-                  bullets.push({ line: newLine, text });
-                }
-                newLine += 1;
-                continue;
-              }
-
-              if (!raw.startsWith('-')) {
-                newLine += 1;
-              }
-            }
-
-            return bullets;
-          }
-
-          function ghApi(path) {
-            return JSON.parse(
-              execFileSync('gh', ['api', '-X', 'GET', path], {
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'inherit'],
-              }),
-            );
-          }
-
-          let workflowRuns = null;
-          const jobsByRun = new Map();
-
-          function runsForHead() {
-            if (workflowRuns) return workflowRuns;
-            const encodedSha = encodeURIComponent(headSha);
-            const response = ghApi(`repos/${repository}/actions/runs?head_sha=${encodedSha}&per_page=100`);
-            workflowRuns = response.workflow_runs ?? [];
-            return workflowRuns;
-          }
-
-          function resetRunCaches() {
-            workflowRuns = null;
-            jobsByRun.clear();
-          }
-
-          function jobsForRun(runId) {
-            if (jobsByRun.has(runId)) return jobsByRun.get(runId);
-            const response = ghApi(`repos/${repository}/actions/runs/${runId}/jobs?per_page=100`);
-            const jobs = response.jobs ?? [];
-            jobsByRun.set(runId, jobs);
-            return jobs;
-          }
-
-          function normalize(value) {
-            return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '/').replace(/^\/|\/$/g, '');
-          }
-
-          function runMatches(run, citation) {
-            const wanted = normalize(citation);
-            const runFields = [run.name, run.display_title, run.path, run.event].map(normalize);
-            if (runFields.some((field) => field.includes(wanted))) return true;
-
-            return jobsForRun(run.id).some((job) => normalize(job.name).includes(wanted));
-          }
-
-          function passedEvidence(citation) {
-            return runsForHead().some((run) => {
-              if (run.status !== 'completed' || run.conclusion !== 'success') return false;
-              return runMatches(run, citation);
-            });
-          }
-
-          // Race-aware wait: evidence-check fires on `pull_request:` in parallel
-          // with every workflow whose evidence it cites (test.yml, integration,
-          // e2e, ...). Evidence check completes in 3-6s; cited workflows take
-          // 20s+. Without polling, on a fresh PR push the cited runs are still
-          // `in_progress` (or `queued`) — or not yet indexed under
-          // `actions/runs?head_sha=...` at all — when we first query, and the
-          // check fails with "no successful GitHub Actions run or job matched
-          // ..." even though the evidence is about to land. Collect every
-          // citation up front, then poll per-citation resolution until every
-          // citation is `passed` / `failed` or the bounded deadline elapses,
-          // and only then run the downstream success/fail decision.
-          const POLL_INTERVAL_MS = 30 * 1000;
-          const POLL_DEADLINE_MS = Date.now() + 20 * 60 * 1000;
-
-          function citedRunNeedles() {
-            const needles = new Set();
-            for (const bullet of addedUnreleasedBullets()) {
-              const evidence = bullet.text.match(/\((verified by|no fixture):\s*([^)]+)\)\s*$/i);
-              if (!evidence) continue;
-              if (evidence[1].toLowerCase() === 'no fixture') continue;
-              for (const citation of evidence[2].split(',').map((p) => p.trim()).filter(Boolean)) {
-                if (allowedBuckets.has(citation.split('/')[0])) needles.add(citation);
-              }
-            }
-            return needles;
-          }
-
-          function citationResolution(citation) {
-            // 'passed' — at least one matching run succeeded.
-            // 'failed' — every matching run reached a terminal state and none succeeded.
-            // 'pending' — no matching runs yet, OR at least one match is still queued/in_progress.
-            const matches = runsForHead().filter((run) => runMatches(run, citation));
-            if (matches.length === 0) return 'pending';
-            if (matches.some((r) => r.status === 'completed' && r.conclusion === 'success')) return 'passed';
-            if (matches.every((r) => r.status === 'completed')) return 'failed';
-            return 'pending';
-          }
-
-          const needles = citedRunNeedles();
-          if (needles.size > 0) {
-            while (Date.now() < POLL_DEADLINE_MS) {
-              const pendingCitations = [...needles].filter((c) => citationResolution(c) === 'pending');
-              if (pendingCitations.length === 0) break;
-              const elapsedSeconds = Math.round((Date.now() - (POLL_DEADLINE_MS - 20 * 60 * 1000)) / 1000);
-              console.log(
-                `evidence-check: t+${elapsedSeconds}s — ${pendingCitations.length} citation(s) ` +
-                  `still pending (no matching workflow_run yet, or matches still in_progress / queued): ` +
-                  `${pendingCitations.join(', ')}`,
-              );
-              execFileSync('sleep', [String(POLL_INTERVAL_MS / 1000)], { stdio: 'ignore' });
-              resetRunCaches();
-            }
-          }
-
-          const failures = [];
-          for (const bullet of addedUnreleasedBullets()) {
-            const evidence = bullet.text.match(/\((verified by|no fixture):\s*([^)]+)\)\s*$/i);
-            if (!evidence) {
-              failures.push(`CHANGELOG.md:${bullet.line}: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause`);
-              continue;
-            }
-
-            const kind = evidence[1].toLowerCase();
-            const value = evidence[2].trim();
-
-            if (kind === 'no fixture') {
-              if (!value || value === '<reason>') {
-                failures.push(`CHANGELOG.md:${bullet.line}: '(no fixture: ...)' requires a non-empty reason`);
-              }
-              continue;
-            }
-
-            for (const citation of value.split(',').map((part) => part.trim()).filter(Boolean)) {
-              const bucket = citation.split('/')[0];
-              if (!allowedBuckets.has(bucket)) {
-                failures.push(`CHANGELOG.md:${bullet.line}: unsupported evidence bucket '${bucket}' in '${citation}'`);
-                continue;
-              }
-
-              if (!passedEvidence(citation)) {
-                failures.push(`CHANGELOG.md:${bullet.line}: no successful GitHub Actions run or job matched '${citation}' on ${headSha}`);
-              }
-            }
-          }
-
-          if (failures.length > 0) {
-            for (const failure of failures) {
-              console.log(`::error::${failure}`);
-            }
-            process.exit(1);
-          }
-
-          console.log(`Evidence check passed for CHANGELOG.md additions between ${baseSha} and ${headSha}.`);
-          NODE
+        run: node .github/workflows/evidence-check.mjs
