@@ -53,6 +53,7 @@ import { releaseGithub } from './release-github/index.js';
 import { formatStatusRow } from './status-format.js';
 import { computeStatus } from './status.js';
 import { formatVerifyRow } from './verify/posture-format.js';
+import { verifyBundleCli } from './verify/bundle-cli/index.js';
 import { verifyCrate } from './verify/crate/index.js';
 import { verifyNpmTarball } from './verify/npm-tarball/index.js';
 import { verifyWheel } from './verify/wheel/index.js';
@@ -99,6 +100,7 @@ function printUsage(): void {
       '  verify npm-tarball  Assert a published npm tarball honors package.json files[] (#443)',
       '  verify crate   Assert a published .crate ships its source tree (#449)',
       '  verify wheel   Assert a built wheel/sdist carries the planned version (#450)',
+      '  verify bundle-cli  Assert a maturin wheel contains its staged bundle_cli binary (#451)',
       '  release-github Cut a GitHub Release for each new tag on HEAD (#444)',
       '  advance-v0     Force-move the floating v0 tag to HEAD (#446)',
       '  advance-floating-major  Move the floating v<major> tag to the latest release (#446)',
@@ -118,7 +120,9 @@ function printUsage(): void {
       '  --matrix <json>   plan matrix (verify npm-tarball)',
       '  --registry <url>  registry to read from (verify npm-tarball); default real npm',
       '  --registry-root <dir>  cargo-http-registry disk root to read .crate files from (verify crate)',
-      '  --target <t>      matrix target: `sdist` or a wheel triple (verify wheel)',
+      '  --target <t>      matrix target: `sdist` or a wheel triple (verify wheel / bundle-cli)',
+      '  --stage-to <dir>  wheel-relative dir the bundle_cli binary is staged into (verify bundle-cli)',
+      '  --bin <name>      bundle_cli binary name (verify bundle-cli)',
       '  --per-triple      verify synthesized per-triple tarballs (verify npm-tarball)',
       '  --check           exit non-zero when status finds drift',
       '  --dry-run         report what reconcile would do without writing tags',
@@ -159,7 +163,12 @@ interface ParsedFlags {
   registryRoot?: string | undefined;
   // `verify wheel` (#450): the matrix row's target (`sdist` or a wheel
   // triple), selecting the sdist-filename vs wheel-METADATA check.
+  // `verify bundle-cli` (#451) reuses it to pick the `.exe` suffix.
   target?: string | undefined;
+  // `verify bundle-cli` (#451): the `bundle_cli.stage_to` dir and `bin`
+  // name; the wheel must contain the binary at `<stage_to>/<bin>`.
+  stageTo?: string | undefined;
+  bin?: string | undefined;
   perTriple: boolean;
   // `fold-bundle` (#446): the bundle commit's subject line
   // (`chore(release): bundle action` vs `chore(v0): bundle action`).
@@ -189,6 +198,8 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--registry-root') {out.registryRoot = argv[++i];}
     else if (a === '--target') {out.target = argv[++i];}
     else if (a === '--subject') {out.subject = argv[++i];}
+    else if (a === '--stage-to') {out.stageTo = argv[++i];}
+    else if (a === '--bin') {out.bin = argv[++i];}
     else if (a === '--per-triple') {out.perTriple = true;}
     else if (a === '--dry-run') {out.dryRun = true;}
   }
@@ -399,6 +410,23 @@ export async function run(argv: readonly string[]): Promise<number> {
             cwd: flags.cwd,
             path: flags.path,
             version: flags.version,
+            target: flags.target,
+          });
+        }
+        if (sub === 'bundle-cli') {
+          // #451: assert the maturin bundled-CLI wheel under <path>/dist
+          // contains its cross-compiled binary at <stage_to>/<bin>. Reads
+          // the wheel zip with the same pure-Node reader (no unzip), so it
+          // runs on the Windows maturin rows too.
+          if (!flags.path) {throw new Error('verify bundle-cli requires --path <pkg-dir>');}
+          if (!flags.stageTo) {throw new Error('verify bundle-cli requires --stage-to <dir>');}
+          if (!flags.bin) {throw new Error('verify bundle-cli requires --bin <name>');}
+          if (flags.target === undefined) {throw new Error('verify bundle-cli requires --target <triple>');}
+          return verifyBundleCli({
+            cwd: flags.cwd,
+            path: flags.path,
+            stageTo: flags.stageTo,
+            bin: flags.bin,
             target: flags.target,
           });
         }
