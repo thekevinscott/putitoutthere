@@ -52,6 +52,7 @@ import { computeStatus } from './status.js';
 import { formatVerifyRow } from './verify/posture-format.js';
 import { verifyCrate } from './verify/crate/index.js';
 import { verifyNpmTarball } from './verify/npm-tarball/index.js';
+import { verifyWheel } from './verify/wheel/index.js';
 import { computeVerify } from './verify/posture.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
 import { writeLauncherFromConfig } from './write-launcher.js';
@@ -91,6 +92,7 @@ function printUsage(): void {
       '  verify         Report publish/trust posture — OIDC vs token, per registry (#403)',
       '  verify npm-tarball  Assert a published npm tarball honors package.json files[] (#443)',
       '  verify crate   Assert a published .crate ships its source tree (#449)',
+      '  verify wheel   Assert a built wheel/sdist carries the planned version (#450)',
       '  release-github Cut a GitHub Release for each new tag on HEAD (#444)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
@@ -106,6 +108,7 @@ function printUsage(): void {
       '  --matrix <json>   plan matrix (verify npm-tarball)',
       '  --registry <url>  registry to read from (verify npm-tarball); default real npm',
       '  --registry-root <dir>  cargo-http-registry disk root to read .crate files from (verify crate)',
+      '  --target <t>      matrix target: `sdist` or a wheel triple (verify wheel)',
       '  --per-triple      verify synthesized per-triple tarballs (verify npm-tarball)',
       '  --check           exit non-zero when status finds drift',
       '  --dry-run         report what reconcile would do without writing tags',
@@ -144,6 +147,9 @@ interface ParsedFlags {
   // `verify crate` (#449): the cargo-http-registry disk root the engine
   // published to; `.crate` files are read from here, no fetch.
   registryRoot?: string | undefined;
+  // `verify wheel` (#450): the matrix row's target (`sdist` or a wheel
+  // triple), selecting the sdist-filename vs wheel-METADATA check.
+  target?: string | undefined;
   perTriple: boolean;
 }
 
@@ -168,6 +174,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--matrix') {out.matrix = argv[++i];}
     else if (a === '--registry') {out.registry = argv[++i];}
     else if (a === '--registry-root') {out.registryRoot = argv[++i];}
+    else if (a === '--target') {out.target = argv[++i];}
     else if (a === '--per-triple') {out.perTriple = true;}
     else if (a === '--dry-run') {out.dryRun = true;}
   }
@@ -366,6 +373,20 @@ export async function run(argv: readonly string[]): Promise<number> {
             throw new Error('verify crate requires --registry-root <dir>');
           }
           return verifyCrate({ matrix: flags.matrix, registryRoot: flags.registryRoot });
+        }
+        if (sub === 'wheel') {
+          // #450: assert the built wheel/sdist under <path>/dist carries
+          // the planned version. Reads the wheel zip with a pure-Node
+          // reader (no unzip), so it runs on the Windows maturin rows too.
+          if (!flags.path) {throw new Error('verify wheel requires --path <pkg-dir>');}
+          if (!flags.version) {throw new Error('verify wheel requires --version <planned>');}
+          if (flags.target === undefined) {throw new Error('verify wheel requires --target <sdist|triple>');}
+          return verifyWheel({
+            cwd: flags.cwd,
+            path: flags.path,
+            version: flags.version,
+            target: flags.target,
+          });
         }
         if (sub !== 'posture') {
           throw new Error(`unknown verify subcommand: ${sub}`);
