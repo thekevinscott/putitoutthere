@@ -63,6 +63,7 @@ function writeConfig(): void {
       'name = "putitoutthere"',
       'kind = "npm"',
       'path = "."',
+      'globs = ["src/**/*.ts"]',
       'access = "public"',
       '',
     ].join('\n'),

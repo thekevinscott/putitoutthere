@@ -116,6 +116,36 @@ export function pushTag(name: string, opts: GitOptions = {}): void {
 }
 
 /**
+ * `git fetch --tags --force origin` — refresh every remote tag, forcing
+ * updates for tags that moved on the remote. The `--force` is load-bearing
+ * (#199): without it a tag the remote force-moved since checkout is
+ * rejected as a non-fast-forward, failing the fetch. Used before the
+ * floating-major-tag move re-derives "latest release" from local tags.
+ */
+export function fetchTagsForce(opts: GitOptions = {}): void {
+  run(['fetch', '--tags', '--force', 'origin'], opts);
+}
+
+/**
+ * `git tag -f <name> <target>` — create or move a lightweight tag to
+ * `target`, overwriting an existing tag of the same name. The local half of
+ * a floating-tag move; pair with `pushTagRefForce` to publish it.
+ */
+export function forceTag(name: string, target: string, opts: GitOptions = {}): void {
+  run(['tag', '-f', name, target], opts);
+}
+
+/**
+ * `git push --force origin refs/tags/<name>` — force-publish a single moved
+ * tag, ref-scoped so it is invisible to every other tag. The remote half of
+ * a floating-tag move: unlike `pushTagRef` (which fails on a non-fast-
+ * forward), this overwrites the remote tag, which floating tags require.
+ */
+export function pushTagRefForce(name: string, opts: GitOptions = {}): void {
+  run(['push', '--force', 'origin', `refs/tags/${name}`], opts);
+}
+
+/**
  * The tags whose commit is HEAD — `git tag --points-at HEAD`. Lists exactly
  * the tags the engine just created on this commit, with no fetch and no
  * remote dependency (#444). Empty array when HEAD carries no tag.
@@ -138,6 +168,46 @@ export function tagsPointingAtHead(opts: GitOptions = {}): string[] {
 export function pushTagRef(name: string, opts: GitOptions = {}): void {
   run(['push', 'origin', `refs/tags/${name}`], opts);
 }
+
+/* ---------------------------- staging ---------------------------- */
+
+/**
+ * `git add -f <pathspec>` — stage `pathspec`, overriding `.gitignore`. The
+ * action bundle (`dist-action/`) is gitignored on main and exists only on
+ * tag commits, so folding it in requires the force flag.
+ */
+export function addForce(pathspec: string, opts: GitOptions = {}): void {
+  run(['add', '-f', pathspec], opts);
+}
+
+/**
+ * Whether the index holds staged changes — `git diff --cached --quiet`
+ * exits non-zero when there are. Returns `true` when something is staged,
+ * `false` on a clean index. Used to guard the fold against committing
+ * nothing when `build:action` produced no bundle output.
+ */
+export function hasStagedChanges(opts: GitOptions = {}): boolean {
+  try {
+    run(['diff', '--cached', '--quiet'], opts);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * `git commit -m <subject> -m <body>` — commit the staged index with a
+ * two-paragraph message. git joins the two `-m` values with a blank line,
+ * producing `<subject>\n\n<body>`, so passing the parent commit's full body
+ * as `body` forwards it verbatim into the new commit (the trailer-forward
+ * the fold relies on so a `release:` trailer survives — see
+ * notes/handoff/2026-04-24-dist-action.md).
+ */
+export function commitWithBody(subject: string, body: string, opts: GitOptions = {}): void {
+  run(['commit', '-m', subject, '-m', body], opts);
+}
+
+/* ------------------------------ tags ------------------------------ */
 
 /**
  * The commit a tag points at. `rev-list -n 1` dereferences an annotated

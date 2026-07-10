@@ -12,14 +12,20 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  addForce,
   commitBody,
   commitParents,
+  commitWithBody,
   createTag,
   diffNames,
+  fetchTagsForce,
+  forceTag,
+  hasStagedChanges,
   headCommit,
   lastTag,
   pushTag,
   pushTagRef,
+  pushTagRefForce,
   tagList,
   tagsPointingAtHead,
 } from './git.js';
@@ -286,6 +292,84 @@ describe('pushTagRef', () => {
     } finally {
       rmSync(bare, { recursive: true, force: true });
     }
+  });
+});
+
+describe('forceTag + pushTagRefForce + fetchTagsForce (floating-tag move; #446)', () => {
+  function withBareRemote(fn: (bare: string) => void): void {
+    const bare = mkdtempSync(join(tmpdir(), 'putitoutthere-remote-'));
+    try {
+      execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: bare });
+      git(['remote', 'add', 'origin', bare]);
+      fn(bare);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  }
+
+  it('forceTag creates a lightweight tag and moves an existing one', () => {
+    const a = commit('first');
+    forceTag('v0', a, { cwd: repo });
+    expect(git(['rev-parse', 'v0'])).toBe(a);
+    const b = commit('second');
+    forceTag('v0', b, { cwd: repo });
+    expect(git(['rev-parse', 'v0'])).toBe(b);
+  });
+
+  it('pushTagRefForce overwrites a diverged remote tag a plain push would reject', () => {
+    withBareRemote((bare) => {
+      const a = commit('first');
+      createTag('v0', a, { cwd: repo });
+      pushTagRef('v0', { cwd: repo });
+
+      // Move the local tag; the remote still holds the old commit. A plain
+      // ref-scoped push rejects (non-fast-forward); the forced one lands.
+      const b = commit('second');
+      forceTag('v0', b, { cwd: repo });
+      expect(() => pushTagRef('v0', { cwd: repo })).toThrow();
+      pushTagRefForce('v0', { cwd: repo });
+      const remoteCommit = execFileSync('git', ['rev-parse', 'v0^{commit}'], {
+        cwd: bare,
+        encoding: 'utf8',
+      }).trim();
+      expect(remoteCommit).toBe(b);
+    });
+  });
+
+  it('fetchTagsForce pulls a tag the remote moved without rejecting', () => {
+    withBareRemote(() => {
+      const a = commit('first');
+      createTag('rel-v1.0.0', a, { cwd: repo });
+      pushTagRef('rel-v1.0.0', { cwd: repo });
+      // Delete the local tag so the fetch has something to bring back.
+      git(['tag', '-d', 'rel-v1.0.0']);
+      expect(tagList('rel-v1.0.0', { cwd: repo })).toEqual([]);
+      fetchTagsForce({ cwd: repo });
+      expect(tagList('rel-v1.0.0', { cwd: repo })).toEqual(['rel-v1.0.0']);
+    });
+  });
+});
+
+describe('addForce + hasStagedChanges + commitWithBody (fold; #446)', () => {
+  it('addForce stages a gitignored path and hasStagedChanges detects it', () => {
+    commit('seed', { files: { '.gitignore': 'dist-action/\n' } });
+    writeFile('dist-action/index.js', '// bundle\n');
+    expect(hasStagedChanges({ cwd: repo })).toBe(false);
+    addForce('dist-action/', { cwd: repo });
+    expect(hasStagedChanges({ cwd: repo })).toBe(true);
+  });
+
+  it('commitWithBody forwards the body as a second paragraph under the subject', () => {
+    commit('parent subject\n\nrelease: minor', { files: { 'a.txt': '1' } });
+    const parentBody = commitBody('HEAD', { cwd: repo });
+    writeFile('dist-action/index.js', '// bundle\n');
+    addForce('dist-action/', { cwd: repo });
+    commitWithBody('chore(release): bundle action', parentBody, { cwd: repo });
+    const body = commitBody('HEAD', { cwd: repo });
+    expect(body).toMatch(/^chore\(release\): bundle action/);
+    expect(body).toMatch(/release:\s*minor/);
+    // The staged bundle landed in the new commit.
+    expect(git(['ls-files', 'dist-action/index.js'])).toContain('dist-action/index.js');
   });
 });
 
