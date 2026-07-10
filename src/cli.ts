@@ -50,6 +50,7 @@ import { releaseGithub } from './release-github/index.js';
 import { formatStatusRow } from './status-format.js';
 import { computeStatus } from './status.js';
 import { formatVerifyRow } from './verify/posture-format.js';
+import { verifyCrate } from './verify/crate/index.js';
 import { verifyNpmTarball } from './verify/npm-tarball/index.js';
 import { computeVerify } from './verify/posture.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
@@ -89,6 +90,7 @@ function printUsage(): void {
       '  reconcile      Backfill missing tags for published-but-untagged packages (#403)',
       '  verify         Report publish/trust posture — OIDC vs token, per registry (#403)',
       '  verify npm-tarball  Assert a published npm tarball honors package.json files[] (#443)',
+      '  verify crate   Assert a published .crate ships its source tree (#449)',
       '  release-github Cut a GitHub Release for each new tag on HEAD (#444)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
@@ -103,6 +105,7 @@ function printUsage(): void {
       '  --release-packages <spec>  manual-release spec (plan / publish)',
       '  --matrix <json>   plan matrix (verify npm-tarball)',
       '  --registry <url>  registry to read from (verify npm-tarball); default real npm',
+      '  --registry-root <dir>  cargo-http-registry disk root to read .crate files from (verify crate)',
       '  --per-triple      verify synthesized per-triple tarballs (verify npm-tarball)',
       '  --check           exit non-zero when status finds drift',
       '  --dry-run         report what reconcile would do without writing tags',
@@ -138,6 +141,9 @@ interface ParsedFlags {
   // backoff; `perTriple` switches to synthesized-binary verification.
   matrix?: string | undefined;
   registry?: string | undefined;
+  // `verify crate` (#449): the cargo-http-registry disk root the engine
+  // published to; `.crate` files are read from here, no fetch.
+  registryRoot?: string | undefined;
   perTriple: boolean;
 }
 
@@ -161,6 +167,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--release-packages') {out.releasePackages = argv[++i];}
     else if (a === '--matrix') {out.matrix = argv[++i];}
     else if (a === '--registry') {out.registry = argv[++i];}
+    else if (a === '--registry-root') {out.registryRoot = argv[++i];}
     else if (a === '--per-triple') {out.perTriple = true;}
     else if (a === '--dry-run') {out.dryRun = true;}
   }
@@ -347,6 +354,18 @@ export async function run(argv: readonly string[]): Promise<number> {
             registry: flags.registry,
             perTriple: flags.perTriple,
           });
+        }
+        if (sub === 'crate') {
+          // #449: crates-side of the verify family. Reads `.crate` files
+          // off the cargo-http-registry disk root the engine published to
+          // (no fetch) and asserts each ships its source tree.
+          if (flags.matrix === undefined) {
+            throw new Error('verify crate requires --matrix <plan-matrix-json>');
+          }
+          if (flags.registryRoot === undefined) {
+            throw new Error('verify crate requires --registry-root <dir>');
+          }
+          return verifyCrate({ matrix: flags.matrix, registryRoot: flags.registryRoot });
         }
         if (sub !== 'posture') {
           throw new Error(`unknown verify subcommand: ${sub}`);

@@ -931,17 +931,14 @@ jobs:
 
       # #334: post-publish .crate tarball-verify gate for first-publish
       # crates fixtures. Symmetric with the npm "Verify published npm
-      # tarballs honor package.json files" step below: download the
-      # published artifact back from the registry it was just pushed to
-      # and assert it contains what the engine planned to ship. The
-      # diagnostic property the rust-vanilla-first-publish fixture
-      # exists to give — without this, a publish step that no-op'd
-      # silently (or produced an empty .crate) would still go green.
-      #
-      # cargo-http-registry stores published .crate files on disk under
-      # the registry root. We assert the tarball exists, is non-empty,
-      # and that extracting it surfaces the fixture's source tree
-      # (src/lib.rs). No HTTP fetch needed — same host, same job.
+      # tarballs honor package.json files" step below — assert the
+      # just-published artifact contains what the engine planned to ship,
+      # so a publish that no-op'd silently (or produced an empty .crate)
+      # can't go green. The find/extract/source-present logic lives in the
+      # engine now (`verify crate`, #449, `src/verify/crate/`) as colocated-
+      # tested code, not inline bash; this step is pure wiring. cargo-http-
+      # registry stores .crate files on disk under the registry root, so
+      # the command reads them straight off `--registry-root` — no fetch.
       - name: Verify published .crate tarballs honor expected files
         if: endsWith(inputs.fixture, '-first-publish') && contains(needs.plan.outputs.matrix, '"kind":"crates"')
         shell: bash
@@ -949,34 +946,9 @@ jobs:
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
           set -euo pipefail
-          REG_ROOT="${RUNNER_TEMP}/piot-alt-registry"
-          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "crates")')
-          fail=0
-          while IFS= read -r row; do
-            name=$(printf '%s' "$row" | jq -r '.name')
-            version=$(printf '%s' "$row" | jq -r '.version')
-            crate_file=$(find "$REG_ROOT" -name "${name}-${version}.crate" -type f -print -quit 2>/dev/null || true)
-            if [ -z "$crate_file" ] || [ ! -s "$crate_file" ]; then
-              echo "::error::[${name}@${version}] no .crate file found (or empty) under ${REG_ROOT}"
-              fail=1
-              continue
-            fi
-            tmp=$(mktemp -d)
-            tar -xzf "$crate_file" -C "$tmp"
-            # cargo packs into <name>-<version>/{Cargo.toml,src/...}.
-            # Heuristic: assert src/lib.rs OR src/main.rs surfaces; this
-            # is the analogue of the npm verify step's "files[] dir is
-            # populated" check.
-            if find "$tmp" -type f \( -path '*/src/lib.rs' -o -path '*/src/main.rs' \) | grep -q .; then
-              echo "ok: ${crate_file} contains src/lib.rs or src/main.rs"
-            else
-              listing=$(find "$tmp" -type f | tr '\n' ' ')
-              echo "::error::[${name}@${version}] .crate tarball missing src/lib.rs and src/main.rs. Tarball contents: ${listing}"
-              fail=1
-            fi
-            rm -rf "$tmp"
-          done <<< "$rows"
-          exit "$fail"
+          node dist/cli-bin.js verify crate \
+            --matrix "$MATRIX" \
+            --registry-root "${RUNNER_TEMP}/piot-alt-registry"
 
       # #331: diagnostic dump for the cargo-http-registry alt-registry.
       # Runs on every crates-bearing job regardless of publish outcome
