@@ -250,52 +250,22 @@ jobs:
           args: --release --out dist --target ${{ matrix.target }}
 
       # #276: post-build assertion. The contract is "the build artifact
-      # carries matrix.version." Verify it directly against the
-      # produced files — independent of which mechanism ensured the
-      # manifest was correct. Catches the divergence regardless of
-      # which build path silently regressed.
+      # carries matrix.version" — verified directly against the produced
+      # files, independent of which mechanism ensured the manifest was
+      # correct, so it catches the divergence regardless of which build
+      # path silently regressed. The find/extract/version-compare logic
+      # lives in the engine now (`verify wheel`, #450, `src/verify/wheel/`)
+      # as colocated-tested code with a pure-Node wheel-zip reader (no
+      # `unzip`); this step is pure wiring.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
         name: Verify wheel/sdist version matches matrix.version
         shell: bash
-        env:
-          PLANNED_VERSION: ${{ matrix.version }}
-          PKG_PATH: ${{ matrix.path }}
-          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          dist_dir="fixture-tree/${PKG_PATH}/dist"
-          if [ ! -d "$dist_dir" ]; then
-            echo "::error::no dist/ produced under ${dist_dir}"
-            exit 1
-          fi
-          # Use `find -print -quit` not `ls` (SC2012); robust against
-          # non-alphanumeric filenames and avoids parsing `ls` output.
-          if [ "$TARGET" = 'sdist' ]; then
-            sdist=$(find "$dist_dir" -maxdepth 1 -name '*.tar.gz' -print -quit)
-            if [ -z "$sdist" ]; then
-              echo "::error::no sdist produced in ${dist_dir}"
-              exit 1
-            fi
-            case "$(basename "$sdist")" in
-              *-${PLANNED_VERSION}.tar.gz) echo "ok sdist: $(basename "$sdist")" ;;
-              *)
-                echo "::error::sdist filename '$(basename "$sdist")' does not contain planned version '${PLANNED_VERSION}'"
-                exit 1
-                ;;
-            esac
-          else
-            wheel=$(find "$dist_dir" -maxdepth 1 -name '*.whl' -print -quit)
-            if [ -z "$wheel" ]; then
-              echo "::error::no wheel produced in ${dist_dir}"
-              exit 1
-            fi
-            actual=$(unzip -p "$wheel" '*.dist-info/METADATA' | awk '/^Version:/ { print $2; exit }')
-            if [ "$actual" != "$PLANNED_VERSION" ]; then
-              echo "::error::wheel METADATA Version='${actual}' but plan='${PLANNED_VERSION}' (wheel: $(basename "$wheel"))"
-              exit 1
-            fi
-            echo "ok wheel: $(basename "$wheel") METADATA Version=${actual}"
-          fi
+          node dist/cli-bin.js verify wheel \
+            --path "fixture-tree/${{ matrix.path }}" \
+            --version "${{ matrix.version }}" \
+            --target "${{ matrix.target }}"
 
       - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
         working-directory: fixture-tree/${{ matrix.path }}
