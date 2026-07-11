@@ -60,28 +60,18 @@ jobs:
 
       # Mirrors `release-npm.yml`'s Fold step: stage the freshly-built
       # `dist-action/` bundle and create a commit on top of HEAD that
-      # forwards the parent commit's full body. Forwarding the body keeps
-      # any `release:` trailer on the parent visible to downstream tooling
-      # that re-reads HEAD (the dogfood publish re-derives plan from HEAD
-      # and would otherwise silently downgrade the bump — see
-      # `notes/handoff/2026-04-24-dist-action.md`).
+      # forwards the parent commit's full body (so any `release:` trailer
+      # stays visible to the dogfood publish's plan re-derivation — see
+      # `notes/handoff/2026-04-24-dist-action.md`). This is the exact same
+      # `fold-bundle` engine command `release-npm.yml` invokes, differing
+      # only in the commit subject.
       - name: Fold action bundle into v0 commit
         run: |
-          set -euo pipefail
-          git add -f dist-action/
-          if git diff --cached --quiet; then
-            echo "No bundle changes to commit (unexpected — build:action should have produced output)." >&2
-            exit 1
-          fi
-          {
-            printf 'chore(v0): bundle action\n\n'
-            git log -1 --format=%B HEAD
-          } | git commit -F -
+          node dist/cli-bin.js fold-bundle --subject 'chore(v0): bundle action'
 
+      # Force-move `v0` to the freshly-folded HEAD via the `advance-v0`
+      # engine command, which shares `forceMoveTag` with
+      # `advance-floating-major` so the two floating-tag movers can't
+      # diverge (`src/advance-v0.ts`).
       - name: Force-move v0 to bundle commit
-        run: |
-          set -euo pipefail
-          target=$(git rev-parse HEAD)
-          echo "Moving v0 -> ${target}"
-          git tag -f v0 "${target}"
-          git push --force origin "refs/tags/v0"
+        run: node dist/cli-bin.js advance-v0

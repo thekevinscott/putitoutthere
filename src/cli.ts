@@ -42,7 +42,10 @@
 
 import { isAbsolute, resolve } from 'node:path';
 
+import { advanceFloatingMajor } from './advance-floating-major.js';
+import { advanceV0 } from './advance-v0.js';
 import { runChecks } from './check.js';
+import { foldActionBundle } from './fold-action-bundle.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { reconcile } from './reconcile.js';
@@ -68,6 +71,9 @@ const COMMANDS = [
   'reconcile',
   'verify',
   'release-github',
+  'advance-v0',
+  'advance-floating-major',
+  'fold-bundle',
   'write-version',
   'write-crate-version',
   'write-launcher',
@@ -96,6 +102,9 @@ function printUsage(): void {
       '  verify wheel   Assert a built wheel/sdist carries the planned version (#450)',
       '  verify bundle-cli  Assert a maturin wheel contains its staged bundle_cli binary (#451)',
       '  release-github Cut a GitHub Release for each new tag on HEAD (#444)',
+      '  advance-v0     Force-move the floating v0 tag to HEAD (#446)',
+      '  advance-floating-major  Move the floating v<major> tag to the latest release (#446)',
+      '  fold-bundle    Commit the built dist-action/ bundle on top of HEAD (#446)',
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
@@ -104,6 +113,7 @@ function printUsage(): void {
       'Options:',
       '  --cwd <path>      working directory',
       '  --config <path>   path to putitoutthere.toml',
+      '  --subject <s>     bundle-commit subject line (fold-bundle)',
       '  --path <dir>      package or crate directory (write-version / write-crate-version)',
       '  --version <v>     planned version (write-version / write-crate-version)',
       '  --release-packages <spec>  manual-release spec (plan / publish)',
@@ -160,6 +170,9 @@ interface ParsedFlags {
   stageTo?: string | undefined;
   bin?: string | undefined;
   perTriple: boolean;
+  // `fold-bundle` (#446): the bundle commit's subject line
+  // (`chore(release): bundle action` vs `chore(v0): bundle action`).
+  subject?: string | undefined;
 }
 
 export function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -184,6 +197,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--registry') {out.registry = argv[++i];}
     else if (a === '--registry-root') {out.registryRoot = argv[++i];}
     else if (a === '--target') {out.target = argv[++i];}
+    else if (a === '--subject') {out.subject = argv[++i];}
     else if (a === '--stage-to') {out.stageTo = argv[++i];}
     else if (a === '--bin') {out.bin = argv[++i];}
     else if (a === '--per-triple') {out.perTriple = true;}
@@ -445,6 +459,28 @@ export async function run(argv: readonly string[]): Promise<number> {
         // than inline bash. Reads GH_TOKEN from the environment for `gh`
         // auth and operates on `--cwd` (the checked-out repo).
         return releaseGithub({ cwd: flags.cwd });
+      }
+      case 'advance-v0': {
+        // #446: force-move the floating `v0` tag to HEAD. Invoked by
+        // `advance-v0.yml` after `fold-bundle` synthesizes the bundle
+        // commit, so `uses: …@v0` resolves to a runnable action. Shares
+        // `forceMoveTag` with the floating-major mover.
+        return advanceV0({ cwd: flags.cwd });
+      }
+      case 'advance-floating-major': {
+        // #446: move the floating `v<major>` tag to the newest release in
+        // its major line. Invoked by `release-npm.yml`'s dogfood publish
+        // job; reads the release tag via the same `lastTag` resolver the
+        // publish path uses. Idempotent.
+        return advanceFloatingMajor({ cwd: flags.cwd });
+      }
+      case 'fold-bundle': {
+        // #446: commit the freshly-built `dist-action/` bundle on top of
+        // HEAD, forwarding the parent body under `--subject` so a
+        // `release:` trailer survives. Invoked by both `release-npm.yml`
+        // and `advance-v0.yml` (differing only in the subject).
+        if (!flags.subject) {throw new Error('fold-bundle: --subject <line> is required');}
+        return foldActionBundle({ cwd: flags.cwd, subject: flags.subject });
       }
       case 'write-launcher': {
         // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli

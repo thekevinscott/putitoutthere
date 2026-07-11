@@ -100,28 +100,16 @@ jobs:
       # so the per-package tag (and the floating `v<major>` tag that tracks
       # it) resolve to a commit that contains `dist-action/index.js`. The
       # commit is not pushed to main — it lives only as the tag's target.
-      # See notes/handoff/2026-04-24-dist-action.md.
       #
-      # The bundle commit forwards the parent's full body so any
-      # `release:` trailer the operator wrote in the merge commit
-      # survives into the new HEAD. Without this, putitoutthere's
-      # publish-time plan re-derivation reads HEAD (the bundle
-      # commit), sees no trailer on a single-parent commit, defaults
-      # the bump to `patch`, and silently downgrades a `release: minor`
-      # to a `0.x.(y+1)` patch release. (Hit in the wild on the
-      # 0.1.51 → 0.2.0 attempt that landed as 0.1.52.)
+      # The stage / empty-index guard / trailer-forwarding commit — and the
+      # reason the parent body must survive (else the publish-time plan
+      # re-derivation silently downgrades `release: minor` to a patch; the
+      # 0.1.51 → 0.2.0 attempt that landed as 0.1.52) — now live in the
+      # `fold-bundle` engine command as tested code (`src/fold-action-bundle.ts`),
+      # not inline bash. See notes/handoff/2026-04-24-dist-action.md.
       - name: Fold action bundle into release commit
         run: |
-          set -euo pipefail
-          git add -f dist-action/
-          if git diff --cached --quiet; then
-            echo "No bundle changes to commit (unexpected — build:action should have produced output)." >&2
-            exit 1
-          fi
-          {
-            printf 'chore(release): bundle action\n\n'
-            git log -1 --format=%B HEAD
-          } | git commit -F -
+          node dist/cli-bin.js fold-bundle --subject 'chore(release): bundle action'
 
       - name: putitoutthere publish
         env:
@@ -137,24 +125,10 @@ jobs:
       # a floating `v<major>` tag pointing at the latest release in the major
       # line so the scaffold resolves. Idempotent: re-runs are a no-op when
       # the floating tag already matches the latest release. Issue #199.
+      #
+      # The force-fetch / latest-release lookup / idempotency / force-move
+      # now live in the `advance-floating-major` engine command as tested
+      # code (`src/advance-floating-major.ts`), sharing `forceMoveTag` with
+      # `advance-v0` so the two floating-tag movers can't diverge.
       - name: Move floating major tag
-        run: |
-          set -euo pipefail
-          git fetch --tags --force origin
-          latest=$(git tag --list 'putitoutthere-v*' | sort -V | tail -n1 || true)
-          if [ -z "$latest" ]; then
-            echo "No putitoutthere-v* tags yet; nothing to track."
-            exit 0
-          fi
-          version="${latest#putitoutthere-v}"
-          major="${version%%.*}"
-          floating="v${major}"
-          target=$(git rev-parse "${latest}^{commit}")
-          current=$(git rev-parse --verify --quiet "refs/tags/${floating}^{commit}" || true)
-          if [ "${current}" = "${target}" ]; then
-            echo "Floating tag ${floating} already at ${latest}; no update."
-            exit 0
-          fi
-          echo "Moving floating tag ${floating} -> ${target} (latest release ${latest})"
-          git tag -f "${floating}" "${target}"
-          git push --force origin "refs/tags/${floating}"
+        run: node dist/cli-bin.js advance-floating-major
