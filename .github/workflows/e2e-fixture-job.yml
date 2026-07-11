@@ -422,9 +422,9 @@ jobs:
             }
           elif [ -f pnpm-lock.yaml ]; then
             npm install -g pnpm@9
-            pnpm install --frozen-lockfile || {
+            pnpm install --frozen-lockfile --ignore-workspace || {
               echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-              pnpm install --no-frozen-lockfile
+              pnpm install --no-frozen-lockfile --ignore-workspace
             }
           else
             npm install
@@ -730,9 +730,9 @@ jobs:
               }
             elif [ -f pnpm-lock.yaml ]; then
               npm install -g pnpm@9
-              pnpm install --frozen-lockfile || {
+              pnpm install --frozen-lockfile --ignore-workspace || {
                 echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-                pnpm install --no-frozen-lockfile
+                pnpm install --no-frozen-lockfile --ignore-workspace
               }
             else
               npm install
