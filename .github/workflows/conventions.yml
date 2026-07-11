@@ -6,3 +6,12 @@ jobs:
     uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
     with:
       path: packages/ci/src
+
+  # packages/engine is adopted gate-by-gate (epic #474) to keep each PR
+  # reviewable. Gates are turned on one at a time and the flag is removed
+  # once the engine meets the full standard.
+  engine:
+    uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
+    with:
+      path: packages/engine/src
+      gates: '["colocated-test"]'
