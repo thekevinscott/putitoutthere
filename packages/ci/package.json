@@ -7,6 +7,9 @@
   "bin": {
     "piot-ci": "./dist/cli-bin.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint src",

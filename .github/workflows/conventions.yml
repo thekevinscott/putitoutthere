@@ -1,0 +1,8 @@
+name: Conventions
+on: [pull_request]
+
+jobs:
+  ci:
+    uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
+    with:
+      path: packages/ci/src
