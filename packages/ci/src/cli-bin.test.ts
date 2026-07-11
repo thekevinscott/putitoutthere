@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./cli.js', () => ({ run: vi.fn() }));
+vi.mock('./cli.js', async () => {
+  const actual = await vi.importActual<typeof import('./cli.js')>('./cli.js');
+  return { ...actual, run: vi.fn() };
+});
 
 import { run } from './cli.js';
 
