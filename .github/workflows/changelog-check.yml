@@ -43,7 +43,7 @@ jobs:
           surface=$(git --glob-pathspecs diff --name-only \
             "${BASE_SHA}" "${HEAD_SHA}" -- \
             'action.yml' \
-            'src/**/*.ts' ':!src/**/*.test.ts' \
+            'packages/engine/src/**/*.ts' ':!packages/engine/src/**/*.test.ts' \
             'docs/api/**' \
             'docs/guide/**' ':!docs/guide/migrations.md')
 

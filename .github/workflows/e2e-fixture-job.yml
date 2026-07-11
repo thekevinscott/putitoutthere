@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf fixture-tree
-          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
           VERSION="0.0.$(date +%s)"
           echo "FIXTURE_VERSION=${VERSION}" >> "$GITHUB_ENV"
           # Walk the materialized tree and rewrite __VERSION__ in any
@@ -176,7 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf fixture-tree
-          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
           # #276: the fixture is materialized at a STALE baseline (0.0.1),
           # NOT matrix.version. This mirrors a real consumer whose
           # pyproject.toml / Cargo.toml literal lags the planned version.
@@ -262,7 +262,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node dist/cli-bin.js verify wheel \
+          node packages/engine/dist/cli-bin.js verify wheel \
             --path "fixture-tree/${{ matrix.path }}" \
             --version "${{ matrix.version }}" \
             --target "${{ matrix.target }}"
@@ -422,9 +422,9 @@ jobs:
             }
           elif [ -f pnpm-lock.yaml ]; then
             npm install -g pnpm@9
-            pnpm install --frozen-lockfile || {
+            pnpm install --frozen-lockfile --ignore-workspace || {
               echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-              pnpm install --no-frozen-lockfile
+              pnpm install --no-frozen-lockfile --ignore-workspace
             }
           else
             npm install
@@ -571,7 +571,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf fixture-tree
-          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
           # Recompute the same throwaway version the plan job baked in.
           # plan emitted matrix.version; the first row's version is the
           # canonical one (every package shares a single version per run).
@@ -730,9 +730,9 @@ jobs:
               }
             elif [ -f pnpm-lock.yaml ]; then
               npm install -g pnpm@9
-              pnpm install --frozen-lockfile || {
+              pnpm install --frozen-lockfile --ignore-workspace || {
                 echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-                pnpm install --no-frozen-lockfile
+                pnpm install --no-frozen-lockfile --ignore-workspace
               }
             else
               npm install
@@ -916,7 +916,7 @@ jobs:
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
           set -euo pipefail
-          node dist/cli-bin.js verify crate \
+          node packages/engine/dist/cli-bin.js verify crate \
             --matrix "$MATRIX" \
             --registry-root "${RUNNER_TEMP}/piot-alt-registry"
 
@@ -962,7 +962,7 @@ jobs:
           set -euo pipefail
           args=(--matrix "$MATRIX" --cwd fixture-tree)
           if [ -n "${REGISTRY_URL:-}" ]; then args+=(--registry "$REGISTRY_URL"); fi
-          node dist/cli-bin.js verify npm-tarball "${args[@]}"
+          node packages/engine/dist/cli-bin.js verify npm-tarball "${args[@]}"
 
       # #306: per-triple tarball-verify for first-publish napi / bundled-cli
       # fixtures. Symmetric with the main verify above and in the same engine
@@ -976,7 +976,7 @@ jobs:
           REGISTRY_URL: http://localhost:4873
         run: |
           set -euo pipefail
-          node dist/cli-bin.js verify npm-tarball --per-triple \
+          node packages/engine/dist/cli-bin.js verify npm-tarball --per-triple \
             --matrix "$MATRIX" \
             --cwd fixture-tree \
             --registry "$REGISTRY_URL"

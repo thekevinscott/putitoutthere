@@ -9,14 +9,16 @@ version = 1
 [[package]]
 name  = "putitoutthere"
 kind  = "npm"
-path  = "."
+path  = "packages/engine"
 globs = [
-  "src/**/*.ts",
-  "src/**/*.json",
-  "package.json",
+  "packages/engine/src/**/*.ts",
+  "packages/engine/src/**/*.json",
+  "packages/engine/package.json",
+  # Workspace lockfile stays at the repo root; a dep change to the engine
+  # package updates it there.
   "pnpm-lock.yaml",
-  "tsconfig.json",
-  "tsconfig.build.json",
+  "packages/engine/tsconfig.json",
+  "packages/engine/tsconfig.build.json",
   "action.yml",
   "dist-action/**",
   # The reusable workflow IS public surface — consumer release runs

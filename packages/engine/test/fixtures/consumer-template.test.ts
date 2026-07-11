@@ -35,8 +35,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const fixturesRoot = join(repoRoot, 'test/fixtures');
+const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
+const fixturesRoot = join(packageRoot, 'test/fixtures');
+// README.md stays at the repo root, two levels above this engine package.
+const repoRoot = fileURLToPath(new URL('../../../..', import.meta.url));
 
 // The canonical consumer template. Mirrors the README Quickstart.
 // If you change this, also update README.md.

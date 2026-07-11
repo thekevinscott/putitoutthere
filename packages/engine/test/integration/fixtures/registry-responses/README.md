@@ -6,7 +6,7 @@ must react to correctly. One file per response shape; companion tests in
 replay each fixture and assert the engine's reaction.
 
 The catalog of "registry behaviours we depend on" lives at
-[`notes/upstream-behaviors.md`](../../../../notes/upstream-behaviors.md);
+[`notes/upstream-behaviors.md`](../../../../../../notes/upstream-behaviors.md);
 add a row there when a new fixture lands.
 
 ## Layout

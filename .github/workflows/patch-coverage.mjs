@@ -39,7 +39,11 @@ try {
 
 const diffOut = execFileSync(
   'git',
-  ['diff', '--unified=0', '--no-prefix', `${BASE}..${HEAD}`, '--', 'src/'],
+  // `-M` (find-renames) so a file move isn't counted as added lines — a
+  // directory relocation must not trip the gate. No pathspec: rename
+  // detection needs both the old and new paths visible; the post-image
+  // filter below (`packages/engine/src/`) does the scoping instead.
+  ['diff', '--unified=0', '--no-prefix', '-M', `${BASE}..${HEAD}`],
   { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 );
 
@@ -73,7 +77,7 @@ const addedByFile = new Map(); // path -> [{line, text}]
         nextLine++;
         continue;
       }
-      if (!currentFile.startsWith('src/') || !currentFile.endsWith('.ts')) {
+      if (!currentFile.startsWith('packages/engine/src/') || !currentFile.endsWith('.ts')) {
         nextLine++;
         continue;
       }
@@ -96,7 +100,7 @@ if (addedByFile.size === 0) {
 
 // Load coverage data. The v8 reporter writes istanbul format keyed by
 // absolute path.
-const covPath = resolve('coverage/coverage-final.json');
+const covPath = resolve('packages/engine/coverage/coverage-final.json');
 let cov;
 try {
   cov = JSON.parse(readFileSync(covPath, 'utf8'));
