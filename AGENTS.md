@@ -82,6 +82,50 @@ Go-forward convention: the existing multi-function modules (`plan.ts`,
 `config.ts`, the handlers) are grandfathered; splitting them is its own
 opt-in refactor, not bundled into a feature change.
 
+### Repo-internal CI gates live in `src/ci/`, never in `.github/`
+
+Some logic runs only in this repo's own CI — the evidence-check and
+changelog gates, the patch-coverage gate, fixture-harness setup. It is
+**not** consumer surface (see `notes/design-commitments.md`), so it does
+not belong on the shipped `putitoutthere` bin. But it is still logic, and
+the epic-#442 rule applies to it in full: **`run:` steps and `.github/`
+hold no logic.**
+
+Concretely, a repo-internal CI gate obeys three rules:
+
+1. **All of it lives under `src/ci/<gate>/`.** Both halves: the I/O-free
+   orchestrator (the decision logic — parse, evaluate, format the
+   `::error::` output — unit- and integration-tested like any engine
+   code) *and* the thin composition root that supplies the real I/O the
+   orchestrator takes as injected deps (env reads, `git`/`gh`
+   subprocesses, file reads, sleep, clock). The composition root is a
+   normal `src/` module compiled to `dist/` by `pnpm build`; it isn't
+   unit-tested in isolation (it's the untestable-I/O seam), so it stays
+   as thin as a wiring layer can be — no decisions, only plumbing.
+
+2. **No authored `.mjs`/`.js`/`.ts` logic file lives under `.github/`.**
+   Not the gate, not a "thin boundary shim." A script sitting in
+   `.github/` is exactly the untested, un-runnable-locally, silently
+   drifting code this epic exists to remove — putting the boundary there
+   instead of in `src/ci/` just relocates the problem. `.github/` holds
+   workflow YAML and Actions config (issue/PR templates, CODEOWNERS) —
+   not code.
+
+3. **Workflows invoke the gate by a `package.json` script, never by a
+   `dist/` path.** Declare a `scripts` entry named `ci:<gate>` (e.g.
+   `"ci:evidence-check": "node dist/ci/evidence-check/main.js"`) and call
+   it from the workflow as `run: pnpm run ci:evidence-check`. The
+   `dist/` path is named in exactly one declared place — `package.json` —
+   never in YAML. Repo-internal gates get a `ci:` script, **not** an
+   entry on the shipped `putitoutthere` bin.
+
+The shipped engine surface (`putitoutthere <subcommand>`) is the other
+tier: logic a *consumer's* workflow runs — artifact `verify`, GitHub
+Release creation, tag moves. Those keep their bin entry. Dogfood
+workflows that run the shipped engine invoke it through the declared bin
+(`pnpm exec putitoutthere <cmd>`) for the same reason — no workflow names
+a `dist/` path.
+
 ### Start every PR with an e2e test against the real CLI
 
 Behaviour work starts at the **e2e tier**: a test that **shells out to
