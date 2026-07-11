@@ -1,0 +1,57 @@
+# testing-conventions config for packages/engine.
+#
+# These modules export only `type` / `interface` declarations — no runtime
+# code. TypeScript's colocated-test rule only auto-ignores `*.d.ts`, and we
+# do not hand-author `.d.ts` source (those are build output; see the repo
+# `.gitignore`). A type-only module has no behavior to unit-test, so each is
+# recorded here as a reasoned colocated-test exemption rather than paired with
+# a fabricated test. `path` is relative to the scanned `packages/engine/src`.
+#
+# Bar for adding an entry: the file must be *only* type/interface exports. The
+# moment one gains a runtime declaration it becomes a real subject and earns a
+# colocated test instead — remove its exemption then.
+
+[[typescript.exempt]]
+path = "plan-status-types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "reconcile-types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "status-types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "release-github/types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "verify/bundle-cli/types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "verify/crate/types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "verify/npm-tarball/types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "verify/posture-types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
+
+[[typescript.exempt]]
+path = "verify/wheel/types.ts"
+rules = ["colocated-test"]
+reason = "type-only module: only type/interface declarations, no runtime code"
