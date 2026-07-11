@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./cli.js', async () => {
-  const actual = await vi.importActual<typeof import('./cli.js')>('./cli.js');
-  return { ...actual, run: vi.fn() };
-});
+// Automock (no factory): vitest generates the double from the real module, so
+// it can't drift from the source — satisfying the unit-suite isolation lint
+// without a hand-written (untyped) factory.
+vi.mock('./cli.js');
 
 import { run } from './cli.js';
 
