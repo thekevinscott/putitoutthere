@@ -7,6 +7,10 @@ coverage/
 .env
 .env.local
 *.tsbuildinfo
+# Declaration files are build output (emitted to dist/), never hand-authored
+# source. Ignoring them keeps a generated *.d.ts from being committed beside
+# the *.ts it was built from.
+*.d.ts
 # Personal Claude Code settings stay local; shared skills are checked in.
 .claude/*
 !.claude/skills/
