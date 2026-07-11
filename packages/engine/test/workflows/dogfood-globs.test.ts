@@ -34,7 +34,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import { plan } from '../../src/plan.js';
 
-const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+const repoRoot = fileURLToPath(new URL('../../../..', import.meta.url));
 const projectTomlText = readFileSync(join(repoRoot, 'putitoutthere.toml'), 'utf8');
 
 interface ProjectConfig {
