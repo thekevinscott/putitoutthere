@@ -22,9 +22,7 @@ describe('cli-bin', () => {
   it('exits with the code the dispatcher returns, passing process.argv through', async () => {
     runMock.mockReturnValue(3);
     process.argv = ['node', 'piot-ci', 'evidence-check'];
-    const exit = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => undefined) as (code?: number) => never);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
     await import('./cli-bin.js');
 
