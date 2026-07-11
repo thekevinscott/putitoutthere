@@ -33,5 +33,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coverage-summary
-          path: coverage/
+          path: packages/engine/coverage/
           retention-days: 7

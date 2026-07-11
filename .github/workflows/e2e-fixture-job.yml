@@ -262,7 +262,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node dist/cli-bin.js verify wheel \
+          node packages/engine/dist/cli-bin.js verify wheel \
             --path "fixture-tree/${{ matrix.path }}" \
             --version "${{ matrix.version }}" \
             --target "${{ matrix.target }}"
@@ -916,7 +916,7 @@ jobs:
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
           set -euo pipefail
-          node dist/cli-bin.js verify crate \
+          node packages/engine/dist/cli-bin.js verify crate \
             --matrix "$MATRIX" \
             --registry-root "${RUNNER_TEMP}/piot-alt-registry"
 
@@ -962,7 +962,7 @@ jobs:
           set -euo pipefail
           args=(--matrix "$MATRIX" --cwd fixture-tree)
           if [ -n "${REGISTRY_URL:-}" ]; then args+=(--registry "$REGISTRY_URL"); fi
-          node dist/cli-bin.js verify npm-tarball "${args[@]}"
+          node packages/engine/dist/cli-bin.js verify npm-tarball "${args[@]}"
 
       # #306: per-triple tarball-verify for first-publish napi / bundled-cli
       # fixtures. Symmetric with the main verify above and in the same engine
@@ -976,7 +976,7 @@ jobs:
           REGISTRY_URL: http://localhost:4873
         run: |
           set -euo pipefail
-          node dist/cli-bin.js verify npm-tarball --per-triple \
+          node packages/engine/dist/cli-bin.js verify npm-tarball --per-triple \
             --matrix "$MATRIX" \
             --cwd fixture-tree \
             --registry "$REGISTRY_URL"

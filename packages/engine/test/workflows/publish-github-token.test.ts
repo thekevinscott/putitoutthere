@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
 const workflowsDir = join(
-  fileURLToPath(new URL('../..', import.meta.url)),
+  fileURLToPath(new URL('../../../..', import.meta.url)),
   '.github/workflows',
 );
 

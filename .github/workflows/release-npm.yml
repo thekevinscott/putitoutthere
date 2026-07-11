@@ -52,7 +52,7 @@ jobs:
 
       - id: plan
         name: putitoutthere plan
-        run: node dist/cli-bin.js plan --json > plan.json
+        run: node packages/engine/dist/cli-bin.js plan --json > plan.json
       - name: expose matrix
         run: |
           # #412: plan --json is now { matrix, verdicts, skew }; the matrix
@@ -109,7 +109,7 @@ jobs:
       # not inline bash. See notes/handoff/2026-04-24-dist-action.md.
       - name: Fold action bundle into release commit
         run: |
-          node dist/cli-bin.js fold-bundle --subject 'chore(release): bundle action'
+          node packages/engine/dist/cli-bin.js fold-bundle --subject 'chore(release): bundle action'
 
       - name: putitoutthere publish
         env:
@@ -117,7 +117,7 @@ jobs:
           # API; an authenticated call gets 5000 req/hr instead of the
           # unauthenticated 60, so a busy runner never rate-limits.
           GITHUB_TOKEN: ${{ github.token }}
-        run: node dist/cli-bin.js publish
+        run: node packages/engine/dist/cli-bin.js publish
 
       # Scaffolded workflows reference `thekevinscott/putitoutthere@v<major>`
       # (community GitHub Actions convention, e.g. actions/checkout@v4). The
@@ -131,4 +131,4 @@ jobs:
       # code (`src/advance-floating-major.ts`), sharing `forceMoveTag` with
       # `advance-v0` so the two floating-tag movers can't diverge.
       - name: Move floating major tag
-        run: node dist/cli-bin.js advance-floating-major
+        run: node packages/engine/dist/cli-bin.js advance-floating-major

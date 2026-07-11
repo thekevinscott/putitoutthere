@@ -39,7 +39,7 @@ try {
 
 const diffOut = execFileSync(
   'git',
-  ['diff', '--unified=0', '--no-prefix', `${BASE}..${HEAD}`, '--', 'src/'],
+  ['diff', '--unified=0', '--no-prefix', `${BASE}..${HEAD}`, '--', 'packages/engine/src/'],
   { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 );
 
@@ -73,7 +73,7 @@ const addedByFile = new Map(); // path -> [{line, text}]
         nextLine++;
         continue;
       }
-      if (!currentFile.startsWith('src/') || !currentFile.endsWith('.ts')) {
+      if (!currentFile.startsWith('packages/engine/src/') || !currentFile.endsWith('.ts')) {
         nextLine++;
         continue;
       }
@@ -96,7 +96,7 @@ if (addedByFile.size === 0) {
 
 // Load coverage data. The v8 reporter writes istanbul format keyed by
 // absolute path.
-const covPath = resolve('coverage/coverage-final.json');
+const covPath = resolve('packages/engine/coverage/coverage-final.json');
 let cov;
 try {
   cov = JSON.parse(readFileSync(covPath, 'utf8'));
