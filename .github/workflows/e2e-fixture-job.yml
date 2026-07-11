@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf fixture-tree
-          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
           VERSION="0.0.$(date +%s)"
           echo "FIXTURE_VERSION=${VERSION}" >> "$GITHUB_ENV"
           # Walk the materialized tree and rewrite __VERSION__ in any
@@ -176,7 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf fixture-tree
-          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
           # #276: the fixture is materialized at a STALE baseline (0.0.1),
           # NOT matrix.version. This mirrors a real consumer whose
           # pyproject.toml / Cargo.toml literal lags the planned version.
@@ -571,7 +571,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf fixture-tree
-          cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
           # Recompute the same throwaway version the plan job baked in.
           # plan emitted matrix.version; the first row's version is the
           # canonical one (every package shares a single version per run).

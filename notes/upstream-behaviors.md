@@ -5,9 +5,9 @@ Catalogue of registry-side response shapes and auth flows that
 Each entry below points at:
 
 1. A captured response fixture under
-   [`test/integration/fixtures/registry-responses/`](../test/integration/fixtures/registry-responses/),
+   [`test/integration/fixtures/registry-responses/`](../packages/engine/test/integration/fixtures/registry-responses/),
 2. The integration test that replays it
-   ([`test/integration/registry-auth.integration.test.ts`](../test/integration/registry-auth.integration.test.ts)),
+   ([`test/integration/registry-auth.integration.test.ts`](../packages/engine/test/integration/registry-auth.integration.test.ts)),
 3. The engine code path that reacts.
 
 When a fixture's shape drifts — a registry tweaks an error code, a CLI
@@ -55,7 +55,7 @@ registry rejects the publish because there is no crate of that name
 yet to match the TP record against.
 
 **Engine reaction.** `looksLikeFirstPublishTpRejection` in
-[`src/handlers/crates.ts`](../src/handlers/crates.ts) anchors on the
+[`src/handlers/crates.ts`](../packages/engine/src/handlers/crates.ts) anchors on the
 404-status line plus the registry's prose. When it fires (outside the
 e2e seam — the alt-registry `PIOT_CRATES_REGISTRY_PRIMARY` doesn't
 model TP), the handler throws `PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED`
@@ -86,8 +86,8 @@ registry that already has the version and gets E403. The package is
 on the registry — npm just exits non-zero on the duplicate write.
 
 **Engine reaction.** `looksLikePublishOverRace` in
-[`src/handlers/npm-platform.ts`](../src/handlers/npm-platform.ts)
-(re-used by [`src/handlers/npm.ts`](../src/handlers/npm.ts))
+[`src/handlers/npm-platform.ts`](../packages/engine/src/handlers/npm-platform.ts)
+(re-used by [`src/handlers/npm.ts`](../packages/engine/src/handlers/npm.ts))
 short-circuits to `{ status: 'already-published' }`. The first
 attempt succeeded; surfacing the E403 as failure would cause a
 misleading red release.
@@ -115,7 +115,7 @@ milliseconds against the consumer's working tree.
 
 **Engine reaction.** Preflight, not response-parsing.
 `assertRepositoryField` in
-[`src/handlers/npm.ts`](../src/handlers/npm.ts) and the
+[`src/handlers/npm.ts`](../packages/engine/src/handlers/npm.ts) and the
 `requireProvenanceMetadata` preflight gate (#280) reject locally with
 `PIOT_NPM_MISSING_REPOSITORY` before any subprocess runs. The
 fixture documents what would happen if the local guard were

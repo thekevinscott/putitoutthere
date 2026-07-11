@@ -39,7 +39,11 @@ try {
 
 const diffOut = execFileSync(
   'git',
-  ['diff', '--unified=0', '--no-prefix', `${BASE}..${HEAD}`, '--', 'packages/engine/src/'],
+  // `-M` (find-renames) so a file move isn't counted as added lines — a
+  // directory relocation must not trip the gate. No pathspec: rename
+  // detection needs both the old and new paths visible; the post-image
+  // filter below (`packages/engine/src/`) does the scoping instead.
+  ['diff', '--unified=0', '--no-prefix', '-M', `${BASE}..${HEAD}`],
   { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 );
 
