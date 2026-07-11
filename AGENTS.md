@@ -82,6 +82,48 @@ Go-forward convention: the existing multi-function modules (`plan.ts`,
 `config.ts`, the handlers) are grandfathered; splitting them is its own
 opt-in refactor, not bundled into a feature change.
 
+### Repo-internal CI gates live in `packages/ci`, never in `.github/`
+
+The repo is a pnpm workspace with two packages: **`packages/engine`** —
+the shipped `putitoutthere` engine (published to npm, the `putitoutthere`
+bin) — and **`packages/ci`** (`@putitoutthere/ci`, `private: true`,
+**never published**, the `piot-ci` bin). Logic that runs only in this
+repo's own CI — the evidence-check, changelog, and patch-coverage gates,
+fixture-harness setup — is not consumer surface, so it must not ship in
+the engine package. It lives in `packages/ci`.
+
+Three rules for a repo-internal CI gate:
+
+1. **All of it lives under `packages/ci/src/<gate>/`** — the I/O-free
+   orchestrator (the decision logic, unit- and integration-tested like
+   any engine code) *and* the thin composition root that supplies the
+   real I/O it takes as injected deps (env reads, `git`/`gh`
+   subprocesses, file reads, sleep, clock). Compiled to `packages/ci/
+   dist/` by that package's build; the composition root stays as thin as
+   a wiring layer can be — no decisions, only plumbing.
+
+2. **No authored `.mjs`/`.js`/`.ts` logic file lives under `.github/`.**
+   Not the gate, not a "thin boundary shim." A script sitting in
+   `.github/` is exactly the untested, un-runnable-locally, silently
+   drifting code this epic exists to remove — putting the boundary there
+   instead of in `packages/ci/` just relocates the problem. `.github/`
+   holds workflow YAML and Actions config (issue/PR templates,
+   CODEOWNERS) — not code.
+
+3. **Workflows invoke a gate through the `piot-ci` bin, never by a
+   `dist/` path** — `pnpm exec piot-ci <gate>` from the repo root. The
+   root workspace package declares `@putitoutthere/ci` as a
+   `workspace:*` devDependency, which links `piot-ci` into the root
+   `node_modules/.bin` (a package's own bin is otherwise not resolvable
+   via `pnpm --filter … exec`). Because `packages/ci` is a private
+   workspace package, the bin never ships to consumers.
+
+The shipped engine (`packages/engine`, the `putitoutthere` bin) is the
+other tier — logic a *consumer's* workflow runs (artifact `verify`,
+GitHub Release creation, tag moves). Dogfood workflows invoke it through
+its declared bin (`pnpm exec putitoutthere <cmd>`), not a `dist/` path,
+for the same reason.
+
 ### Start every PR with an e2e test against the real CLI
 
 Behaviour work starts at the **e2e tier**: a test that **shells out to

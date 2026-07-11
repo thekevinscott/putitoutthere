@@ -16,5 +16,8 @@
     "test:unit:coverage": "pnpm --filter putitoutthere run test:unit:coverage",
     "test:integration": "pnpm --filter putitoutthere run test:integration",
     "test:e2e": "pnpm --filter putitoutthere run test:e2e"
+  },
+  "devDependencies": {
+    "@putitoutthere/ci": "workspace:*"
   }
 }
