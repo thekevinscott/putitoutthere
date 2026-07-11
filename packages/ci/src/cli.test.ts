@@ -1,0 +1,47 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { run } from './cli.js';
+
+let out: string[];
+let err: string[];
+
+beforeEach(() => {
+  out = [];
+  err = [];
+  vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
+    out.push(typeof c === 'string' ? c : c.toString());
+    return true;
+  });
+  vi.spyOn(process.stderr, 'write').mockImplementation((c) => {
+    err.push(typeof c === 'string' ? c : c.toString());
+    return true;
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const argv = (...rest: string[]) => ['node', 'piot-ci', ...rest];
+
+describe('piot-ci dispatcher', () => {
+  it('prints usage to stdout and exits 1 with no command', () => {
+    const code = run(argv());
+    expect(code).toBe(1);
+    expect(out.join('')).toContain('piot-ci — putitoutthere repo-internal CI gates');
+    expect(err.join('')).toBe('');
+  });
+
+  it.each(['help', '--help', '-h'])('prints usage and exits 0 for %s', (flag) => {
+    const code = run(argv(flag));
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('Usage: piot-ci <command>');
+  });
+
+  it('reports an unknown command on stderr, prints usage, exits 1', () => {
+    const code = run(argv('bogus'));
+    expect(code).toBe(1);
+    expect(err.join('')).toContain("piot-ci: unknown command 'bogus'");
+    expect(out.join('')).toContain('Usage: piot-ci <command>');
+  });
+});

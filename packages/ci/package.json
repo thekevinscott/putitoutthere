@@ -1,0 +1,26 @@
+{
+  "name": "@putitoutthere/ci",
+  "version": "0.0.0",
+  "description": "Repo-internal CI gates for putitoutthere. Private; never published.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "piot-ci": "./dist/cli-bin.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/node": "^26.0.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "eslint": "^10.2.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.8.0",
+    "vitest": "^2.1.0"
+  }
+}
