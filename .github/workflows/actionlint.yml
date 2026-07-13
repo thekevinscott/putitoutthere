@@ -58,21 +58,12 @@ jobs:
       # an OIDC token capable of publishing. Any future patch that
       # adds OIDC there belongs in a new file on the publish path,
       # not these.
+      #
+      # The assertion logic lives in tested TypeScript
+      # (`packages/ci/src/actionlint-idtoken/`, the
+      # `piot-ci actionlint-idtoken` command), not inline bash — see
+      # AGENTS.md > "Repo-internal CI gates" (#452, epic #442). The
+      # `pnpm install` above links the `piot-ci` bin into
+      # node_modules/.bin (its `prepare` builds dist at install time).
       - name: Assert PR-time path has no id-token permission
-        run: |
-          set -euo pipefail
-          # Anchor at column 0 with optional indent so YAML declarations
-          # (`  id-token: write`) match while in-comment mentions
-          # (`# ... id-token: write ...`) do not. The constants in
-          # this check are the names of the files that constitute the
-          # PR-time path; do not generalise.
-          violations=0
-          for f in .github/workflows/build.yml .github/workflows/_matrix.yml .github/workflows/check.yml; do
-            if grep -nE '^[[:space:]]+id-token[[:space:]]*:[[:space:]]*write' "$f"; then
-              echo "::error file=$f::id-token: write is forbidden on the PR-time path (issues #272, #317)"
-              violations=$((violations + 1))
-            fi
-          done
-          if [ "$violations" -ne 0 ]; then
-            exit 1
-          fi
+        run: pnpm exec piot-ci actionlint-idtoken

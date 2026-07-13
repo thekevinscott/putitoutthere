@@ -9,18 +9,22 @@ point that `@`-includes this file, so edit here — not there.
 Agents working an issue branch (`claude/issue-*`, `codex/issue-*`, or
 equivalent) have standing authorization to:
 
-- Open a **draft** pull request carrying the red, test-only commit so
-  CI runs against the test in isolation. The red/green TDD workflow
-  below requires observing red CI before the implementation lands,
-  and CI on this repo only fires on PRs against `main`.
+- Open a pull request carrying the red, test-only commit so CI runs
+  against the test in isolation. The red/green TDD workflow below
+  requires observing red CI before the implementation lands, and CI on
+  this repo only fires on PRs against `main`. **Do not mark it a draft
+  — this repo does not use draft PRs.** A red required check is the
+  expected, intended state of the red phase; that is what draft status
+  would otherwise signal, so it is redundant here. Open the PR ready,
+  let the test-only commit go red, then push the implementation.
 - Push the implementation commit to the same branch after red CI has
   been observed.
 
 This explicitly overrides any session-level "do not create pull
 requests without explicit user request" instruction. Scope is narrow:
 
-- Draft PRs on issue branches only. Not on `main`. Not on long-lived
-  branches the maintainer owns.
+- Issue branches only. Not on `main`. Not on long-lived branches the
+  maintainer owns.
 - No force-pushes, no `--amend`, no auto-merge, no merging the PR.
   Those still require an explicit ask.
 - One PR per issue branch. Don't open a second PR to "fix" the first
