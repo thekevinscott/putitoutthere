@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { runActionlintIdToken } from './actionlint-idtoken/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
 import { run } from './cli.js';
+import { runTddLint } from './tdd-lint/run.js';
 
+vi.mock('./actionlint-idtoken/run.js');
 vi.mock('./changelog-check/run.js');
+vi.mock('./tdd-lint/run.js');
 
 let out: string[];
 let err: string[];
@@ -53,6 +57,22 @@ describe('piot-ci dispatcher', () => {
     const code = run(argv('changelog-check'));
     expect(code).toBe(1);
     expect(runChangelogCheck).toHaveBeenCalledOnce();
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches tdd-lint to its gate and returns its exit code', () => {
+    vi.mocked(runTddLint).mockReturnValue(1);
+    const code = run(argv('tdd-lint'));
+    expect(code).toBe(1);
+    expect(runTddLint).toHaveBeenCalledOnce();
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches actionlint-idtoken to its gate and returns its exit code', () => {
+    vi.mocked(runActionlintIdToken).mockReturnValue(1);
+    const code = run(argv('actionlint-idtoken'));
+    expect(code).toBe(1);
+    expect(runActionlintIdToken).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 });
