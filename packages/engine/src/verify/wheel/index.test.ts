@@ -56,9 +56,11 @@ describe('verifyWheel: dist presence', () => {
   it('resolves a relative --path against cwd', () => {
     // A relative path exercises the resolve(cwd, path) branch; the resolved
     // dist dir is reported in the missing-dist error, pinning the resolution.
+    // Separator-agnostic so the assertion holds on Windows too (path.resolve
+    // there yields backslashes and a drive letter).
     existsMock.mockReturnValue(false);
     const code = verifyWheel(opts({ path: 'rel/pkg' }));
-    expect(out.join('')).toContain('no dist/ produced under /unused/rel/pkg/dist');
+    expect(out.join('')).toMatch(/no dist\/ produced under .*[/\\]unused[/\\]rel[/\\]pkg[/\\]dist/);
     expect(code).toBe(1);
   });
 
