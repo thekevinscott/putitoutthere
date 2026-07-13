@@ -8,7 +8,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isVersionIndependentWheel } from './wheel-abi.js';
 
@@ -40,10 +40,6 @@ const detect = (): boolean => isVersionIndependentWheel('.', 'repo');
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('isVersionIndependentWheel (#401)', () => {

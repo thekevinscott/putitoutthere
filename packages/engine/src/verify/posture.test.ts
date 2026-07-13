@@ -15,7 +15,7 @@
  * Issue #414, #403 slice 5.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { computeVerify } from './posture.js';
 import { type Config, loadConfig } from '../config.js';
@@ -70,10 +70,6 @@ function stubHandler(): void {
     }),
   } as unknown as ReturnType<typeof handlerFor>);
 }
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('computeVerify', () => {
   it('classifies every posture', async () => {

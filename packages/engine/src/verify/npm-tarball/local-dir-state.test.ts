@@ -1,5 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 import { localDirState } from './local-dir-state.js';
@@ -18,10 +18,6 @@ const listMock = vi.mocked(listFilesRecursive);
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('localDirState', () => {

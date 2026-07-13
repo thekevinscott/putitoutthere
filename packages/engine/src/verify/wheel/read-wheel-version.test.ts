@@ -6,7 +6,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { readWheelVersion } from './read-wheel-version.js';
 import { readZipEntry } from './read-zip-entry.js';
@@ -22,9 +22,6 @@ const META = (v: string) => `Metadata-Version: 2.1\nName: demo\nVersion: ${v}\n`
 beforeEach(() => {
   vi.resetAllMocks();
   readFileMock.mockReturnValue(Buffer.from('wheel-bytes'));
-});
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('readWheelVersion', () => {

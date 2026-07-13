@@ -9,7 +9,7 @@
  * test/integration/tag-plumbing.integration.test.ts and the e2e tier.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { forceMoveTag } from './force-move-tag.js';
 import { forceTag, pushTagRefForce } from './git.js';
@@ -21,10 +21,6 @@ const pushForceMock = vi.mocked(pushTagRefForce);
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('forceMoveTag', () => {

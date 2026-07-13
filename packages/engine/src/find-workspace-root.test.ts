@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findWorkspaceRoot } from './find-workspace-root.js';
 
@@ -35,9 +35,6 @@ function cargoTree(byDirSuffix: Record<string, string>): void {
 
 beforeEach(() => {
   readFileMock.mockReset();
-});
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('findWorkspaceRoot (#428)', () => {

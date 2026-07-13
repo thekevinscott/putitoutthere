@@ -8,7 +8,7 @@
  * test/integration/tag-plumbing.integration.test.ts and the e2e tier.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ensureTag } from './ensure-tag.js';
 import { createTag, pushTag, tagList } from './git.js';
@@ -26,10 +26,6 @@ function makeLog(): Logger {
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('ensureTag', () => {

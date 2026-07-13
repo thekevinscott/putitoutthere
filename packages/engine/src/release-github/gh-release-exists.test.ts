@@ -3,7 +3,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ghReleaseExists } from './gh-release-exists.js';
 
@@ -17,10 +17,6 @@ const execMock = vi.mocked(execFileSync);
 
 beforeEach(() => {
   execMock.mockReset();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('ghReleaseExists', () => {

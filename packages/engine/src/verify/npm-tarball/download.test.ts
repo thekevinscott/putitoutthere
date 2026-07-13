@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { downloadNpmTarball } from './download.js';
 
@@ -23,10 +23,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   execMock.mockReturnValue('');
   mkdtempMock.mockReturnValue(ROOT);
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('downloadNpmTarball', () => {

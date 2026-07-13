@@ -5,7 +5,7 @@
  * Issue #5. Plan: plan.md §6.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { loadConfig, parseConfig, sanitizeArtifactName } from './config.js';
 
@@ -725,9 +725,6 @@ describe('parseConfig: TOML errors', () => {
 describe('loadConfig: filesystem', () => {
   beforeEach(() => {
     readFileSyncMock.mockReset();
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it('reads a valid config from disk', () => {
