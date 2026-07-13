@@ -4,23 +4,31 @@
  * Mocks `execFileSync` so we can assert every npm invocation (platform
  * publishes, then main) and stub per-package `isPublished` lookups.
  *
+ * Unit-suite isolation: the subprocess boundary (`node:child_process`) and
+ * the filesystem (`node:fs`) are both mocked. `node:fs` is backed by a small
+ * in-memory tree (below) shared between test setup and the unit under test,
+ * so synthesized staging dirs, artifact reads, and package.json rewrites all
+ * observe the same state without a real temp tree. Real end-to-end file
+ * behavior is covered by the npm integration tier
+ * (test/integration/npm.integration.test.ts).
+ *
  * Issue #19. Plan: §13.7.
  */
 
-import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
+import type { Stats } from 'node:fs';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -37,12 +45,148 @@ import {
 } from './npm-platform.js';
 import type { Ctx } from '../types.js';
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
-});
+vi.mock('node:child_process');
+vi.mock('node:fs');
 
 const execMock = vi.mocked(execFileSync);
+
+/* -------------------------- in-memory filesystem -------------------------- */
+// A minimal `node:fs` substitute keyed by normalized (forward-slash) path, so
+// the source's real-`node:path` joins (back-slashed on Windows) resolve to the
+// same entries the test seeds. Covers exactly the calls crossing the mocked
+// boundary: mkdir/write/read/readdir/exists/stat/chmod/cp/mkdtemp/rm.
+
+type FsFile = { type: 'file'; content: Buffer; mode: number };
+type FsDir = { type: 'dir'; mode: number };
+type FsNode = FsFile | FsDir;
+
+let store = new Map<string, FsNode>();
+let mkdtempCounter = 0;
+
+function norm(p: unknown): string {
+  let s = String(p).replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (s.length > 1 && s.endsWith('/')) {s = s.slice(0, -1);}
+  return s;
+}
+function parentOf(np: string): string {
+  const i = np.lastIndexOf('/');
+  return i <= 0 ? '/' : np.slice(0, i);
+}
+function ensureDir(p: string): void {
+  const np = norm(p);
+  if (store.has(np)) {return;}
+  if (np !== '/') {ensureDir(parentOf(np));}
+  store.set(np, { type: 'dir', mode: 0o755 });
+}
+function enoent(path: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`ENOENT: no such file or directory, '${path}'`), { code: 'ENOENT' });
+}
+
+function resetFs(): void {
+  store = new Map<string, FsNode>();
+  store.set('/', { type: 'dir', mode: 0o755 });
+}
+
+function installFs(): void {
+  vi.mocked(mkdirSync).mockImplementation(((p: string) => {
+    ensureDir(norm(p));
+    return undefined;
+  }) as typeof mkdirSync);
+
+  vi.mocked(writeFileSync).mockImplementation(((p: string, data: string | Buffer) => {
+    const np = norm(p);
+    ensureDir(parentOf(np));
+    const content = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data));
+    store.set(np, { type: 'file', content, mode: 0o644 });
+  }) as typeof writeFileSync);
+
+  vi.mocked(readFileSync).mockImplementation(((p: string, enc?: unknown) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node || node.type !== 'file') {throw enoent(np);}
+    const encoding = typeof enc === 'string' ? enc : (enc as { encoding?: string } | undefined)?.encoding;
+    return encoding ? node.content.toString(encoding as BufferEncoding) : Buffer.from(node.content);
+  }) as typeof readFileSync);
+
+  vi.mocked(readdirSync).mockImplementation(((p: string): string[] => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node || node.type !== 'dir') {throw enoent(np);}
+    const prefix = np === '/' ? '/' : `${np}/`;
+    const names: string[] = [];
+    for (const key of store.keys()) {
+      if (key === np) {continue;}
+      if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
+        names.push(key.slice(prefix.length));
+      }
+    }
+    return names;
+  }) as unknown as typeof readdirSync);
+
+  vi.mocked(existsSync).mockImplementation(((p: string) => store.has(norm(p))) as typeof existsSync);
+
+  vi.mocked(statSync).mockImplementation(((p: string) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node) {throw enoent(np);}
+    return {
+      mode: node.mode,
+      isFile: () => node.type === 'file',
+      isDirectory: () => node.type === 'dir',
+    } as unknown as Stats;
+  }) as typeof statSync);
+
+  vi.mocked(chmodSync).mockImplementation(((p: string, mode: number) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node) {throw enoent(np);}
+    node.mode = typeof mode === 'string' ? parseInt(mode, 8) : mode;
+  }) as typeof chmodSync);
+
+  vi.mocked(cpSync).mockImplementation(((src: string, dest: string) => {
+    const from = norm(src);
+    const to = norm(dest);
+    const node = store.get(from);
+    if (!node) {throw enoent(from);}
+    if (node.type === 'file') {
+      ensureDir(parentOf(to));
+      store.set(to, { type: 'file', content: Buffer.from(node.content), mode: node.mode });
+      return;
+    }
+    ensureDir(to);
+    const prefix = `${from}/`;
+    for (const [key, child] of [...store.entries()]) {
+      if (key.startsWith(prefix)) {
+        const rel = key.slice(prefix.length);
+        const target = `${to}/${rel}`;
+        store.set(
+          target,
+          child.type === 'file'
+            ? { type: 'file', content: Buffer.from(child.content), mode: child.mode }
+            : { type: 'dir', mode: child.mode },
+        );
+      }
+    }
+  }) as typeof cpSync);
+
+  vi.mocked(mkdtempSync).mockImplementation((prefix: string) => {
+    mkdtempCounter += 1;
+    const dir = `${norm(prefix)}${mkdtempCounter.toString().padStart(6, '0')}`;
+    ensureDir(dir);
+    return dir;
+  });
+
+  vi.mocked(rmSync).mockImplementation(((p: string) => {
+    const np = norm(p);
+    store.delete(np);
+    const prefix = `${np}/`;
+    for (const key of [...store.keys()]) {
+      if (key.startsWith(prefix)) {store.delete(key);}
+    }
+  }) as typeof rmSync);
+}
+
+installFs();
 
 let repo: string;
 let artifactsRoot: string;
@@ -59,15 +203,15 @@ function makeCtx(over: Partial<Ctx> = {}): Ctx {
 }
 
 function makeArtifact(target: string, fileName: string, contents: Buffer | string): void {
-  const dir = join(artifactsRoot, `demo-cli-${target}`);
+  const dir = `${artifactsRoot}/demo-cli-${target}`;
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, fileName), contents);
+  writeFileSync(`${dir}/${fileName}`, contents);
 }
 
 function basePkg(over: Partial<PlatformPkg> = {}): PlatformPkg {
   return {
     name: 'demo-cli',
-    path: join(repo, 'pkg'),
+    path: `${repo}/pkg`,
     build: [{ mode: 'napi', name: DEFAULT_NAME_TEMPLATE }],
     targets: ['linux-x64-gnu', 'darwin-arm64'],
     ...over,
@@ -91,18 +235,19 @@ function stagingDirArg(args: string[]): string | undefined {
 
 beforeEach(() => {
   execMock.mockReset();
-  repo = mkdtempSync(join(tmpdir(), 'npm-plat-test-'));
-  artifactsRoot = join(repo, 'artifacts');
+  resetFs();
+  repo = '/repo';
+  artifactsRoot = `${repo}/artifacts`;
   mkdirSync(artifactsRoot, { recursive: true });
-  mkdirSync(join(repo, 'pkg'), { recursive: true });
+  mkdirSync(`${repo}/pkg`, { recursive: true });
   writeFileSync(
-    join(repo, 'pkg', 'package.json'),
+    `${repo}/pkg/package.json`,
     JSON.stringify({ name: 'demo-cli', version: '0.0.0' }, null, 2),
   );
 });
 
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  resetFs();
 });
 
 describe('resolvePlatformName', () => {
@@ -333,7 +478,7 @@ describe('publishPlatforms (napi)', () => {
     const r = await publishPlatforms(basePkg(), '0.2.0', makeCtx());
     expect(r.published).toEqual(['demo-cli-linux-x64-gnu', 'demo-cli-darwin-arm64']);
 
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies).toEqual({
@@ -354,7 +499,7 @@ describe('publishPlatforms (napi)', () => {
     expect(r.skipped).toContain('demo-cli-linux-x64-gnu');
     expect(r.published).toEqual(['demo-cli-darwin-arm64']);
     // Already-published platforms still end up in optionalDependencies.
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
@@ -376,7 +521,7 @@ describe('publishPlatforms (napi)', () => {
     await expect(publishPlatforms(basePkg(), '0.2.0', makeCtx())).rejects.toThrow(/platform/);
 
     // Main package.json must NOT have optionalDependencies.
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as Record<string, unknown>;
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as Record<string, unknown>;
     expect(pkgJson.optionalDependencies).toBeUndefined();
     expect(calls).toBeGreaterThan(0);
   });
@@ -385,8 +530,8 @@ describe('publishPlatforms (napi)', () => {
 
 describe('publishPlatforms (bundled-cli)', () => {
   it('synthesized platform package.json picks the executable as main', async () => {
-    mkdirSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('#!/bin/bash\n'));
+    mkdirSync(`${artifactsRoot}/demo-cli-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-cli-linux-x64-gnu/demo-cli`, Buffer.from('#!/bin/bash\n'));
 
     const stagingPkgJsons: Record<string, unknown>[] = [];
     execMock.mockImplementation((_cmd, args) => {
@@ -397,7 +542,7 @@ describe('publishPlatforms (bundled-cli)', () => {
       // .npmrc for auth). Inspect package.json by parsing the folder arg.
       const folder = stagingDirArg(a);
       if (folder) {
-        stagingPkgJsons.push(JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>);
+        stagingPkgJsons.push(JSON.parse(readFileSync(`${folder}/package.json`, 'utf8')) as Record<string, unknown>);
       }
       return Buffer.from('');
     });
@@ -418,7 +563,7 @@ describe('publishPlatforms (bundled-cli)', () => {
     // the publishing GitHub repo. Ensure synthesized platform packages
     // inherit identity fields from the main package.
     writeFileSync(
-      join(repo, 'pkg', 'package.json'),
+      `${repo}/pkg/package.json`,
       JSON.stringify({
         name: 'demo-cli',
         version: '0.0.0',
@@ -427,8 +572,8 @@ describe('publishPlatforms (bundled-cli)', () => {
         repository: { type: 'git', url: 'git+https://github.com/acme/demo-cli.git' },
       }, null, 2),
     );
-    mkdirSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('x'));
+    mkdirSync(`${artifactsRoot}/demo-cli-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-cli-linux-x64-gnu/demo-cli`, Buffer.from('x'));
 
     const stagingPkgJsons: Record<string, unknown>[] = [];
     execMock.mockImplementation((_cmd, args) => {
@@ -436,7 +581,7 @@ describe('publishPlatforms (bundled-cli)', () => {
       if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       const folder = stagingDirArg(a);
       if (folder) {
-        stagingPkgJsons.push(JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>);
+        stagingPkgJsons.push(JSON.parse(readFileSync(`${folder}/package.json`, 'utf8')) as Record<string, unknown>);
       }
       return Buffer.from('');
     });
@@ -464,8 +609,8 @@ describe('publishPlatforms (bundled-cli)', () => {
     // job as 0644. The synthesized platform package must restore +x —
     // npm only chmods `bin` entries, and the bundled binary is referenced
     // via `main`, so without this the launcher's spawnSync EACCESes.
-    mkdirSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu'), { recursive: true });
-    const artifactBin = join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo-cli');
+    mkdirSync(`${artifactsRoot}/demo-cli-linux-x64-gnu`, { recursive: true });
+    const artifactBin = `${artifactsRoot}/demo-cli-linux-x64-gnu/demo-cli`;
     writeFileSync(artifactBin, Buffer.from('#!/bin/sh\n'));
     chmodSync(artifactBin, 0o644); // simulate the lost executable bit
 
@@ -475,7 +620,7 @@ describe('publishPlatforms (bundled-cli)', () => {
       if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       const folder = stagingDirArg(a);
       if (folder) {
-        stagedModes.push(statSync(join(folder, 'demo-cli')).mode);
+        stagedModes.push(statSync(`${folder}/demo-cli`).mode);
       }
       return Buffer.from('');
     });
@@ -523,7 +668,7 @@ describe('publishPlatforms — cwd is pkg.path so npm finds the consumer .npmrc 
           folder,
           folderExisted: folder !== undefined && existsSync(folder),
           folderHadPackageJson:
-            folder !== undefined && existsSync(join(folder, 'package.json')),
+            folder !== undefined && existsSync(`${folder}/package.json`),
         });
       }
       return Buffer.from('');
@@ -629,7 +774,7 @@ describe('publishPlatforms: publish flags', () => {
   it('merges onto existing optionalDependencies rather than replacing', async () => {
     makeArtifact('linux-x64-gnu', 'demo.node', Buffer.from('x'));
     writeFileSync(
-      join(repo, 'pkg', 'package.json'),
+      `${repo}/pkg/package.json`,
       JSON.stringify({ name: 'demo-cli', version: '0.0.0', optionalDependencies: { 'other-dep': '^1.0.0' } }, null, 2),
     );
     execMock.mockImplementation((_cmd, args) => {
@@ -638,7 +783,7 @@ describe('publishPlatforms: publish flags', () => {
       return Buffer.from('');
     });
     await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies['other-dep']).toBe('^1.0.0');
@@ -650,16 +795,16 @@ describe('artifact path resolution', () => {
   it('falls back to ctx.cwd/artifacts when artifactsRoot is unset', () => {
     makeArtifact('linux-x64-gnu', 'demo.node', Buffer.from('x'));
     // Not a real published-end-to-end test; just existence.
-    expect(existsSync(join(repo, 'artifacts', 'demo-cli-linux-x64-gnu'))).toBe(true);
+    expect(existsSync(`${repo}/artifacts/demo-cli-linux-x64-gnu`)).toBe(true);
   });
 
   // #237: slash-containing pkg.name (polyglot-monorepo grouping shape)
   // resolves to the encoded artifact directory the planner emitted.
   it('encodes `/` in pkg.name when looking up the artifact directory', async () => {
     // On-disk dir uses the encoded name; the lookup must match it.
-    const dir = join(artifactsRoot, 'js__cachetta-linux-x64-gnu');
+    const dir = `${artifactsRoot}/js__cachetta-linux-x64-gnu`;
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'cachetta.linux-x64-gnu.node'), Buffer.from('napi-bytes'));
+    writeFileSync(`${dir}/cachetta.linux-x64-gnu.node`, Buffer.from('napi-bytes'));
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
@@ -678,10 +823,10 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
   it('publishes both napi and bundled-cli families and pins both in optionalDependencies', async () => {
     // Two artifacts per triple — one per mode — each in its own
     // mode-infixed artifact dir.
-    mkdirSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu', 'demo.linux-x64-gnu.node'), Buffer.from('napi'));
-    mkdirSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('#!/bin/bash\n'));
+    mkdirSync(`${artifactsRoot}/demo-cli-napi-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-cli-napi-linux-x64-gnu/demo.linux-x64-gnu.node`, Buffer.from('napi'));
+    mkdirSync(`${artifactsRoot}/demo-cli-bundled-cli-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-cli-bundled-cli-linux-x64-gnu/demo-cli`, Buffer.from('#!/bin/bash\n'));
 
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
@@ -699,7 +844,7 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
     const r = await publishPlatforms(pkg, '0.2.0', makeCtx());
     expect(r.published).toEqual(['@dirsql/lib-linux-x64-gnu', '@dirsql/cli-linux-x64-gnu']);
 
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies).toEqual({
@@ -709,10 +854,10 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
   });
 
   it('synthesized platform package picks the right main file per mode', async () => {
-    mkdirSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-cli-napi-linux-x64-gnu', 'demo.linux-x64-gnu.node'), Buffer.from('napi'));
-    mkdirSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-cli-bundled-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('x'));
+    mkdirSync(`${artifactsRoot}/demo-cli-napi-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-cli-napi-linux-x64-gnu/demo.linux-x64-gnu.node`, Buffer.from('napi'));
+    mkdirSync(`${artifactsRoot}/demo-cli-bundled-cli-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-cli-bundled-cli-linux-x64-gnu/demo-cli`, Buffer.from('x'));
 
     const stagingByName = new Map<string, Record<string, unknown>>();
     execMock.mockImplementation((_cmd, args) => {
@@ -720,7 +865,7 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
       if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
       const folder = stagingDirArg(a);
       if (folder) {
-        const json = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Record<string, unknown>;
+        const json = JSON.parse(readFileSync(`${folder}/package.json`, 'utf8')) as Record<string, unknown>;
         stagingByName.set(String(json.name), json);
       }
       return Buffer.from('');
@@ -744,8 +889,8 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
 
   it('resolves {scope} and {base} variables when the main package is scoped', async () => {
     // Single-entry build → no mode infix in the artifact dir name.
-    mkdirSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo.node'), Buffer.from('x'));
+    mkdirSync(`${artifactsRoot}/demo-cli-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-cli-linux-x64-gnu/demo.node`, Buffer.from('x'));
 
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
@@ -843,7 +988,7 @@ describe('publishPlatforms: npm CLI retry race (#dirsql)', () => {
     // the package is on the registry at the requested version.
     expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
     // Main package.json got the optionalDependencies rewrite.
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
@@ -884,7 +1029,7 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
 
     const r = await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
     expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
@@ -911,7 +1056,7 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
       publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx()),
     ).rejects.toThrow(/Re-run the release to mint a fresh attestation/);
     // Failed before the rewrite: main package.json must NOT carry optionalDependencies.
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as Record<string, unknown>;
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as Record<string, unknown>;
     expect(pkgJson.optionalDependencies).toBeUndefined();
   });
 });
