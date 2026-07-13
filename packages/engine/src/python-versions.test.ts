@@ -2,10 +2,8 @@
  * `requires-python` → concrete CPython version expansion. Issue #369.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_PYTHON_VERSION,
@@ -13,6 +11,14 @@ import {
   expandRequiresPython,
   resolvePythonVersions,
 } from './python-versions.js';
+
+// `resolvePythonVersions`'s only collaborator is `node:fs` (reading
+// pyproject.toml); mock it so this isolates the resolution logic — override /
+// inference / fallback — from disk. The real read is covered at the
+// integration + e2e tiers.
+vi.mock('node:fs');
+
+const readFileMock = vi.mocked(readFileSync);
 
 describe('expandRequiresPython', () => {
   it('expands `>=3.10` to the released CPython set it allows', () => {
@@ -114,59 +120,58 @@ describe('expandRequiresPython', () => {
 });
 
 describe('resolvePythonVersions', () => {
-  let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'pyver-test-'));
+    readFileMock.mockReset();
   });
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
+  // `cwd`/`path` are opaque to the mocked reader; the pyproject *contents* it
+  // returns (or the error it throws) are what drives each branch.
+  const pyproject = (contents: string): void => {
+    readFileMock.mockReturnValue(contents);
+  };
+  const missingPyproject = (): void => {
+    readFileMock.mockImplementation(() => {
+      throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+    });
+  };
+
   it('prefers an explicit python_versions override, sorted ascending', () => {
-    writeFileSync(
-      join(dir, 'pyproject.toml'),
-      '[project]\nrequires-python = ">=3.10"\n',
-      'utf8',
-    );
+    pyproject('[project]\nrequires-python = ">=3.10"\n');
     expect(
-      resolvePythonVersions({ path: '.', python_versions: ['3.13', '3.9'] }, dir),
+      resolvePythonVersions({ path: '.', python_versions: ['3.13', '3.9'] }, '/repo'),
     ).toEqual(['3.9', '3.13']);
   });
 
   it('infers from requires-python when no override is given', () => {
-    writeFileSync(
-      join(dir, 'pyproject.toml'),
-      '[project]\nrequires-python = ">=3.12"\n',
-      'utf8',
-    );
-    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual(['3.12', '3.13', '3.14']);
+    pyproject('[project]\nrequires-python = ">=3.12"\n');
+    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual(['3.12', '3.13', '3.14']);
   });
 
   it('falls back to the default when pyproject.toml is missing', () => {
-    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
+    missingPyproject();
+    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
   it('falls back to the default when requires-python is absent', () => {
-    writeFileSync(join(dir, 'pyproject.toml'), '[project]\nname = "x"\n', 'utf8');
-    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
+    pyproject('[project]\nname = "x"\n');
+    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
   it('falls back to the default when pyproject.toml has no [project] table', () => {
-    writeFileSync(join(dir, 'pyproject.toml'), '[build-system]\nrequires = []\n', 'utf8');
-    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
+    pyproject('[build-system]\nrequires = []\n');
+    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
   it('falls back to the default when pyproject.toml is malformed TOML', () => {
-    writeFileSync(join(dir, 'pyproject.toml'), 'this is not = = valid toml [[', 'utf8');
-    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
+    pyproject('this is not = = valid toml [[');
+    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
   it('falls back to the default when requires-python is unparseable', () => {
-    writeFileSync(
-      join(dir, 'pyproject.toml'),
-      '[project]\nrequires-python = "banana"\n',
-      'utf8',
-    );
-    expect(resolvePythonVersions({ path: '.' }, dir)).toEqual([DEFAULT_PYTHON_VERSION]);
+    pyproject('[project]\nrequires-python = "banana"\n');
+    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 });

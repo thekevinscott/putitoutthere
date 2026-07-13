@@ -1,67 +1,65 @@
 /**
- * `foldActionBundle` — synthesize the action-bundle commit (#446). Real git;
- * covers the happy path (body-forwarding commit) and the empty-index guard.
+ * `foldActionBundle` — synthesize the action-bundle commit (#446). The git
+ * primitives (`./git.js`) are mocked so this isolates the fold orchestration:
+ * stage the bundle → guard on an empty index → forward the parent body into the
+ * bundle commit. The real git round trip is covered at the integration + e2e
+ * tiers.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { foldActionBundle } from './fold-action-bundle.js';
+import { addForce, commitBody, commitWithBody, hasStagedChanges } from './git.js';
 
-let repo: string;
+// Automock (no factory): the git-primitive doubles are generated from the real
+// module so they can't drift from the source, satisfying unit isolation without
+// a hand-written (untyped) factory.
+vi.mock('./git.js');
 
-function git(args: string[]): string {
-  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-}
-
-function stageBundle(): void {
-  mkdirSync(join(repo, 'dist-action'), { recursive: true });
-  writeFileSync(join(repo, 'dist-action/index.js'), '// bundle\n', 'utf8');
-  git(['add', '-f', 'dist-action/']);
-}
+const addForceMock = vi.mocked(addForce);
+const commitBodyMock = vi.mocked(commitBody);
+const commitWithBodyMock = vi.mocked(commitWithBody);
+const hasStagedChangesMock = vi.mocked(hasStagedChanges);
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'piot-fold-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
+  vi.resetAllMocks();
 });
-
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 describe('foldActionBundle', () => {
   it('commits the staged bundle on top of HEAD, forwarding the parent body', () => {
-    writeFileSync(join(repo, 'README.md'), 'hi\n', 'utf8');
-    git(['add', '-A']);
-    git(['commit', '-q', '-m', 'feat: bump\n\nrelease: minor']);
-    const parent = git(['rev-parse', 'HEAD']);
-    stageBundle();
+    hasStagedChangesMock.mockReturnValue(true);
+    commitBodyMock.mockReturnValue('feat: bump\n\nrelease: minor');
 
-    const code = foldActionBundle({ cwd: repo, subject: 'chore(v0): bundle action' });
+    const code = foldActionBundle({ cwd: '/repo', subject: 'chore(v0): bundle action' });
 
     expect(code).toBe(0);
-    expect(git(['rev-parse', 'HEAD^'])).toBe(parent);
-    expect(git(['ls-files', 'dist-action/index.js'])).toContain('dist-action/index.js');
-    const body = git(['log', '-1', '--format=%B', 'HEAD']);
-    expect(body).toMatch(/^chore\(v0\): bundle action/);
-    expect(body).toMatch(/release:\s*minor/);
+    // Stages the freshly-built bundle dir before committing.
+    expect(addForceMock).toHaveBeenCalledWith('dist-action/', { cwd: '/repo' });
+    // The parent's full body (with its `release:` trailer) is read from HEAD and
+    // forwarded verbatim into the bundle commit, so the publish-time plan
+    // re-derivation keeps the operator's bump instead of defaulting to patch.
+    expect(commitBodyMock).toHaveBeenCalledWith('HEAD', { cwd: '/repo' });
+    expect(commitWithBodyMock).toHaveBeenCalledWith(
+      'chore(v0): bundle action',
+      'feat: bump\n\nrelease: minor',
+      { cwd: '/repo' },
+    );
   });
 
   it('throws the guard message when nothing is staged to fold', () => {
-    // Commit the bundle first so a second `git add -f dist-action/` stages
-    // no change — the "build:action produced nothing" state.
-    stageBundle();
-    git(['commit', '-q', '-m', 'seed with bundle']);
+    // Empty index after staging: `build:action` produced nothing, an unexpected
+    // state the release must abort on rather than commit nothing.
+    hasStagedChangesMock.mockReturnValue(false);
 
-    expect(() => foldActionBundle({ cwd: repo, subject: 'chore(release): bundle action' })).toThrow(
+    expect(() =>
+      foldActionBundle({ cwd: '/repo', subject: 'chore(release): bundle action' }),
+    ).toThrow(
       'No bundle changes to commit (unexpected — build:action should have produced output).',
     );
+    // The guard fires before any commit is attempted.
+    expect(commitWithBodyMock).not.toHaveBeenCalled();
   });
 });

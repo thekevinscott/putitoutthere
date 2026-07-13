@@ -6,10 +6,16 @@
  * Issue #8.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import pkg from '../package.json' with { type: 'json' };
 import { bump, firstVersion, parseSemver, USER_AGENT, VERSION } from './version.js';
+
+// `../package.json` is the collaborator `version.ts` reads its VERSION from.
+// The options-form `{ spy: true }` mock (not a factory) intercepts the module
+// for unit isolation while passing the real values through, so VERSION/USER_AGENT
+// still reflect the actual package.json — the contract under test.
+vi.mock('../package.json', { spy: true });
 
 describe('parseSemver', () => {
   it('parses a plain semver', () => {

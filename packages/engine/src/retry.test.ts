@@ -15,6 +15,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { withRetry } from './retry.js';
 import { AuthError, TransientError } from './types.js';
 
+// Automock (no factory): the error-class doubles are generated from the real
+// module so `withRetry` and this suite share the same constructors — `instanceof`
+// still discriminates — while `./types.js` is isolated per unit-suite rules.
+vi.mock('./types.js');
+
 describe('withRetry', () => {
   beforeEach(() => {
     vi.useFakeTimers();
