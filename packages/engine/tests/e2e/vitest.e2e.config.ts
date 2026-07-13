@@ -11,7 +11,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['test/e2e/**/*.e2e.test.ts'],
+    include: ['tests/e2e/**/*.e2e.test.ts'],
     setupFiles: ['./test/setup.ts'],
     environment: 'node',
     // Real network: a handful of registry GETs per test.

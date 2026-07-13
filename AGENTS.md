@@ -142,8 +142,8 @@ scenario, same assertions, two fidelities.
 
 | tier | runs the tool via | external surface | role |
 | --- | --- | --- | --- |
-| e2e — `test/e2e/**/*.e2e.test.ts` | shells out to the built CLI | real (live registry / tool) | proves the mock isn't lying |
-| integration — `test/integration/**/*.integration.test.ts` | the SDK, in-process | mocked (`execFileSync` / `fetch`) | the deterministic CI red→green gate |
+| e2e — `tests/e2e/**/*.e2e.test.ts` | shells out to the built CLI | real (live registry / tool) | proves the mock isn't lying |
+| integration — `tests/integration/**/*.integration.test.ts` | the SDK, in-process | mocked (`execFileSync` / `fetch`) | the deterministic CI red→green gate |
 
 Write **both red first**. The integration test is the one that visibly
 fails in CI during the red phase (deterministic, no network); the e2e is
@@ -159,7 +159,7 @@ piot's own `piot-fixture-zzz-*` fixtures, so its red→green is visible
 per-PR alongside the integration gate. It also runs locally
 (`pnpm test:e2e`, which builds `dist/` first). The separate, heavier
 fixture suite — `e2e.yml` over `test/fixtures/` — exercises real OIDC
-publishes and is CI-only; see `test/e2e/README.md`.
+publishes and is CI-only; see `tests/e2e/README.md`.
 
 ## Design commitments
 
@@ -284,7 +284,7 @@ caught the bug.
      stays fast. Good for branching/orchestration logic; bad at
      catching "the engine never called X" bugs because the X is the
      mock.
-   - **Integration tests** — `test/integration/**/*.integration.test.ts`,
+   - **Integration tests** — `tests/integration/**/*.integration.test.ts`,
      run via `pnpm test:integration`. Mock only the subprocess
      boundary (`execFileSync`, `fetch`). Real config loader, real
      plan, real preflight, real handler dispatch.

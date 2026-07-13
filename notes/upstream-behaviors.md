@@ -5,9 +5,9 @@ Catalogue of registry-side response shapes and auth flows that
 Each entry below points at:
 
 1. A captured response fixture under
-   [`test/integration/fixtures/registry-responses/`](../packages/engine/test/integration/fixtures/registry-responses/),
+   [`tests/integration/fixtures/registry-responses/`](../packages/engine/tests/integration/fixtures/registry-responses/),
 2. The integration test that replays it
-   ([`test/integration/registry-auth.integration.test.ts`](../packages/engine/test/integration/registry-auth.integration.test.ts)),
+   ([`tests/integration/registry-auth.integration.test.ts`](../packages/engine/tests/integration/registry-auth.integration.test.ts)),
 3. The engine code path that reacts.
 
 When a fixture's shape drifts — a registry tweaks an error code, a CLI
@@ -165,9 +165,9 @@ The handler's `publish` makes exactly one HTTP request (the
 1. Capture the response in the wild. Sanitise identifiers (crate
    names, package names, owner slugs) to generic placeholders.
 2. Save it under
-   `test/integration/fixtures/registry-responses/<registry>/<descriptive-name>.{txt,json}`.
+   `tests/integration/fixtures/registry-responses/<registry>/<descriptive-name>.{txt,json}`.
 3. Add an integration test in
-   `test/integration/registry-auth.integration.test.ts` that loads
+   `tests/integration/registry-auth.integration.test.ts` that loads
    the fixture and asserts the engine's reaction.
 4. Add a section here covering shape / trigger / engine reaction / test.
 5. If the engine added new detection code for this row, reference its
