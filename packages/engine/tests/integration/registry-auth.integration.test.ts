@@ -327,7 +327,7 @@ describe('pypi: OIDC TP filter rejection for reusable-workflow callers (#252)', 
     // strings so a future fixture refresh has to acknowledge the
     // invalid-publisher / repository_owner-filter contract.
     const fixture = JSON.parse(
-      loadFixture('pypi', 'oidc-mint-tp-filter-rejected.json'),
+      loadFixture('pypi', 'oidc-mint-tp-filter-rejected.json')
     ) as { message: string; errors?: Array<{ code: string; description: string }> };
     expect(fixture.message).toMatch(/invalid-publisher/);
     expect(fixture.errors?.[0]?.code).toBe('invalid-publisher');
