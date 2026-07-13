@@ -1,16 +1,19 @@
 /**
  * CLI wiring for the `verify` command family (#442/#443): the
  * `npm-tarball` subcommand dispatch, its flags, and the posture
- * fall-through. The engine functions are mocked — this asserts routing,
- * not their behavior (covered in their own suites).
+ * fall-through. Isolated per the unit-suite convention: the engine
+ * (`./verify/npm-tarball/index.js`) and the posture check
+ * (`./verify/posture.js`) are bare-automocked so the doubles can't drift
+ * from the source, and the dispatcher under test (`./cli.js`) is loaded via
+ * dynamic import so the mocks are in place first. This asserts routing, not
+ * their behavior (covered in their own suites and the e2e-cli tier).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./verify/npm-tarball/index.js', () => ({ verifyNpmTarball: vi.fn().mockResolvedValue(0) }));
-vi.mock('./verify/posture.js', () => ({ computeVerify: vi.fn().mockResolvedValue([]) }));
+vi.mock('./verify/npm-tarball/index.js');
+vi.mock('./verify/posture.js');
 
-import { parseFlags, run } from './cli.js';
 import { computeVerify } from './verify/posture.js';
 import { verifyNpmTarball } from './verify/npm-tarball/index.js';
 
@@ -39,14 +42,16 @@ afterEach(() => {
 });
 
 describe('parseFlags: verify npm-tarball flags', () => {
-  it('parses --matrix, --registry and --per-triple', () => {
+  it('parses --matrix, --registry and --per-triple', async () => {
+    const { parseFlags } = await import('./cli.js');
     const f = parseFlags(['--matrix', '[]', '--registry', 'http://r', '--per-triple']);
     expect(f.matrix).toBe('[]');
     expect(f.registry).toBe('http://r');
     expect(f.perTriple).toBe(true);
   });
 
-  it('defaults perTriple to false and leaves matrix/registry unset', () => {
+  it('defaults perTriple to false and leaves matrix/registry unset', async () => {
+    const { parseFlags } = await import('./cli.js');
     const f = parseFlags([]);
     expect(f.perTriple).toBe(false);
     expect(f.matrix).toBeUndefined();
@@ -56,6 +61,7 @@ describe('parseFlags: verify npm-tarball flags', () => {
 
 describe('run: verify subcommand dispatch', () => {
   it('routes `verify npm-tarball` to the engine with parsed flags', async () => {
+    const { run } = await import('./cli.js');
     const code = await run([
       'node', 'piot', 'verify', 'npm-tarball',
       '--matrix', '[]', '--registry', 'http://r', '--per-triple', '--cwd', '/x',
@@ -68,6 +74,7 @@ describe('run: verify subcommand dispatch', () => {
   });
 
   it('errors when `verify npm-tarball` is missing --matrix', async () => {
+    const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'verify', 'npm-tarball', '--cwd', '/x']);
     expect(code).toBe(1);
     expect(stderr.join('')).toContain('verify npm-tarball requires --matrix');
@@ -75,12 +82,14 @@ describe('run: verify subcommand dispatch', () => {
   });
 
   it('rejects an unknown verify subcommand', async () => {
+    const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'verify', 'frobnicate', '--cwd', '/x']);
     expect(code).toBe(1);
     expect(stderr.join('')).toContain('unknown verify subcommand: frobnicate');
   });
 
   it('bare `verify` still runs the posture check', async () => {
+    const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'verify', '--cwd', '/x']);
     expect(code).toBe(0);
     expect(computeVerifyMock).toHaveBeenCalledOnce();
@@ -88,6 +97,7 @@ describe('run: verify subcommand dispatch', () => {
   });
 
   it('`verify --json` (leading-flag positional) still routes to posture', async () => {
+    const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'verify', '--json', '--cwd', '/x']);
     expect(code).toBe(0);
     expect(computeVerifyMock).toHaveBeenCalledOnce();

@@ -1,61 +1,135 @@
-import type * as ChildProcess from 'node:child_process';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { isAbsolute } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseFlags, run } from './cli.js';
+/**
+ * Unit suite for the `putitoutthere` CLI dispatcher (`cli.ts`). Isolated
+ * per the unit-suite convention: every engine collaborator the dispatcher
+ * calls (`./plan-status.js`, `./check.js`, `./status.js`, `./publish.js`,
+ * the `write-*` hooks) and the `node:fs` `$GITHUB_OUTPUT` sink are mocked,
+ * so each test exercises only `run`'s routing / flag-validation / exit-code
+ * / output-shape branching. The real engine behaviour those handlers carry
+ * (actual version bumps, real drift detection, launcher authoring) is
+ * covered at the integration and e2e-cli tiers — see AGENTS.md.
+ *
+ * `parseFlags` is exercised directly (it is `cli.ts`'s own pure code);
+ * `./status-format.js` / `./version.js` stay real (pure, no I/O, and not
+ * imported here) so the human-readable render is asserted end to end.
+ */
 
-// `plan` now always probes the registry via `isPublished` (#412). For npm
-// that is a `npm view` subprocess; stub it so the unit suite stays offline
-// (→ "not published" → PUBLISH verdict), while git — also execFileSync —
-// runs for real.
-const realCp = vi.hoisted(() => ({
-  execFileSync: undefined as unknown as typeof ChildProcess.execFileSync,
-}));
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  realCp.execFileSync = actual.execFileSync;
-  const patched = ((cmd: string, ...rest: unknown[]): unknown => {
-    if (cmd === 'npm') {throw new Error('npm stubbed offline (unit)');}
-    return (realCp.execFileSync as (...a: unknown[]) => unknown)(cmd, ...rest);
-  }) as typeof actual.execFileSync;
-  return { ...actual, execFileSync: patched };
+import { appendFileSync } from 'node:fs';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { parseFlags, run } from './cli.js';
+import { runChecks } from './check.js';
+import { computePlanStatus } from './plan-status.js';
+import { publish } from './publish.js';
+import { computeStatus } from './status.js';
+import { writeCrateVersionForBuild } from './write-crate-version.js';
+import { writeLauncherFromConfig } from './write-launcher.js';
+import { writeVersionForBuild } from './write-version.js';
+import type { CheckFinding } from './check.js';
+import type { MatrixRow } from './plan.js';
+import type { PlanStatus } from './plan-status-types.js';
+import type { StatusRow } from './status-types.js';
+
+vi.mock('node:fs');
+vi.mock('./check.js');
+vi.mock('./plan-status.js');
+vi.mock('./publish.js');
+vi.mock('./status.js');
+vi.mock('./write-crate-version.js');
+vi.mock('./write-launcher.js');
+vi.mock('./write-version.js');
+
+const runChecksMock = vi.mocked(runChecks);
+const computePlanStatusMock = vi.mocked(computePlanStatus);
+const publishMock = vi.mocked(publish);
+const computeStatusMock = vi.mocked(computeStatus);
+const writeCrateVersionMock = vi.mocked(writeCrateVersionForBuild);
+const writeLauncherMock = vi.mocked(writeLauncherFromConfig);
+const writeVersionMock = vi.mocked(writeVersionForBuild);
+const appendFileSyncMock = vi.mocked(appendFileSync);
+
+function matrixRow(name: string, version = '1.0.0'): MatrixRow {
+  return {
+    name,
+    kind: 'npm',
+    version,
+    target: 'main',
+    runs_on: 'ubuntu-latest',
+    artifact_name: `${name}-artifact`,
+    artifact_path: 'artifacts',
+    path: 'packages/ts',
+  };
+}
+
+function planStatus(rows: MatrixRow[]): PlanStatus {
+  return {
+    matrix: rows,
+    verdicts: rows.map((r) => ({
+      package: r.name,
+      kind: r.kind,
+      version: r.version,
+      verdict: 'publish' as const,
+    })),
+    skew: [],
+  };
+}
+
+function statusRow(overrides: Partial<StatusRow> = {}): StatusRow {
+  return {
+    package: 'demo-rust',
+    kind: 'crates',
+    tag: null,
+    tagVersion: null,
+    registry: '0.1.0',
+    registryUnreachable: false,
+    state: 'in sync',
+    drift: false,
+    ...overrides,
+  };
+}
+
+const argv = (...rest: string[]) => ['node', 'putitoutthere', ...rest];
+
+let stdout: string[];
+let stderr: string[];
+
+beforeEach(() => {
+  stdout = [];
+  stderr = [];
+  vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    stdout.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    return true;
+  });
+  vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    stderr.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    return true;
+  });
+  computePlanStatusMock.mockResolvedValue(planStatus([]));
+  runChecksMock.mockReturnValue([]);
+  computeStatusMock.mockResolvedValue([]);
+  publishMock.mockResolvedValue({ ok: true, published: [] });
+  writeVersionMock.mockReturnValue(['pyproject.toml']);
+  writeCrateVersionMock.mockReturnValue(['Cargo.toml']);
+  writeLauncherMock.mockReturnValue([]);
 });
 
-describe('cli', () => {
-  const stdoutChunks: string[] = [];
-  const stderrChunks: string[] = [];
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.GITHUB_OUTPUT;
+});
 
-  beforeEach(() => {
-    stdoutChunks.length = 0;
-    stderrChunks.length = 0;
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
+describe('cli: top-level dispatch', () => {
   it('prints a short --help hint and exits 1 with no command (#150)', async () => {
-    const code = await run(['node', 'putitoutthere']);
+    const code = await run(argv());
     expect(code).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/missing command/);
-    expect(stderrChunks.join('')).toMatch(/--help/);
+    expect(stderr.join('')).toMatch(/missing command/);
+    expect(stderr.join('')).toMatch(/--help/);
   });
 
   it('prints usage and exits 0 for --help', async () => {
-    const code = await run(['node', 'putitoutthere', '--help']);
+    const code = await run(argv('--help'));
     expect(code).toBe(0);
-    expect(stderrChunks.join('')).toMatch(/Usage:/);
+    expect(stderr.join('')).toMatch(/Usage:/);
   });
 
   it('--help description for --json is not stale (#231)', async () => {
@@ -63,108 +137,52 @@ describe('cli', () => {
     // but the flag has been accepted on every command that emits a result
     // since their respective additions. Lock the corrected wording in so
     // a future edit can't quietly reintroduce the bug.
-    const code = await run(['node', 'putitoutthere', '--help']);
+    const code = await run(argv('--help'));
     expect(code).toBe(0);
-    const usage = stderrChunks.join('');
+    const usage = stderr.join('');
     expect(usage).toMatch(/--json\s+emit machine-readable output/);
     expect(usage).not.toMatch(/--json[^\n]*plan only/);
   });
 
   it('prints version from package.json', async () => {
-    const code = await run(['node', 'putitoutthere', 'version']);
+    const code = await run(argv('version'));
     expect(code).toBe(0);
-    expect(stdoutChunks.join('')).toMatch(/putitoutthere \d+\.\d+\.\d+/);
+    expect(stdout.join('')).toMatch(/putitoutthere \d+\.\d+\.\d+/);
   });
 
   it('exits 1 on unknown command', async () => {
-    const code = await run(['node', 'putitoutthere', 'foo']);
+    const code = await run(argv('foo'));
     expect(code).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/unknown command/);
+    expect(stderr.join('')).toMatch(/unknown command/);
   });
 
-  it('`check` exits 1 with a finding list when config is missing (#319)', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'cli-check-'));
-    try {
-      const code = await run(['node', 'putitoutthere', 'check', '--cwd', tmp]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/check: 1 finding/);
-      expect(stderrChunks.join('')).toMatch(/putitoutthere\.toml not found/);
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  it('`check` exits 0 with a "no findings" line when config is well-formed', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'cli-check-ok-'));
-    try {
-      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp });
-      execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: tmp });
-      execFileSync('git', ['config', 'user.name', 't'], { cwd: tmp });
-      execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
-      mkdirSync(join(tmp, 'pkg'), { recursive: true });
-      writeFileSync(join(tmp, 'pkg/index.ts'), 'x');
-      writeFileSync(
-        join(tmp, 'pkg/package.json'),
-        JSON.stringify({
-          name: 'lib',
-          version: '0.0.0',
-          repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
-        }),
-      );
-      writeFileSync(
-        join(tmp, 'putitoutthere.toml'),
-        `[putitoutthere]
-version = 1
-[[package]]
-name  = "lib"
-kind  = "npm"
-path  = "pkg"
-globs = ["pkg/**"]
-`,
-      );
-      execFileSync('git', ['add', '-A'], { cwd: tmp });
-      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmp });
-
-      const code = await run(['node', 'putitoutthere', 'check', '--cwd', tmp]);
-      expect(code).toBe(0);
-      expect(stdoutChunks.join('')).toMatch(/no findings/);
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  it('`check --json` emits the findings array on stdout', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'cli-check-json-'));
-    try {
-      const code = await run(['node', 'putitoutthere', 'check', '--cwd', tmp, '--json']);
-      expect(code).toBe(1);
-      const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
-        findings: Array<{ message: string }>;
-      };
-      expect(parsed.findings.length).toBeGreaterThan(0);
-      expect(parsed.findings[0]!.message).toMatch(/putitoutthere\.toml/);
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  it('surfaces errors with a non-zero exit and a friendly message', async () => {
-    const code = await run(['node', 'putitoutthere', 'plan', '--cwd', '/path/that/does/not/exist']);
+  it('surfaces engine errors with a non-zero exit and a friendly prefix', async () => {
+    computePlanStatusMock.mockRejectedValue(new Error('boom'));
+    const code = await run(argv('plan', '--cwd', '/x'));
     expect(code).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/^putitoutthere:/m);
+    expect(stderr.join('')).toMatch(/^putitoutthere:/m);
   });
 
+  it('rejects --dry-run on every command except reconcile (#244)', async () => {
+    const code = await run(argv('publish', '--cwd', '/x', '--dry-run'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/--dry-run was removed/);
+    expect(publishMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseFlags', () => {
   it('resolves a relative --cwd to an absolute path (#244)', () => {
     // Downstream handlers run subprocesses with `cwd: ctx.cwd` and pass
     // file paths derived from `join(cwd, 'artifacts', ...)`. If the parsed
     // cwd were left relative, those paths would re-resolve under the
     // subprocess's cwd and double-up the prefix. Anchor at parse time.
     const flags = parseFlags(['--cwd', 'fixture-tree']);
-    expect(isAbsolute(flags.cwd)).toBe(true);
+    expect(flags.cwd).not.toBe('fixture-tree');
     expect(flags.cwd.endsWith('fixture-tree')).toBe(true);
   });
 
-  it('leaves an absolute --cwd untouched', () => {
+  it('leaves an already-absolute --cwd untouched', () => {
     const flags = parseFlags(['--cwd', '/tmp/abs-path-test']);
     expect(flags.cwd).toBe('/tmp/abs-path-test');
   });
@@ -180,61 +198,44 @@ globs = ["pkg/**"]
   });
 });
 
-describe('cli: status', () => {
-  let repo: string;
-
-  function git(args: string[]): string {
-    return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-  }
-
-  const stdoutChunks: string[] = [];
-
-  beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cli-status-'));
-    git(['init', '-q', '-b', 'main']);
-    git(['config', 'user.email', 'test@example.com']);
-    git(['config', 'user.name', 'Test']);
-    git(['config', 'commit.gpgsign', 'false']);
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `[putitoutthere]
-version = 1
-[[package]]
-name  = "demo-rust"
-kind  = "crates"
-crate = "demo"
-path  = "."
-globs = ["**"]
-`,
-      'utf8',
-    );
-    git(['add', '-A']);
-    git(['commit', '-q', '-m', 'init']);
-
-    stdoutChunks.length = 0;
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+describe('cli: check dispatch', () => {
+  it('exits 1 with a finding list when checks report findings (#319)', async () => {
+    const findings: CheckFinding[] = [
+      { message: 'putitoutthere.toml not found at /x/putitoutthere.toml' },
+    ];
+    runChecksMock.mockReturnValue(findings);
+    const code = await run(argv('check', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/check: 1 finding/);
+    expect(stderr.join('')).toMatch(/putitoutthere\.toml not found/);
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    rmSync(repo, { recursive: true, force: true });
+  it('exits 0 with a "no findings" line when checks pass', async () => {
+    runChecksMock.mockReturnValue([]);
+    const code = await run(argv('check', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(stdout.join('')).toMatch(/no findings/);
   });
 
-  function mockCratesLatest(version: string): void {
-    vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ crate: { newest_version: version } }), { status: 200 }),
-    );
-  }
+  it('emits the findings array on stdout under --json', async () => {
+    runChecksMock.mockReturnValue([{ message: 'putitoutthere.toml missing' }]);
+    const code = await run(argv('check', '--cwd', '/x', '--json'));
+    expect(code).toBe(1);
+    const parsed = JSON.parse(stdout.join('').trim()) as {
+      findings: Array<{ message: string }>;
+    };
+    expect(parsed.findings.length).toBeGreaterThan(0);
+    expect(parsed.findings[0]!.message).toMatch(/putitoutthere\.toml/);
+  });
+});
 
-  it('flags published-but-untagged drift and exits non-zero under --check (--json)', async () => {
-    // Crate live at 0.1.0 on the registry, but there is no demo-rust-v* tag.
-    mockCratesLatest('0.1.0');
-    const code = await run(['node', 'piot', 'status', '--check', '--json', '--cwd', repo]);
-    const parsed = JSON.parse(stdoutChunks.join('').trim()) as Array<{
+describe('cli: status dispatch', () => {
+  it('flags drift and exits non-zero under --check (--json)', async () => {
+    computeStatusMock.mockResolvedValue([
+      statusRow({ state: 'published, untagged', drift: true }),
+    ]);
+    const code = await run(argv('status', '--check', '--json', '--cwd', '/x'));
+    const parsed = JSON.parse(stdout.join('').trim()) as Array<{
       package: string;
       state: string;
       drift: boolean;
@@ -246,558 +247,168 @@ globs = ["**"]
   });
 
   it('renders a human-readable table and exits zero when in sync', async () => {
-    git(['tag', '-a', '-m', 'demo-rust-v0.1.0', 'demo-rust-v0.1.0']);
-    mockCratesLatest('0.1.0');
-    const code = await run(['node', 'piot', 'status', '--check', '--cwd', repo]);
-    const out = stdoutChunks.join('');
+    computeStatusMock.mockResolvedValue([
+      statusRow({ tag: 'demo-rust-v0.1.0', tagVersion: '0.1.0', state: 'in sync' }),
+    ]);
+    const code = await run(argv('status', '--check', '--cwd', '/x'));
+    const out = stdout.join('');
     expect(out).toContain('demo-rust');
     expect(out).toContain('in sync');
     expect(code).toBe(0);
   });
 
-  it('without --check, drift is reported but the exit code stays zero', async () => {
-    mockCratesLatest('0.1.0'); // untagged → drift, but no gate requested
-    const code = await run(['node', 'piot', 'status', '--cwd', repo]);
+  it('reports drift but keeps a zero exit without --check', async () => {
+    computeStatusMock.mockResolvedValue([
+      statusRow({ state: 'published, untagged', drift: true }),
+    ]);
+    const code = await run(argv('status', '--cwd', '/x'));
     expect(code).toBe(0);
   });
 });
 
-describe('cli: plan', () => {
-  let repo: string;
-
-  function git(args: string[]): string {
-    return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-  }
-
-  beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cli-plan-'));
-    git(['init', '-q', '-b', 'main']);
-    git(['config', 'user.email', 'test@example.com']);
-    git(['config', 'user.name', 'Test']);
-    git(['config', 'commit.gpgsign', 'false']);
-
-    mkdirSync(join(repo, 'packages/ts'), { recursive: true });
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `[putitoutthere]
-version = 1
-[[package]]
-name  = "demo"
-kind  = "npm"
-path  = "packages/ts"
-globs = ["packages/ts/**"]
-`,
-      'utf8',
-    );
-    writeFileSync(join(repo, 'packages/ts/index.ts'), 'x', 'utf8');
-    git(['add', '-A']);
-    git(['commit', '-m', 'init']);
-  });
-
-  afterEach(() => {
-    rmSync(repo, { recursive: true, force: true });
-  });
-
-  it('prints a human summary by default', async () => {
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-
-    const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo]);
+describe('cli: plan dispatch', () => {
+  it('prints a human summary of the planned matrix by default', async () => {
+    computePlanStatusMock.mockResolvedValue(planStatus([matrixRow('demo')]));
+    const code = await run(argv('plan', '--cwd', '/x'));
     expect(code).toBe(0);
-    expect(stdoutChunks.join('')).toMatch(/demo/);
+    expect(stdout.join('')).toMatch(/demo/);
   });
 
   it('emits JSON on --json', async () => {
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-
-    const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo, '--json']);
+    computePlanStatusMock.mockResolvedValue(planStatus([matrixRow('demo')]));
+    const code = await run(argv('plan', '--cwd', '/x', '--json'));
     expect(code).toBe(0);
-    const out = stdoutChunks.join('').trim();
-    const parsed = JSON.parse(out) as { matrix: Array<{ name: string }> };
+    const parsed = JSON.parse(stdout.join('').trim()) as { matrix: Array<{ name: string }> };
     expect(parsed.matrix.map((r) => r.name)).toContain('demo');
   });
 
-  it('honors --release-packages, planning only the named package', async () => {
-    // Tag `demo` so a manual bump has a base version. No new commit
-    // lands after the tag — the manual path must release it anyway.
-    git(['tag', 'demo-v1.0.0']);
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-
-    const code = await run([
-      'node', 'putitoutthere', 'plan', '--cwd', repo, '--json',
-      '--release-packages', 'demo@minor',
-    ]);
+  it('forwards --release-packages to the planner', async () => {
+    computePlanStatusMock.mockResolvedValue(planStatus([matrixRow('demo', '1.1.0')]));
+    const code = await run(argv('plan', '--cwd', '/x', '--json', '--release-packages', 'demo@minor'));
     expect(code).toBe(0);
-    const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+    expect(computePlanStatusMock).toHaveBeenCalledWith(
+      expect.objectContaining({ releasePackages: 'demo@minor' }),
+    );
+    const parsed = JSON.parse(stdout.join('').trim()) as {
       matrix: Array<{ name: string; version: string }>;
     };
-    expect(parsed.matrix.map((r) => r.name)).toEqual(['demo']);
     expect(parsed.matrix[0]!.version).toBe('1.1.0');
   });
 
-  it('appends to $GITHUB_OUTPUT when set', async () => {
-    const outFile = join(repo, 'gha-output.txt');
-    writeFileSync(outFile, '', 'utf8');
-    process.env.GITHUB_OUTPUT = outFile;
-
-    const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo, '--json']);
+  it('appends matrix= to $GITHUB_OUTPUT when set and the plan is non-empty', async () => {
+    computePlanStatusMock.mockResolvedValue(planStatus([matrixRow('demo')]));
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('plan', '--cwd', '/x', '--json'));
     expect(code).toBe(0);
-    const out = readFileSync(outFile, 'utf8');
-    expect(out).toMatch(/^matrix=/);
-
-    delete process.env.GITHUB_OUTPUT;
+    expect(appendFileSyncMock).toHaveBeenCalledOnce();
+    expect(appendFileSyncMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+    expect(String(appendFileSyncMock.mock.calls[0]![1])).toMatch(/^matrix=/);
   });
 
   it('does NOT write matrix= to $GITHUB_OUTPUT when the plan is empty (#146)', async () => {
-    // Force an empty plan via a `release: skip` trailer.
-    git(['commit', '--allow-empty', '-m', 'nop\n\nrelease: skip']);
-    const outFile = join(repo, 'gha-output-empty.txt');
-    writeFileSync(outFile, '', 'utf8');
-    process.env.GITHUB_OUTPUT = outFile;
-
-    const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo, '--json']);
+    computePlanStatusMock.mockResolvedValue(planStatus([]));
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('plan', '--cwd', '/x', '--json'));
     expect(code).toBe(0);
-    const out = readFileSync(outFile, 'utf8');
-    expect(out).toBe('');
-
-    delete process.env.GITHUB_OUTPUT;
+    expect(appendFileSyncMock).not.toHaveBeenCalled();
   });
 
-  it('prints "no packages to release" when plan is empty', async () => {
-    // Commit a release: skip trailer to force empty plan.
-    git(['commit', '--allow-empty', '-m', 'nop\n\nrelease: skip']);
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo]);
+  it('prints "no packages to release" when the plan is empty', async () => {
+    computePlanStatusMock.mockResolvedValue(planStatus([]));
+    const code = await run(argv('plan', '--cwd', '/x'));
     expect(code).toBe(0);
-    expect(stdoutChunks.join('')).toMatch(/no packages to release/);
+    expect(stdout.join('')).toMatch(/no packages to release/);
+  });
+});
+
+describe('cli: write-version dispatch', () => {
+  it('routes to the engine with the resolved path and version', async () => {
+    const code = await run(argv('write-version', '--path', '/pkg', '--version', '0.2.8'));
+    expect(code).toBe(0);
+    expect(writeVersionMock).toHaveBeenCalledWith('/pkg', '0.2.8');
+    expect(stdout.join('')).toMatch(/write-version:/);
   });
 
-  it('throws when --dry-run is passed (removed in #244)', async () => {
-    const stderrChunks: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    const code = await run([
-      'node',
-      'putitoutthere',
-      'publish',
-      '--cwd',
-      repo,
-      '--dry-run',
-    ]);
+  it('errors when --version is missing (#276)', async () => {
+    const code = await run(argv('write-version', '--path', '/pkg'));
     expect(code).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/--dry-run was removed/);
+    expect(stderr.join('')).toMatch(/--version/);
+    expect(writeVersionMock).not.toHaveBeenCalled();
   });
 
-  it('write-version: rejects a static [project].version literal with PIOT_PYPI_STATIC_VERSION (#333)', async () => {
-    // After #333, pyproject.toml must declare `dynamic = ["version"]`.
-    // The CLI subcommand mirrors the preflight rejection so a direct
-    // invocation against a misconfigured tree surfaces the actionable
-    // error rather than building an under-versioned artifact.
-    const dir = mkdtempSync(join(tmpdir(), 'write-version-static-rejected-'));
-    try {
-      writeFileSync(
-        join(dir, 'pyproject.toml'),
-        ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
-        'utf8',
-      );
-      const stderrChunks: string[] = [];
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-        return true;
-      });
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-version',
-        '--path',
-        dir,
-        '--version',
-        '0.2.8',
-      ]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/PIOT_PYPI_STATIC_VERSION/);
-      // pyproject.toml must not have been mutated by the failed call.
-      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toContain('version = "0.1.0"');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-version: bumps Cargo.toml when pyproject declares dynamic = ["version"] (#276)', async () => {
-    // Maturin's dynamic-version mode reads [package].version from the
-    // sibling Cargo.toml. When pyproject opts into that, the bump
-    // target shifts from pyproject to Cargo.toml; pyproject is left
-    // untouched.
-    const dir = mkdtempSync(join(tmpdir(), 'write-version-dynamic-'));
-    try {
-      writeFileSync(
-        join(dir, 'pyproject.toml'),
-        ['[project]', 'name = "demo"', 'dynamic = ["version"]', ''].join('\n'),
-        'utf8',
-      );
-      writeFileSync(
-        join(dir, 'Cargo.toml'),
-        ['[package]', 'name = "demo"', 'version = "0.1.0"', 'edition = "2021"', ''].join('\n'),
-        'utf8',
-      );
-      const before = readFileSync(join(dir, 'pyproject.toml'), 'utf8');
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-version',
-        '--path',
-        dir,
-        '--version',
-        '0.2.8',
-      ]);
-      expect(code).toBe(0);
-      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).toContain('version = "0.2.8"');
-      // pyproject was the dispatch input; its content must not change.
-      expect(readFileSync(join(dir, 'pyproject.toml'), 'utf8')).toBe(before);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-version: errors when pyproject is dynamic but Cargo.toml is missing (#276)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-cargo-'));
-    try {
-      writeFileSync(
-        join(dir, 'pyproject.toml'),
-        ['[project]', 'name = "demo"', 'dynamic = ["version"]', ''].join('\n'),
-        'utf8',
-      );
-      const stderrChunks: string[] = [];
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-        return true;
-      });
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-version',
-        '--path',
-        dir,
-        '--version',
-        '0.2.8',
-      ]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/Cargo\.toml/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-version: errors when pyproject.toml is missing (#276)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-pyproject-'));
-    try {
-      const stderrChunks: string[] = [];
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-        return true;
-      });
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-version',
-        '--path',
-        dir,
-        '--version',
-        '0.2.8',
-      ]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/pyproject\.toml/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-version: errors when pyproject.toml is malformed (#276)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'write-version-malformed-'));
-    try {
-      writeFileSync(join(dir, 'pyproject.toml'), '[project\nbroken = ', 'utf8');
-      const stderrChunks: string[] = [];
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-        return true;
-      });
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-version',
-        '--path',
-        dir,
-        '--version',
-        '0.2.8',
-      ]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/parse|pyproject\.toml/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-version: errors when pyproject.toml has no [project] table (#276)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-project-'));
-    try {
-      writeFileSync(
-        join(dir, 'pyproject.toml'),
-        '[build-system]\nrequires = ["setuptools"]\n',
-        'utf8',
-      );
-      const stderrChunks: string[] = [];
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-        return true;
-      });
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-version',
-        '--path',
-        dir,
-        '--version',
-        '0.2.8',
-      ]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/\[project\]/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-version: errors when --version is missing (#276)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'write-version-no-version-'));
-    try {
-      const stderrChunks: string[] = [];
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-        return true;
-      });
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-version',
-        '--path',
-        dir,
-      ]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/--version/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-crate-version: rewrites Cargo.toml [package].version (#366)', async () => {
-    // `_matrix.yml`'s npm bundled-cli path invokes
-    // `command: write-crate-version` against the cross-compiled crate
-    // so `cargo build` bakes the planned version into the binary.
-    const dir = mkdtempSync(join(tmpdir(), 'cli-write-crate-version-'));
-    try {
-      writeFileSync(
-        join(dir, 'Cargo.toml'),
-        ['[package]', 'name = "dirsql"', 'version = "0.2.7"', 'edition = "2021"', ''].join('\n'),
-        'utf8',
-      );
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-crate-version',
-        '--path',
-        dir,
-        '--version',
-        '0.3.5',
-      ]);
-      expect(code).toBe(0);
-      expect(readFileSync(join(dir, 'Cargo.toml'), 'utf8')).toContain('version = "0.3.5"');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('write-crate-version: resolves a relative --path against --cwd (#366)', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'cli-write-crate-version-rel-'));
-    try {
-      const crate = join(root, 'crate');
-      mkdirSync(crate);
-      writeFileSync(
-        join(crate, 'Cargo.toml'),
-        ['[package]', 'name = "dirsql"', 'version = "0.2.7"', ''].join('\n'),
-        'utf8',
-      );
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-crate-version',
-        '--cwd',
-        root,
-        '--path',
-        'crate',
-        '--version',
-        '0.3.5',
-      ]);
-      expect(code).toBe(0);
-      expect(readFileSync(join(crate, 'Cargo.toml'), 'utf8')).toContain('version = "0.3.5"');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('write-crate-version: errors when --path is missing (#366)', async () => {
-    const stderrChunks: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    const code = await run(['node', 'putitoutthere', 'write-crate-version', '--version', '0.3.5']);
+  it('errors when --path is missing (#276)', async () => {
+    const code = await run(argv('write-version', '--version', '0.2.8'));
     expect(code).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/--path/);
+    expect(stderr.join('')).toMatch(/--path/);
+    expect(writeVersionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('cli: write-crate-version dispatch', () => {
+  it('routes to the engine with the resolved path and version (#366)', async () => {
+    const code = await run(argv('write-crate-version', '--path', '/crate', '--version', '0.3.5'));
+    expect(code).toBe(0);
+    expect(writeCrateVersionMock).toHaveBeenCalledWith('/crate', '0.3.5');
   });
 
-  it('write-crate-version: errors when --version is missing (#366)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cli-write-crate-version-no-version-'));
-    try {
-      const stderrChunks: string[] = [];
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-        stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-        return true;
-      });
-      const code = await run(['node', 'putitoutthere', 'write-crate-version', '--path', dir]);
-      expect(code).toBe(1);
-      expect(stderrChunks.join('')).toMatch(/--version/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  it('resolves a relative --path against --cwd (#366)', async () => {
+    const code = await run(argv('write-crate-version', '--cwd', '/root', '--path', 'crate', '--version', '0.3.5'));
+    expect(code).toBe(0);
+    // The resolved target is OS-specific (`/root/crate` vs `\root\crate`);
+    // assert the trailing segment separator-agnostically.
+    expect(writeCrateVersionMock).toHaveBeenCalledWith(
+      expect.stringMatching(/[/\\]crate$/),
+      '0.3.5',
+    );
   });
 
-  it('write-launcher: writes bin/<bin>.js + updates package.json#bin for a bundled-cli npm package (#299)', async () => {
-    // The matrix's main row invokes `command: write-launcher` so the
-    // engine authors the per-platform launcher consumers used to have
-    // to write by hand. Mirrors the write-version invocation shape:
-    // `working_directory: ${{ matrix.path }}` flows through as `--path`.
-    const tree = mkdtempSync(join(tmpdir(), 'cli-write-launcher-'));
-    try {
-      mkdirSync(join(tree, 'packages/ts'), { recursive: true });
-      writeFileSync(
-        join(tree, 'packages/ts/package.json'),
-        JSON.stringify({ name: 'demo-cli', version: '0.0.0' }, null, 2),
-      );
-      writeFileSync(
-        join(tree, 'putitoutthere.toml'),
-        `[putitoutthere]
-version = 1
-[[package]]
-name = "demo-cli"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-build = "bundled-cli"
-targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
-[package.bundle_cli]
-bin = "demo-cli"
-crate_path = "."
-`,
-      );
-
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-launcher',
-        '--cwd',
-        tree,
-        '--path',
-        'packages/ts',
-      ]);
-      expect(code).toBe(0);
-      const launcher = readFileSync(
-        join(tree, 'packages/ts/bin/demo-cli.js'),
-        'utf8',
-      );
-      expect(launcher).toContain('`demo-cli-${triple}`');
-      const pkg = JSON.parse(
-        readFileSync(join(tree, 'packages/ts/package.json'), 'utf8'),
-      ) as { bin?: Record<string, string> };
-      expect(pkg.bin).toEqual({ 'demo-cli': 'bin/demo-cli.js' });
-    } finally {
-      rmSync(tree, { recursive: true, force: true });
-    }
-  });
-
-  it('write-launcher: no-op for an npm vanilla package (no bundled-cli entry) (#299)', async () => {
-    const tree = mkdtempSync(join(tmpdir(), 'cli-write-launcher-noop-'));
-    try {
-      mkdirSync(join(tree, 'packages/ts'), { recursive: true });
-      writeFileSync(
-        join(tree, 'packages/ts/package.json'),
-        JSON.stringify({ name: 'demo', version: '0.0.0' }, null, 2),
-      );
-      writeFileSync(
-        join(tree, 'putitoutthere.toml'),
-        `[putitoutthere]
-version = 1
-[[package]]
-name = "demo"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-`,
-      );
-
-      const code = await run([
-        'node',
-        'putitoutthere',
-        'write-launcher',
-        '--cwd',
-        tree,
-        '--path',
-        'packages/ts',
-      ]);
-      expect(code).toBe(0);
-      // No launcher was authored; no `bin` field was added.
-      const pkg = JSON.parse(
-        readFileSync(join(tree, 'packages/ts/package.json'), 'utf8'),
-      ) as { bin?: unknown };
-      expect(pkg.bin).toBeUndefined();
-    } finally {
-      rmSync(tree, { recursive: true, force: true });
-    }
-  });
-
-  it('publish exits 1 with PIOT_PUBLISH_EMPTY_PLAN when the plan is empty', async () => {
-    // Invariant: if `publish` runs, something publishes. An empty
-    // plan at this stage is a workflow-gate / engine-state bug and
-    // surfaces as a non-zero exit with a fingerprintable code.
-    git(['commit', '--allow-empty', '-m', 'nop\n\nrelease: skip']);
-    const stderrChunks: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    const code = await run([
-      'node',
-      'putitoutthere',
-      'publish',
-      '--cwd',
-      repo,
-    ]);
+  it('errors when --path is missing (#366)', async () => {
+    const code = await run(argv('write-crate-version', '--version', '0.3.5'));
     expect(code).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/PIOT_PUBLISH_EMPTY_PLAN/);
+    expect(stderr.join('')).toMatch(/--path/);
+    expect(writeCrateVersionMock).not.toHaveBeenCalled();
+  });
+
+  it('errors when --version is missing (#366)', async () => {
+    const code = await run(argv('write-crate-version', '--path', '/crate'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/--version/);
+    expect(writeCrateVersionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('cli: write-launcher dispatch', () => {
+  it('reports the authored files when the engine writes a launcher (#299)', async () => {
+    writeLauncherMock.mockReturnValue(['bin/demo-cli.js', 'package.json']);
+    const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts'));
+    expect(code).toBe(0);
+    expect(writeLauncherMock).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: '/tree', packagePath: 'packages/ts' }),
+    );
+    expect(stdout.join('')).toMatch(/wrote bin\/demo-cli\.js, package\.json/);
+  });
+
+  it('prints a no-op line when the engine authors nothing (#299)', async () => {
+    writeLauncherMock.mockReturnValue([]);
+    const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts'));
+    expect(code).toBe(0);
+    expect(stdout.join('')).toMatch(/no-op/);
+  });
+
+  it('errors when --path is missing (#299)', async () => {
+    const code = await run(argv('write-launcher', '--cwd', '/tree'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/--path/);
+    expect(writeLauncherMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('cli: publish dispatch', () => {
+  it('routes to the engine and reports an empty publish set', async () => {
+    publishMock.mockResolvedValue({ ok: true, published: [] });
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(publishMock).toHaveBeenCalledOnce();
+    expect(stdout.join('')).toMatch(/published: \(nothing\)/);
   });
 });
