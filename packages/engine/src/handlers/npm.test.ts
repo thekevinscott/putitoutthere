@@ -2,27 +2,177 @@
  * npm handler (vanilla) tests.
  *
  * Issue #18. Plan: §7.4, §12.2 (vanilla mode), §13.1, §14.5, §16.1.
+ *
+ * Unit-suite isolation: the subprocess boundary (`node:child_process`) and
+ * the filesystem (`node:fs`) are both mocked. `node:fs` is backed by a small
+ * in-memory tree (below) shared between test setup and the unit under test,
+ * so package.json rewrites, artifact reads, and synthesized platform staging
+ * dirs all observe the same state without a real temp tree. Real end-to-end
+ * file behavior is covered by the npm integration tier
+ * (test/integration/npm.integration.test.ts).
  */
 
-import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { Stats } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isBootstrapPublish, npm } from './npm.js';
 import type { Ctx } from '../types.js';
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  return {
-    ...actual,
-    execFileSync: vi.fn(actual.execFileSync),
-  };
-});
+vi.mock('node:child_process');
+vi.mock('node:fs');
 
 const execMock = vi.mocked(execFileSync);
+
+/* -------------------------- in-memory filesystem -------------------------- */
+// A minimal `node:fs` substitute keyed by normalized (forward-slash) path, so
+// the source's real-`node:path` joins (back-slashed on Windows) resolve to the
+// same entries the test seeds. Covers exactly the calls crossing the mocked
+// boundary: mkdir/write/read/readdir/exists/stat/chmod/cp/mkdtemp/rm.
+
+type FsFile = { type: 'file'; content: Buffer; mode: number };
+type FsDir = { type: 'dir'; mode: number };
+type FsNode = FsFile | FsDir;
+
+let store = new Map<string, FsNode>();
+let mkdtempCounter = 0;
+
+function norm(p: unknown): string {
+  let s = String(p).replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (s.length > 1 && s.endsWith('/')) {s = s.slice(0, -1);}
+  return s;
+}
+function parentOf(np: string): string {
+  const i = np.lastIndexOf('/');
+  return i <= 0 ? '/' : np.slice(0, i);
+}
+function ensureDir(p: string): void {
+  const np = norm(p);
+  if (store.has(np)) {return;}
+  if (np !== '/') {ensureDir(parentOf(np));}
+  store.set(np, { type: 'dir', mode: 0o755 });
+}
+function enoent(path: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`ENOENT: no such file or directory, '${path}'`), { code: 'ENOENT' });
+}
+
+function resetFs(): void {
+  store = new Map<string, FsNode>();
+  store.set('/', { type: 'dir', mode: 0o755 });
+}
+
+function installFs(): void {
+  vi.mocked(mkdirSync).mockImplementation(((p: string) => {
+    ensureDir(norm(p));
+    return undefined;
+  }) as typeof mkdirSync);
+
+  vi.mocked(writeFileSync).mockImplementation(((p: string, data: string | Buffer) => {
+    const np = norm(p);
+    ensureDir(parentOf(np));
+    const content = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data));
+    store.set(np, { type: 'file', content, mode: 0o644 });
+  }) as typeof writeFileSync);
+
+  vi.mocked(readFileSync).mockImplementation(((p: string, enc?: unknown) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node || node.type !== 'file') {throw enoent(np);}
+    const encoding = typeof enc === 'string' ? enc : (enc as { encoding?: string } | undefined)?.encoding;
+    return encoding ? node.content.toString(encoding as BufferEncoding) : Buffer.from(node.content);
+  }) as typeof readFileSync);
+
+  vi.mocked(readdirSync).mockImplementation(((p: string): string[] => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node || node.type !== 'dir') {throw enoent(np);}
+    const prefix = np === '/' ? '/' : `${np}/`;
+    const names: string[] = [];
+    for (const key of store.keys()) {
+      if (key === np) {continue;}
+      if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
+        names.push(key.slice(prefix.length));
+      }
+    }
+    return names;
+  }) as unknown as typeof readdirSync);
+
+  vi.mocked(existsSync).mockImplementation(((p: string) => store.has(norm(p))) as typeof existsSync);
+
+  vi.mocked(statSync).mockImplementation(((p: string) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node) {throw enoent(np);}
+    return {
+      mode: node.mode,
+      isFile: () => node.type === 'file',
+      isDirectory: () => node.type === 'dir',
+    } as unknown as Stats;
+  }) as typeof statSync);
+
+  vi.mocked(chmodSync).mockImplementation(((p: string, mode: number) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node) {throw enoent(np);}
+    node.mode = typeof mode === 'string' ? parseInt(mode, 8) : mode;
+  }) as typeof chmodSync);
+
+  vi.mocked(cpSync).mockImplementation(((src: string, dest: string) => {
+    const from = norm(src);
+    const to = norm(dest);
+    const node = store.get(from);
+    if (!node) {throw enoent(from);}
+    if (node.type === 'file') {
+      ensureDir(parentOf(to));
+      store.set(to, { type: 'file', content: Buffer.from(node.content), mode: node.mode });
+      return;
+    }
+    ensureDir(to);
+    const prefix = `${from}/`;
+    for (const [key, child] of [...store.entries()]) {
+      if (key.startsWith(prefix)) {
+        const rel = key.slice(prefix.length);
+        const target = `${to}/${rel}`;
+        store.set(
+          target,
+          child.type === 'file'
+            ? { type: 'file', content: Buffer.from(child.content), mode: child.mode }
+            : { type: 'dir', mode: child.mode },
+        );
+      }
+    }
+  }) as typeof cpSync);
+
+  vi.mocked(mkdtempSync).mockImplementation((prefix: string) => {
+    mkdtempCounter += 1;
+    const dir = `${norm(prefix)}${mkdtempCounter.toString().padStart(6, '0')}`;
+    ensureDir(dir);
+    return dir;
+  });
+
+  vi.mocked(rmSync).mockImplementation(((p: string) => {
+    const np = norm(p);
+    store.delete(np);
+    const prefix = `${np}/`;
+    for (const key of [...store.keys()]) {
+      if (key.startsWith(prefix)) {store.delete(key);}
+    }
+  }) as typeof rmSync);
+}
+
+installFs();
 
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
@@ -56,6 +206,7 @@ const ENV_BAK = { ...process.env };
 
 beforeEach(() => {
   execMock.mockReset();
+  resetFs();
   delete process.env.NODE_AUTH_TOKEN;
 });
 
@@ -64,6 +215,7 @@ afterEach(() => {
     if (!(k in ENV_BAK)) {delete process.env[k];}
   }
   Object.assign(process.env, ENV_BAK);
+  resetFs();
 });
 
 describe('npm.isPublished', () => {
@@ -136,16 +288,10 @@ describe('npm.latestVersion', () => {
 });
 
 describe('npm.writeVersion', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'npm-test-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/wv';
 
   it('rewrites the version field in package.json', async () => {
-    const p = join(dir, 'package.json');
+    const p = `${dir}/package.json`;
     writeFileSync(
       p,
       JSON.stringify({ name: 'demo', version: '0.1.0', main: 'index.js' }, null, 2),
@@ -159,11 +305,13 @@ describe('npm.writeVersion', () => {
     const out = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
     expect(out.version).toBe('0.2.0');
     expect(out.name).toBe('demo');
-    expect(paths).toContain(p);
+    // The rewritten path is the package's package.json (separator-agnostic).
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.endsWith('package.json')).toBe(true);
   });
 
   it('is idempotent when version already matches', async () => {
-    const p = join(dir, 'package.json');
+    const p = `${dir}/package.json`;
     writeFileSync(p, JSON.stringify({ name: 'demo', version: '1.0.0' }), 'utf8');
     const paths = await npm.writeVersion(
       { ...basePkg(), path: dir },
@@ -180,14 +328,14 @@ describe('npm.writeVersion', () => {
   });
 
   it('throws when package.json is malformed JSON', async () => {
-    writeFileSync(join(dir, 'package.json'), 'not json', 'utf8');
+    writeFileSync(`${dir}/package.json`, 'not json', 'utf8');
     await expect(
       npm.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
     ).rejects.toThrow(/JSON|parse/i);
   });
 
   it('preserves 2-space indentation', async () => {
-    const p = join(dir, 'package.json');
+    const p = `${dir}/package.json`;
     writeFileSync(
       p,
       JSON.stringify({ name: 'demo', version: '0.1.0' }, null, 2),
@@ -203,12 +351,12 @@ describe('npm.writeVersion', () => {
 });
 
 describe('npm.publish', () => {
-  let dir: string;
+  const dir = '/pub';
+
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'npm-pub-'));
-    mkdirSync(join(dir, 'dist'), { recursive: true });
+    mkdirSync(`${dir}/dist`, { recursive: true });
     writeFileSync(
-      join(dir, 'package.json'),
+      `${dir}/package.json`,
       JSON.stringify({
         name: 'demo-npm',
         version: '0.1.0',
@@ -216,9 +364,6 @@ describe('npm.publish', () => {
       }),
       'utf8',
     );
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
   });
 
   it('skips when already-published', async () => {
@@ -255,9 +400,9 @@ describe('npm.publish', () => {
 
   it('napi: publishes platform packages before main', async () => {
     // Set up artifactsRoot with a platform artifact.
-    const artifactsRoot = join(dir, 'artifacts');
-    mkdirSync(join(artifactsRoot, 'demo-js-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-js-linux-x64-gnu', 'demo.node'), Buffer.from('x'));
+    const artifactsRoot = `${dir}/artifacts`;
+    mkdirSync(`${artifactsRoot}/demo-js-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-js-linux-x64-gnu/demo.node`, Buffer.from('x'));
 
     const viewCalls: string[] = [];
     const publishCwds: string[] = [];
@@ -289,11 +434,11 @@ describe('npm.publish', () => {
   it('dispatches to platform publish for array-form build (#dirsql)', async () => {
     // Two artifact families on disk — one per mode — each in its own
     // mode-infixed directory. Match what plan.ts emits for array-form.
-    const artifactsRoot = join(dir, 'artifacts');
-    mkdirSync(join(artifactsRoot, 'demo-js-napi-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-js-napi-linux-x64-gnu', 'demo.node'), Buffer.from('napi'));
-    mkdirSync(join(artifactsRoot, 'demo-js-bundled-cli-linux-x64-gnu'), { recursive: true });
-    writeFileSync(join(artifactsRoot, 'demo-js-bundled-cli-linux-x64-gnu', 'demo'), Buffer.from('bin'));
+    const artifactsRoot = `${dir}/artifacts`;
+    mkdirSync(`${artifactsRoot}/demo-js-napi-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-js-napi-linux-x64-gnu/demo.node`, Buffer.from('napi'));
+    mkdirSync(`${artifactsRoot}/demo-js-bundled-cli-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-js-bundled-cli-linux-x64-gnu/demo`, Buffer.from('bin'));
 
     const viewCalls: string[] = [];
     execMock.mockImplementation((_cmd, args) => {
@@ -324,7 +469,7 @@ describe('npm.publish', () => {
     expect(viewCalls.some((v) => v.startsWith('@scope/cli-linux-x64-gnu@'))).toBe(true);
 
     // optionalDependencies on the main package must span both families.
-    const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(readFileSync(`${dir}/package.json`, 'utf8')) as {
       optionalDependencies?: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies).toEqual({
@@ -445,7 +590,7 @@ describe('npm.publish', () => {
 
   it('requires the repository field in package.json when OIDC is on', async () => {
     writeFileSync(
-      join(dir, 'package.json'),
+      `${dir}/package.json`,
       JSON.stringify({ name: 'demo-npm', version: '0.1.0' }),
       'utf8',
     );
@@ -476,7 +621,7 @@ describe('npm.publish', () => {
 
   it('rejects an object-form repository without a `url` when OIDC is on (#280)', async () => {
     writeFileSync(
-      join(dir, 'package.json'),
+      `${dir}/package.json`,
       JSON.stringify({ name: 'demo-npm', version: '0.1.0', repository: { type: 'git' } }),
       'utf8',
     );
@@ -496,7 +641,7 @@ describe('npm.publish', () => {
 
   it('rejects an empty repository object when OIDC is on (#280)', async () => {
     writeFileSync(
-      join(dir, 'package.json'),
+      `${dir}/package.json`,
       JSON.stringify({ name: 'demo-npm', version: '0.1.0', repository: {} }),
       'utf8',
     );
@@ -516,7 +661,7 @@ describe('npm.publish', () => {
 
   it('rejects a whitespace-only repository string when OIDC is on (#280)', async () => {
     writeFileSync(
-      join(dir, 'package.json'),
+      `${dir}/package.json`,
       JSON.stringify({ name: 'demo-npm', version: '0.1.0', repository: '   ' }),
       'utf8',
     );
@@ -536,7 +681,7 @@ describe('npm.publish', () => {
 
   it('error message names the package.json path and includes PIOT_NPM_MISSING_REPOSITORY (#280)', async () => {
     writeFileSync(
-      join(dir, 'package.json'),
+      `${dir}/package.json`,
       JSON.stringify({ name: 'demo-npm', version: '0.1.0' }),
       'utf8',
     );
@@ -557,7 +702,9 @@ describe('npm.publish', () => {
     delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     expect(caught).toBeDefined();
     expect(caught!.message).toContain('PIOT_NPM_MISSING_REPOSITORY');
-    expect(caught!.message).toContain(join(dir, 'package.json'));
+    // The message names the offending file; assert on its basename
+    // (separator-agnostic — Windows joins the path with backslashes).
+    expect(caught!.message).toMatch(/package\.json/);
   });
 
   it('surfaces publish failure stderr', async () => {

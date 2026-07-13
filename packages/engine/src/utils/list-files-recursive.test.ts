@@ -1,34 +1,58 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, readdirSync } from 'node:fs';
+import type { Dirent } from 'node:fs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listFilesRecursive } from './list-files-recursive.js';
 
-let dir: string;
+// Bare automock (no factory): the fs collaborators are the unit-under-test's
+// only side channel, so isolate them and drive the directory tree through
+// `existsSync` / `readdirSync` returns. Real dir walking over a temp tree is
+// covered by the integration tier.
+vi.mock('node:fs');
+
+const existsMock = vi.mocked(existsSync);
+const readdirMock = vi.mocked(readdirSync);
+
+/** A minimal `Dirent` double — only `name` + `isDirectory`/`isFile` matter. */
+function dirent(name: string, isDir: boolean): Dirent {
+  return {
+    name,
+    isDirectory: () => isDir,
+    isFile: () => !isDir,
+  } as unknown as Dirent;
+}
+
+// Separator-agnostic: the source joins with node:path (real, unmocked), so on
+// Windows the recursion keys arrive back-slashed. Normalize before comparing.
+const norm = (p: unknown): string => String(p).replace(/\\/g, '/');
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'lfr-'));
-});
-
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  existsMock.mockReset();
+  readdirMock.mockReset();
 });
 
 describe('listFilesRecursive', () => {
   it('returns every regular file, descending into subdirectories', () => {
-    mkdirSync(join(dir, 'a', 'b'), { recursive: true });
-    writeFileSync(join(dir, 'top.txt'), '');
-    writeFileSync(join(dir, 'a', 'mid.txt'), '');
-    writeFileSync(join(dir, 'a', 'b', 'leaf.txt'), '');
+    existsMock.mockReturnValue(true);
+    readdirMock.mockImplementation(((p: Parameters<typeof readdirSync>[0]): Dirent[] => {
+      switch (norm(p)) {
+        case '/root':
+          return [dirent('a', true), dirent('top.txt', false)];
+        case '/root/a':
+          return [dirent('b', true), dirent('mid.txt', false)];
+        case '/root/a/b':
+          return [dirent('leaf.txt', false)];
+        default:
+          return [];
+      }
+    }) as unknown as typeof readdirSync);
 
-    const files = listFilesRecursive(dir).sort();
-    expect(files).toEqual(
-      [join(dir, 'a', 'b', 'leaf.txt'), join(dir, 'a', 'mid.txt'), join(dir, 'top.txt')].sort(),
-    );
+    const files = listFilesRecursive('/root').map(norm).sort();
+    expect(files).toEqual(['/root/a/b/leaf.txt', '/root/a/mid.txt', '/root/top.txt']);
   });
 
   it('returns [] for a path that does not exist', () => {
-    expect(listFilesRecursive(join(dir, 'nope'))).toEqual([]);
+    existsMock.mockReturnValue(false);
+    expect(listFilesRecursive('/root/nope')).toEqual([]);
   });
 });

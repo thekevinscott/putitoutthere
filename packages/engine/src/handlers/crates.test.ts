@@ -3,30 +3,37 @@
  *
  * Issue #16. Plan: §7.4, §13.1, §14.5, §16.1.
  *
- * Mocks: global fetch for isPublished; node:child_process for publish;
- * temp files for writeVersion.
+ * Unit-suite isolation: the subprocess boundary (`node:child_process` — cargo
+ * + git) and the filesystem (`node:fs`) are mocked so each case isolates the
+ * unit under test. Cargo.toml contents are driven through `readFileSync`
+ * returns; the dirty-tree scan is driven through mocked `git` output rather
+ * than a real repo. Real end-to-end file + git behavior is covered by the
+ * crates integration tier (test/integration/crates.integration.test.ts).
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { crates, looksLikeFirstPublishTpRejection, scanDirtyOutsideManifest } from './crates.js';
 import type { Ctx } from '../types.js';
 
-import type * as ChildProcess from 'node:child_process';
-
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  return {
-    ...actual,
-    execFileSync: vi.fn(actual.execFileSync),
-  };
-});
+vi.mock('node:child_process');
+vi.mock('node:fs');
 
 const execMock = vi.mocked(execFileSync);
+const readMock = vi.mocked(readFileSync);
+const writeMock = vi.mocked(writeFileSync);
+
+/** ENOENT the way `node:fs` throws it, so the handler's `code` branch fires. */
+function enoent(): NodeJS.ErrnoException {
+  return Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+}
+
+/** The string content of the Nth `writeFileSync` call. */
+function writtenContent(n = 0): string {
+  return writeMock.mock.calls[n]![1] as string;
+}
 
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
@@ -60,6 +67,8 @@ const ENV_BAK = { ...process.env };
 
 beforeEach(() => {
   execMock.mockReset();
+  readMock.mockReset();
+  writeMock.mockReset();
   delete process.env.CARGO_REGISTRY_TOKEN;
 });
 
@@ -154,77 +163,68 @@ describe('crates.latestVersion', () => {
 });
 
 describe('crates.writeVersion', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'crates-test-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/wv';
 
   it('rewrites the [package] version in Cargo.toml', async () => {
-    const cargoPath = join(dir, 'Cargo.toml');
-    writeFileSync(
-      cargoPath,
+    readMock.mockReturnValue(
       `[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nserde = "1"\n`,
-      'utf8',
     );
     const paths = await crates.writeVersion(
       { ...basePkg(), path: dir },
       '0.2.3',
       makeCtx({ cwd: dir }),
     );
-    const out = readFileSync(cargoPath, 'utf8');
+    const out = writtenContent();
     expect(out).toContain('version = "0.2.3"');
     expect(out).not.toContain('version = "0.1.0"');
     expect(out).toContain('name = "demo"');
-    expect(paths).toContain(cargoPath);
+    // The rewritten path is the package's Cargo.toml (separator-agnostic).
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
   });
 
   it('is idempotent when version already matches', async () => {
-    const cargoPath = join(dir, 'Cargo.toml');
-    writeFileSync(cargoPath, `[package]\nname = "demo"\nversion = "1.0.0"\n`, 'utf8');
+    readMock.mockReturnValue(`[package]\nname = "demo"\nversion = "1.0.0"\n`);
     const paths = await crates.writeVersion(
       { ...basePkg(), path: dir },
       '1.0.0',
       makeCtx({ cwd: dir }),
     );
     expect(paths).toEqual([]);
-    expect(readFileSync(cargoPath, 'utf8')).toContain('version = "1.0.0"');
+    expect(writeMock).not.toHaveBeenCalled();
   });
 
   it('throws when Cargo.toml is missing', async () => {
+    readMock.mockImplementation(() => {
+      throw enoent();
+    });
     await expect(
       crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
     ).rejects.toThrow(/Cargo\.toml/);
   });
 
   it('throws when the [package] version line is missing', async () => {
-    const cargoPath = join(dir, 'Cargo.toml');
-    writeFileSync(cargoPath, `[workspace]\nmembers = ["a"]\n`, 'utf8');
+    readMock.mockReturnValue(`[workspace]\nmembers = ["a"]\n`);
     await expect(
       crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
     ).rejects.toThrow(/version/i);
   });
 
   it('preserves comments and whitespace around the version line', async () => {
-    const cargoPath = join(dir, 'Cargo.toml');
-    writeFileSync(
-      cargoPath,
+    readMock.mockReturnValue(
       `[package]
 name    = "demo"
 # keep me
 version = "0.1.0"   # trailing comment
 edition = "2021"
 `,
-      'utf8',
     );
     await crates.writeVersion(
       { ...basePkg(), path: dir },
       '0.2.0',
       makeCtx({ cwd: dir }),
     );
-    const out = readFileSync(cargoPath, 'utf8');
+    const out = writtenContent();
     expect(out).toContain('# keep me');
     expect(out).toContain('# trailing comment');
     expect(out).toContain('version = "0.2.0"');
@@ -232,15 +232,7 @@ edition = "2021"
 });
 
 describe('crates.publish', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'crates-pub-'));
-    mkdirSync(join(dir, '.cargo'), { recursive: true });
-    writeFileSync(join(dir, 'Cargo.toml'), `[package]\nname = "demo"\nversion = "0.1.0"\n`, 'utf8');
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/pub';
 
   it('skips when already published', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
@@ -260,7 +252,11 @@ describe('crates.publish', () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
     );
-    execMock.mockReturnValueOnce(Buffer.from('ok'));
+    // git → not a repo (scanDirty returns null); cargo → ok.
+    execMock.mockImplementation((file: string) => {
+      if (file === 'git') {throw new Error('not a git repo');}
+      return Buffer.from('ok');
+    });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
     const result = await crates.publish(
@@ -692,7 +688,8 @@ describe('crates.publish', () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
     );
-    execMock.mockImplementation(() => {
+    execMock.mockImplementation((file: string) => {
+      if (file === 'git') {throw new Error('not a git repo');}
       throw Object.assign(new Error('exit 1'), { stderr: Buffer.from('permission denied') });
     });
     process.env.CARGO_REGISTRY_TOKEN = 'tok';
@@ -864,75 +861,55 @@ describe('looksLikeFirstPublishTpRejection (#284)', () => {
 });
 
 describe('scanDirtyOutsideManifest (#135)', () => {
-  // spawnSync is NOT mocked (only execFileSync is), so use it for real
-  // git setup without fighting the execMock.
-  function git(args: string[], cwd: string): void {
-    const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
-    if (r.status !== 0) {
-      throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
-    }
+  // The git subprocess is mocked: `rev-parse --show-toplevel` establishes the
+  // worktree, `ls-files` reports the managed Cargo.toml's repo-relative path,
+  // and `status --porcelain` supplies the dirty set. porcelain paths are
+  // forward-slashed (git renders them that way on every platform).
+  interface GitRoutes {
+    /** When true, `git rev-parse --show-toplevel` throws (not a worktree). */
+    noRepo?: boolean;
+    toplevel?: string;
+    managedRel?: string;
+    porcelain?: string;
   }
 
-  let repo: string;
-  beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'crates-scan-'));
-    git(['init', '-q', '-b', 'main'], repo);
-    git(['config', 'user.email', 't@e'], repo);
-    git(['config', 'user.name', 'T'], repo);
-    git(['config', 'commit.gpgsign', 'false'], repo);
-    // Route execFileSync('git', ...) back to the real binary. mockReset
-    // in the parent beforeEach stripped the implementation.
-    const realGit = (file: string, args: readonly string[] = [], options: { cwd?: string; encoding?: string } = {}): Buffer | string => {
+  function mockGit(routes: GitRoutes): void {
+    execMock.mockImplementation((file: string, args?: readonly string[]) => {
       if (file !== 'git') {throw new Error(`unexpected exec: ${file}`);}
-      const r = spawnSync('git', args as string[], {
-        cwd: options.cwd,
-        encoding: (options.encoding as BufferEncoding | undefined) ?? 'utf8',
-      });
-      if (r.status !== 0) {
-        throw Object.assign(new Error(`git exit ${r.status ?? -1}`), {
-          stderr: Buffer.from(r.stderr ?? ''),
-          status: r.status,
-        });
+      const a = (args ?? []) as string[];
+      if (a[0] === 'rev-parse') {
+        if (routes.noRepo) {throw new Error('not a git repo');}
+        return `${routes.toplevel ?? '/repo'}\n`;
       }
-      return options.encoding ? r.stdout : Buffer.from(r.stdout);
-    };
-    execMock.mockImplementation(realGit as unknown as typeof execFileSync);
-  });
-  afterEach(() => {
-    rmSync(repo, { recursive: true, force: true });
-  });
+      if (a[0] === 'ls-files') {return `${routes.managedRel ?? ''}\n`;}
+      if (a[0] === 'status') {return routes.porcelain ?? '';}
+      throw new Error(`unexpected git: ${a.join(' ')}`);
+    });
+  }
 
   it('returns an empty list when only the managed Cargo.toml is dirty', () => {
-    writeFileSync(join(repo, 'Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
-    writeFileSync(join(repo, 'Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
-    expect(scanDirtyOutsideManifest(repo, repo)).toEqual([]);
+    mockGit({ managedRel: 'Cargo.toml', porcelain: ' M Cargo.toml\n' });
+    expect(scanDirtyOutsideManifest('/repo', '/repo')).toEqual([]);
   });
 
   it('flags a stray dirty file outside the package dir', () => {
-    mkdirSync(join(repo, 'crate'), { recursive: true });
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
-    writeFileSync(join(repo, 'README.md'), 'before\n', 'utf8');
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
-    writeFileSync(join(repo, 'README.md'), 'stray edit\n', 'utf8');
-    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'));
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n M README.md\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
     expect(result).toContain('README.md');
     expect(result).not.toContain('crate/Cargo.toml');
   });
 
   it('flags a dirty sibling file inside the package dir that is not Cargo.toml', () => {
-    mkdirSync(join(repo, 'crate/src'), { recursive: true });
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
-    writeFileSync(join(repo, 'crate/src/lib.rs'), 'fn a(){}\n', 'utf8');
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
     // Only src/lib.rs dirty -- the managed Cargo.toml is unchanged. Still
     // a surprise: our writeVersion didn't produce this edit.
-    writeFileSync(join(repo, 'crate/src/lib.rs'), 'fn b(){}\n', 'utf8');
-    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'));
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/src/lib.rs\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
     expect(result).toContain('crate/src/lib.rs');
   });
 
@@ -942,39 +919,27 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     // (crates-only fixtures). git status sees `?? artifacts/` and the
     // pre-publish dirty-check would refuse cargo publish unless it
     // recognises this directory as engine-managed.
-    mkdirSync(join(repo, 'crate'), { recursive: true });
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
-    mkdirSync(join(repo, 'artifacts/some-pkg'), { recursive: true });
-    writeFileSync(join(repo, 'artifacts/some-pkg/file.txt'), 'x', 'utf8');
-    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'), join(repo, 'artifacts'));
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n?? artifacts/\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo/artifacts');
     expect(result).toEqual([]);
   });
 
   it('still flags non-artifacts-root files when artifactsRoot is provided', () => {
-    mkdirSync(join(repo, 'crate'), { recursive: true });
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
-    writeFileSync(join(repo, 'README.md'), 'init\n', 'utf8');
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
-    writeFileSync(join(repo, 'README.md'), 'stray\n', 'utf8');
-    mkdirSync(join(repo, 'artifacts'), { recursive: true });
-    writeFileSync(join(repo, 'artifacts/file.txt'), 'x', 'utf8');
-    const result = scanDirtyOutsideManifest(repo, join(repo, 'crate'), join(repo, 'artifacts'));
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n M README.md\n?? artifacts/file.txt\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo/artifacts');
     expect(result).toContain('README.md');
     expect(result?.some((p) => p.startsWith('artifacts'))).toBe(false);
   });
 
   it('returns null when cwd is not inside a git worktree', () => {
-    const plain = mkdtempSync(join(tmpdir(), 'crates-scan-nogit-'));
-    try {
-      expect(scanDirtyOutsideManifest(plain, plain)).toBeNull();
-    } finally {
-      rmSync(plain, { recursive: true, force: true });
-    }
+    mockGit({ noRepo: true });
+    expect(scanDirtyOutsideManifest('/plain', '/plain')).toBeNull();
   });
 
   it('skips files inside sibling package paths — workflow-managed install state', () => {
@@ -984,88 +949,59 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     // untracked files before cargo publish runs. None of that can end
     // up in the rust crate's tarball — cargo only packs from
     // packages/rust/ — so the dirty check shouldn't refuse on them.
-    mkdirSync(join(repo, 'packages/rust'), { recursive: true });
-    mkdirSync(join(repo, 'packages/ts'), { recursive: true });
-    writeFileSync(
-      join(repo, 'packages/rust/Cargo.toml'),
-      '[package]\nname = "demo"\nversion = "0.1.0"\n',
-      'utf8',
-    );
-    writeFileSync(
-      join(repo, 'packages/ts/package.json'),
-      '{"name":"@demo/ts","version":"0.1.0"}\n',
-      'utf8',
-    );
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
-    // Bump the managed Cargo.toml + create install state in the
-    // sibling package, mirroring what the publish job does.
-    writeFileSync(
-      join(repo, 'packages/rust/Cargo.toml'),
-      '[package]\nname = "demo"\nversion = "0.2.0"\n',
-      'utf8',
-    );
-    mkdirSync(join(repo, 'packages/ts/node_modules/typescript/bin'), { recursive: true });
-    writeFileSync(join(repo, 'packages/ts/node_modules/typescript/bin/tsc'), 'x', 'utf8');
-    writeFileSync(join(repo, 'packages/ts/package-lock.json'), '{}', 'utf8');
-    mkdirSync(join(repo, 'packages/ts/dist'), { recursive: true });
-    writeFileSync(join(repo, 'packages/ts/dist/index.js'), 'x', 'utf8');
+    mockGit({
+      managedRel: 'packages/rust/Cargo.toml',
+      porcelain: [
+        ' M packages/rust/Cargo.toml',
+        '?? packages/ts/node_modules/typescript/bin/tsc',
+        '?? packages/ts/package-lock.json',
+        '?? packages/ts/dist/index.js',
+        '',
+      ].join('\n'),
+    });
     const result = scanDirtyOutsideManifest(
-      repo,
-      join(repo, 'packages/rust'),
+      '/repo',
+      '/repo/packages/rust',
       undefined,
-      [join(repo, 'packages/ts')],
+      ['/repo/packages/ts'],
     );
     expect(result).toEqual([]);
   });
 
   it('still flags non-sibling paths when siblingPackagePaths is provided', () => {
-    mkdirSync(join(repo, 'packages/rust'), { recursive: true });
-    mkdirSync(join(repo, 'packages/ts'), { recursive: true });
-    writeFileSync(
-      join(repo, 'packages/rust/Cargo.toml'),
-      '[package]\nname = "demo"\nversion = "0.1.0"\n',
-      'utf8',
-    );
-    writeFileSync(join(repo, 'README.md'), 'init\n', 'utf8');
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
-    writeFileSync(
-      join(repo, 'packages/rust/Cargo.toml'),
-      '[package]\nname = "demo"\nversion = "0.2.0"\n',
-      'utf8',
-    );
-    writeFileSync(join(repo, 'README.md'), 'stray\n', 'utf8');
-    mkdirSync(join(repo, 'packages/ts'), { recursive: true });
-    writeFileSync(join(repo, 'packages/ts/dist'), 'x', 'utf8');
+    mockGit({
+      managedRel: 'packages/rust/Cargo.toml',
+      porcelain: [
+        ' M packages/rust/Cargo.toml',
+        ' M README.md',
+        '?? packages/ts/dist',
+        '',
+      ].join('\n'),
+    });
     const result = scanDirtyOutsideManifest(
-      repo,
-      join(repo, 'packages/rust'),
+      '/repo',
+      '/repo/packages/rust',
       undefined,
-      [join(repo, 'packages/ts')],
+      ['/repo/packages/ts'],
     );
     expect(result).toContain('README.md');
     expect(result?.some((p) => p.startsWith('packages/ts'))).toBe(false);
   });
 
   it('crates.publish rejects with a clear error when an unrelated file is dirty', async () => {
-    mkdirSync(join(repo, 'crate'), { recursive: true });
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
-    writeFileSync(join(repo, 'README.md'), 'init\n', 'utf8');
-    git(['add', '-A'], repo);
-    git(['commit', '-q', '-m', 'init'], repo);
-    writeFileSync(join(repo, 'README.md'), 'stray edit\n', 'utf8');
-    writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.2.0"\n', 'utf8');
-
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n M README.md\n',
+    });
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
     );
     process.env.CARGO_REGISTRY_TOKEN = 'tok';
     await expect(
       crates.publish(
-        { ...basePkg(), path: join(repo, 'crate') },
+        { ...basePkg(), path: '/repo/crate' },
         '0.2.0',
-        makeCtx({ cwd: repo, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        makeCtx({ cwd: '/repo', env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
       ),
     ).rejects.toThrow(/unexpected dirty|README\.md/);
     fetchSpy.mockRestore();

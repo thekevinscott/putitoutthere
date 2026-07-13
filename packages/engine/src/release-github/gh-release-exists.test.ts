@@ -2,16 +2,16 @@
  * `ghReleaseExists` — the `gh release view` idempotency guard (#444).
  */
 
-import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ghReleaseExists } from './gh-release-exists.js';
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
-});
+// Bare automock (no factory): vitest generates the double from the real
+// module, so it can't drift from the source — satisfying the unit-suite
+// isolation lint without a hand-written (untyped) factory. Every call is
+// driven per-test via `execMock`.
+vi.mock('node:child_process');
 
 const execMock = vi.mocked(execFileSync);
 
