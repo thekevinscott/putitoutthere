@@ -1,29 +1,64 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+/**
+ * Unit suite for the CLI binary entry (`cli-bin.ts`). Isolated per the
+ * unit-suite convention: `./cli.js` — the dispatcher this entry point
+ * drives — is mocked (bare automock, so the double can't drift from the
+ * source), leaving only `cli-bin.ts`'s own wiring under test: it forwards
+ * `process.argv` to `run`, exits with the resolved code, and maps a
+ * rejection to a fatal exit 4. The real dispatch behaviour is covered at
+ * the integration and e2e-cli tiers. See #201 for why the entry point is
+ * a separate module from `cli.ts` (ncc bundling of `action.ts`).
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('./cli.js');
+
+import { run } from './cli.js';
+
+const runMock = vi.mocked(run);
+
+let savedArgv: string[];
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+beforeEach(() => {
+  savedArgv = process.argv;
+  vi.resetModules();
+});
+
+afterEach(() => {
+  process.argv = savedArgv;
+  vi.restoreAllMocks();
+  vi.resetModules();
+});
 
 describe('cli-bin', () => {
-  const binSource = readFileSync(
-    fileURLToPath(new URL('./cli-bin.ts', import.meta.url)),
-    'utf8',
-  );
-  const cliSource = readFileSync(
-    fileURLToPath(new URL('./cli.ts', import.meta.url)),
-    'utf8',
-  );
+  it('forwards process.argv to run and exits with the resolved code', async () => {
+    runMock.mockResolvedValue(3);
+    process.argv = ['node', 'putitoutthere', 'plan', '--cwd', '/x'];
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
-  it('cli.ts has no top-level entry-point guard (#201)', () => {
-    // ncc bundles src/action.ts with src/cli.ts inlined. Any guard that
-    // tests `import.meta.url === file://${process.argv[1]}` inside
-    // cli.ts would fire before action.ts's guard in the bundled
-    // dist-action/index.js and short-circuit the action wrapper.
-    expect(cliSource).not.toMatch(/import\.meta\.url\s*===/);
-    expect(cliSource).not.toMatch(/process\.argv\[1\]/);
+    await import('./cli-bin.js');
+    await flush();
+
+    expect(runMock).toHaveBeenCalledWith(['node', 'putitoutthere', 'plan', '--cwd', '/x']);
+    expect(exit).toHaveBeenCalledWith(3);
   });
 
-  it('cli-bin.ts owns the CLI entry-point: starts run(process.argv)', () => {
-    expect(binSource).toMatch(/^#!\/usr\/bin\/env node/);
-    expect(binSource).toMatch(/from '\.\/cli\.js'/);
-    expect(binSource).toMatch(/run\(process\.argv\)/);
+  it('maps a dispatcher rejection to a fatal exit 4 with a message', async () => {
+    runMock.mockRejectedValue(new Error('boom'));
+    process.argv = ['node', 'putitoutthere', 'plan'];
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((c) => {
+      stderr.push(typeof c === 'string' ? c : c.toString());
+      return true;
+    });
+
+    await import('./cli-bin.js');
+    await flush();
+
+    expect(exit).toHaveBeenCalledWith(4);
+    expect(stderr.join('')).toMatch(/fatal: boom/);
   });
 });

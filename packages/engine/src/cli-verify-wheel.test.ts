@@ -1,15 +1,19 @@
 /**
  * CLI wiring for `verify wheel` (#450): subcommand dispatch and its required
- * flags. The engine function is mocked — this asserts routing, not behavior
- * (covered in `verify/wheel/index.test.ts`).
+ * flags. Isolated per the unit-suite convention: the engine
+ * (`./verify/wheel/index.js`) and the posture fall-through
+ * (`./verify/posture.js`) are bare-automocked so the doubles can't drift
+ * from the source, and the dispatcher under test (`./cli.js`) is loaded via
+ * dynamic import so the mocks are in place first. This asserts routing, not
+ * engine behavior (covered in `verify/wheel/index.test.ts` and the e2e-cli
+ * tier).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./verify/wheel/index.js', () => ({ verifyWheel: vi.fn().mockReturnValue(0) }));
-vi.mock('./verify/posture.js', () => ({ computeVerify: vi.fn().mockResolvedValue([]) }));
+vi.mock('./verify/wheel/index.js');
+vi.mock('./verify/posture.js');
 
-import { parseFlags, run } from './cli.js';
 import { verifyWheel } from './verify/wheel/index.js';
 
 const wheelMock = vi.mocked(verifyWheel);
@@ -30,13 +34,15 @@ afterEach(() => {
 });
 
 describe('parseFlags: verify wheel flags', () => {
-  it('parses --target', () => {
+  it('parses --target', async () => {
+    const { parseFlags } = await import('./cli.js');
     expect(parseFlags(['--target', 'sdist']).target).toBe('sdist');
   });
 });
 
 describe('run: verify wheel dispatch', () => {
   it('routes `verify wheel` to the engine with path/version/target', async () => {
+    const { run } = await import('./cli.js');
     const code = await run([
       'node', 'piot', 'verify', 'wheel', '--path', 'pkg', '--version', '1.2.3', '--target', 'sdist', '--cwd', '/x',
     ]);
@@ -45,6 +51,7 @@ describe('run: verify wheel dispatch', () => {
   });
 
   it('errors when --path is missing', async () => {
+    const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'verify', 'wheel', '--version', '1.2.3', '--target', 'sdist']);
     expect(code).toBe(1);
     expect(stderr.join('')).toContain('verify wheel requires --path');
@@ -52,12 +59,14 @@ describe('run: verify wheel dispatch', () => {
   });
 
   it('errors when --version is missing', async () => {
+    const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'verify', 'wheel', '--path', 'pkg', '--target', 'sdist']);
     expect(code).toBe(1);
     expect(stderr.join('')).toContain('verify wheel requires --version');
   });
 
   it('errors when --target is missing', async () => {
+    const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'verify', 'wheel', '--path', 'pkg', '--version', '1.2.3']);
     expect(code).toBe(1);
     expect(stderr.join('')).toContain('verify wheel requires --target');
