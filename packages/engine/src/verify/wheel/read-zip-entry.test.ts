@@ -1,26 +1,29 @@
 /**
  * `readZipEntry` (#450): the minimal pure-Node zip reader. Exercises both
- * stored (method 0) and deflate (method 8) entries, the not-a-zip and
- * no-match null paths, entry selection among several, and the case where a
- * local header's extra field differs from the central directory's (so the
- * data offset must be read from the local header).
+ * stored (method 0) and deflate (method 8) entries, the not-a-zip and no-match
+ * null paths, entry selection among several, and the case where a local
+ * header's extra field differs from the central directory's (so the data
+ * offset must be read from the local header).
+ *
+ * Unit-isolated: `node:zlib` is mocked so no real deflate stream is built —
+ * fixtures store their bytes raw and the method-8 branch is exercised through
+ * the mocked `inflateRawSync` (driven as an identity decode). Real deflate
+ * round-tripping is covered in `test/integration/verify-wheel.integration.test.ts`
+ * and `test/e2e/verify-wheel.e2e.test.ts`.
  */
 
-import { deflateRawSync } from 'node:zlib';
-import { describe, expect, it } from 'vitest';
+import { inflateRawSync } from 'node:zlib';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { readZipEntry } from './read-zip-entry.js';
 
-function crc32(buf: Buffer): number {
-  let crc = ~0;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i]!;
-    for (let j = 0; j < 8; j++) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-    }
-  }
-  return (~crc) >>> 0;
-}
+vi.mock('node:zlib');
+
+beforeEach(() => {
+  // The mocked inflate decodes a fixture's raw-stored bytes unchanged, so a
+  // method-8 entry round-trips its content while node:zlib stays mocked.
+  vi.mocked(inflateRawSync).mockImplementation((buf) => Buffer.from(buf as Buffer));
+});
 
 interface Entry {
   content: string;
@@ -29,7 +32,11 @@ interface Entry {
   localExtra?: number;
 }
 
-/** Build a minimal zip; per-entry method + optional local-only extra field. */
+/**
+ * Build a minimal zip; per-entry method + optional local-only extra field.
+ * Entry bytes are stored raw regardless of the declared method — the reader's
+ * deflate branch inflates them through the mocked (identity) `inflateRawSync`.
+ */
 function makeZip(files: Record<string, Entry>): Buffer {
   const local: Buffer[] = [];
   const central: Buffer[] = [];
@@ -37,15 +44,13 @@ function makeZip(files: Record<string, Entry>): Buffer {
   for (const [name, entry] of Object.entries(files)) {
     const method = entry.method ?? 8;
     const data = Buffer.from(entry.content, 'utf8');
-    const comp = method === 8 ? deflateRawSync(data) : data;
-    const crc = crc32(data);
+    const comp = data;
     const nameBuf = Buffer.from(name, 'utf8');
     const localExtra = Buffer.alloc(entry.localExtra ?? 0);
 
     const lfh = Buffer.alloc(30);
     lfh.writeUInt32LE(0x04034b50, 0);
     lfh.writeUInt16LE(method, 8);
-    lfh.writeUInt32LE(crc, 14);
     lfh.writeUInt32LE(comp.length, 18);
     lfh.writeUInt32LE(data.length, 22);
     lfh.writeUInt16LE(nameBuf.length, 26);
@@ -57,7 +62,6 @@ function makeZip(files: Record<string, Entry>): Buffer {
     const cdh = Buffer.alloc(46);
     cdh.writeUInt32LE(0x02014b50, 0);
     cdh.writeUInt16LE(method, 10);
-    cdh.writeUInt32LE(crc, 16);
     cdh.writeUInt32LE(comp.length, 20);
     cdh.writeUInt32LE(data.length, 24);
     cdh.writeUInt16LE(nameBuf.length, 28);
@@ -98,9 +102,9 @@ describe('readZipEntry', () => {
 
   it('selects the matching entry among several', () => {
     const buf = makeZip({
-      'a.txt': { content: 'first' },
-      'target.txt': { content: 'the payload' },
-      'c.txt': { content: 'third' },
+      'a.txt': { content: 'first', method: 0 },
+      'target.txt': { content: 'the payload', method: 0 },
+      'c.txt': { content: 'third', method: 0 },
     });
     expect(readZipEntry(buf, (name) => name === 'target.txt')?.toString('utf8')).toBe('the payload');
   });

@@ -1,44 +1,55 @@
 /**
  * `findDistFile` — first `<ext>` file directly under a dir (#450).
+ *
+ * Unit-isolated: `node:fs` is mocked and the readdir/stat results are driven
+ * directly, so no real temp dirs are created. Real directory round-tripping
+ * is covered by the integration and e2e tiers.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findDistFile } from './find-dist-file.js';
 
-let dir: string;
+vi.mock('node:fs');
+
+const existsMock = vi.mocked(existsSync);
+const readdirMock = vi.mocked(readdirSync);
+const statMock = vi.mocked(statSync);
+
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'piot-dist-'));
+  vi.resetAllMocks();
+  existsMock.mockReturnValue(true);
+  statMock.mockReturnValue({ isFile: () => true } as never);
 });
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 describe('findDistFile', () => {
   it('finds a .whl', () => {
-    writeFileSync(join(dir, 'demo-1.0.0-py3-none-any.whl'), 'x');
-    expect(basename(findDistFile(dir, '.whl')!)).toBe('demo-1.0.0-py3-none-any.whl');
+    readdirMock.mockReturnValue(['demo-1.0.0-py3-none-any.whl'] as never);
+    expect(findDistFile('dist', '.whl')?.endsWith('demo-1.0.0-py3-none-any.whl')).toBe(true);
   });
 
   it('finds a .tar.gz', () => {
-    writeFileSync(join(dir, 'demo-1.0.0.tar.gz'), 'x');
-    expect(basename(findDistFile(dir, '.tar.gz')!)).toBe('demo-1.0.0.tar.gz');
+    readdirMock.mockReturnValue(['demo-1.0.0.tar.gz'] as never);
+    expect(findDistFile('dist', '.tar.gz')?.endsWith('demo-1.0.0.tar.gz')).toBe(true);
   });
 
   it('returns null when no file matches the extension', () => {
-    writeFileSync(join(dir, 'demo-1.0.0.tar.gz'), 'x');
-    expect(findDistFile(dir, '.whl')).toBeNull();
+    readdirMock.mockReturnValue(['demo-1.0.0.tar.gz'] as never);
+    expect(findDistFile('dist', '.whl')).toBeNull();
   });
 
   it('returns null for a missing directory', () => {
-    expect(findDistFile(join(dir, 'nope'), '.whl')).toBeNull();
+    existsMock.mockReturnValue(false);
+    expect(findDistFile('nope', '.whl')).toBeNull();
   });
 
   it('ignores a matching directory (files only)', () => {
-    mkdirSync(join(dir, 'weird.whl'));
-    expect(findDistFile(dir, '.whl')).toBeNull();
+    readdirMock.mockReturnValue(['weird.whl'] as never);
+    statMock.mockReturnValue({ isFile: () => false } as never);
+    expect(findDistFile('dist', '.whl')).toBeNull();
   });
 });
