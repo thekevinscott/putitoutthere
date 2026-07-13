@@ -166,6 +166,34 @@ per-PR alongside the integration gate. It also runs locally
 fixture suite — `e2e.yml` over `test/fixtures/` — exercises real OIDC
 publishes and is CI-only; see `tests/e2e/README.md`.
 
+### We do not use e2e attestations (`e2e-verify`)
+
+testing-conventions' `e2e-verify` gate exists for repos that **can't
+afford to run e2e in CI** (real contracts are slow, flaky, and cost
+money): instead of running the suite, it requires each PR touching the
+scoped source to commit an **attestation receipt** — the author's local
+record that they ran the e2e they judged appropriate.
+
+**piot makes the opposite choice: it runs its full e2e suite in CI.**
+`e2e-cli.yml` runs every `tests/e2e/**/*.e2e.test.ts` on every PR, and
+`e2e-fixture.yml` does the heavy real-OIDC-publish runs. Actually
+executing e2e is strictly stronger than a receipt claiming someone did,
+so the attestation model would only add ceremony (no-op receipts) with no
+safety gain.
+
+The gate is therefore **intentionally left dormant**. `e2e-verify` is
+default-off until an `e2e-attestation` baseline is committed, and piot
+never commits one. Concretely:
+
+- **Never** run `testing-conventions e2e attest` or commit anything under
+  `e2e-attestations/`, and never set the reusable workflow's `run_e2e`
+  input. Any of those would arm the gate for no benefit.
+- A dormant (`skipped`) `e2e-verify` job on a PR is the **correct** state,
+  not a gap to "fix." (See #521 for the full rationale.)
+- This does not conflict with reaching the full standard on each package:
+  at full standard `e2e-verify` is present-but-dormant, which is exactly
+  what we want.
+
 ## Design commitments
 
 Explicit non-goals that bound `putitoutthere`'s scope. Read before proposing
