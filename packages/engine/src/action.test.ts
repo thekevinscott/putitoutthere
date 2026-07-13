@@ -1,26 +1,23 @@
-import type * as ChildProcess from 'node:child_process';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { main } from './action.js';
+/**
+ * `action` unit tests. `main()` is the ~50-line GHA adapter: it reads the
+ * `INPUT_*` env, shapes the CLI argv, dispatches, and surfaces the exit code
+ * (honouring `fail_on_error`). The dispatcher itself (`./cli.js`'s `run`) is
+ * mocked so this isolates the adapter's env-parsing / argv-shaping / exit-code
+ * logic; the real plan / write-* behaviour is covered at the integration + e2e
+ * tiers.
+ */
 
-// `plan` now always probes the registry via `isPublished` (#412). For npm
-// that is a `npm view` subprocess; stub it so the unit suite stays offline
-// (→ "not published" → PUBLISH verdict), while git runs for real.
-const realCp = vi.hoisted(() => ({
-  execFileSync: undefined as unknown as typeof ChildProcess.execFileSync,
-}));
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  realCp.execFileSync = actual.execFileSync;
-  const patched = ((cmd: string, ...rest: unknown[]): unknown => {
-    if (cmd === 'npm') {throw new Error('npm stubbed offline (unit)');}
-    return (realCp.execFileSync as (...a: unknown[]) => unknown)(cmd, ...rest);
-  }) as typeof actual.execFileSync;
-  return { ...actual, execFileSync: patched };
-});
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Automock (no factory): the dispatcher double is generated from the real
+// module so it can't drift from the source, satisfying unit isolation without a
+// hand-written (untyped) factory.
+vi.mock('./cli.js');
+
+import { main } from './action.js';
+import { run } from './cli.js';
+
+const runMock = vi.mocked(run);
 
 describe('action', () => {
   let stderrChunks: string[] = [];
@@ -31,6 +28,8 @@ describe('action', () => {
     stderrChunks = [];
     stdoutChunks = [];
     exitCode = undefined;
+    runMock.mockReset();
+    runMock.mockResolvedValue(0);
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
       stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;
@@ -57,97 +56,80 @@ describe('action', () => {
   it('fails when INPUT_COMMAND is missing', async () => {
     await expect(main()).rejects.toThrow(/exit:1/);
     expect(stderrChunks.join('')).toMatch(/missing.*command/i);
+    // The adapter exits before ever reaching the dispatcher.
+    expect(runMock).not.toHaveBeenCalled();
   });
 
   it('invokes plan when INPUT_COMMAND=plan (and surfaces its exit code)', async () => {
     process.env.INPUT_COMMAND = 'plan';
-    // Plan will fail because no putitoutthere.toml at this cwd.
-    await expect(main()).rejects.toThrow(/exit:\d+/);
-    expect(exitCode).not.toBe(undefined);
+    runMock.mockResolvedValue(7);
+    await expect(main()).rejects.toThrow(/exit:7/);
+    expect(runMock).toHaveBeenCalledWith(['node', 'putitoutthere', 'plan', '--json']);
+    expect(exitCode).toBe(7);
   });
 
   it('ignores non-zero exit when fail_on_error is false', async () => {
     process.env.INPUT_COMMAND = 'plan';
     process.env.INPUT_FAIL_ON_ERROR = 'false';
+    runMock.mockResolvedValue(3);
     await expect(main()).rejects.toThrow(/exit:0/);
   });
 
   it('write-launcher: forwards working_directory as --path (#299)', async () => {
     // The matrix's main row invokes the action with
     // command: write-launcher, working_directory: ${{ matrix.path }}.
-    // Confirm the dispatch arm forwards the input and exits non-zero
-    // when the directory does not host a putitoutthere.toml — the
-    // realistic failure shape for the action wrapper.
+    // Confirm the dispatch arm forwards the input as `--path` (and adds no
+    // `--json`, since write-launcher emits a single human line).
     process.env.INPUT_COMMAND = 'write-launcher';
     process.env.INPUT_WORKING_DIRECTORY = '/path/that/does/not/exist';
-    await expect(main()).rejects.toThrow(/exit:1/);
-    expect(stderrChunks.join('')).toMatch(/putitoutthere\.toml/);
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'write-launcher',
+      '--path',
+      '/path/that/does/not/exist',
+    ]);
   });
 
   it('write-version: forwards working_directory as --path and version as --version (#276)', async () => {
     // The reusable workflow's `_matrix.yml` invokes the action with
     // command: write-version, working_directory: ${{ matrix.path }},
-    // version: ${{ matrix.version }}. Confirm the dispatch arm
-    // forwards both inputs and exits non-zero on a missing pyproject
-    // (the realistic failure shape for the action wrapper).
+    // version: ${{ matrix.version }}. Confirm the dispatch arm forwards both
+    // inputs in the `--path` / `--version` argv shape.
     process.env.INPUT_COMMAND = 'write-version';
     process.env.INPUT_WORKING_DIRECTORY = '/path/that/does/not/exist';
     process.env.INPUT_VERSION = '0.2.8';
-    await expect(main()).rejects.toThrow(/exit:1/);
-    expect(stderrChunks.join('')).toMatch(/pyproject\.toml/);
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'write-version',
+      '--path',
+      '/path/that/does/not/exist',
+      '--version',
+      '0.2.8',
+    ]);
   });
 
   it('plan: forwards release_packages as --release-packages', async () => {
     // The reusable workflow's `_matrix.yml` invokes the action with
-    // command: plan, release_packages: ${{ inputs.release_packages }}.
-    // Build a repo with a tagged package and NO new commits — the
-    // change-detected path would plan nothing; the manual spec must
-    // make `demo` show up in the emitted matrix.
-    const repo = mkdtempSync(join(tmpdir(), 'action-relpkg-'));
-    try {
-      const git = (args: string[]): void => {
-        execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
-      };
-      git(['init', '-q', '-b', 'main']);
-      git(['config', 'user.email', 'test@example.com']);
-      git(['config', 'user.name', 'Test']);
-      git(['config', 'commit.gpgsign', 'false']);
-      git(['config', 'tag.gpgsign', 'false']);
-      mkdirSync(join(repo, 'packages/ts'), { recursive: true });
-      writeFileSync(
-        join(repo, 'putitoutthere.toml'),
-        `[putitoutthere]
-version = 1
-[[package]]
-name  = "demo"
-kind  = "npm"
-path  = "packages/ts"
-globs = ["packages/ts/**"]
-`,
-        'utf8',
-      );
-      writeFileSync(join(repo, 'packages/ts/index.ts'), 'x', 'utf8');
-      git(['add', '-A']);
-      git(['commit', '-q', '-m', 'init']);
-      git(['tag', 'demo-v1.0.0']);
-
-      process.env.INPUT_COMMAND = 'plan';
-      process.env.INPUT_WORKING_DIRECTORY = repo;
-      process.env.INPUT_RELEASE_PACKAGES = 'demo@minor';
-
-      // main() exits 0 on a successful plan (process.exit is mocked to
-      // throw `exit:<code>`).
-      await expect(main()).rejects.toThrow(/exit:0/);
-      // #412: plan --json is now { matrix, verdicts, skew }; the action's
-      // `outputs.matrix` (written to $GITHUB_OUTPUT) stays the bare array.
-      const out = JSON.parse(stdoutChunks.join('').trim()) as {
-        matrix: Array<{ name: string; version: string }>;
-      };
-      expect(out.matrix.map((r) => r.name)).toEqual(['demo']);
-      expect(out.matrix[0]!.version).toBe('1.1.0');
-    } finally {
-      rmSync(repo, { recursive: true, force: true });
-    }
+    // command: plan, working_directory, release_packages:
+    // ${{ inputs.release_packages }}. Confirm the dispatch arm forwards the
+    // manual spec (and `--cwd`) into the plan argv.
+    process.env.INPUT_COMMAND = 'plan';
+    process.env.INPUT_WORKING_DIRECTORY = '/repo';
+    process.env.INPUT_RELEASE_PACKAGES = 'demo@minor';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'plan',
+      '--json',
+      '--cwd',
+      '/repo',
+      '--release-packages',
+      'demo@minor',
+    ]);
   });
-
 });

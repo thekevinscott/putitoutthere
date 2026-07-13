@@ -6,18 +6,27 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Writable } from 'node:stream';
+import type { Writable } from 'node:stream';
 import { createLogger } from './log.js';
 
-class BufStream extends Writable {
-  chunks: string[] = [];
-  override _write(chunk: Buffer, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString('utf8'));
-    cb();
-  }
-  get text(): string {
-    return this.chunks.join('');
-  }
+// The logger only touches `stream.write()` and `stream.isTTY`; an in-memory
+// double captures output without pulling `node:stream` (a runtime collaborator)
+// into the unit. Typed as `Writable` (a type-only import, erased at compile
+// time) so `createLogger`'s option stays checked.
+type BufStream = Writable & { chunks: string[]; readonly text: string; isTTY?: boolean };
+
+function makeStream(): BufStream {
+  const chunks: string[] = [];
+  return {
+    chunks,
+    write(chunk: string): boolean {
+      chunks.push(chunk);
+      return true;
+    },
+    get text(): string {
+      return chunks.join('');
+    },
+  } as unknown as BufStream;
 }
 
 const ENV_BAK = { ...process.env };
@@ -32,7 +41,7 @@ afterEach(() => {
 describe('createLogger: JSON mode', () => {
   let dest: BufStream;
   beforeEach(() => {
-    dest = new BufStream();
+    dest = makeStream();
   });
 
   it('emits one JSON object per line with level, msg, and fields', () => {
@@ -69,7 +78,7 @@ describe('createLogger: JSON mode', () => {
 describe('createLogger: redaction (§22.5)', () => {
   it('redacts known-secret env values anywhere in the message', () => {
     process.env.MY_SECRET_TOKEN = 'super-sensitive-value';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('saw token: super-sensitive-value in response');
     const line = dest.text;
@@ -82,7 +91,7 @@ describe('createLogger: redaction (§22.5)', () => {
   it('uses a stable per-token digest marker so rotated tokens are distinguishable (#134)', () => {
     process.env.A_SECRET_TOKEN = 'first-token-value';
     process.env.B_SECRET_TOKEN = 'second-token-value';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('both here: first-token-value then second-token-value');
     const line = dest.text;
@@ -97,7 +106,7 @@ describe('createLogger: redaction (§22.5)', () => {
     process.env.MY_SECRET = 'BBBBBBBB1';
     process.env.DATABASE_PASSWORD = 'CCCCCCCC1';
     process.env.ENCRYPTION_KEY = 'DDDDDDDD1';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('dump: AAAAAAAA1 BBBBBBBB1 CCCCCCCC1 DDDDDDDD1');
     const line = dest.text;
@@ -109,7 +118,7 @@ describe('createLogger: redaction (§22.5)', () => {
   it('redacts values from word-boundary *PAT* and trailing *_KEY names', () => {
     process.env.GH_PAT = 'patvalue-123';
     process.env.API_KEY = 'apikey-value-456';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('credentials: patvalue-123 apikey-value-456');
     const line = dest.text;
@@ -119,7 +128,7 @@ describe('createLogger: redaction (§22.5)', () => {
 
   it('does not redact values from keys outside the secret patterns', () => {
     process.env.PROJECT_NAME = 'example-lib';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('running for example-lib');
     expect(dest.text).toContain('example-lib');
@@ -139,7 +148,7 @@ describe('createLogger: redaction (§22.5)', () => {
     process.env.PASSPORT_URL = 'https://passport.example.com/oauth';
     process.env.PATHWAY_URL = 'https://pathway.example.com/api';
     process.env.PATS_COUNT = 'sixteen-characters'; // prefix, not word-boundary PAT
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info(
       [
@@ -172,7 +181,7 @@ describe('createLogger: redaction (§22.5)', () => {
 
   it('redacts secrets inside structured fields, not just msg', () => {
     process.env.CARGO_REGISTRY_TOKEN = 'abc-12345678';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('publishing', { tokenEcho: 'abc-12345678', package: 'x' });
     const line = dest.text;
@@ -183,7 +192,7 @@ describe('createLogger: redaction (§22.5)', () => {
   it('does not redact short env values that would mangle unrelated log text (#137)', () => {
     process.env.CI = '1';
     process.env.SHORT_TOKEN = 'abc'; // name matches but too short
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('status=1 count=3 abc things with 1 in text');
     const line = dest.text;
@@ -198,7 +207,7 @@ describe('createLogger: redaction (§22.5)', () => {
     const ctxEnv: Record<string, string> = {
       CARGO_REGISTRY_TOKEN: 'ctxenv-supersecret-value',
     };
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false, envSources: [ctxEnv] });
     log.info('publishing with ctxenv-supersecret-value in payload');
     const line = dest.text;
@@ -208,7 +217,7 @@ describe('createLogger: redaction (§22.5)', () => {
 
   it('caches the redaction set across back-to-back log calls (#141)', () => {
     process.env.PERF_CHECK_TOKEN = 'perf-checksecret';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
 
     // The full scan (regex match + length filter + sort) runs only on
@@ -234,7 +243,7 @@ describe('createLogger: redaction (§22.5)', () => {
 
   it('refreshes the cache when the source env mutates (#141)', () => {
     process.env.MUT_TOKEN = 'firstsecretvalue';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('phase1: firstsecretvalue');
 
@@ -249,7 +258,7 @@ describe('createLogger: redaction (§22.5)', () => {
 
   it('handles empty-string secret values without blowing up', () => {
     process.env.EMPTY_TOKEN = '';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('nothing to hide');
     expect(dest.text).toContain('nothing to hide');
@@ -263,7 +272,7 @@ describe('createLogger: redaction (§22.5)', () => {
       GOOD_TOKEN: 'realtokenvalue-1234',
       MAYBE_TOKEN: undefined,
     };
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false, envSources: [src] });
     log.info('payload: realtokenvalue-1234');
     expect(dest.text).not.toContain('realtokenvalue-1234');
@@ -271,7 +280,7 @@ describe('createLogger: redaction (§22.5)', () => {
 
   it('case-insensitive on the env key pattern', () => {
     process.env.my_token = 'lowercased-value-1234';
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: false });
     log.info('payload: lowercased-value-1234');
     expect(dest.text).not.toContain('lowercased-value-1234');
@@ -280,7 +289,7 @@ describe('createLogger: redaction (§22.5)', () => {
 
 describe('createLogger: pretty mode', () => {
   it('writes human-readable output (not pure JSON)', () => {
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: true });
     log.info('hello', { pkg: 'a' });
     // Pretty text still contains the message; not strict on format.
@@ -290,14 +299,14 @@ describe('createLogger: pretty mode', () => {
   });
 
   it('stringifies object-valued fields (not just primitives)', () => {
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: true });
     log.info('obj', { meta: { a: 1 } });
     expect(dest.text).toContain('"a":1');
   });
 
   it('handles the no-fields branch', () => {
-    const dest = new BufStream();
+    const dest = makeStream();
     const log = createLogger({ stream: dest, pretty: true });
     log.info('bare');
     expect(dest.text).toContain('bare');
@@ -305,7 +314,8 @@ describe('createLogger: pretty mode', () => {
 
   it('auto-detects TTY when no `pretty` is passed', () => {
     // Simulate a TTY stream by tagging it.
-    const dest = Object.assign(new BufStream(), { isTTY: true });
+    const dest = makeStream();
+    dest.isTTY = true;
     const log = createLogger({ stream: dest });
     log.info('auto');
     // Pretty format prefixes with [LEVEL]; JSON would start with '{'.

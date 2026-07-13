@@ -5,11 +5,16 @@
  * Issue #5. Plan: plan.md §6.
  */
 
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { loadConfig, parseConfig, sanitizeArtifactName } from './config.js';
+
+// `loadConfig`'s only collaborator is `node:fs`; mock it so the loader/parser
+// is isolated from disk. The real read is covered at the integration + e2e
+// tiers.
+vi.mock('node:fs');
+
+const readFileSyncMock = vi.mocked(readFileSync);
 
 const MINIMAL = `
 [putitoutthere]
@@ -718,21 +723,24 @@ describe('parseConfig: TOML errors', () => {
 });
 
 describe('loadConfig: filesystem', () => {
+  beforeEach(() => {
+    readFileSyncMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('reads a valid config from disk', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'putitoutthere-cfg-'));
-    try {
-      const path = join(dir, 'putitoutthere.toml');
-      writeFileSync(path, MINIMAL, 'utf8');
-      const cfg = loadConfig(path);
-      expect(cfg.packages[0]!.name).toBe('app');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    readFileSyncMock.mockReturnValue(MINIMAL);
+    const cfg = loadConfig('putitoutthere.toml');
+    expect(cfg.packages[0]!.name).toBe('app');
   });
 
   it('throws a clear error when the file does not exist', () => {
-    const path = join(tmpdir(), 'putitoutthere-does-not-exist-xxxxxx.toml');
-    expect(() => loadConfig(path)).toThrow(/cannot read/);
+    readFileSyncMock.mockImplementation(() => {
+      throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+    });
+    expect(() => loadConfig('does-not-exist.toml')).toThrow(/cannot read/);
   });
 });
 
