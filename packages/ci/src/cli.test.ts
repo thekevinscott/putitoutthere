@@ -5,11 +5,13 @@ import { runChangelogCheck } from './changelog-check/run.js';
 import { run } from './cli.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runTddLint } from './tdd-lint/run.js';
+import { runTestpypiVerify } from './testpypi-verify/run.js';
 
 vi.mock('./actionlint-idtoken/run.js');
 vi.mock('./changelog-check/run.js');
 vi.mock('./evidence-check/run.js');
 vi.mock('./tdd-lint/run.js');
+vi.mock('./testpypi-verify/run.js');
 
 let out: string[];
 let err: string[];
@@ -83,6 +85,14 @@ describe('piot-ci dispatcher', () => {
     const code = run(argv('evidence-check'));
     expect(code).toBe(1);
     expect(runEvidenceCheck).toHaveBeenCalledOnce();
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches testpypi-verify to its gate, forwarding argv, and returns its exit code', () => {
+    vi.mocked(runTestpypiVerify).mockReturnValue(1);
+    const code = run(argv('testpypi-verify', 'assert'));
+    expect(code).toBe(1);
+    expect(runTestpypiVerify).toHaveBeenCalledWith(['node', 'piot-ci', 'testpypi-verify', 'assert']);
     expect(err.join('')).toBe('');
   });
 });
