@@ -13,9 +13,12 @@
  */
 
 import { runActionlintIdToken } from './actionlint-idtoken/run.js';
+import { runCargoRegistry } from './cargo-registry/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
+import { runFixtureMaterialize } from './fixture-materialize/run.js';
 import { runTddLint } from './tdd-lint/run.js';
+import { runVerdaccioAuth } from './verdaccio-auth/run.js';
 import { printUsage } from './usage.js';
 
 export function run(argv: readonly string[]): number {
@@ -39,6 +42,15 @@ export function run(argv: readonly string[]): number {
   }
   if (cmd === 'evidence-check') {
     return runEvidenceCheck();
+  }
+  if (cmd === 'fixture-materialize') {
+    return runFixtureMaterialize(argv);
+  }
+  if (cmd === 'verdaccio-auth') {
+    return runVerdaccioAuth();
+  }
+  if (cmd === 'cargo-registry') {
+    return runCargoRegistry(argv);
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();
