@@ -37,6 +37,14 @@ describe('decideActionlintIdToken: what counts as an id-token: write declaration
     expect(check('  : write')).toEqual({ exitCode: 0, lines: [] });
   });
 
+  it('does NOT flag a different, same-length key that grants write (the key literal gates, not its length)', () => {
+    // `contents` is 8 chars, exactly like `id-token`, so slicing the key
+    // length off `  contents: write` leaves `: write` — a match on
+    // everything-but-the-key. The explicit `startsWith(KEY)` check must
+    // still reject it; drop that guard and this line false-flags.
+    expect(check('  contents: write')).toEqual({ exitCode: 0, lines: [] });
+  });
+
   it('flags a space before the colon (`id-token : write`)', () => {
     const r = check('  id-token : write');
     expect(r.lines).toEqual(['1:  id-token : write', err('f.yml')]);
