@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runChangelogCheck } from './changelog-check/run.js';
 import { run } from './cli.js';
+import { runEvidenceCheck } from './evidence-check/run.js';
 
 vi.mock('./changelog-check/run.js');
+vi.mock('./evidence-check/run.js');
 
 let out: string[];
 let err: string[];
@@ -53,6 +55,14 @@ describe('piot-ci dispatcher', () => {
     const code = run(argv('changelog-check'));
     expect(code).toBe(1);
     expect(runChangelogCheck).toHaveBeenCalledOnce();
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches evidence-check to its gate and returns its exit code', () => {
+    vi.mocked(runEvidenceCheck).mockReturnValue(1);
+    const code = run(argv('evidence-check'));
+    expect(code).toBe(1);
+    expect(runEvidenceCheck).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 });
