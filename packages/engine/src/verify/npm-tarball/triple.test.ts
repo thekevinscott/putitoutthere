@@ -1,37 +1,42 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readdirSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./resolve-url.js', () => ({ resolveNpmTarballUrl: vi.fn() }));
-vi.mock('./download.js', () => ({ downloadNpmTarball: vi.fn() }));
+// Bare automocks (no factory) isolate the unit under test: the resolve/
+// download collaborators, the recursive-listing helper, and `node:fs` are
+// driven directly, so no real registry, temp dirs, or extraction happen.
+// Real download/IO round-tripping is covered by
+// test/integration/verify-npm-tarball.integration.test.ts and the e2e tier.
+vi.mock('./resolve-url.js');
+vi.mock('./download.js');
+vi.mock('../../utils/list-files-recursive.js');
+vi.mock('node:fs');
 
 import { downloadNpmTarball } from './download.js';
 import { resolveNpmTarballUrl } from './resolve-url.js';
+import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 import { verifyNpmTarballTriple } from './triple.js';
 
 const resolveMock = vi.mocked(resolveNpmTarballUrl);
 const downloadMock = vi.mocked(downloadNpmTarball);
+const listMock = vi.mocked(listFilesRecursive);
+const readdirMock = vi.mocked(readdirSync);
 
-const roots: string[] = [];
 const out: string[] = [];
 
-function fakeTarball(withBinary: boolean): { root: string; packageDir: string } {
-  const root = mkdtempSync(join(tmpdir(), 'tri-'));
-  roots.push(root);
-  const packageDir = join(root, 'package');
-  mkdirSync(packageDir, { recursive: true });
-  writeFileSync(join(packageDir, 'package.json'), '{}');
-  if (withBinary) {writeFileSync(join(packageDir, 'pkg.linux-x64-gnu.node'), 'ELF');}
-  return { root, packageDir };
+// `downloadNpmTarball`'s return is opaque here — the tarball's top-level
+// contents are expressed through the mocked `readdirSync` response.
+const TARBALL = { root: 'tarball-root', packageDir: 'tarball-root/package' };
+
+/** A fake `readdirSync(..., { withFileTypes: true })` file entry. */
+function entry(name: string): { isFile: () => boolean; name: string } {
+  return { isFile: () => true, name };
 }
 
 const row = { name: '@scope/pkg', kind: 'npm', version: '1.0.0', target: 'linux-x64-gnu', path: 'packages/npm' };
 const opts = { cwd: '/unused', matrix: '', registry: 'http://localhost:4873' };
 
 beforeEach(() => {
-  resolveMock.mockReset();
-  downloadMock.mockReset();
+  vi.resetAllMocks();
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
@@ -41,7 +46,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const r of roots.splice(0)) {rmSync(r, { recursive: true, force: true });}
 });
 
 describe('verifyNpmTarballTriple', () => {
@@ -53,7 +57,8 @@ describe('verifyNpmTarballTriple', () => {
 
   it('passes when the platform tarball ships a non-metadata file', async () => {
     resolveMock.mockResolvedValue('https://reg/triple.tgz');
-    downloadMock.mockReturnValue(fakeTarball(true));
+    downloadMock.mockReturnValue(TARBALL);
+    readdirMock.mockReturnValue([entry('package.json'), entry('pkg.linux-x64-gnu.node')] as never);
 
     const code = await verifyNpmTarballTriple([row], opts);
     const text = out.join('');
@@ -65,7 +70,10 @@ describe('verifyNpmTarballTriple', () => {
 
   it('fails when the tarball carries only package.json', async () => {
     resolveMock.mockResolvedValue('https://reg/triple.tgz');
-    downloadMock.mockReturnValue(fakeTarball(false));
+    downloadMock.mockReturnValue(TARBALL);
+    readdirMock.mockReturnValue([entry('package.json')] as never);
+    // `basename` of this path is 'package.json' on every OS.
+    listMock.mockReturnValue(['tarball-root/package/package.json']);
 
     const code = await verifyNpmTarballTriple([row], opts);
     const text = out.join('');
