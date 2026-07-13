@@ -1,69 +1,109 @@
 /**
- * `putitoutthere publish` tests. Integrates plan + preflight +
- * completeness + handlers + tag into one pipeline.
+ * `publish` orchestration unit tests.
  *
- * Issue #22. Plan: §13 (whole flow), §13.6 (no-push tag model).
+ * `publish` is the subject: it re-runs plan, runs the pre-flight +
+ * completeness gates, then publishes each package in dep order and tags
+ * it. Every collaborator is isolated — `loadConfig`, `plan`, the
+ * `preflight` gates, `checkCompleteness`, `normalizeArtifactLayout`,
+ * `headCommit`, `ensureTag`, and `dumpFailure` are automocked and driven
+ * per scenario; the handler is injected via `handlerFor`. `withRetry`
+ * runs for real (retry is part of the orchestration under test). So each
+ * case asserts the wiring — which gate aborts, publish order, tag-on-
+ * success, no-tag-on-failure — without a real repo, network, or tool.
  *
- * Uses mocked handlers + git so we assert orchestration without
- * hitting networks or shelling to cargo/twine/npm.
+ * The whole flow against real plan/preflight/completeness is pinned in
+ * `test/integration/publish.integration.test.ts` and the e2e tier.
+ *
+ * Issue #22.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Package } from './config.js';
+import { loadConfig } from './config.js';
+import { checkCompleteness } from './completeness.js';
+import { normalizeArtifactLayout } from './normalize-artifacts.js';
+import { ensureTag } from './ensure-tag.js';
+import { headCommit } from './git.js';
+import { type MatrixRow, plan } from './plan.js';
+import {
+  requireAuth,
+  requireCargoShape,
+  requireCratesMetadata,
+  requirePackageJsonShape,
+  requireProvenanceMetadata,
+  requirePyprojectShape,
+  requirePypiVersionSource,
+  requireRepoPublic,
+  requireRepoUrlMatch,
+} from './preflight.js';
 import { publish } from './publish.js';
-import { TransientError, attachHandlerMeta, type Handler } from './types.js';
+import { readHandlerMeta, type Handler } from './types.js';
+import { dumpFailure } from './verbose.js';
 
-let repo: string;
-function git(args: string[]): string {
-  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+vi.mock('./config.js');
+vi.mock('./plan.js');
+vi.mock('./preflight.js');
+vi.mock('./completeness.js');
+vi.mock('./normalize-artifacts.js');
+vi.mock('./ensure-tag.js');
+vi.mock('./git.js');
+vi.mock('./verbose.js');
+vi.mock('./types.js');
+
+const CWD = '/repo';
+
+function npmPkg(name: string, path: string, depends_on: string[] = []): Package {
+  return {
+    name,
+    kind: 'npm',
+    path,
+    globs: [`${path}/**`],
+    depends_on,
+    first_version: '0.1.0',
+    tag_format: '{name}-v{version}',
+  };
 }
-function writeRepoFile(relative: string, content: string): void {
-  const full = join(repo, relative);
-  mkdirSync(join(full, '..'), { recursive: true });
-  writeFileSync(full, content, 'utf8');
+
+function pypiPkg(name: string, path: string): Package {
+  return {
+    name,
+    kind: 'pypi',
+    path,
+    globs: [`${path}/**`],
+    build: 'setuptools',
+    depends_on: [],
+    first_version: '0.1.0',
+    tag_format: '{name}-v{version}',
+  } as unknown as Package;
 }
 
-const TOML = `
-[putitoutthere]
-version = 1
+function configWith(...packages: Package[]): void {
+  vi.mocked(loadConfig).mockReturnValue({
+    putitoutthere: { version: 1 },
+    packages,
+  });
+}
 
-[[package]]
-name  = "lib-js"
-kind  = "npm"
-path  = "packages/ts"
-globs = ["packages/ts/**"]
-`;
+function row(pkg: Package): MatrixRow {
+  return {
+    name: pkg.name,
+    kind: pkg.kind,
+    version: '0.1.0',
+    target: pkg.kind === 'npm' ? 'noarch' : 'sdist',
+    runs_on: 'ubuntu-latest',
+    artifact_name: `${pkg.name}-pkg`,
+    artifact_path: pkg.kind === 'npm' ? 'package.json' : 'dist',
+    path: pkg.path,
+  };
+}
 
-beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'publish-test-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
-
-  writeRepoFile('putitoutthere.toml', TOML);
-  writeRepoFile('packages/ts/package.json', JSON.stringify({ name: 'lib-js', version: '0.0.0', repository: { type: 'git', url: 'x' } }));
-  writeRepoFile('packages/ts/index.ts', 'x');
-  git(['add', '-A']);
-  git(['commit', '-m', 'feat: initial\n\nrelease: patch']);
-
-  // Stage artifacts so the completeness check passes.
-  const artifactsRoot = join(repo, 'artifacts');
-  mkdirSync(join(artifactsRoot, 'lib-js-pkg'), { recursive: true });
-  writeFileSync(join(artifactsRoot, 'lib-js-pkg/package.json'), '{}', 'utf8');
-
-  process.env.NODE_AUTH_TOKEN = 'npm-token';
-});
-
-afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
-  delete process.env.NODE_AUTH_TOKEN;
-});
+/** A completeness map where every package is complete. */
+function allComplete(...packages: Package[]): void {
+  vi.mocked(checkCompleteness).mockReturnValue(
+    new Map(packages.map((p) => [p.name, { ok: true, missing: [] }])),
+  );
+}
 
 function makeHandler(over: Partial<Handler> = {}): Handler {
   return {
@@ -77,313 +117,271 @@ function makeHandler(over: Partial<Handler> = {}): Handler {
   };
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(headCommit).mockReturnValue('HEAD-SHA');
+  vi.mocked(normalizeArtifactLayout).mockReturnValue(undefined);
+  vi.mocked(readHandlerMeta).mockReturnValue(undefined);
+  // Preflight gates pass by default; individual tests override one to abort.
+  for (const gate of [
+    requireAuth,
+    requireProvenanceMetadata,
+    requireCratesMetadata,
+    requirePypiVersionSource,
+    requirePyprojectShape,
+    requireCargoShape,
+    requirePackageJsonShape,
+    requireRepoUrlMatch,
+  ]) {
+    vi.mocked(gate).mockReturnValue(undefined);
+  }
+  vi.mocked(requireRepoPublic).mockResolvedValue(undefined);
+});
+
 describe('publish: happy path', () => {
   it('invokes the handler for each cascaded package and creates a tag', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
     const handler = makeHandler();
-    const result = await publish({
-      cwd: repo,
-      handlerFor: () => handler,
-    });
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
+
     expect(handler.writeVersion).toHaveBeenCalledTimes(1);
     expect(handler.publish).toHaveBeenCalledTimes(1);
-
-    // Tag should exist now.
-    const tags = git(['tag', '-l']);
-    expect(tags).toContain('lib-js-v0.1.0');
-
-    // Result reports success.
+    // Tag written for the published package at HEAD.
+    expect(ensureTag).toHaveBeenCalledWith(
+      '{name}-v{version}',
+      'lib-js',
+      '0.1.0',
+      'HEAD-SHA',
+      { cwd: CWD },
+      expect.anything(),
+    );
     expect(result.ok).toBe(true);
-    expect(result.published.map((p) => p.package)).toEqual(['lib-js']);
+    expect(result.published.map((r) => r.package)).toEqual(['lib-js']);
   });
 
-  it('short-circuits on already-published (no tag, clean exit)', async () => {
-    const handler = makeHandler({
-      isPublished: vi.fn().mockResolvedValue(true),
-    });
-    const result = await publish({
-      cwd: repo,
-      handlerFor: () => handler,
-    });
+  it('short-circuits on already-published (auto-heals the tag, clean exit)', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const handler = makeHandler({ isPublished: vi.fn().mockResolvedValue(true) });
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
+
     expect(handler.publish).not.toHaveBeenCalled();
-    // Still tag -- re-runs with already-published don't re-tag.
+    // Skip path still ensures the tag (auto-heal #407).
+    expect(ensureTag).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(true);
   });
 
-  it('retries handler.publish on TransientError (#133)', async () => {
+  it('retries handler.publish on a transient (5xx) failure (#133)', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const transient = Object.assign(new Error('registry 503'), { status: 503 });
     const publishFn = vi
       .fn()
-      .mockRejectedValueOnce(new TransientError('registry 503'))
+      .mockRejectedValueOnce(transient)
       .mockResolvedValue({ status: 'published', url: 'https://npm/lib-js/0.1.0' });
     const handler = makeHandler({ publish: publishFn });
-    const result = await publish({ cwd: repo, handlerFor: () => handler });
+
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
     expect(publishFn).toHaveBeenCalledTimes(2);
     expect(result.ok).toBe(true);
   }, 10_000);
 });
 
 describe('publish: pre-flight and completeness', () => {
-  it('aborts on missing auth', async () => {
-    delete process.env.NODE_AUTH_TOKEN;
+  it('aborts when the auth pre-flight fails', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    vi.mocked(requireAuth).mockImplementation(() => {
+      throw new Error('missing NODE_AUTH_TOKEN (auth)');
+    });
+
     const handler = makeHandler();
-    await expect(
-      publish({ cwd: repo, handlerFor: () => handler }),
-    ).rejects.toThrow(/NODE_AUTH_TOKEN|auth/i);
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /NODE_AUTH_TOKEN|auth/i,
+    );
     expect(handler.publish).not.toHaveBeenCalled();
   });
 
-  it('aborts when GITHUB_REPOSITORY does not match package.json#repository.url', async () => {
-    writeRepoFile(
-      'packages/ts/package.json',
-      JSON.stringify({
-        name: 'lib-js',
-        version: '0.0.0',
-        repository: { type: 'git', url: 'git+https://github.com/wrong/repo.git' },
-      }),
-    );
-    git(['add', '-A']);
-    git(['commit', '-m', 'manifest url\n\nrelease: patch']);
-    process.env.GITHUB_REPOSITORY = 'acme/widget';
+  it('aborts when the repo-url pre-flight fails (manifest vs GITHUB_REPOSITORY)', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    vi.mocked(requireRepoUrlMatch).mockImplementation(() => {
+      throw new Error('[PIOT_REPO_URL_MISMATCH] repository.url mismatch');
+    });
+
     const handler = makeHandler();
-    await expect(
-      publish({ cwd: repo, handlerFor: () => handler }),
-    ).rejects.toThrow(/PIOT_REPO_URL_MISMATCH/);
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /PIOT_REPO_URL_MISMATCH/,
+    );
     expect(handler.publish).not.toHaveBeenCalled();
   });
 
-  it('aborts when the GitHub repository the workflow is running from is private', async () => {
-    writeRepoFile(
-      'packages/ts/package.json',
-      JSON.stringify({
-        name: 'lib-js',
-        version: '0.0.0',
-        repository: { type: 'git', url: 'git+https://github.com/acme/widget.git' },
-      }),
+  it('aborts when the repo-visibility pre-flight fails (private repo)', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    vi.mocked(requireRepoPublic).mockRejectedValue(
+      new Error('[PIOT_REPO_PRIVATE] repository is private'),
     );
-    git(['add', '-A']);
-    git(['commit', '-m', 'manifest url\n\nrelease: patch']);
-    process.env.GITHUB_REPOSITORY = 'acme/widget';
-    process.env.GITHUB_TOKEN = 'gha-token';
-    const fakeFetch = vi.fn(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ private: true }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-      ),
+
+    const handler = makeHandler();
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /PIOT_REPO_PRIVATE/,
     );
-    vi.stubGlobal('fetch', fakeFetch);
-    try {
-      const handler = makeHandler();
-      await expect(
-        publish({ cwd: repo, handlerFor: () => handler }),
-      ).rejects.toThrow(/PIOT_REPO_PRIVATE/);
-      expect(handler.publish).not.toHaveBeenCalled();
-      expect(fakeFetch).toHaveBeenCalledWith(
-        'https://api.github.com/repos/acme/widget',
-        expect.objectContaining({ method: 'GET' }),
-      );
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(handler.publish).not.toHaveBeenCalled();
   });
 
   it('aborts on incomplete artifacts', async () => {
-    // Swap to a pypi-kind config so the completeness check actually
-    // fires (vanilla-npm-noarch and crates rows skip — npm and cargo
-    // both publish from the source tree directly, so no artifact ever
-    // lives under artifacts/).
-    writeRepoFile(
-      'putitoutthere.toml',
-      `[putitoutthere]
-version = 1
-[[package]]
-name  = "lib-py"
-kind  = "pypi"
-path  = "packages/py"
-globs = ["packages/py/**"]
-`,
+    const p = pypiPkg('lib-py', 'packages/py');
+    configWith(p);
+    const r = row(p);
+    vi.mocked(plan).mockResolvedValue([r]);
+    // Completeness reports a missing artifact for the package.
+    vi.mocked(checkCompleteness).mockReturnValue(
+      new Map([['lib-py', { ok: false, missing: [{ row: r, reason: 'missing sdist' }] }]]),
     );
-    writeRepoFile(
-      'packages/py/pyproject.toml',
-      '[build-system]\nrequires = ["setuptools>=64", "setuptools-scm>=8"]\nbuild-backend = "setuptools.build_meta"\n[project]\nname = "lib-py"\ndynamic = ["version"]\n[tool.setuptools_scm]\n',
-    );
-    writeRepoFile('packages/py/lib_py/__init__.py', '');
-    git(['add', '-A']);
-    git(['commit', '-m', 'pypi setup\n\nrelease: patch']);
-    rmSync(join(repo, 'artifacts'), { recursive: true });
-    process.env.PYPI_API_TOKEN = 'tok';
 
     const handler = makeHandler({ kind: 'pypi' });
-    await expect(
-      publish({ cwd: repo, handlerFor: () => handler }),
-    ).rejects.toThrow(/completeness|missing/i);
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /completeness|missing/i,
+    );
     expect(handler.publish).not.toHaveBeenCalled();
-
-    delete process.env.PYPI_API_TOKEN;
   });
 
   it('throws PIOT_PUBLISH_EMPTY_PLAN when the plan is empty (cascade did not trigger)', async () => {
-    // Tag HEAD so the package has a last tag, then commit a file
-    // OUTSIDE the package's globs. Cascade has no work to do.
-    // Reaching publish in this state means the workflow gate was
-    // bypassed or the engine is inconsistent — either way, surface
-    // it loudly with a fingerprintable code rather than returning
-    // a silent zero.
-    git(['tag', 'lib-js-v0.1.0']);
-    writeRepoFile('docs/notes.md', 'unrelated to packages/ts/**');
-    git(['add', '-A']);
-    git(['commit', '-m', 'docs: unrelated\n\nrelease: minor']);
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([]);
 
     const handler = makeHandler();
-    await expect(
-      publish({ cwd: repo, handlerFor: () => handler }),
-    ).rejects.toThrow(/PIOT_PUBLISH_EMPTY_PLAN/);
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /PIOT_PUBLISH_EMPTY_PLAN/,
+    );
     expect(handler.publish).not.toHaveBeenCalled();
   });
 
   it('throws PIOT_PUBLISH_EMPTY_PLAN on `release: skip` too (gate, not engine, owns skip)', async () => {
-    // `release: skip` is a workflow-gate concern: the plan job
-    // returns [] and the gate skips the publish job. If publish is
-    // reached anyway (gate misconfigured, direct CLI invocation),
-    // the engine's invariant — "publish runs => something publishes"
-    // — wins. Throws.
-    git(['commit', '--allow-empty', '-m', 'chore\n\nrelease: skip']);
+    // `release: skip` makes plan return [] — reaching publish in that
+    // state is a misconfigured gate, and the engine's invariant wins.
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([]);
+
     const handler = makeHandler();
-    await expect(
-      publish({ cwd: repo, handlerFor: () => handler }),
-    ).rejects.toThrow(/PIOT_PUBLISH_EMPTY_PLAN/);
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /PIOT_PUBLISH_EMPTY_PLAN/,
+    );
     expect(handler.publish).not.toHaveBeenCalled();
   });
 });
 
 describe('publish: publish order (toposort)', () => {
   it('publishes dependencies before dependents', async () => {
-    const TOML2 = `
-[putitoutthere]
-version = 1
-
-[[package]]
-name  = "a"
-kind  = "npm"
-path  = "packages/a"
-globs = ["packages/a/**"]
-
-[[package]]
-name       = "b"
-kind       = "npm"
-path       = "packages/b"
-globs      = ["packages/b/**"]
-depends_on = ["a"]
-
-[[package]]
-name       = "c"
-kind       = "npm"
-path       = "packages/c"
-globs      = ["packages/c/**"]
-depends_on = ["a", "b"]
-`;
-    // Rebuild repo with three packages.
-    rmSync(repo, { recursive: true, force: true });
-    repo = mkdtempSync(join(tmpdir(), 'publish-test-'));
-    git(['init', '-q', '-b', 'main']);
-    git(['config', 'user.email', 'test@example.com']);
-    git(['config', 'user.name', 'Test']);
-    git(['config', 'commit.gpgsign', 'false']);
-    git(['config', 'tag.gpgsign', 'false']);
-    writeRepoFile('putitoutthere.toml', TOML2);
-    for (const p of ['a', 'b', 'c']) {
-      writeRepoFile(`packages/${p}/package.json`, JSON.stringify({ name: p, version: '0.0.0', repository: { type: 'git', url: 'x' } }));
-      writeRepoFile(`packages/${p}/index.ts`, 'x');
-    }
-    git(['add', '-A']);
-    git(['commit', '-m', 'feat: initial']);
-
-    const artifactsRoot = join(repo, 'artifacts');
-    for (const p of ['a', 'b', 'c']) {
-      mkdirSync(join(artifactsRoot, `${p}-pkg`), { recursive: true });
-      writeFileSync(join(artifactsRoot, `${p}-pkg/package.json`), '{}', 'utf8');
-    }
-    process.env.NODE_AUTH_TOKEN = 'tok';
+    const a = npmPkg('a', 'packages/a');
+    const b = npmPkg('b', 'packages/b', ['a']);
+    const c = npmPkg('c', 'packages/c', ['a', 'b']);
+    configWith(a, b, c);
+    vi.mocked(plan).mockResolvedValue([row(a), row(b), row(c)]);
+    allComplete(a, b, c);
 
     const calls: string[] = [];
     const handler = makeHandler({
-      publish: vi.fn().mockImplementation(async (pkg: { name: string }) => {
+      publish: vi.fn().mockImplementation((pkg: { name: string }) => {
         calls.push(pkg.name);
         return Promise.resolve({ status: 'published' as const });
       }),
     });
-    const result = await publish({ cwd: repo, handlerFor: () => handler });
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
     expect(result.ok).toBe(true);
     expect(calls).toEqual(['a', 'b', 'c']);
   });
 });
 
 describe('publish: handler failure', () => {
-  it('surfaces the error and leaves other packages untouched', async () => {
+  it('surfaces the error and leaves the tag uncreated', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
     const handler = makeHandler({
       publish: vi.fn().mockRejectedValue(new Error('registry 500')),
     });
-    await expect(
-      publish({ cwd: repo, handlerFor: () => handler }),
-    ).rejects.toThrow(/500|registry/);
-    // No tag created on failure.
-    expect(git(['tag', '-l'])).toBe('');
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /500|registry/,
+    );
+    // No tag on failure; the failure was dumped.
+    expect(ensureTag).not.toHaveBeenCalled();
+    expect(dumpFailure).toHaveBeenCalledTimes(1);
   });
 
-  // Phase 2 / Idea 9: tool-version metadata attached by a handler must
-  // reach the rendered job-summary markdown via FailureContext, so a
-  // foreign agent reading the rendered failure can see "what version
-  // of twine/npm/cargo was running" without re-running anything.
   it('threads handler-attached tool versions into the failure dump', async () => {
-    // Wire up a temp $GITHUB_STEP_SUMMARY so we can inspect the markdown.
-    const summaryPath = join(repo, '_step_summary.md');
-    writeFileSync(summaryPath, '', 'utf8');
-    const prev = process.env.GITHUB_STEP_SUMMARY;
-    process.env.GITHUB_STEP_SUMMARY = summaryPath;
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
 
-    try {
-      const err = new Error('twine upload failed');
-      attachHandlerMeta(err, {
+    const err = new Error('twine upload failed');
+    // The handler attached tool-version metadata; publish reads it back
+    // via readHandlerMeta and threads it into the failure context.
+    vi.mocked(readHandlerMeta).mockReturnValue({
+      toolVersions: { twine: 'twine 5.1.0', python: 'Python 3.12.6' },
+    });
+    const handler = makeHandler({ publish: vi.fn().mockRejectedValue(err) });
+
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /twine upload failed/,
+    );
+
+    expect(dumpFailure).toHaveBeenCalledWith(
+      err,
+      expect.objectContaining({
+        package: 'lib-js',
         toolVersions: { twine: 'twine 5.1.0', python: 'Python 3.12.6' },
-      });
-      const handler = makeHandler({
-        publish: vi.fn().mockRejectedValue(err),
-      });
-      await expect(
-        publish({ cwd: repo, handlerFor: () => handler }),
-      ).rejects.toThrow(/twine upload failed/);
-
-      const md = readFileSync(summaryPath, 'utf8');
-      expect(md).toContain('Tool versions');
-      expect(md).toContain('twine 5.1.0');
-      expect(md).toContain('Python 3.12.6');
-    } finally {
-      if (prev === undefined) {delete process.env.GITHUB_STEP_SUMMARY;}
-      else {process.env.GITHUB_STEP_SUMMARY = prev;}
-    }
+      }),
+      expect.anything(),
+    );
   });
 });
 
 describe('publish: pkg.path resolution', () => {
   it('passes absolute pkg.path to handlers regardless of process.cwd()', async () => {
-    // Handlers do `readFileSync(join(pkg.path, 'Cargo.toml'))` which resolves
-    // against process.cwd(). Anchoring pkg.path to opts.cwd at the top of
-    // publish() ensures e2e harnesses / monorepo orchestrators that invoke
-    // the CLI with `--cwd /elsewhere` get the right path.
+    // Handlers do `readFileSync(join(pkg.path, ...))` which resolves against
+    // process.cwd(); publish anchors pkg.path to opts.cwd up front so a
+    // `--cwd /elsewhere` invocation still points at the right tree.
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
     const seen: { writeVersion?: string; publish?: string } = {};
     const handler = makeHandler({
-      writeVersion: vi.fn().mockImplementation(async (pkg: { path: string }) => {
+      writeVersion: vi.fn().mockImplementation((pkg: { path: string }) => {
         seen.writeVersion = pkg.path;
         return Promise.resolve([]);
       }),
-      publish: vi.fn().mockImplementation(async (pkg: { path: string }) => {
+      publish: vi.fn().mockImplementation((pkg: { path: string }) => {
         seen.publish = pkg.path;
         return Promise.resolve({ status: 'published' as const });
       }),
     });
-    await publish({ cwd: repo, handlerFor: () => handler });
-    expect(seen.writeVersion).toBe(join(repo, 'packages/ts'));
-    expect(seen.publish).toBe(join(repo, 'packages/ts'));
+    await publish({ cwd: CWD, handlerFor: () => handler });
+
+    // Anchored to opts.cwd and ending in the package subdir — separator-
+    // agnostic so the assertion holds on Windows too.
+    expect(seen.writeVersion).toMatch(/[/\\]packages[/\\]ts$/);
+    expect(seen.publish).toMatch(/[/\\]packages[/\\]ts$/);
   });
 });
-

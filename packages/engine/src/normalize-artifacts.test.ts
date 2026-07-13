@@ -8,24 +8,47 @@
  * doesn't exercise: multi-artifact plans, already-subdir layouts,
  * crates-only matrices, vanilla-npm matrices, and empty/missing
  * artifact roots.
+ *
+ * The `node:fs` boundary is automocked so each case isolates the
+ * branching logic — `existsSync` / `readdirSync` are driven to stage a
+ * scenario and the move is asserted through the `mkdirSync` /
+ * `renameSync` calls, not real files. Path assertions are separator-
+ * agnostic so they hold on Windows as well as POSIX.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import type { MatrixRow } from './plan.js';
 
-let root: string;
+vi.mock('node:fs');
+
+const existsMock = vi.mocked(existsSync);
+const readdirMock = vi.mocked(readdirSync);
+const mkdirMock = vi.mocked(mkdirSync);
+const renameMock = vi.mocked(renameSync);
+
+/**
+ * Drive `existsSync` from a set of paths that should report present.
+ * Membership is matched by suffix so callers can name a path by its
+ * trailing segment without hard-coding a separator.
+ */
+function existing(...present: string[]): void {
+  existsMock.mockImplementation((p) =>
+    present.some((suffix) => String(p).endsWith(suffix)),
+  );
+}
+
+/** Feed `readdirSync` a set of dumped entries. */
+function dumped(...entries: string[]): void {
+  readdirMock.mockReturnValue(entries as unknown as ReturnType<typeof readdirSync>);
+}
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'piot-normalize-'));
-});
-
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  vi.clearAllMocks();
+  existsMock.mockReturnValue(false);
+  readdirMock.mockReturnValue([]);
 });
 
 const SDIST_ROW: MatrixRow = {
@@ -74,95 +97,108 @@ const VANILLA_NPM_ROW: MatrixRow = {
 
 describe('#311 normalizeArtifactLayout', () => {
   it('moves a dumped sdist into <artifactsRoot>/<artifact_name>/', () => {
-    const artifacts = join(root, 'artifacts');
-    mkdirSync(artifacts, { recursive: true });
-    writeFileSync(join(artifacts, 'pkg-1.0.0.tar.gz'), 'sdist-bytes');
+    // Root present, target subdir absent, one dumped file at the root.
+    existing('artifacts');
+    dumped('pkg-1.0.0.tar.gz');
 
-    normalizeArtifactLayout([SDIST_ROW], artifacts);
+    normalizeArtifactLayout([SDIST_ROW], 'artifacts');
 
-    expect(existsSync(join(artifacts, 'pkg-sdist', 'pkg-1.0.0.tar.gz'))).toBe(true);
-    expect(readFileSync(join(artifacts, 'pkg-sdist', 'pkg-1.0.0.tar.gz'), 'utf8')).toBe(
-      'sdist-bytes',
+    // Subdir created, the dumped file relocated under it.
+    expect(mkdirMock).toHaveBeenCalledWith(
+      expect.stringMatching(/artifacts[/\\]pkg-sdist$/),
+      { recursive: true },
     );
-    // The dumped file no longer sits at the root.
-    expect(readdirSync(artifacts)).toEqual(['pkg-sdist']);
+    expect(renameMock).toHaveBeenCalledTimes(1);
+    expect(renameMock).toHaveBeenCalledWith(
+      expect.stringMatching(/artifacts[/\\]pkg-1\.0\.0\.tar\.gz$/),
+      expect.stringMatching(/pkg-sdist[/\\]pkg-1\.0\.0\.tar\.gz$/),
+    );
   });
 
   it('leaves the documented subdir layout untouched (no-op)', () => {
-    const artifacts = join(root, 'artifacts');
-    const subdir = join(artifacts, 'pkg-sdist');
-    mkdirSync(subdir, { recursive: true });
-    writeFileSync(join(subdir, 'pkg-1.0.0.tar.gz'), 'sdist-bytes');
+    // The target subdir already exists — nothing to relocate.
+    existing('artifacts', 'pkg-sdist');
 
-    normalizeArtifactLayout([SDIST_ROW], artifacts);
+    normalizeArtifactLayout([SDIST_ROW], 'artifacts');
 
-    expect(existsSync(join(subdir, 'pkg-1.0.0.tar.gz'))).toBe(true);
-    expect(readdirSync(artifacts)).toEqual(['pkg-sdist']);
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(renameMock).not.toHaveBeenCalled();
   });
 
   it('no-ops when the matrix expects multiple staged artifacts (only single-row case manifests the v8 dump)', () => {
-    const artifacts = join(root, 'artifacts');
-    mkdirSync(artifacts, { recursive: true });
-    writeFileSync(join(artifacts, 'stray.txt'), 'x');
+    // Two expected artifacts — the multi-artifact code path on the action
+    // side creates the right subdirs, so re-arranging in-process would be
+    // actively harmful. The function bails before touching the fs.
+    existing('artifacts');
+    dumped('stray.txt');
 
-    normalizeArtifactLayout([SDIST_ROW, WHEEL_ROW], artifacts);
+    normalizeArtifactLayout([SDIST_ROW, WHEEL_ROW], 'artifacts');
 
-    // Nothing moved — the multi-artifact code path on the action side
-    // creates the right subdirs, so re-arranging in-process would be
-    // actively harmful.
-    expect(readdirSync(artifacts)).toEqual(['stray.txt']);
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(renameMock).not.toHaveBeenCalled();
   });
 
   it('no-ops on a crates-only matrix (build job never uploads a crate artifact)', () => {
-    const artifacts = join(root, 'artifacts');
-    mkdirSync(artifacts, { recursive: true });
-    writeFileSync(join(artifacts, 'whatever'), 'x');
+    existing('artifacts');
+    dumped('whatever');
 
-    normalizeArtifactLayout([CRATE_ROW], artifacts);
+    normalizeArtifactLayout([CRATE_ROW], 'artifacts');
 
-    expect(readdirSync(artifacts)).toEqual(['whatever']);
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(renameMock).not.toHaveBeenCalled();
   });
 
   it('no-ops on a vanilla-npm-only matrix (publish job packages from source)', () => {
-    const artifacts = join(root, 'artifacts');
-    mkdirSync(artifacts, { recursive: true });
-    writeFileSync(join(artifacts, 'whatever'), 'x');
+    existing('artifacts');
+    dumped('whatever');
 
-    normalizeArtifactLayout([VANILLA_NPM_ROW], artifacts);
+    normalizeArtifactLayout([VANILLA_NPM_ROW], 'artifacts');
 
-    expect(readdirSync(artifacts)).toEqual(['whatever']);
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(renameMock).not.toHaveBeenCalled();
   });
 
   it('no-ops when the artifacts root does not exist (no download happened)', () => {
-    const artifacts = join(root, 'artifacts'); // intentionally not mkdir'd
+    // Neither target subdir nor the root exist.
+    existsMock.mockReturnValue(false);
 
-    expect(() => normalizeArtifactLayout([SDIST_ROW], artifacts)).not.toThrow();
-    expect(existsSync(artifacts)).toBe(false);
+    expect(() => normalizeArtifactLayout([SDIST_ROW], 'artifacts')).not.toThrow();
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(renameMock).not.toHaveBeenCalled();
   });
 
   it('no-ops on an empty artifacts root', () => {
-    const artifacts = join(root, 'artifacts');
-    mkdirSync(artifacts, { recursive: true });
+    // Root present but nothing was dumped into it.
+    existing('artifacts');
+    dumped();
 
-    normalizeArtifactLayout([SDIST_ROW], artifacts);
+    normalizeArtifactLayout([SDIST_ROW], 'artifacts');
 
-    expect(readdirSync(artifacts)).toEqual([]);
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(renameMock).not.toHaveBeenCalled();
   });
 
   it('moves multiple dumped files (a wheel and its .pyi stubs, sigfile, etc.) into the same subdir', () => {
     // download-artifact's single-artifact extraction dumps every file
     // the upstream upload-artifact step staged — preserve them all,
     // not just the headline `.tar.gz`/`.whl`.
-    const artifacts = join(root, 'artifacts');
-    mkdirSync(artifacts, { recursive: true });
-    writeFileSync(join(artifacts, 'pkg-1.0.0-py3-none-any.whl'), 'wheel');
-    writeFileSync(join(artifacts, 'pkg-1.0.0-py3-none-any.whl.sigstore'), 'sig');
+    existing('artifacts');
+    dumped('pkg-1.0.0-py3-none-any.whl', 'pkg-1.0.0-py3-none-any.whl.sigstore');
 
-    normalizeArtifactLayout([WHEEL_ROW], artifacts);
+    normalizeArtifactLayout([WHEEL_ROW], 'artifacts');
 
-    const subdir = join(artifacts, WHEEL_ROW.artifact_name);
-    expect(existsSync(join(subdir, 'pkg-1.0.0-py3-none-any.whl'))).toBe(true);
-    expect(existsSync(join(subdir, 'pkg-1.0.0-py3-none-any.whl.sigstore'))).toBe(true);
-    expect(readdirSync(artifacts)).toEqual([WHEEL_ROW.artifact_name]);
+    expect(mkdirMock).toHaveBeenCalledWith(
+      expect.stringMatching(/artifacts[/\\]pkg-wheel-x86_64-unknown-linux-gnu$/),
+      { recursive: true },
+    );
+    expect(renameMock).toHaveBeenCalledTimes(2);
+    expect(renameMock).toHaveBeenCalledWith(
+      expect.stringMatching(/artifacts[/\\]pkg-1\.0\.0-py3-none-any\.whl$/),
+      expect.stringMatching(/pkg-wheel-x86_64-unknown-linux-gnu[/\\]pkg-1\.0\.0-py3-none-any\.whl$/),
+    );
+    expect(renameMock).toHaveBeenCalledWith(
+      expect.stringMatching(/artifacts[/\\]pkg-1\.0\.0-py3-none-any\.whl\.sigstore$/),
+      expect.stringMatching(/pkg-wheel-x86_64-unknown-linux-gnu[/\\]pkg-1\.0\.0-py3-none-any\.whl\.sigstore$/),
+    );
   });
 });

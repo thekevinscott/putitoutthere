@@ -1,177 +1,165 @@
 /**
- * `reconcile` unit coverage — drives the CLI end to end (`run([...])`)
- * against a real temp git repo with only `global.fetch` mocked, the same
- * shape `cli: status` uses. This is the tier patch-coverage reads
- * (`test:unit:coverage`), so it exercises every new line: the reconcile
- * loop, the sibling-vs-HEAD commit resolver, the `tagCommit` git helper,
- * and the CLI rendering. End-to-end behaviour is pinned at the
- * integration + e2e tiers; here we cover the wiring.
+ * `reconcile` unit coverage. The subject backfills the missing git tag
+ * for every package that is live on its registry but untagged
+ * (`status`'s `published, untagged` drift).
+ *
+ * Its collaborators are isolated: `loadConfig`, `computeStatus`,
+ * `resolveTagCommit`, and `ensureTag` are automocked and driven per
+ * scenario, so each case exercises the reconcile loop — which drift rows
+ * it heals, the sibling-vs-HEAD commit it tags, and the dry-run gate —
+ * without a real repo or registry. The pure `formatTag` math runs for
+ * real. End-to-end behaviour (real git tag writes + CLI rendering) is
+ * pinned at the integration + e2e tiers.
  *
  * Issue #410, #403 slice 3.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { run } from './cli.js';
+import type { Package } from './config.js';
+import { loadConfig } from './config.js';
+import { ensureTag } from './ensure-tag.js';
+import { reconcile } from './reconcile.js';
+import { resolveTagCommit } from './resolve-tag-commit.js';
+import { computeStatus } from './status.js';
+import type { StatusRow } from './status-types.js';
 
-let repo: string;
-const stdoutChunks: string[] = [];
-
-function git(args: string[]): string {
-  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-}
-
-function tagCommitSha(tag: string): string {
-  return git(['rev-list', '-n', '1', tag]);
-}
-
-function hasTag(tag: string): boolean {
-  return git(['tag', '-l', tag]).length > 0;
-}
-
-/** Mock crates.io's per-crate latest endpoint from a name->version map. */
-function mockRegistry(versions: Record<string, string>): void {
-  vi.spyOn(global, 'fetch').mockImplementation((input) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const m = /\/api\/v1\/crates\/([^/?]+)/.exec(url);
-    const v = m ? versions[m[1]!] : undefined;
-    return Promise.resolve(
-      v === undefined
-        ? new Response('{"errors":[{"detail":"Not Found"}]}', { status: 404 })
-        : new Response(JSON.stringify({ crate: { newest_version: v } }), { status: 200 }),
-    );
-  });
-}
-
-function writeConfig(body: string): void {
-  writeFileSync(join(repo, 'putitoutthere.toml'), body, 'utf8');
-  git(['add', '-A']);
-  git(['commit', '-q', '-m', 'config']);
-}
-
-const ONE_PKG = `[putitoutthere]
-version = 1
-[[package]]
-name  = "core-rust"
-kind  = "crates"
-crate = "core"
-path  = "packages/core"
-globs = ["packages/core/**"]
-`;
-
-const THREE_PKG = `[putitoutthere]
-version = 1
-[[package]]
-name  = "core-rust"
-kind  = "crates"
-crate = "core"
-path  = "packages/core"
-globs = ["packages/core/**"]
-[[package]]
-name  = "other-rust"
-kind  = "crates"
-crate = "other"
-path  = "packages/other"
-globs = ["packages/other/**"]
-[[package]]
-name  = "helper-rust"
-kind  = "crates"
-crate = "helper"
-path  = "packages/helper"
-globs = ["packages/helper/**"]
-`;
+vi.mock('./config.js');
+vi.mock('./ensure-tag.js');
+vi.mock('./resolve-tag-commit.js');
+vi.mock('./status.js');
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'reconcile-unit-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
+  vi.clearAllMocks();
+});
 
-  stdoutChunks.length = 0;
-  vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-    stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-    return true;
+function pkg(name: string): Package {
+  return {
+    name,
+    kind: 'crates',
+    crate: name,
+    path: `packages/${name}`,
+    globs: [`packages/${name}/**`],
+    depends_on: [],
+    first_version: '0.1.0',
+    tag_format: '{name}-v{version}',
+  };
+}
+
+function configWith(...packages: Package[]): void {
+  vi.mocked(loadConfig).mockReturnValue({
+    putitoutthere: { version: 1 },
+    packages,
   });
-  // ensureTag warns when the push fails (no remote here); keep it off the
-  // reporter and out of the captured stdout.
-  vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-});
+}
 
-afterEach(() => {
-  vi.restoreAllMocks();
-  rmSync(repo, { recursive: true, force: true });
-});
+function statusRow(over: Partial<StatusRow> & { package: string }): StatusRow {
+  return {
+    kind: 'crates',
+    tag: null,
+    tagVersion: null,
+    registry: null,
+    registryUnreachable: false,
+    state: 'in sync',
+    drift: false,
+    ...over,
+  };
+}
 
-describe('cli: reconcile', () => {
+describe('reconcile', () => {
   it('backfills at the sibling tag commit and leaves in-sync packages untouched', async () => {
-    writeConfig(THREE_PKG);
-    const siblingCommit = git(['rev-parse', 'HEAD']);
-    // other + helper released at this commit; core never got a tag.
-    git(['tag', '-a', '-m', 'other-rust-v2.0.0', 'other-rust-v2.0.0']);
-    git(['tag', '-a', '-m', 'helper-rust-v0.1.0', 'helper-rust-v0.1.0']);
-    git(['commit', '-q', '--allow-empty', '-m', 'later work']);
-    const head = git(['rev-parse', 'HEAD']);
+    configWith(pkg('core-rust'), pkg('other-rust'), pkg('helper-rust'));
+    // core is live at 0.1.0 but untagged (drift); the siblings are in sync.
+    vi.mocked(computeStatus).mockResolvedValue([
+      statusRow({ package: 'core-rust', registry: '0.1.0', state: 'published, untagged', drift: true }),
+      statusRow({ package: 'other-rust', tag: 'other-rust-v2.0.0', tagVersion: '2.0.0', registry: '2.0.0', state: 'in sync' }),
+      statusRow({ package: 'helper-rust', tag: 'helper-rust-v0.1.0', tagVersion: '0.1.0', registry: '0.1.0', state: 'in sync' }),
+    ]);
+    vi.mocked(resolveTagCommit).mockReturnValue({ commit: 'sibling-sha', source: 'sibling' });
 
-    // core live at 0.1.0 (untagged → drift); other in sync at 2.0.0;
-    // helper in sync at 0.1.0.
-    mockRegistry({ core: '0.1.0', other: '2.0.0', helper: '0.1.0' });
+    const result = await reconcile({ cwd: '/repo' });
 
-    const code = await run(['node', 'piot', 'reconcile', '--cwd', repo]);
-    const out = stdoutChunks.join('');
+    // Only the drifting package is healed; siblings produce no action.
+    expect(result.ok).toBe(true);
+    expect(result.dryRun).toBe(false);
+    expect(result.actions).toEqual([
+      {
+        package: 'core-rust',
+        kind: 'crates',
+        version: '0.1.0',
+        tag: 'core-rust-v0.1.0',
+        commit: 'sibling-sha',
+        source: 'sibling',
+        created: true,
+      },
+    ]);
 
-    // core healed at the sibling's release commit (helper-rust-v0.1.0),
-    // not at HEAD; other + helper were already in sync and untouched.
-    expect(hasTag('core-rust-v0.1.0')).toBe(true);
-    expect(tagCommitSha('core-rust-v0.1.0')).toBe(siblingCommit);
-    expect(tagCommitSha('core-rust-v0.1.0')).not.toBe(head);
-    expect(out).toContain('core-rust');
-    expect(out).toContain('created');
-    expect(out).toContain('(sibling)');
-    expect(out).toContain('reconcile: created 1 tag(s)');
-    expect(code).toBe(0);
+    // The heal used the sibling resolver and wrote the tag once.
+    expect(resolveTagCommit).toHaveBeenCalledTimes(1);
+    expect(resolveTagCommit).toHaveBeenCalledWith(
+      '0.1.0',
+      // siblings = every other package
+      [expect.objectContaining({ name: 'other-rust' }), expect.objectContaining({ name: 'helper-rust' })],
+      { cwd: '/repo' },
+    );
+    expect(ensureTag).toHaveBeenCalledTimes(1);
+    expect(ensureTag).toHaveBeenCalledWith(
+      '{name}-v{version}',
+      'core-rust',
+      '0.1.0',
+      'sibling-sha',
+      { cwd: '/repo' },
+      expect.anything(),
+    );
   });
 
-  it('falls back to HEAD when no sibling tag exists, emitting --json', async () => {
-    writeConfig(ONE_PKG);
-    const head = git(['rev-parse', 'HEAD']);
-    mockRegistry({ core: '0.1.0' });
+  it('falls back to HEAD when no sibling tag exists', async () => {
+    configWith(pkg('core-rust'));
+    vi.mocked(computeStatus).mockResolvedValue([
+      statusRow({ package: 'core-rust', registry: '0.1.0', state: 'published, untagged', drift: true }),
+    ]);
+    vi.mocked(resolveTagCommit).mockReturnValue({ commit: 'head-sha', source: 'head' });
 
-    const code = await run(['node', 'piot', 'reconcile', '--json', '--cwd', repo]);
+    const result = await reconcile({ cwd: '/repo' });
 
-    expect(hasTag('core-rust-v0.1.0')).toBe(true);
-    expect(tagCommitSha('core-rust-v0.1.0')).toBe(head);
-    const result = JSON.parse(stdoutChunks.join('')) as {
-      dryRun: boolean;
-      actions: Array<{ package: string; source: string; created: boolean; tag: string }>;
-    };
     expect(result.dryRun).toBe(false);
     expect(result.actions).toEqual([
       expect.objectContaining({
         package: 'core-rust',
         tag: 'core-rust-v0.1.0',
+        commit: 'head-sha',
         source: 'head',
         created: true,
       }),
     ]);
-    expect(code).toBe(0);
+    expect(ensureTag).toHaveBeenCalledWith(
+      '{name}-v{version}',
+      'core-rust',
+      '0.1.0',
+      'head-sha',
+      { cwd: '/repo' },
+      expect.anything(),
+    );
   });
 
   it('--dry-run reports the heal without writing a tag', async () => {
-    writeConfig(ONE_PKG);
-    mockRegistry({ core: '0.1.0' });
+    configWith(pkg('core-rust'));
+    vi.mocked(computeStatus).mockResolvedValue([
+      statusRow({ package: 'core-rust', registry: '0.1.0', state: 'published, untagged', drift: true }),
+    ]);
+    vi.mocked(resolveTagCommit).mockReturnValue({ commit: 'head-sha', source: 'head' });
 
-    const code = await run(['node', 'piot', 'reconcile', '--dry-run', '--cwd', repo]);
-    const out = stdoutChunks.join('');
+    const result = await reconcile({ cwd: '/repo', dryRun: true });
 
-    expect(out).toContain('would create');
-    expect(out).toContain('core-rust-v0.1.0');
-    expect(hasTag('core-rust-v0.1.0')).toBe(false);
-    expect(code).toBe(0);
+    expect(result.dryRun).toBe(true);
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        package: 'core-rust',
+        tag: 'core-rust-v0.1.0',
+        created: false,
+      }),
+    ]);
+    // Dry-run must not write the tag.
+    expect(ensureTag).not.toHaveBeenCalled();
   });
 });
