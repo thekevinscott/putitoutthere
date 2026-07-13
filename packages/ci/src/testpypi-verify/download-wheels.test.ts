@@ -86,6 +86,12 @@ describe('downloadWheels', () => {
     expect(sleepSecs).toHaveBeenNthCalledWith(5, 5);
   });
 
+  it('succeeds on the sixth and final attempt (six pip invocations)', () => {
+    stubPip(5);
+    expect(downloadWheels(['a==1'], 'https://idx/')).toBe(0);
+    expect(exec.mock.calls.filter((call) => call[0] === 'python')).toHaveLength(6);
+  });
+
   it('downloads each requirement in turn', () => {
     stubPip(0);
     expect(downloadWheels(['a==1', 'b==2'], 'https://idx/')).toBe(0);

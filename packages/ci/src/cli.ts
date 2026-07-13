@@ -16,6 +16,7 @@ import { runActionlintIdToken } from './actionlint-idtoken/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runTddLint } from './tdd-lint/run.js';
+import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { printUsage } from './usage.js';
 
 export function run(argv: readonly string[]): number {
@@ -39,6 +40,9 @@ export function run(argv: readonly string[]): number {
   }
   if (cmd === 'evidence-check') {
     return runEvidenceCheck();
+  }
+  if (cmd === 'testpypi-verify') {
+    return runTestpypiVerify(argv);
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();

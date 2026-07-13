@@ -81,6 +81,7 @@ describe('runTestpypiMetadata', () => {
 
   it('builds from dist files, writes requirements, resets dirs, and runs the phases in order', () => {
     expect(runTestpypiMetadata()).toBe(0);
+    expect(readdir).toHaveBeenCalledWith('dist', { withFileTypes: true });
     expect(build).toHaveBeenCalledWith(['a.whl']);
     expect(writeFileSync).toHaveBeenCalledWith('testpypi-requirements.txt', 'a==1\nb==2\n');
     expect(rmSync).toHaveBeenCalledWith('downloaded-wheels', { recursive: true, force: true });

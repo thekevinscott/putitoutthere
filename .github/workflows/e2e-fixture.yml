@@ -126,6 +126,22 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Toolchain for `pnpm exec piot-ci`. Checkout runs before the
+      # artifact downloads so its workspace clean does not wipe dist/.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - uses: actions/download-artifact@v8
         with:
           pattern: 'piot-fixture-zzz-python-maturin-sdist'
@@ -148,24 +164,7 @@ jobs:
           merge-multiple: true
 
       - name: Assert TestPyPI fixture artifacts exist
-        run: |
-          set -euo pipefail
-          find dist -maxdepth 1 -type f -print | sort
-          for prefix in \
-            piot_fixture_zzz_python_maturin \
-            piot_fixture_zzz_python_hatch
-          do
-            sdist=$(find dist -maxdepth 1 -type f -name "${prefix}-*.tar.gz" -print -quit)
-            if [ -z "$sdist" ]; then
-              echo "::error::missing ${prefix} sdist artifact for TestPyPI"
-              exit 1
-            fi
-            wheel=$(find dist -maxdepth 1 -type f -name "${prefix}-*.whl" -print -quit)
-            if [ -z "$wheel" ]; then
-              echo "::error::missing ${prefix} wheel artifact for TestPyPI"
-              exit 1
-            fi
-          done
+        run: pnpm exec piot-ci testpypi-verify assert
 
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -175,186 +174,4 @@ jobs:
       - name: Verify TestPyPI artifact metadata
         env:
           TESTPYPI_INDEX_URL: https://test.pypi.org/simple/
-        run: |
-          set -euo pipefail
-          python - <<'PY' > testpypi-requirements.txt
-          from pathlib import Path
-          import sys
-
-          dist = Path("dist")
-          packages = {
-              "piot-fixture-zzz-python-maturin": "piot_fixture_zzz_python_maturin",
-              "piot-fixture-zzz-python-hatch": "piot_fixture_zzz_python_hatch",
-          }
-          for package, stem in packages.items():
-              versions = set()
-              for artifact in dist.glob(f"{stem}-*"):
-                  name = artifact.name
-                  if name.endswith(".tar.gz"):
-                      versions.add(name.removeprefix(f"{stem}-").removesuffix(".tar.gz"))
-                  elif name.endswith(".whl"):
-                      parts = name.split("-")
-                      if len(parts) >= 2:
-                          versions.add(parts[1])
-              if len(versions) != 1:
-                  print(
-                      f"expected exactly one version for {package}, found {sorted(versions)}",
-                      file=sys.stderr,
-                  )
-                  sys.exit(1)
-              version = versions.pop()
-              print(f"{package}=={version}")
-          PY
-
-          rm -rf downloaded-wheels downloaded-sdists
-          mkdir -p downloaded-wheels downloaded-sdists
-          while IFS= read -r req; do
-            echo "Downloading wheel for ${req} from TestPyPI"
-            wheel_downloaded=0
-            for attempt in 1 2 3 4 5 6; do
-              if python -m pip download \
-                --index-url "${TESTPYPI_INDEX_URL}" \
-                --no-deps \
-                --only-binary=:all: \
-                --dest downloaded-wheels \
-                "${req}"; then
-                wheel_downloaded=1
-                break
-              fi
-              if [ "$attempt" -lt 6 ]; then
-                sleep_for=$((attempt * 10))
-                echo "TestPyPI wheel index lag for ${req}; retrying in ${sleep_for}s"
-                sleep "$sleep_for"
-              fi
-            done
-            if [ "$wheel_downloaded" -ne 1 ]; then
-              echo "::error::failed to download wheel for ${req} from TestPyPI"
-              exit 1
-            fi
-          done < testpypi-requirements.txt
-
-          python - <<'PY'
-          from html.parser import HTMLParser
-          from pathlib import Path
-          from urllib.parse import unquote, urljoin, urlparse
-          from urllib.request import urlopen
-          import os
-          import sys
-          import time
-
-          class SimpleLinks(HTMLParser):
-              def __init__(self):
-                  super().__init__()
-                  self.hrefs = []
-
-              def handle_starttag(self, tag, attrs):
-                  if tag != "a":
-                      return
-                  attrs_dict = dict(attrs)
-                  href = attrs_dict.get("href")
-                  if href:
-                      self.hrefs.append(href)
-
-          index_url = os.environ["TESTPYPI_INDEX_URL"].rstrip("/") + "/"
-          out_dir = Path("downloaded-sdists")
-          out_dir.mkdir(exist_ok=True)
-          for req in Path("testpypi-requirements.txt").read_text().splitlines():
-              package, version = req.split("==", 1)
-              project_url = urljoin(index_url, f"{package}/")
-              expected_suffix = f"-{version}.tar.gz"
-              for attempt in range(1, 7):
-                  try:
-                      with urlopen(project_url, timeout=30) as response:
-                          html = response.read().decode()
-                      parser = SimpleLinks()
-                      parser.feed(html)
-                      for href in parser.hrefs:
-                          filename = unquote(urlparse(href).path.rsplit("/", 1)[-1])
-                          if filename.endswith(expected_suffix):
-                              artifact_url = urljoin(project_url, href)
-                              print(f"Downloading sdist for {req} from {artifact_url}")
-                              with urlopen(artifact_url, timeout=60) as response:
-                                  (out_dir / filename).write_bytes(response.read())
-                              break
-                      else:
-                          raise RuntimeError(f"no sdist ending {expected_suffix} on {project_url}")
-                      break
-                  except Exception as exc:
-                      if attempt == 6:
-                          print(f"failed to download sdist for {req}: {exc}", file=sys.stderr)
-                          sys.exit(1)
-                      sleep_for = attempt * 10
-                      print(f"TestPyPI sdist index lag for {req}; retrying in {sleep_for}s")
-                      time.sleep(sleep_for)
-          PY
-
-          python - <<'PY'
-          from pathlib import Path
-          import sys
-          import tarfile
-          import zipfile
-
-          wheels_dir = Path("downloaded-wheels")
-          sdists_dir = Path("downloaded-sdists")
-          for req in Path("testpypi-requirements.txt").read_text().splitlines():
-              package, version = req.split("==", 1)
-              stem = package.replace("-", "_")
-              wheels = sorted(wheels_dir.glob(f"{stem}-{version}-*.whl"))
-              if not wheels:
-                  print(f"no downloaded wheel for {req}", file=sys.stderr)
-                  sys.exit(1)
-              with zipfile.ZipFile(wheels[0]) as wheel:
-                  metadata_paths = [
-                      name for name in wheel.namelist()
-                      if name.endswith(".dist-info/METADATA")
-                  ]
-                  if len(metadata_paths) != 1:
-                      print(
-                          f"expected one METADATA file in {wheels[0].name}, found {metadata_paths}",
-                          file=sys.stderr,
-                      )
-                      sys.exit(1)
-                  metadata = wheel.read(metadata_paths[0]).decode()
-              actual = None
-              for line in metadata.splitlines():
-                  if line.startswith("Version: "):
-                      actual = line.removeprefix("Version: ").strip()
-                      break
-              if actual != version:
-                  print(
-                      f"{wheels[0].name} METADATA Version={actual!r}, expected {version!r}",
-                      file=sys.stderr,
-                  )
-                  sys.exit(1)
-              print(f"ok: {wheels[0].name} METADATA Version={actual}")
-
-              sdists = sorted(sdists_dir.glob(f"{stem}-{version}.tar.gz"))
-              if not sdists:
-                  print(f"no downloaded sdist for {req}", file=sys.stderr)
-                  sys.exit(1)
-              with tarfile.open(sdists[0]) as sdist:
-                  pkg_info_paths = [
-                      member for member in sdist.getmembers()
-                      if member.name.endswith("/PKG-INFO")
-                  ]
-                  if not pkg_info_paths:
-                      print(f"no PKG-INFO file in {sdists[0].name}", file=sys.stderr)
-                      sys.exit(1)
-                  pkg_info = sdist.extractfile(pkg_info_paths[0])
-                  if pkg_info is None:
-                      print(f"could not read PKG-INFO in {sdists[0].name}", file=sys.stderr)
-                      sys.exit(1)
-                  metadata = pkg_info.read().decode()
-              actual = None
-              for line in metadata.splitlines():
-                  if line.startswith("Version: "):
-                      actual = line.removeprefix("Version: ").strip()
-                      break
-              if actual != version:
-                  print(
-                      f"{sdists[0].name} PKG-INFO Version={actual!r}, expected {version!r}",
-                      file=sys.stderr,
-                  )
-                  sys.exit(1)
-              print(f"ok: {sdists[0].name} PKG-INFO Version={actual}")
-          PY
+        run: pnpm exec piot-ci testpypi-verify metadata
