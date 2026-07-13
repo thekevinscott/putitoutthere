@@ -110,4 +110,58 @@ describe('writeVersionForBuild (#276, #428)', () => {
     expect(contents).toContain('version = "1.2.3"');
     expect(contents).not.toContain('version.workspace = true');
   });
+
+  // Error contract (#276, #333): each malformed input surfaces an actionable
+  // message instead of building an under-versioned artifact. `node:fs` is
+  // already mocked, so the throw branches are driven purely by mocked reads.
+  const enoent = () => {
+    const err = new Error('ENOENT') as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    return err;
+  };
+
+  it('throws when pyproject.toml is missing', () => {
+    readFileMock.mockImplementation(() => {
+      throw enoent();
+    });
+    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('pyproject.toml not found');
+  });
+
+  it('throws when pyproject.toml is malformed', () => {
+    readFileMock.mockImplementation((p) =>
+      String(p).endsWith('pyproject.toml') ? 'not valid = = toml ][' : '',
+    );
+    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('failed to parse');
+  });
+
+  it('throws when pyproject.toml has no [project] table', () => {
+    readFileMock.mockImplementation((p) =>
+      String(p).endsWith('pyproject.toml') ? '[build-system]\nrequires = []\n' : '',
+    );
+    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('has no [project] table');
+  });
+
+  it('throws on a static [project].version literal (#333)', () => {
+    readFileMock.mockImplementation((p) =>
+      String(p).endsWith('pyproject.toml')
+        ? '[project]\nname = "lib"\nversion = "1.0.0"\n'
+        : '',
+    );
+    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('declares a static');
+  });
+
+  it('throws when [project] declares no version source', () => {
+    readFileMock.mockImplementation((p) =>
+      String(p).endsWith('pyproject.toml') ? '[project]\nname = "lib"\n' : '',
+    );
+    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('declares no version source');
+  });
+
+  it('throws when Cargo.toml is missing under a dynamic pyproject', () => {
+    readFileMock.mockImplementation((p) => {
+      if (String(p).endsWith('pyproject.toml')) {return dynamicPyproject;}
+      throw enoent();
+    });
+    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('Cargo.toml is missing');
+  });
 });
