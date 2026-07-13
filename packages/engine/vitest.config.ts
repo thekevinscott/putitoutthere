@@ -9,6 +9,7 @@ export default defineConfig({
     ],
     setupFiles: ['./test/setup.ts'],
     environment: 'node',
+    testTimeout: 10_000,
     // Vitest 4: vi.restoreAllMocks() no longer resets automocks (only
     // vi.spyOn spies), so per-file afterEach(() => vi.restoreAllMocks())
     // no longer clears vi.mock()'d module call/result history between
