@@ -10,7 +10,6 @@
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { applySubstitutions } from './apply-substitutions.js';
 import { decideFixtureMaterialize, type FixtureMaterializeMode } from './decide.js';
@@ -83,7 +82,7 @@ export function runFixtureMaterialize(argv: readonly string[]): number {
   }
 
   rmSync(FIXTURE_TREE, { recursive: true, force: true });
-  cpSync(join(FIXTURES_ROOT, fixture), FIXTURE_TREE, { recursive: true });
+  cpSync(`${FIXTURES_ROOT}/${fixture}`, FIXTURE_TREE, { recursive: true });
 
   if (githubEnv !== undefined) {
     appendFileSync(githubEnv, `FIXTURE_VERSION=${version}\n`);
@@ -93,7 +92,7 @@ export function runFixtureMaterialize(argv: readonly string[]): number {
     if (!entry.isFile() || !MANIFEST_NAMES.includes(entry.name)) {
       continue;
     }
-    const filePath = join(entry.parentPath, entry.name);
+    const filePath = `${entry.parentPath}/${entry.name}`;
     writeFileSync(filePath, applySubstitutions(readFileSync(filePath, 'utf8'), plan.substitutions));
   }
 
