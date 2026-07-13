@@ -9,6 +9,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { decideFixtureMaterialize } from './decide.js';
@@ -170,7 +171,7 @@ describe('runFixtureMaterialize: filesystem materialization', () => {
   it('wipes then copies the fixture into fixture-tree', () => {
     runFixtureMaterialize(argv('build'));
     expect(rmSync).toHaveBeenCalledWith('fixture-tree', { recursive: true, force: true });
-    expect(cpSync).toHaveBeenCalledWith('packages/engine/test/fixtures/js-vanilla', 'fixture-tree', {
+    expect(cpSync).toHaveBeenCalledWith(join('packages/engine/test/fixtures', 'js-vanilla'), 'fixture-tree', {
       recursive: true,
     });
   });
@@ -193,12 +194,12 @@ describe('runFixtureMaterialize: filesystem materialization', () => {
     runFixtureMaterialize(argv('build'));
 
     expect(readdirSync).toHaveBeenCalledWith('fixture-tree', { recursive: true, withFileTypes: true });
-    expect(readFile).toHaveBeenCalledWith('fixture-tree/putitoutthere.toml', 'utf8');
+    expect(readFile).toHaveBeenCalledWith(join('fixture-tree', 'putitoutthere.toml'), 'utf8');
     expect(readFile).toHaveBeenCalledTimes(4);
-    expect(writeFile).toHaveBeenNthCalledWith(1, 'fixture-tree/putitoutthere.toml', 'version = "0.0.1"');
-    expect(writeFile).toHaveBeenNthCalledWith(2, 'fixture-tree/crate/Cargo.toml', 'version = "0.0.1"');
-    expect(writeFile).toHaveBeenNthCalledWith(3, 'fixture-tree/package.json', 'version = "0.0.1"');
-    expect(writeFile).toHaveBeenNthCalledWith(4, 'fixture-tree/py/pyproject.toml', 'version = "0.0.1"');
+    expect(writeFile).toHaveBeenNthCalledWith(1, join('fixture-tree', 'putitoutthere.toml'), 'version = "0.0.1"');
+    expect(writeFile).toHaveBeenNthCalledWith(2, join('fixture-tree/crate', 'Cargo.toml'), 'version = "0.0.1"');
+    expect(writeFile).toHaveBeenNthCalledWith(3, join('fixture-tree', 'package.json'), 'version = "0.0.1"');
+    expect(writeFile).toHaveBeenNthCalledWith(4, join('fixture-tree/py', 'pyproject.toml'), 'version = "0.0.1"');
     expect(writeFile).toHaveBeenCalledTimes(4);
   });
 
