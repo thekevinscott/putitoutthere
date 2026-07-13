@@ -1,6 +1,6 @@
 # Fixtures
 
-Mini-repos exercising every distinct `putitoutthere` publish-path manifestation. Used by the unit plan-shape tests (`fixtures.test.ts`) and by the e2e suite (which actually publishes against the `piot-fixture-zzz-*` family on real registries).
+Mini-repos exercising every distinct `putitoutthere` publish-path manifestation. Used by the plan-shape e2e test (`tests/e2e/fixtures-plan.e2e.test.ts`) and by the e2e fixture-publish suite (which actually publishes against the `piot-fixture-zzz-*` family on real registries).
 
 The set is deliberately minimal: one fixture per unique manifestation. Build-backend differences that share a publish path (e.g. setuptools vs hatch) and cascade-ordering variations (covered by `polyglot-everything`) are tested at the code level, not as fixtures.
 

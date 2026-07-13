@@ -24,6 +24,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { run as runCli } from '../../src/cli.js';
 import { plan } from '../../src/plan.js';
 
+// The fixture data (sample consumer repos) lives at `test/fixtures/`, shared
+// with the e2e-fixture-job.yml publish harness; this test consumes it from
+// there rather than owning it.
+const FIXTURES_DIR = join(import.meta.dirname, '..', '..', 'test', 'fixtures');
+
 let repo: string;
 
 beforeEach(() => {
@@ -36,7 +41,7 @@ afterEach(() => {
 
 function prepareFixture(name: string): string {
   repo = mkdtempSync(join(tmpdir(), `fixture-${name}-`));
-  cpSync(join(import.meta.dirname, name), repo, { recursive: true });
+  cpSync(join(FIXTURES_DIR, name), repo, { recursive: true });
   rewritePlaceholders(repo, '0.1.0');
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
   execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
@@ -56,7 +61,7 @@ function rewritePlaceholders(root: string, version: string): void {
         walk(p);
         continue;
       }
-      if (entry.name === 'fixtures.test.ts' || entry.name === 'README.md') continue;
+      if (entry.name === 'README.md') continue;
       try {
         const s = readFileSync(p, 'utf8');
         if (s.includes('__VERSION__')) writeFileSync(p, s.replaceAll('__VERSION__', version), 'utf8');
