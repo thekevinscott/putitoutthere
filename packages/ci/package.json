@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "prepare": "tsc -p tsconfig.build.json"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

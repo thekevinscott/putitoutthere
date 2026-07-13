@@ -32,10 +32,9 @@ jobs:
         run: npm install -g pnpm@9
 
       - name: Install dependencies
+        # packages/ci's `prepare` script builds its dist during install, so
+        # `piot-ci` is linked into node_modules/.bin and resolvable below.
         run: pnpm install --frozen-lockfile
-
-      - name: Build piot-ci
-        run: pnpm run build:ci
 
       - name: Enforce changelog + migration entry
         env:

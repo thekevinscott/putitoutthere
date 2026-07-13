@@ -3,10 +3,11 @@
  * HEAD_SHA, runs the `git log` / `git diff` invocations, feeds them to
  * `decideChangelogCheck`, writes the lines, returns the exit code. Both
  * collaborators are mocked (the `node:child_process` boundary and `decide`)
- * so this isolates the wiring: that run parses git output into the right
- * decide() input, and surfaces decide()'s lines + exit code unchanged. The
- * real decisions are covered in `decide.test.ts`; the end-to-end gate is
- * exercised on every PR by the workflow itself.
+ * so this isolates the wiring. It asserts the *exact* git commands run
+ * (including the public-surface pathspec list), that git output is parsed
+ * into the right decide() input, and that decide()'s lines + exit code are
+ * surfaced unchanged. The decisions themselves are covered in
+ * `decide.test.ts`; the end-to-end gate runs on every PR via the workflow.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -44,14 +45,45 @@ afterEach(() => {
 function gitStub(map: { log?: string; surface?: string; changed?: string }): void {
   exec.mockImplementation((_cmd, args) => {
     const a = (args as readonly string[]).join(' ');
-    if (a.includes('log')) {return map.log ?? '';}
-    if (a.includes('--glob-pathspecs')) {return map.surface ?? '';}
+    if (a.includes('log')) {
+      return map.log ?? '';
+    }
+    if (a.includes('--glob-pathspecs')) {
+      return map.surface ?? '';
+    }
     return map.changed ?? '';
   });
 }
 
 describe('runChangelogCheck', () => {
-  it('parses git output into decide()’s input (splitting + dropping blanks)', () => {
+  it('runs the exact git log / diff commands, including the surface pathspecs', () => {
+    gitStub({ log: '', surface: '', changed: '' });
+    runChangelogCheck();
+
+    expect(exec).toHaveBeenNthCalledWith(1, 'git', ['log', '--format=%B', 'aaaa..bbbb'], { encoding: 'utf8' });
+    expect(exec).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      [
+        '--glob-pathspecs',
+        'diff',
+        '--name-only',
+        'aaaa',
+        'bbbb',
+        '--',
+        'action.yml',
+        'packages/engine/src/**/*.ts',
+        ':!packages/engine/src/**/*.test.ts',
+        'docs/api/**',
+        'docs/guide/**',
+        ':!docs/guide/migrations.md',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(exec).toHaveBeenNthCalledWith(3, 'git', ['diff', '--name-only', 'aaaa', 'bbbb'], { encoding: 'utf8' });
+  });
+
+  it('parses git output into decide()’s input (splitting on newlines, dropping blanks)', () => {
     gitStub({
       log: 'feat: x\n',
       surface: 'action.yml\npackages/engine/src/plan.ts\n',
@@ -65,7 +97,7 @@ describe('runChangelogCheck', () => {
     });
   });
 
-  it('writes decide()’s lines and returns its exit code', () => {
+  it('writes decide()’s lines verbatim (one per line) and returns its exit code', () => {
     gitStub({ log: '', surface: 'action.yml\n', changed: '' });
     decide.mockReturnValue({ exitCode: 1, lines: ['::error::boom', 'second line'] });
     const code = runChangelogCheck();
@@ -73,20 +105,37 @@ describe('runChangelogCheck', () => {
     expect(out.join('')).toBe('::error::boom\nsecond line\n');
   });
 
+  it('returns 0 and writes nothing extra when decide passes with no lines', () => {
+    gitStub({ log: '', surface: '', changed: '' });
+    decide.mockReturnValue({ exitCode: 0, lines: [] });
+    expect(runChangelogCheck()).toBe(0);
+    expect(out.join('')).toBe('');
+  });
+
   it('fails clearly and never shells out when BASE_SHA is absent', () => {
     delete process.env.BASE_SHA;
-    gitStub({});
     const code = runChangelogCheck();
     expect(code).toBe(1);
-    expect(out.join('')).toContain('BASE_SHA and HEAD_SHA must be set');
+    expect(out.join('')).toBe('::error::changelog-check: BASE_SHA and HEAD_SHA must be set.\n');
     expect(exec).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
   });
 
-  it('fails clearly when HEAD_SHA is empty', () => {
+  it('fails clearly when BASE_SHA is the empty string', () => {
+    process.env.BASE_SHA = '';
+    expect(runChangelogCheck()).toBe(1);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('fails clearly when HEAD_SHA is absent', () => {
+    delete process.env.HEAD_SHA;
+    expect(runChangelogCheck()).toBe(1);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('fails clearly when HEAD_SHA is the empty string', () => {
     process.env.HEAD_SHA = '';
-    const code = runChangelogCheck();
-    expect(code).toBe(1);
+    expect(runChangelogCheck()).toBe(1);
     expect(exec).not.toHaveBeenCalled();
   });
 });

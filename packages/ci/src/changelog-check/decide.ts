@@ -21,13 +21,20 @@ export interface ChangelogCheckResult {
 }
 
 // Mirrors the bash `grep -iqE '^skip-changelog:[[:space:]]*.+$'`: a line
-// beginning `skip-changelog:` (any case) with a non-empty value.
-const SKIP_TRAILER = /^skip-changelog:[ \t]*.+$/im;
+// beginning `skip-changelog:` (any case) with a non-empty value. A
+// fixed-prefix match plus an explicit length check, rather than a `.+`
+// quantifier — the quantifier forms (`.+`, `.`, `.+$`) are indistinguishable
+// under `RegExp.test()`, so they'd be unkillable equivalent mutants.
+const SKIP_PREFIX = /^skip-changelog:/i;
 
 export function decideChangelogCheck(input: ChangelogCheckInput): ChangelogCheckResult {
   const { commitLog, surfaceFiles, changedFiles } = input;
 
-  if (SKIP_TRAILER.test(commitLog)) {
+  const hasSkipTrailer = commitLog.split('\n').some((line) => {
+    const prefix = SKIP_PREFIX.exec(line);
+    return prefix !== null && line.length > prefix[0].length;
+  });
+  if (hasSkipTrailer) {
     return { exitCode: 0, lines: ["Found 'skip-changelog:' trailer; bypassing check."] };
   }
 

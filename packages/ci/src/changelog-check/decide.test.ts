@@ -1,78 +1,109 @@
 /**
  * Decision matrix for the changelog-check gate (#452), extracted from the
  * inline bash in `.github/workflows/changelog-check.yml`. Pins the exact
- * pass/fail decisions and `::error::` text the bash produced, so the
+ * pass/fail decisions and every emitted line the bash produced, so the
  * TypeScript reimplementation is provably equivalent. Pure — no I/O — so
- * every branch is driven by plain inputs.
+ * every branch is driven by plain inputs. Assertions are exact (`toEqual`
+ * on the full line list) so a dropped or altered message is caught.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { decideChangelogCheck } from './decide.js';
 
-const base = {
+const surfaceOnly = {
   commitLog: 'feat: something\n',
   surfaceFiles: ['packages/engine/src/plan.ts'],
-  changedFiles: [] as string[],
 };
 
-describe('decideChangelogCheck', () => {
-  it('bypasses on a skip-changelog: trailer (case-insensitive)', () => {
-    const r = decideChangelogCheck({ ...base, commitLog: 'feat: x\n\nSKIP-changelog: internal refactor\n' });
+describe('decideChangelogCheck: skip-changelog trailer', () => {
+  it('bypasses (exact line) on a trailer, even with surface changed and no changelog', () => {
+    const r = decideChangelogCheck({ commitLog: 'feat: x\n\nskip-changelog: internal\n', surfaceFiles: ['action.yml'], changedFiles: [] });
     expect(r.exitCode).toBe(0);
-    expect(r.lines.join('\n')).toContain("Found 'skip-changelog:' trailer");
+    expect(r.lines).toEqual(["Found 'skip-changelog:' trailer; bypassing check."]);
   });
 
-  it('bypass takes precedence even when surface changed and no changelog', () => {
-    const r = decideChangelogCheck({ commitLog: 'skip-changelog: x\n', surfaceFiles: ['action.yml'], changedFiles: [] });
+  it('is case-insensitive', () => {
+    expect(decideChangelogCheck({ ...surfaceOnly, commitLog: 'SKIP-CHANGELOG: x\n', changedFiles: [] }).exitCode).toBe(0);
+  });
+
+  it('matches a value with no space after the colon', () => {
+    expect(decideChangelogCheck({ ...surfaceOnly, commitLog: 'skip-changelog:x\n', changedFiles: [] }).exitCode).toBe(0);
+  });
+
+  it('does NOT bypass when the trailer is not at the start of a line', () => {
+    expect(decideChangelogCheck({ ...surfaceOnly, commitLog: 'xskip-changelog: y\n', changedFiles: [] }).exitCode).toBe(1);
+  });
+
+  it('does NOT bypass when the trailer has no value', () => {
+    expect(decideChangelogCheck({ ...surfaceOnly, commitLog: 'skip-changelog:\n', changedFiles: [] }).exitCode).toBe(1);
+  });
+
+  it('does NOT bypass an unrelated commit log', () => {
+    expect(decideChangelogCheck({ ...surfaceOnly, commitLog: 'chore: skip the changelog someday\n', changedFiles: [] }).exitCode).toBe(1);
+  });
+});
+
+describe('decideChangelogCheck: surface detection', () => {
+  it('passes with the exact line when no public-surface files changed', () => {
+    const r = decideChangelogCheck({ commitLog: 'docs: x\n', surfaceFiles: [], changedFiles: ['README.md'] });
     expect(r.exitCode).toBe(0);
+    expect(r.lines).toEqual(['No public-surface files changed; skipping.']);
   });
+});
 
-  it('passes when no public-surface files changed', () => {
-    const r = decideChangelogCheck({ ...base, surfaceFiles: [] });
-    expect(r.exitCode).toBe(0);
-    expect(r.lines.join('\n')).toContain('No public-surface files changed');
-  });
-
-  it('lists the changed surface files with the "  - " prefix', () => {
-    const r = decideChangelogCheck({ ...base, changedFiles: [] });
-    expect(r.lines.join('\n')).toContain('  - packages/engine/src/plan.ts');
-  });
-
-  it('fails naming both files when surface changed and neither updated', () => {
-    const r = decideChangelogCheck({ ...base, changedFiles: ['packages/engine/src/plan.ts'] });
-    expect(r.exitCode).toBe(1);
-    expect(r.lines.join('\n')).toContain(
-      '::error::This PR changes public-surface files but did not update: CHANGELOG.md MIGRATIONS.md',
-    );
-  });
-
-  it('fails naming only MIGRATIONS.md when CHANGELOG.md is present', () => {
+describe('decideChangelogCheck: changelog + migration requirement', () => {
+  it('fails with the exact lines when neither file is updated', () => {
     const r = decideChangelogCheck({
-      ...base,
-      changedFiles: ['packages/engine/src/plan.ts', 'CHANGELOG.md'],
+      commitLog: 'feat: x\n',
+      surfaceFiles: ['action.yml', 'packages/engine/src/plan.ts'],
+      changedFiles: ['action.yml', 'packages/engine/src/plan.ts'],
     });
     expect(r.exitCode).toBe(1);
-    expect(r.lines.join('\n')).toContain('did not update: MIGRATIONS.md');
-    expect(r.lines.join('\n')).not.toContain('CHANGELOG.md MIGRATIONS.md');
+    expect(r.lines).toEqual([
+      'Public-surface files changed:',
+      '  - action.yml',
+      '  - packages/engine/src/plan.ts',
+      '',
+      '::error::This PR changes public-surface files but did not update: CHANGELOG.md MIGRATIONS.md',
+      "See AGENTS.md > 'Changelog and migration policy'.",
+      "If the change has no consumer impact, add a commit with a 'skip-changelog:' trailer.",
+    ]);
   });
 
-  it('passes when surface changed and both files updated', () => {
+  it('names only MIGRATIONS.md when CHANGELOG.md is present', () => {
+    const r = decideChangelogCheck({ ...surfaceOnly, changedFiles: ['packages/engine/src/plan.ts', 'CHANGELOG.md'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.lines).toContain('::error::This PR changes public-surface files but did not update: MIGRATIONS.md');
+  });
+
+  it('names only CHANGELOG.md when MIGRATIONS.md is present', () => {
+    const r = decideChangelogCheck({ ...surfaceOnly, changedFiles: ['packages/engine/src/plan.ts', 'MIGRATIONS.md'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.lines).toContain('::error::This PR changes public-surface files but did not update: CHANGELOG.md');
+  });
+
+  it('passes with the exact final line when both files are updated', () => {
     const r = decideChangelogCheck({
-      ...base,
+      ...surfaceOnly,
       changedFiles: ['packages/engine/src/plan.ts', 'CHANGELOG.md', 'MIGRATIONS.md'],
     });
     expect(r.exitCode).toBe(0);
-    expect(r.lines.join('\n')).toContain('both updated. OK');
+    expect(r.lines).toEqual([
+      'Public-surface files changed:',
+      '  - packages/engine/src/plan.ts',
+      '',
+      'CHANGELOG.md and MIGRATIONS.md both updated. OK.',
+    ]);
   });
 
-  it('matches CHANGELOG.md only as a whole line, not a suffix', () => {
-    // grep -xF semantics: `docs/CHANGELOG.md` must not satisfy the check.
+  it('matches CHANGELOG.md / MIGRATIONS.md only as whole lines, not suffixes', () => {
+    // A `docs/CHANGELOG.md` / `sub/MIGRATIONS.md` change must not satisfy the check.
     const r = decideChangelogCheck({
-      ...base,
+      ...surfaceOnly,
       changedFiles: ['packages/engine/src/plan.ts', 'docs/CHANGELOG.md', 'sub/MIGRATIONS.md'],
     });
     expect(r.exitCode).toBe(1);
-    expect(r.lines.join('\n')).toContain('CHANGELOG.md MIGRATIONS.md');
+    expect(r.lines).toContain('::error::This PR changes public-surface files but did not update: CHANGELOG.md MIGRATIONS.md');
   });
 });

@@ -115,7 +115,12 @@ Three rules for a repo-internal CI gate:
    root workspace package declares `@putitoutthere/ci` as a
    `workspace:*` devDependency, which links `piot-ci` into the root
    `node_modules/.bin` (a package's own bin is otherwise not resolvable
-   via `pnpm --filter … exec`). Because `packages/ci` is a private
+   via `pnpm --filter … exec`). The link only forms if the bin's target
+   (`packages/ci/dist/cli-bin.js`) exists at install time, so
+   `packages/ci` carries a `prepare` script that builds `dist/` during
+   `pnpm install` — do not remove it, or `pnpm exec piot-ci` stops
+   resolving in a fresh CI checkout (a workflow's own `build` step runs
+   too late, after bin-linking). Because `packages/ci` is a private
    workspace package, the bin never ships to consumers.
 
 The shipped engine (`packages/engine`, the `putitoutthere` bin) is the
