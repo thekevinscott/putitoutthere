@@ -1,57 +1,51 @@
 /**
  * `forceMoveTag` — the shared local-write + ref-scoped force-push both
- * floating-tag advancers use (#446). Real git + a real bare remote.
+ * floating-tag advancers use (#446).
+ *
+ * The git collaborators (`forceTag`, `pushTagRefForce`) are mocked so this
+ * isolates the delegation contract — the local move then the ref-scoped
+ * force-push, in that order. The real git + bare-remote round trip (the tag
+ * actually overwriting a diverged remote) is covered by
+ * test/integration/tag-plumbing.integration.test.ts and the e2e tier.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { forceMoveTag } from './force-move-tag.js';
+import { forceTag, pushTagRefForce } from './git.js';
 
-let repo: string;
-let bare: string;
+vi.mock('./git.js');
 
-function git(args: string[], cwd = repo): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
+const forceTagMock = vi.mocked(forceTag);
+const pushForceMock = vi.mocked(pushTagRefForce);
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'piot-fmt-'));
-  bare = mkdtempSync(join(tmpdir(), 'piot-fmt-remote-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
-  git(['init', '--bare', '-q'], bare);
-  git(['remote', 'add', 'origin', bare]);
+  vi.resetAllMocks();
 });
 
 afterEach(() => {
-  for (const d of [repo, bare]) {
-    rmSync(d, { recursive: true, force: true });
-  }
+  vi.restoreAllMocks();
 });
 
 describe('forceMoveTag', () => {
-  it('writes the tag locally and force-pushes it ref-scoped to the remote', () => {
-    git(['commit', '-q', '--allow-empty', '-m', 'c1']);
-    const head = git(['rev-parse', 'HEAD']);
-    forceMoveTag('v0', head, { cwd: repo });
-    expect(git(['rev-parse', 'v0'])).toBe(head);
-    expect(git(['rev-parse', 'v0'], bare)).toBe(head);
+  it('writes the tag locally then force-pushes it ref-scoped to the remote', () => {
+    forceMoveTag('v0', 'headsha', { cwd: 'repo' });
+
+    expect(forceTagMock).toHaveBeenCalledWith('v0', 'headsha', { cwd: 'repo' });
+    expect(pushForceMock).toHaveBeenCalledWith('v0', { cwd: 'repo' });
+    // Local move must precede the publish so the remote never leads local.
+    expect(forceTagMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      pushForceMock.mock.invocationCallOrder[0]!,
+    );
   });
 
-  it('overwrites a diverged remote tag (force path)', () => {
-    git(['commit', '-q', '--allow-empty', '-m', 'c1']);
-    const first = git(['rev-parse', 'HEAD']);
-    forceMoveTag('v0', first, { cwd: repo });
-    git(['commit', '-q', '--allow-empty', '-m', 'c2']);
-    const second = git(['rev-parse', 'HEAD']);
-    forceMoveTag('v0', second, { cwd: repo });
-    expect(git(['rev-parse', 'v0'], bare)).toBe(second);
+  it('re-targets the tag on a subsequent move (the force path)', () => {
+    forceMoveTag('v0', 'first', { cwd: 'repo' });
+    forceMoveTag('v0', 'second', { cwd: 'repo' });
+
+    // The second move points both the local write and the forced push at the
+    // new commit — the diverged-remote overwrite the force flag exists for.
+    expect(forceTagMock).toHaveBeenLastCalledWith('v0', 'second', { cwd: 'repo' });
+    expect(pushForceMock).toHaveBeenCalledTimes(2);
   });
 });

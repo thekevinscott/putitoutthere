@@ -1,15 +1,21 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+/**
+ * Unit tests for the npm bundled-cli launcher author (#299).
+ *
+ * `node:fs` and the config loader (`loadConfig`, an fs collaborator) are
+ * mocked so each case isolates the launcher-generation / override / bin-field
+ * logic: `readFileSync` is driven with the package.json bytes and
+ * `writeFileSync` is asserted against, with no real temp dir. `normalizeBuild`
+ * and the pure generators run for real. The real on-disk round trip is
+ * covered by the integration + e2e tiers.
+ *
+ * Path assertions use basename `endsWith` only — never a separator-bearing
+ * literal — so they hold on Windows, macOS, and Linux alike.
+ */
 
+import { readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { loadConfig } from './config.js';
 import {
   detectIndent,
   generateLauncherSource,
@@ -18,42 +24,65 @@ import {
   writeLauncherFromConfig,
 } from './write-launcher.js';
 
-let repo: string;
+vi.mock('node:fs');
+vi.mock('./config.js');
+
+const readFileMock = vi.mocked(readFileSync);
+const writeMock = vi.mocked(writeFileSync);
+const loadConfigMock = vi.mocked(loadConfig);
+
+/** The data (2nd arg) of the single writeFileSync whose path ends with `suffix`. */
+function writtenTo(suffix: string): string | undefined {
+  const call = writeMock.mock.calls.find(([p]) => String(p).endsWith(suffix));
+  // The engine always writes string contents on these paths.
+  return call ? (call[1] as string) : undefined;
+}
+
+/** Was a writeFileSync issued against a path ending with `suffix`? */
+function wroteTo(suffix: string): boolean {
+  return writeMock.mock.calls.some(([p]) => String(p).endsWith(suffix));
+}
+
+/** Make the launcher's write-exclusive (`flag: 'wx'`) call fail with EEXIST,
+ *  modelling a consumer-authored launcher already on disk. */
+function launcherAlreadyExists(): void {
+  writeMock.mockImplementation((_path, _data, opts) => {
+    if (typeof opts === 'object' && opts !== null && opts.flag === 'wx') {
+      throw Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' });
+    }
+  });
+}
+
+const pkgJson = (extra: Record<string, unknown> = {}): string =>
+  JSON.stringify({ name: 'my-cli', version: '0.0.0', ...extra }, null, 2);
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'write-launcher-test-'));
+  vi.resetAllMocks();
 });
 
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
-function writeMainPkg(name = 'my-cli'): string {
-  const dir = join(repo, 'pkg');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, 'package.json'),
-    JSON.stringify({ name, version: '0.0.0' }, null, 2),
-  );
-  return dir;
-}
-
 describe('writeLauncher (#299)', () => {
+  const baseOpts = {
+    npmName: 'my-cli',
+    bin: 'my-cli',
+    platformNameTemplate: '{name}-{triple}',
+  };
+
   it('writes bin/<bin>.js and updates package.json#bin when both are absent', () => {
-    const pkgDir = writeMainPkg('my-cli');
+    readFileMock.mockReturnValue(pkgJson());
     const written = writeLauncher({
-      pkgDir,
-      npmName: 'my-cli',
-      bin: 'my-cli',
-      platformNameTemplate: '{name}-{triple}',
+      ...baseOpts,
+      pkgDir: 'pkg',
       triples: ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin'],
     });
 
-    const launcher = join(pkgDir, 'bin', 'my-cli.js');
-    expect(written).toContain(launcher);
-    expect(written).toContain(join(pkgDir, 'package.json'));
+    expect(written.some((p) => p.endsWith('my-cli.js'))).toBe(true);
+    expect(written.some((p) => p.endsWith('package.json'))).toBe(true);
 
-    const src = readFileSync(launcher, 'utf8');
+    const src = writtenTo('my-cli.js')!;
     // Standard launcher shape: hashbang, triples table, spawnSync, exit.
     expect(src).toMatch(/^#!\/usr\/bin\/env node\n/);
     expect(src).toContain("'linux-x64': 'x86_64-unknown-linux-gnu'");
@@ -63,136 +92,73 @@ describe('writeLauncher (#299)', () => {
     expect(src).toContain("'.exe'");
     expect(src).toMatch(/spawnSync/);
 
-    const pkgJson = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
-      bin?: Record<string, string>;
-    };
-    expect(pkgJson.bin).toEqual({ 'my-cli': 'bin/my-cli.js' });
+    const parsed = JSON.parse(writtenTo('package.json')!) as { bin?: Record<string, string> };
+    expect(parsed.bin).toEqual({ 'my-cli': 'bin/my-cli.js' });
   });
 
   it('does not overwrite an existing bin/<bin>.js (consumer override wins)', () => {
-    const pkgDir = writeMainPkg('my-cli');
-    mkdirSync(join(pkgDir, 'bin'), { recursive: true });
-    const existing = '// custom launcher\nconsole.log("hi");\n';
-    writeFileSync(join(pkgDir, 'bin', 'my-cli.js'), existing, 'utf8');
-
+    launcherAlreadyExists();
+    readFileMock.mockReturnValue(pkgJson());
     const written = writeLauncher({
-      pkgDir,
-      npmName: 'my-cli',
-      bin: 'my-cli',
-      platformNameTemplate: '{name}-{triple}',
+      ...baseOpts,
+      pkgDir: 'pkg',
       triples: ['x86_64-unknown-linux-gnu'],
     });
-
-    expect(written).not.toContain(join(pkgDir, 'bin', 'my-cli.js'));
-    expect(readFileSync(join(pkgDir, 'bin', 'my-cli.js'), 'utf8')).toBe(existing);
+    // The EEXIST launcher is not reported as written.
+    expect(written.some((p) => p.endsWith('my-cli.js'))).toBe(false);
   });
 
   it('does not overwrite an existing package.json#bin (consumer override wins)', () => {
-    const pkgDir = writeMainPkg('my-cli');
-    const pkgJson = join(pkgDir, 'package.json');
-    writeFileSync(
-      pkgJson,
-      JSON.stringify(
-        { name: 'my-cli', version: '0.0.0', bin: { 'my-cli': 'dist/cli.js' } },
-        null,
-        2,
-      ),
-    );
-
-    writeLauncher({
-      pkgDir,
-      npmName: 'my-cli',
-      bin: 'my-cli',
-      platformNameTemplate: '{name}-{triple}',
-      triples: ['x86_64-unknown-linux-gnu'],
-    });
-
-    const parsed = JSON.parse(readFileSync(pkgJson, 'utf8')) as {
-      bin: Record<string, string>;
-    };
-    expect(parsed.bin).toEqual({ 'my-cli': 'dist/cli.js' });
+    readFileMock.mockReturnValue(pkgJson({ bin: { 'my-cli': 'dist/cli.js' } }));
+    writeLauncher({ ...baseOpts, pkgDir: 'pkg', triples: ['x86_64-unknown-linux-gnu'] });
+    // A present bin field is left untouched — no package.json write at all.
+    expect(wroteTo('package.json')).toBe(false);
   });
 
   it('writes package.json#bin even if bin/<bin>.js exists (and vice versa)', () => {
-    const pkgDir = writeMainPkg('my-cli');
-    // Existing launcher but no bin field. The function should still
-    // populate the bin field without touching the launcher.
-    mkdirSync(join(pkgDir, 'bin'), { recursive: true });
-    const existing = '// preexisting\n';
-    writeFileSync(join(pkgDir, 'bin', 'my-cli.js'), existing, 'utf8');
-
-    writeLauncher({
-      pkgDir,
-      npmName: 'my-cli',
-      bin: 'my-cli',
-      platformNameTemplate: '{name}-{triple}',
+    launcherAlreadyExists();
+    readFileMock.mockReturnValue(pkgJson());
+    const written = writeLauncher({
+      ...baseOpts,
+      pkgDir: 'pkg',
       triples: ['x86_64-unknown-linux-gnu'],
     });
-
-    expect(readFileSync(join(pkgDir, 'bin', 'my-cli.js'), 'utf8')).toBe(existing);
-    const parsed = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
-      bin?: Record<string, string>;
-    };
+    // Launcher untouched (EEXIST) but the bin field is still populated.
+    expect(written.some((p) => p.endsWith('my-cli.js'))).toBe(false);
+    const parsed = JSON.parse(writtenTo('package.json')!) as { bin?: Record<string, string> };
     expect(parsed.bin).toEqual({ 'my-cli': 'bin/my-cli.js' });
   });
 
   it('preserves the trailing newline in package.json when present', () => {
-    const pkgDir = writeMainPkg('my-cli');
-    // Rewrite package.json with a trailing newline so the
-    // newline-preservation branch is exercised.
-    const pkgJsonPath = join(pkgDir, 'package.json');
-    writeFileSync(
-      pkgJsonPath,
-      JSON.stringify({ name: 'my-cli', version: '0.0.0' }, null, 2) + '\n',
-    );
-    writeLauncher({
-      pkgDir,
-      npmName: 'my-cli',
-      bin: 'my-cli',
-      platformNameTemplate: '{name}-{triple}',
-      triples: ['x86_64-unknown-linux-gnu'],
-    });
-    expect(readFileSync(pkgJsonPath, 'utf8').endsWith('\n')).toBe(true);
+    readFileMock.mockReturnValue(pkgJson() + '\n');
+    writeLauncher({ ...baseOpts, pkgDir: 'pkg', triples: ['x86_64-unknown-linux-gnu'] });
+    expect(writtenTo('package.json')!.endsWith('\n')).toBe(true);
   });
 
   it('errors on unsupported platform at runtime (generated launcher prints bin name)', () => {
-    const pkgDir = writeMainPkg('my-cli');
-    writeLauncher({
-      pkgDir,
-      npmName: 'my-cli',
-      bin: 'my-cli',
-      platformNameTemplate: '{name}-{triple}',
-      triples: ['x86_64-unknown-linux-gnu'],
-    });
-    const src = readFileSync(join(pkgDir, 'bin', 'my-cli.js'), 'utf8');
-    // The launcher's unsupported-platform branch identifies the CLI by
-    // name so a user sees "my-cli: unsupported platform ..." rather than
-    // an opaque exit.
-    expect(src).toContain('my-cli: unsupported platform');
+    readFileMock.mockReturnValue(pkgJson());
+    writeLauncher({ ...baseOpts, pkgDir: 'pkg', triples: ['x86_64-unknown-linux-gnu'] });
+    // The launcher's unsupported-platform branch identifies the CLI by name.
+    expect(writtenTo('my-cli.js')).toContain('my-cli: unsupported platform');
   });
 
   it('resolves {name} / {scope} / {base} placeholders in the template', () => {
-    const pkgDir = writeMainPkg('@myorg/cli');
+    readFileMock.mockReturnValue(JSON.stringify({ name: '@myorg/cli', version: '0.0.0' }, null, 2));
     writeLauncher({
-      pkgDir,
+      pkgDir: 'pkg',
       npmName: '@myorg/cli',
       bin: 'my-cli',
       platformNameTemplate: '@myorg/cli-{triple}',
       triples: ['x86_64-unknown-linux-gnu'],
     });
-    const src = readFileSync(join(pkgDir, 'bin', 'my-cli.js'), 'utf8');
     // The template constants get inlined at generation time; `{triple}`
     // becomes the runtime template substitution.
-    expect(src).toContain('`@myorg/cli-${triple}`');
+    expect(writtenTo('my-cli.js')).toContain('`@myorg/cli-${triple}`');
   });
 });
 
 describe('internals (#299)', () => {
   it('nodePlatformKey throws on an unmapped triple', () => {
-    // Plan-time guard normally rejects unmapped triples before this
-    // function runs, so reaching the throw means TRIPLE_MAP /
-    // RUST_TARGET_KEYS have drifted. The vocabulary matches
-    // `targetToOsCpu` so the drift is obvious in the error message.
     expect(() => nodePlatformKey('totally-bogus-triple')).toThrow(
       /not mapped to Node platform\+arch/,
     );
@@ -214,7 +180,7 @@ describe('internals (#299)', () => {
 
   it('generateLauncherSource resolves {scope} / {base} when called directly', () => {
     const src = generateLauncherSource({
-      pkgDir: '/tmp/unused',
+      pkgDir: 'unused',
       npmName: '@myorg/cli',
       bin: 'my-cli',
       platformNameTemplate: '@myorg/{base}-{triple}',
@@ -225,225 +191,145 @@ describe('internals (#299)', () => {
 });
 
 describe('writeLauncherFromConfig (#299)', () => {
-  function writeRepo(toml: string, mainPkgName: string, mainPkgPath = 'packages/ts'): void {
-    mkdirSync(join(repo, mainPkgPath), { recursive: true });
-    writeFileSync(
-      join(repo, mainPkgPath, 'package.json'),
-      JSON.stringify({ name: mainPkgName, version: '0.0.0' }, null, 2),
-    );
-    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
+  interface CfgPkg {
+    name: string;
+    kind: string;
+    path: string;
+    build?: unknown;
+    targets?: unknown;
+    bundle_cli?: unknown;
+    npm?: string;
+  }
+  // Only the fields writeLauncherFromConfig reads are supplied; loadConfig is
+  // mocked so no real putitoutthere.toml is parsed (config parsing is covered
+  // by config.test.ts + the integration tier).
+  function withConfig(pkgs: CfgPkg[]): void {
+    loadConfigMock.mockReturnValue({ packages: pkgs } as unknown as ReturnType<typeof loadConfig>);
+    readFileMock.mockReturnValue(JSON.stringify({ name: 'my-cli', version: '0.0.0' }, null, 2));
   }
 
   it('writes a launcher for a bundled-cli package using the configured triples + template', () => {
-    writeRepo(
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "my-cli"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-build = "bundled-cli"
-targets = [
-  "x86_64-unknown-linux-gnu",
-  "aarch64-apple-darwin",
-]
-[package.bundle_cli]
-bin = "my-cli"
-crate_path = "crates/my-cli"
-`,
-      'my-cli',
-    );
+    withConfig([
+      {
+        name: 'my-cli',
+        kind: 'npm',
+        path: 'packages/ts',
+        build: 'bundled-cli',
+        targets: ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin'],
+        bundle_cli: { bin: 'my-cli', crate_path: 'crates/my-cli' },
+      },
+    ]);
 
-    const written = writeLauncherFromConfig({
-      cwd: repo,
-      packagePath: 'packages/ts',
-    });
+    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     expect(written.length).toBeGreaterThan(0);
-    const launcher = readFileSync(
-      join(repo, 'packages/ts/bin/my-cli.js'),
-      'utf8',
-    );
+    const launcher = writtenTo('my-cli.js')!;
     expect(launcher).toContain("'linux-x64': 'x86_64-unknown-linux-gnu'");
     expect(launcher).toContain("'darwin-arm64': 'aarch64-apple-darwin'");
     expect(launcher).toContain('`my-cli-${triple}`');
   });
 
   it('uses the bundled-cli entry from a multi-mode build array (ignores napi entries)', () => {
-    writeRepo(
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "my-cli"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-build = [
-  { mode = "napi",        name = "@my-cli/lib-{triple}" },
-  { mode = "bundled-cli", name = "@my-cli/cli-{triple}" },
-]
-targets = ["x86_64-unknown-linux-gnu"]
-[package.bundle_cli]
-bin = "my-cli"
-crate_path = "."
-`,
-      'my-cli',
-    );
+    withConfig([
+      {
+        name: 'my-cli',
+        kind: 'npm',
+        path: 'packages/ts',
+        build: [
+          { mode: 'napi', name: '@my-cli/lib-{triple}' },
+          { mode: 'bundled-cli', name: '@my-cli/cli-{triple}' },
+        ],
+        targets: ['x86_64-unknown-linux-gnu'],
+        bundle_cli: { bin: 'my-cli', crate_path: '.' },
+      },
+    ]);
 
-    writeLauncherFromConfig({ cwd: repo, packagePath: 'packages/ts' });
-    const launcher = readFileSync(
-      join(repo, 'packages/ts/bin/my-cli.js'),
-      'utf8',
-    );
-    // The launcher must use the bundled-cli family's template, not the
-    // napi family's. The napi family carries .node addons, not binaries.
+    writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
+    const launcher = writtenTo('my-cli.js')!;
+    // The launcher must use the bundled-cli family's template, not the napi
+    // family's (napi carries .node addons, not binaries).
     expect(launcher).toContain('`@my-cli/cli-${triple}`');
     expect(launcher).not.toContain('@my-cli/lib-');
   });
 
   it('accepts an absolute packagePath', () => {
-    writeRepo(
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "my-cli"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-build = "bundled-cli"
-targets = ["x86_64-unknown-linux-gnu"]
-[package.bundle_cli]
-bin = "my-cli"
-crate_path = "."
-`,
-      'my-cli',
-    );
-    const written = writeLauncherFromConfig({
-      cwd: repo,
-      packagePath: join(repo, 'packages/ts'),
-    });
+    // `process.cwd()` is a native absolute path on every OS, so this
+    // exercises the isAbsolute branch without a hardcoded (OS-specific)
+    // path literal. pkg.path equals it, so resolve() matches on any OS.
+    const abs = process.cwd();
+    withConfig([
+      {
+        name: 'my-cli',
+        kind: 'npm',
+        path: abs,
+        build: 'bundled-cli',
+        targets: ['x86_64-unknown-linux-gnu'],
+        bundle_cli: { bin: 'my-cli', crate_path: '.' },
+      },
+    ]);
+    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: abs });
     expect(written.length).toBeGreaterThan(0);
   });
 
   it('is a no-op for non-npm packages', () => {
-    writeRepo(
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "demo"
-kind = "crates"
-path = "."
-globs = ["**"]
-`,
-      'demo',
-      '.',
-    );
-    // Crates packages have no `path/bin/...` concept; the function
-    // should return [] without touching the filesystem.
-    const written = writeLauncherFromConfig({ cwd: repo, packagePath: '.' });
+    withConfig([{ name: 'demo', kind: 'crates', path: '.' }]);
+    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: '.' });
     expect(written).toEqual([]);
-    expect(existsSync(join(repo, 'bin'))).toBe(false);
+    // Nothing is written to disk.
+    expect(writeMock).not.toHaveBeenCalled();
   });
 
   it('is a no-op when the package is npm but not bundled-cli', () => {
-    writeRepo(
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "demo"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-`,
-      'demo',
-    );
-    const written = writeLauncherFromConfig({ cwd: repo, packagePath: 'packages/ts' });
+    withConfig([{ name: 'demo', kind: 'npm', path: 'packages/ts' }]);
+    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     expect(written).toEqual([]);
-    expect(existsSync(join(repo, 'packages/ts/bin'))).toBe(false);
+    expect(writeMock).not.toHaveBeenCalled();
   });
 
   it('is a no-op for a bundled-cli npm package that omits [package.bundle_cli] (legacy bring-your-own-launcher path)', () => {
     // #298 kept the legacy bundled-cli path opt-in: a package may omit
-    // [package.bundle_cli] and ship its own scripts/build.cjs plus a
-    // hand-authored bin/<bin>.js (package.json#bin). The cross-compile step
-    // already skips such packages — it gates on `matrix.bundle_cli` — so
-    // launcher generation must do the same. Without the table the engine has
-    // no binary name to author a launcher from, so it must no-op rather than
-    // dereference the absent block. This is the exact shape of the
-    // `polyglot-everything` fixture (and any freshly scaffolded consumer that
-    // hasn't adopted the declarative block); before this guard #299's
-    // writeLauncherFromConfig died with "Cannot read properties of undefined
-    // (reading 'bin')" on the bundled-cli main row.
-    writeRepo(
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "my-cli"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-build = [
-  "bundled-cli",
-  { mode = "napi", name = "{name}-napi-{triple}" },
-]
-targets = ["x86_64-unknown-linux-gnu"]
-`,
-      'my-cli',
-    );
-
-    const written = writeLauncherFromConfig({ cwd: repo, packagePath: 'packages/ts' });
+    // [package.bundle_cli] and ship its own bin/<bin>.js. Without the table
+    // the engine has no binary name to author a launcher from, so it must
+    // no-op rather than dereference the absent block.
+    withConfig([
+      {
+        name: 'my-cli',
+        kind: 'npm',
+        path: 'packages/ts',
+        build: ['bundled-cli', { mode: 'napi', name: '{name}-napi-{triple}' }],
+        targets: ['x86_64-unknown-linux-gnu'],
+      },
+    ]);
+    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     expect(written).toEqual([]);
-    expect(existsSync(join(repo, 'packages/ts/bin'))).toBe(false);
+    expect(writeMock).not.toHaveBeenCalled();
   });
 
   it('handles a single-line (un-indented) package.json without losing the bin field', () => {
-    // `detectIndent`'s fallback returns 2 when no indented quote
-    // matches. Exercising it here also pins the runtime contract:
-    // writing the launcher into a minified package.json still
-    // produces a parseable file with the new `bin` entry.
-    mkdirSync(join(repo, 'pkg'), { recursive: true });
-    writeFileSync(
-      join(repo, 'pkg', 'package.json'),
-      JSON.stringify({ name: 'demo-cli', version: '0.0.0' }),
-    );
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "demo-cli"
-kind = "npm"
-path = "pkg"
-globs = ["pkg/**"]
-build = "bundled-cli"
-targets = ["x86_64-unknown-linux-gnu"]
-[package.bundle_cli]
-bin = "demo-cli"
-crate_path = "."
-`,
-      'utf8',
-    );
-    writeLauncherFromConfig({ cwd: repo, packagePath: 'pkg' });
-    const parsed = JSON.parse(readFileSync(join(repo, 'pkg/package.json'), 'utf8')) as {
-      bin?: Record<string, string>;
-    };
+    // detectIndent's fallback returns 2 when no indented quote matches;
+    // a minified package.json still produces a parseable file with `bin`.
+    loadConfigMock.mockReturnValue({
+      packages: [
+        {
+          name: 'demo-cli',
+          kind: 'npm',
+          path: 'pkg',
+          build: 'bundled-cli',
+          targets: ['x86_64-unknown-linux-gnu'],
+          bundle_cli: { bin: 'demo-cli', crate_path: '.' },
+        },
+      ],
+    } as unknown as ReturnType<typeof loadConfig>);
+    readFileMock.mockReturnValue(JSON.stringify({ name: 'demo-cli', version: '0.0.0' }));
+
+    writeLauncherFromConfig({ cwd: 'repo', packagePath: 'pkg' });
+    const parsed = JSON.parse(writtenTo('package.json')!) as { bin?: Record<string, string> };
     expect(parsed.bin).toEqual({ 'demo-cli': 'bin/demo-cli.js' });
   });
 
   it('errors when no package in the config has the given path', () => {
-    writeRepo(
-      `[putitoutthere]
-version = 1
-[[package]]
-name = "demo"
-kind = "npm"
-path = "packages/ts"
-globs = ["packages/ts/**"]
-`,
-      'demo',
-    );
+    withConfig([{ name: 'demo', kind: 'npm', path: 'packages/ts' }]);
     expect(() =>
-      writeLauncherFromConfig({ cwd: repo, packagePath: 'packages/other' }),
+      writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/other' }),
     ).toThrow(/no \[\[package\]\] entry/);
   });
 });

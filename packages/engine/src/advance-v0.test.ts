@@ -1,34 +1,28 @@
 /**
- * `advanceV0` — force-move the floating `v0` tag to HEAD (#446). Real git +
- * a real bare remote; stdout captured for the log-line assertion.
+ * `advanceV0` — force-move the floating `v0` tag to HEAD (#446).
+ *
+ * The git collaborators (`headCommit`, `forceMoveTag`) are mocked so this
+ * isolates the derive-target / log / delegate sequence; stdout is captured
+ * for the log-line assertion. The real git + bare-remote round trip (the tag
+ * actually landing on local + remote) is covered by
+ * test/integration/tag-plumbing.integration.test.ts and the e2e tier.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { advanceV0 } from './advance-v0.js';
+import { forceMoveTag } from './force-move-tag.js';
+import { headCommit } from './git.js';
 
-let repo: string;
-let bare: string;
+vi.mock('./git.js');
+vi.mock('./force-move-tag.js');
+
+const headMock = vi.mocked(headCommit);
+const forceMoveMock = vi.mocked(forceMoveTag);
 const out: string[] = [];
 
-function git(args: string[], cwd = repo): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'piot-av0-'));
-  bare = mkdtempSync(join(tmpdir(), 'piot-av0-remote-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
-  git(['init', '--bare', '-q'], bare);
-  git(['remote', 'add', 'origin', bare]);
+  vi.resetAllMocks();
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
@@ -38,24 +32,16 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const d of [repo, bare]) {
-    rmSync(d, { recursive: true, force: true });
-  }
 });
 
 describe('advanceV0', () => {
-  it('force-moves v0 to HEAD on the local repo and the remote, logging the move', () => {
-    git(['commit', '-q', '--allow-empty', '-m', 'c1']);
-    git(['tag', 'v0', 'HEAD']); // stale v0 at c1
-    git(['push', '-q', 'origin', 'refs/tags/v0']);
-    git(['commit', '-q', '--allow-empty', '-m', 'c2']);
-    const head = git(['rev-parse', 'HEAD']);
+  it('force-moves v0 to HEAD, logging the move', () => {
+    headMock.mockReturnValue('headsha');
 
-    const code = advanceV0({ cwd: repo });
+    const code = advanceV0({ cwd: 'repo' });
 
     expect(code).toBe(0);
-    expect(git(['rev-parse', 'v0'])).toBe(head);
-    expect(git(['rev-parse', 'v0'], bare)).toBe(head);
-    expect(out.join('')).toBe(`Moving v0 -> ${head}\n`);
+    expect(out.join('')).toBe('Moving v0 -> headsha\n');
+    expect(forceMoveMock).toHaveBeenCalledWith('v0', 'headsha', { cwd: 'repo' });
   });
 });
