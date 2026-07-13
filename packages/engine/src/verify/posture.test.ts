@@ -1,130 +1,108 @@
 /**
- * `verify` unit coverage — drives the CLI end to end (`run(['verify', …])`)
- * against a real temp repo with only `global.fetch` mocked (crates
- * `latestVersion` + `trustPosture`), the tier patch-coverage reads.
- * Exercises every posture (`oidc` / `token` / `unpublished` /
- * `unreachable`), the renderer, the `--json` and human arms, and `--check`.
- * Cross-registry behaviour is pinned at the integration + e2e tiers.
+ * `computeVerify` unit coverage — the colocated unit under test. Isolated:
+ * the config loader (`loadConfig`), the handler registry (`handlerFor`) and
+ * the logger (`createLogger`) are mocked, so each case drives one posture
+ * branch off the mocked handler's `latestVersion` / `trustPosture` returns:
+ * `oidc` / `token` / `unpublished` (no release, trust never read) /
+ * `unreachable` (a read throws, on either the version or the trust probe).
+ *
+ * The CLI wiring this once drove end-to-end — `--json` / `--check` /
+ * rendering, the live crates reads, cross-registry behaviour — is exercised
+ * at the integration + e2e tiers (`test/integration/verify.integration.test.ts`)
+ * and the renderer at `posture-format.test.ts`, so this stays a focused unit
+ * over the classification the engine owns.
  *
  * Issue #414, #403 slice 5.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { run } from '../cli.js';
+import { computeVerify } from './posture.js';
+import { type Config, loadConfig } from '../config.js';
+import { handlerFor } from '../handlers/index.js';
 
-let repo: string;
-const stdoutChunks: string[] = [];
+vi.mock('../config.js');
+vi.mock('../handlers/index.js');
+vi.mock('../log.js');
 
-function git(args: string[]): void {
-  execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
+const loadConfigMock = vi.mocked(loadConfig);
+const handlerForMock = vi.mocked(handlerFor);
+
+type Pkg = Config['packages'][number];
+
+/**
+ * A config whose five packages each name the posture they should classify
+ * to, so the mocked handler can key its per-read behaviour off the name.
+ */
+function configWith(names: string[]): Config {
+  const packages = names.map((name) => ({
+    name,
+    kind: 'crates',
+    crate: name,
+    path: `packages/${name}`,
+    globs: [`packages/${name}/**`],
+  }));
+  return { putitoutthere: { version: 1 }, packages } as unknown as Config;
 }
 
 /**
- * Mock crates.io. `/api/v1/crates/{name}` is latestVersion;
- * `/api/v1/crates/{name}/{version}` is trustPosture (trustpub_data).
+ * The per-kind handler `computeVerify` dispatches to, driven by package
+ * name: `pkg-unpub` was never published (null), `pkg-latestflaky` throws on
+ * the version read, `pkg-trustflaky` publishes but throws on the trust read,
+ * `pkg-oidc` is a trusted publisher, everything else is token-authed.
  */
-function mockCrates(): void {
-  vi.spyOn(global, 'fetch').mockImplementation((input) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const two = /\/api\/v1\/crates\/([^/?]+)\/([^/?]+)/.exec(url);
-    if (two) {
-      const name = two[1];
-      if (name === 'trustflakycrate') {return Promise.resolve(new Response('{}', { status: 503 }));}
-      const trustpub = name === 'oidccrate' ? { provider: 'github' } : null;
-      return Promise.resolve(
-        new Response(JSON.stringify({ version: { trustpub_data: trustpub } }), { status: 200 }),
-      );
-    }
-    const one = /\/api\/v1\/crates\/([^/?]+)/.exec(url);
-    const name = one?.[1];
-    if (name === 'unpubcrate') {return Promise.resolve(new Response('{}', { status: 404 }));}
-    if (name === 'latestflakycrate') {return Promise.resolve(new Response('{}', { status: 503 }));}
-    const newest = name === 'trustflakycrate' ? '2.0.0' : '1.0.0';
-    return Promise.resolve(
-      new Response(JSON.stringify({ crate: { newest_version: newest } }), { status: 200 }),
-    );
-  });
+function stubHandler(): void {
+  handlerForMock.mockReturnValue({
+    latestVersion: vi.fn((pkg: Pkg) => {
+      switch (pkg.name) {
+        case 'pkg-unpub': return Promise.resolve(null);
+        case 'pkg-latestflaky': return Promise.reject(new Error('503'));
+        case 'pkg-trustflaky': return Promise.resolve('2.0.0');
+        default: return Promise.resolve('1.0.0');
+      }
+    }),
+    trustPosture: vi.fn((pkg: Pkg) => {
+      switch (pkg.name) {
+        case 'pkg-oidc': return Promise.resolve('oidc');
+        case 'pkg-trustflaky': return Promise.reject(new Error('503'));
+        default: return Promise.resolve('token');
+      }
+    }),
+  } as unknown as ReturnType<typeof handlerFor>);
 }
-
-const CONFIG = `[putitoutthere]
-version = 1
-${[
-  ['pkg-oidc', 'oidccrate'],
-  ['pkg-token', 'tokencrate'],
-  ['pkg-unpub', 'unpubcrate'],
-  ['pkg-latestflaky', 'latestflakycrate'],
-  ['pkg-trustflaky', 'trustflakycrate'],
-]
-  .map(
-    ([name, crate]) => `[[package]]
-name  = "${name}"
-kind  = "crates"
-crate = "${crate}"
-path  = "packages/${name}"
-globs = ["packages/${name}/**"]`,
-  )
-  .join('\n')}
-`;
-
-beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'verify-unit-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  writeFileSync(join(repo, 'putitoutthere.toml'), CONFIG, 'utf8');
-  git(['add', '-A']);
-  git(['commit', '-q', '-m', 'config']);
-
-  stdoutChunks.length = 0;
-  vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-    stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-    return true;
-  });
-  vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(repo, { recursive: true, force: true });
 });
 
-interface VerifyRow {
-  package: string;
-  version: string | null;
-  posture: string;
-}
+describe('computeVerify', () => {
+  it('classifies every posture', async () => {
+    loadConfigMock.mockReturnValue(
+      configWith(['pkg-oidc', 'pkg-token', 'pkg-unpub', 'pkg-latestflaky', 'pkg-trustflaky']),
+    );
+    stubHandler();
 
-describe('cli: verify', () => {
-  it('classifies every posture and emits --json', async () => {
-    mockCrates();
-    const code = await run(['node', 'piot', 'verify', '--json', '--cwd', repo]);
-    const rows = JSON.parse(stdoutChunks.join('')) as VerifyRow[];
+    const rows = await computeVerify({ cwd: '/repo' });
     const byPkg = Object.fromEntries(rows.map((r) => [r.package, r]));
 
     expect(byPkg['pkg-oidc']).toMatchObject({ version: '1.0.0', posture: 'oidc' });
     expect(byPkg['pkg-token']).toMatchObject({ version: '1.0.0', posture: 'token' });
+    // Never published: no release to attribute, so trust is not read.
     expect(byPkg['pkg-unpub']).toMatchObject({ version: null, posture: 'unpublished' });
+    // A throwing version read reports unreachable without a version.
     expect(byPkg['pkg-latestflaky']).toMatchObject({ version: null, posture: 'unreachable' });
+    // A throwing trust read reports unreachable but keeps the read version.
     expect(byPkg['pkg-trustflaky']).toMatchObject({ version: '2.0.0', posture: 'unreachable' });
-    expect(code).toBe(0);
   });
 
-  it('renders the human table and exits non-zero under --check when token-dependent', async () => {
-    mockCrates();
-    const code = await run(['node', 'piot', 'verify', '--check', '--cwd', repo]);
-    const out = stdoutChunks.join('');
+  it('does not read trust for an unpublished package', async () => {
+    loadConfigMock.mockReturnValue(configWith(['pkg-unpub']));
+    stubHandler();
 
-    expect(out).toContain('pkg-oidc  1.0.0  ✓ oidc  trusted publisher');
-    expect(out).toContain('pkg-token  1.0.0  ⚠ token  token-dependent');
-    expect(out).toContain('pkg-unpub  —  ? unpublished  never published');
-    expect(out).toContain('pkg-latestflaky  —  ? unreachable  registry unreachable');
-    // `--check` gates on the token-dependent package.
-    expect(code).toBe(1);
+    const rows = await computeVerify({ cwd: '/repo' });
+    const handler = handlerForMock.mock.results[0]!.value as ReturnType<typeof handlerFor>;
+
+    expect(rows).toEqual([{ package: 'pkg-unpub', kind: 'crates', version: null, posture: 'unpublished' }]);
+    expect(vi.mocked(handler.trustPosture)).not.toHaveBeenCalled();
   });
 });
