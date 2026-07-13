@@ -122,7 +122,7 @@ beforeEach(() => {
   // delegates upload to the caller's pypi-publish job and returns
   // 'published' on its own).
   execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) =>
-    real.execFileSync(cmd, args as readonly string[], opts as Parameters<typeof execFileSync>[2]),
+    real.execFileSync(cmd, args as readonly string[], opts as Parameters<typeof execFileSync>[2])
   ) as typeof execFileSync);
 
   repo = mkdtempSync(join(tmpdir(), 'piot-artlayout-int-'));

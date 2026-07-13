@@ -47,7 +47,7 @@ function wireRegistry(reg: FakeRegistry, dir: string): void {
     }
     if (a[0] === 'publish') {
       const pkgJson = JSON.parse(
-        require('node:fs').readFileSync(join(dir, 'package.json'), 'utf8') as string,
+        require('node:fs').readFileSync(join(dir, 'package.json'), 'utf8') as string
       ) as { name: string; version: string };
       reg.published.add(`${pkgJson.name}@${pkgJson.version}`);
       reg.publishedPayloads.push({
