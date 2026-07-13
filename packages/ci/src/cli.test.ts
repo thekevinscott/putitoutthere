@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { runChangelogCheck } from './changelog-check/run.js';
 import { run } from './cli.js';
+
+vi.mock('./changelog-check/run.js');
 
 let out: string[];
 let err: string[];
@@ -43,5 +46,13 @@ describe('piot-ci dispatcher', () => {
     expect(code).toBe(1);
     expect(err.join('')).toContain("piot-ci: unknown command 'bogus'");
     expect(out.join('')).toContain('Usage: piot-ci <command>');
+  });
+
+  it('dispatches changelog-check to its gate and returns its exit code', () => {
+    vi.mocked(runChangelogCheck).mockReturnValue(1);
+    const code = run(argv('changelog-check'));
+    expect(code).toBe(1);
+    expect(runChangelogCheck).toHaveBeenCalledOnce();
+    expect(err.join('')).toBe('');
   });
 });
