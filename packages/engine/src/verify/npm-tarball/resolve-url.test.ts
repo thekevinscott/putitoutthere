@@ -1,13 +1,12 @@
-import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveNpmTarballUrl } from './resolve-url.js';
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
-});
+// Bare automock (no factory): the double is derived from the real module,
+// so it can't drift and needs no hand-written factory. Real `npm view`
+// behaviour is covered by the integration and e2e tiers.
+vi.mock('node:child_process');
 
 const execMock = vi.mocked(execFileSync);
 const out: string[] = [];
