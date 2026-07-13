@@ -1,6 +1,16 @@
 name: Conventions
 on: [pull_request]
 
+# NOTE — we deliberately do NOT use the `e2e-verify` gate / e2e attestations.
+# That gate is for repos that can't run e2e in CI; piot runs its full e2e
+# suite in CI directly (e2e-cli.yml runs every tests/e2e/**/*.e2e.test.ts per
+# PR; e2e-fixture.yml does the real-OIDC-publish runs), which is strictly
+# stronger than an attestation receipt. `e2e-verify` is default-off until an
+# `e2e-attestation` baseline is committed — we never commit one, so it stays
+# dormant (a `skipped` e2e-verify job is the intended, correct state). Do not
+# commit under e2e-attestations/ or set `run_e2e`. See AGENTS.md > "We do not
+# use e2e attestations" and #521.
+
 jobs:
   ci:
     uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
