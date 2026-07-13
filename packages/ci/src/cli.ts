@@ -14,6 +14,7 @@
 
 import { runActionlintIdToken } from './actionlint-idtoken/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
+import { runEvidenceCheck } from './evidence-check/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { printUsage } from './usage.js';
 
@@ -35,6 +36,9 @@ export function run(argv: readonly string[]): number {
   }
   if (cmd === 'actionlint-idtoken') {
     return runActionlintIdToken();
+  }
+  if (cmd === 'evidence-check') {
+    return runEvidenceCheck();
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();
