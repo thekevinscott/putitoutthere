@@ -7,6 +7,7 @@ import { run } from './cli.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
 import { runTddLint } from './tdd-lint/run.js';
+import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
 
 vi.mock('./actionlint-idtoken/run.js');
@@ -15,6 +16,7 @@ vi.mock('./changelog-check/run.js');
 vi.mock('./evidence-check/run.js');
 vi.mock('./fixture-materialize/run.js');
 vi.mock('./tdd-lint/run.js');
+vi.mock('./testpypi-verify/run.js');
 vi.mock('./verdaccio-auth/run.js');
 
 let out: string[];
@@ -113,6 +115,14 @@ describe('piot-ci dispatcher', () => {
     const code = run(argv('cargo-registry', 'start'));
     expect(code).toBe(1);
     expect(runCargoRegistry).toHaveBeenCalledWith(['node', 'piot-ci', 'cargo-registry', 'start']);
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches testpypi-verify to its gate, forwarding argv, and returns its exit code', () => {
+    vi.mocked(runTestpypiVerify).mockReturnValue(1);
+    const code = run(argv('testpypi-verify', 'assert'));
+    expect(code).toBe(1);
+    expect(runTestpypiVerify).toHaveBeenCalledWith(['node', 'piot-ci', 'testpypi-verify', 'assert']);
     expect(err.join('')).toBe('');
   });
 });
