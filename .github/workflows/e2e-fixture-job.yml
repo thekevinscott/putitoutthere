@@ -68,56 +68,20 @@ jobs:
           pnpm run build:action
 
       # Materialize the fixture as a fresh git repo at fixture-tree/.
-      # Bumps __VERSION__ placeholders to a throwaway 0.0.{unix_seconds}
-      # version so each run gets a fresh registry slot (crates.io's
-      # immutable-publish rule means we can't reuse).
+      # `plan` mode wipes + copies the fixture, rewrites __VERSION__ to a
+      # throwaway 0.0.{unix_seconds} (crates.io's immutable-publish rule
+      # means each run needs a fresh slot), exports FIXTURE_VERSION,
+      # uniquifies the `-placeholder` suffix on *-first-publish fixtures
+      # (#304/#334/#294), and inits a throwaway git repo so the engine's
+      # tag-creation path has a HEAD. Extracted to the piot-ci
+      # fixture-materialize gate (#447) — the logic is unit-tested, not
+      # inline bash. See packages/ci/src/fixture-materialize/.
       - name: Materialize fixture
         env:
           FIXTURE: ${{ inputs.fixture }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          rm -rf fixture-tree
-          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
-          VERSION="0.0.$(date +%s)"
-          echo "FIXTURE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          # Walk the materialized tree and rewrite __VERSION__ in any
-          # toml/json manifest. -print0 / xargs -0 keeps paths-with-spaces
-          # safe even though our fixtures have none.
-          find fixture-tree \
-            \( -name putitoutthere.toml -o -name package.json \
-               -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
-            | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
-          # #304: first-publish fixtures carry a `-placeholder` suffix on
-          # the package name. Rewrite to a per-run unique suffix so each
-          # scenario publishes against a packument that's truly 404 on
-          # the empty Verdaccio / cargo-http-registry (no false-greens
-          # from leftover state in the service container, no collisions
-          # across PR pushes). #334: Cargo.toml is included in the rewrite
-          # so the rust-vanilla-first-publish fixture's [package].name
-          # tracks putitoutthere.toml. #294: pyproject.toml included so
-          # the polyglot-everything-first-publish fixture's maturin
-          # `[project].name` is uniquified alongside the wrapper crate.
-          case "${FIXTURE}" in
-            *-first-publish)
-              SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
-              find fixture-tree \
-                \( -name putitoutthere.toml -o -name package.json \
-                   -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
-                | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
-              ;;
-          esac
-          # Init a throwaway git repo so the engine's tag-creation path
-          # doesn't trip on a missing HEAD.
-          cd fixture-tree
-          git init -q -b main
-          git config user.email 'e2e@putitoutthere.dev'
-          git config user.name 'piot e2e'
-          git config commit.gpgsign false
-          git config tag.gpgsign false
-          git add .
-          git commit -q -m 'e2e: initial fixture'
+        run: pnpm exec piot-ci fixture-materialize plan
 
       - id: plan
         uses: ./
@@ -166,32 +130,20 @@ jobs:
           pnpm run build
           pnpm run build:action
 
+      # #276: `build` mode materializes the fixture at a STALE baseline
+      # (0.0.1), NOT matrix.version — mirroring a real consumer whose
+      # pyproject.toml / Cargo.toml literal lags the planned version.
+      # `_matrix.yml` bumps the manifest to matrix.version before maturin
+      # runs; the post-build assertion verifies the artifacts agree with the
+      # plan. build mode does no placeholder rewrite, no git init, and no
+      # FIXTURE_VERSION export. Extracted to the piot-ci fixture-materialize
+      # gate (#447); the gate is pure Node, so it behaves consistently across
+      # the Linux/macOS/Windows build runners without the perl-vs-sed dance.
       - name: Materialize fixture
-        # Build matrix runs on Linux, macOS, and Windows. GitHub Actions
-        # defaults to pwsh on Windows for `run:` blocks; force bash so
-        # find/xargs/perl behave consistently across all three runners.
         shell: bash
         env:
           FIXTURE: ${{ inputs.fixture }}
-        run: |
-          set -euo pipefail
-          rm -rf fixture-tree
-          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
-          # #276: the fixture is materialized at a STALE baseline (0.0.1),
-          # NOT matrix.version. This mirrors a real consumer whose
-          # pyproject.toml / Cargo.toml literal lags the planned version.
-          # `_matrix.yml` is responsible for bumping the manifest to
-          # `matrix.version` before maturin runs; the post-build assertion
-          # below verifies the produced artifacts agree with the plan.
-          # Earlier this step pre-substituted matrix.version, which silently
-          # masked the bug — wheels appeared correctly versioned because we
-          # patched the manifest, not because the build path did.
-          # perl -i is portable across GNU sed (Linux) and BSD sed (macOS);
-          # `sed -i ""` requires different argument shapes per platform.
-          find fixture-tree \
-            \( -name putitoutthere.toml -o -name package.json \
-               -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
-            | xargs -0 perl -i -pe "s/__VERSION__/0.0.1/g"
+        run: pnpm exec piot-ci fixture-materialize build
 
       # #391: mirror of `_matrix.yml`'s cargo cache step. The e2e mirror
       # is supposed to faithfully reproduce the engine path against the
@@ -563,47 +515,22 @@ jobs:
           pnpm run build
           pnpm run build:action
 
+      # `publish` mode recomputes the same throwaway version the plan job
+      # baked in — the matrix's first-row version is canonical (every package
+      # shares one version per run) — and is passed in as FIXTURE_VERSION via
+      # `env:` (an `env:` value is templated safely; an inline `${{ }}` in a
+      # run script is the #442 pre-shell-templating trap). It rewrites
+      # __VERSION__, uniquifies the `-placeholder` suffix on *-first-publish
+      # fixtures (#304/#334/#294), and inits the throwaway git repo — but does
+      # NOT export FIXTURE_VERSION. Extracted to the piot-ci fixture-materialize
+      # gate (#447). See packages/ci/src/fixture-materialize/.
       - name: Materialize fixture
         env:
           FIXTURE: ${{ inputs.fixture }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          rm -rf fixture-tree
-          cp -r "packages/engine/test/fixtures/${FIXTURE}" fixture-tree
-          # Recompute the same throwaway version the plan job baked in.
-          # plan emitted matrix.version; the first row's version is the
-          # canonical one (every package shares a single version per run).
-          VERSION='${{ fromJSON(needs.plan.outputs.matrix)[0].version }}'
-          find fixture-tree \
-            \( -name putitoutthere.toml -o -name package.json \
-               -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
-            | xargs -0 sed -i "s/__VERSION__/${VERSION}/g"
-          # #304: mirror the plan job's name-uniquification so package
-          # name on disk in publish matches what the matrix references.
-          # #334: Cargo.toml included for the rust-vanilla-first-publish
-          # fixture (cargo reads [package].name from the manifest).
-          # #294: pyproject.toml included for the
-          # polyglot-everything-first-publish fixture (maturin reads
-          # [project].name from pyproject.toml).
-          case "${FIXTURE}" in
-            *-first-publish)
-              SUFFIX="-${RUN_ID}-${RUN_ATTEMPT}"
-              find fixture-tree \
-                \( -name putitoutthere.toml -o -name package.json \
-                   -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
-                | xargs -0 sed -i "s/-placeholder/${SUFFIX}/g"
-              ;;
-          esac
-          cd fixture-tree
-          git init -q -b main
-          git config user.email 'e2e@putitoutthere.dev'
-          git config user.name 'piot e2e'
-          git config commit.gpgsign false
-          git config tag.gpgsign false
-          git add .
-          git commit -q -m 'e2e: initial fixture'
+          FIXTURE_VERSION: ${{ fromJSON(needs.plan.outputs.matrix)[0].version }}
+        run: pnpm exec piot-ci fixture-materialize publish
 
       - uses: actions/download-artifact@v8
         with:
@@ -653,55 +580,20 @@ jobs:
         if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
         run: cargo install --locked cargo-http-registry@0.1.8
 
+      # Backgrounds cargo-http-registry (detached) on the fixed port
+      # 127.0.0.1:35503 — so the `PIOT_CRATES_REGISTRY_*` env values passed
+      # to the engine step below are statically known — writing to a log
+      # file and exporting its PID, polls the git-smart-http endpoint until
+      # ready (the first call cargo makes), and on success appends
+      # `[net] git-fetch-with-cli = true` to cargo config so libgit2 stops
+      # choking on the alt-registry's `application/octet-stream` content-type
+      # (the system git binary the flag routes to does not). On failure it
+      # dumps the raw log and fails. Extracted to the piot-ci cargo-registry
+      # gate (#454); see packages/ci/src/cargo-registry/.
       - name: Start cargo-http-registry (#331)
         if: contains(needs.plan.outputs.matrix, '"kind":"crates"')
         shell: bash
-        run: |
-          set -euo pipefail
-          REG_ROOT="${RUNNER_TEMP}/piot-alt-registry"
-          mkdir -p "${REG_ROOT}"
-          # Bind to a fixed port (default is an ephemeral one) so the
-          # `PIOT_CRATES_REGISTRY_FALLBACK` env value passed to the
-          # engine step below can be statically known. nohup + & +
-          # disown keeps the process alive across step boundaries;
-          # the workflow runner reaps it when the job ends.
-          nohup cargo-http-registry --addr 127.0.0.1:35503 "${REG_ROOT}" \
-            > "${RUNNER_TEMP}/cargo-http-registry.log" 2>&1 &
-          echo "CARGO_HTTP_REGISTRY_PID=$!" >> "$GITHUB_ENV"
-          disown
-          # Poll until the registry's git-smart-http endpoint responds.
-          # `GET /git/info/refs?service=git-upload-pack` is the first
-          # call cargo makes; on Bare `GET /git` cargo-http-registry
-          # returns 405 (method-not-allowed) which is healthy but a
-          # confusing readiness signal.
-          ready=0
-          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-            if curl -fsS -o /dev/null 'http://127.0.0.1:35503/git/info/refs?service=git-upload-pack'; then
-              echo "cargo-http-registry up (attempt ${attempt})"
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" -eq 0 ]; then
-            echo "::error::cargo-http-registry never came up; dumping log:"
-            cat "${RUNNER_TEMP}/cargo-http-registry.log" || true
-            exit 1
-          fi
-          # Configure cargo so its libgit2 stops choking on the
-          # alt-registry's `application/octet-stream` content-type.
-          # cargo-http-registry serves valid git-smart-http packs but
-          # libgit2 enforces strict `application/x-git-*` content-type
-          # checking; the system `git` binary doesn't and works fine.
-          # Verified locally: without this, every `cargo publish --index
-          # http://127.0.0.1:35503/git` fails with
-          # `invalid content-type: 'application/octet-stream'`.
-          mkdir -p "${HOME}/.cargo"
-          cat >> "${HOME}/.cargo/config.toml" <<'EOF'
-
-          [net]
-          git-fetch-with-cli = true
-          EOF
+        run: pnpm exec piot-ci cargo-registry start
 
       # Mirrors release.yml: rebuild npm packages from source before
       # the engine's `npm publish` runs. The build job's dist/ is not
@@ -812,56 +704,21 @@ jobs:
             fi
           done
 
-      # #304: configure Verdaccio auth for first-publish rows. Creates an
-      # `e2e` user via Verdaccio's user-create endpoint, captures the
-      # returned auth token, writes it into a per-package `.npmrc` so the
-      # subsequent `npm publish --registry=http://localhost:4873` honors
-      # it. The handler's PIOT_NPM_REGISTRY seam reads from `ctx.env`
-      # (npm.ts / npm-platform.ts); we set it on the publish action step
-      # below, gated to first-publish rows.
+      # #304: configure Verdaccio auth for first-publish rows. Waits for the
+      # Verdaccio `/-/ping` endpoint to bind, creates an `e2e` user via the
+      # user-create endpoint, captures + masks the returned auth token, and
+      # writes it into a per-package `.npmrc` so the subsequent
+      # `npm publish --registry=http://localhost:4873` honors it. The
+      # handler's PIOT_NPM_REGISTRY seam reads from `ctx.env` (npm.ts /
+      # npm-platform.ts); it is set on the publish action step below, gated
+      # to first-publish rows. Extracted to the piot-ci verdaccio-auth gate
+      # (#453); see packages/ci/src/verdaccio-auth/.
       - name: Configure Verdaccio auth (first-publish)
         if: endsWith(inputs.fixture, '-first-publish')
         shell: bash
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
-        run: |
-          set -euo pipefail
-          # Verdaccio service can take a few seconds to bind. Wait until
-          # the /-/ping endpoint is reachable before issuing the user PUT.
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS http://localhost:4873/-/ping > /dev/null 2>&1; then
-              echo "Verdaccio up (attempt ${attempt})"
-              break
-            fi
-            if [ "$attempt" -eq 10 ]; then
-              echo "::error::Verdaccio /-/ping unreachable after 10 attempts"
-              exit 1
-            fi
-            sleep 1
-          done
-          response=$(curl -fsS -X PUT \
-            -H 'Content-Type: application/json' \
-            --data '{"name":"e2e","password":"e2e","email":"e2e@piot.dev"}' \
-            'http://localhost:4873/-/user/org.couchdb.user:e2e')
-          TOKEN=$(printf '%s' "$response" | jq -r '.token')
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = 'null' ]; then
-            echo "::error::Verdaccio user-create did not return a token. Response: ${response}"
-            exit 1
-          fi
-          echo "::add-mask::$TOKEN"
-          # Write .npmrc into every npm package dir so `npm publish` in
-          # that cwd resolves both the registry and auth correctly.
-          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          for path in $paths; do
-            # Write .npmrc with no YAML-indentation contamination. Each
-            # echo emits one config line; the file is the union.
-            {
-              echo "registry=http://localhost:4873/"
-              echo "//localhost:4873/:_authToken=${TOKEN}"
-              echo "always-auth=true"
-            } > "fixture-tree/${path}/.npmrc"
-            echo "Wrote fixture-tree/${path}/.npmrc"
-          done
+        run: pnpm exec piot-ci verdaccio-auth
 
       - uses: ./
         env:
@@ -926,21 +783,15 @@ jobs:
       # fallback ever fires AND fails. Cheap on the happy path. Strip
       # once the alt-registry path has been stable in CI for ~10
       # polyglot runs.
+      # Prints the grouped cargo-http-registry diagnostic dump: the raw log,
+      # an endpoint HTTP-code probe, and the raw cargo config (with
+      # (no log) / (no config.toml) fallbacks). Never fails (diagnostic
+      # only). Extracted to the piot-ci cargo-registry gate (#454); see
+      # packages/ci/src/cargo-registry/.
       - name: Diagnostic dump (cargo-http-registry)
         if: always() && contains(needs.plan.outputs.matrix, '"kind":"crates"')
         shell: bash
-        run: |
-          set +e
-          echo "::group::cargo-http-registry log"
-          cat "${RUNNER_TEMP}/cargo-http-registry.log" 2>/dev/null || echo "(no log)"
-          echo "::endgroup::"
-          echo "::group::endpoint probe"
-          curl -sS -o /dev/null -w 'GET /git/info/refs?service=git-upload-pack -> %{http_code}\n' \
-            'http://127.0.0.1:35503/git/info/refs?service=git-upload-pack'
-          echo "::endgroup::"
-          echo "::group::~/.cargo/config.toml"
-          cat "${HOME}/.cargo/config.toml" 2>/dev/null || echo "(no config.toml)"
-          echo "::endgroup::"
+        run: pnpm exec piot-ci cargo-registry diagnose
 
       # Post-publish npm tarball verification lives in the engine now
       # (`verify npm-tarball`, #443): the `files[]`-dir presence check, its
