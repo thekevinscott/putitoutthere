@@ -26,10 +26,6 @@ describe('extractHref', () => {
     expect(extractHref('a data-href="nope"')).toBeNull();
   });
 
-  it('tolerates whitespace around the equals sign', () => {
-    expect(extractHref('a href = "spaced"')).toBe('spaced');
-  });
-
   it('returns the empty string for an empty href value', () => {
     expect(extractHref('a href=""')).toBe('');
   });

@@ -40,4 +40,8 @@ describe('isAnchorStart', () => {
   it('treats a slash as the tag-name boundary (self-closing)', () => {
     expect(isAnchorStart('a/')).toBe(true);
   });
+
+  it('takes the earliest boundary when the href value contains slashes', () => {
+    expect(isAnchorStart('a href="https://files/foo.tar.gz"')).toBe(true);
+  });
 });

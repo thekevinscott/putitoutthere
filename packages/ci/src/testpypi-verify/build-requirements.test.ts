@@ -65,9 +65,11 @@ describe('buildRequirements', () => {
     });
   });
 
-  it('errors with the sorted version list when a package has two versions', () => {
+  it('errors with the version list sorted, not in discovery order', () => {
+    // The higher version is discovered first; the error must still list them
+    // sorted (`sorted(versions)`), so this pins the sort.
     expect(
-      buildRequirements([MATURIN_SDIST, 'piot_fixture_zzz_python_maturin-0.0.2-cp312-cp312-manylinux.whl']),
+      buildRequirements(['piot_fixture_zzz_python_maturin-0.0.2.tar.gz', MATURIN_SDIST]),
     ).toEqual({
       errorLine: "expected exactly one version for piot-fixture-zzz-python-maturin, found ['0.0.1', '0.0.2']",
     });

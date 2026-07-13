@@ -43,4 +43,10 @@ describe('parseSimpleIndexHrefs', () => {
   it('returns an empty list when there are no tags', () => {
     expect(parseSimpleIndexHrefs('no tags here')).toEqual([]);
   });
+
+  it('ignores an incomplete final tag that never closes with >', () => {
+    // The trailing `<a href="leak" ` has no `>`, so its piece must be skipped
+    // rather than parsed as a tag.
+    expect(parseSimpleIndexHrefs('<a href="real.tar.gz">ok</a><a href="leak" ')).toEqual(['real.tar.gz']);
+  });
 });
