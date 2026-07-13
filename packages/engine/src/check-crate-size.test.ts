@@ -12,14 +12,15 @@
  * `test/integration/check-crate-size.integration.test.ts`.
  */
 
-import type * as ChildProcess from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  return { ...actual, spawnSync: vi.fn() };
-});
+// Bare automock (no factory): vitest generates the double from the real
+// module, so it can't drift from the source — satisfying the unit-suite
+// isolation lint without a hand-written (untyped) factory. Only spawnSync
+// is exercised; the real `cargo package` subprocess round-trip is covered
+// by test/integration/check-crate-size.integration.test.ts.
+vi.mock('node:child_process');
 
 import { checkCratesPackageSize } from './check-crate-size.js';
 import type { Package } from './config.js';

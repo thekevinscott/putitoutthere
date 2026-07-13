@@ -1,15 +1,17 @@
 /**
- * Git wrapper tests. Seeds a throwaway git repo in beforeEach and
- * exercises every public function in src/git.ts against it.
+ * Git wrapper tests (#9). The file under test is `git.ts`; its only
+ * collaborator is the `git` CLI via `execFileSync`, mocked here so each case
+ * isolates one wrapper's argv-construction and stdout-parsing without a real
+ * repo. `tag-template` / `version` (pure) run for real so `lastTag`'s
+ * highest-semver selection is genuinely exercised.
  *
- * Issue #9.
+ * The real git round trip — tags actually landing on a repo + bare remote —
+ * is covered by test/integration/tag-plumbing.integration.test.ts and the
+ * e2e tier.
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   addForce,
@@ -30,362 +32,256 @@ import {
   tagsPointingAtHead,
 } from './git.js';
 
-let repo: string;
+vi.mock('node:child_process');
 
-function git(args: string[]): string {
-  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+const execMock = vi.mocked(execFileSync);
+const OPTS = { cwd: 'repo' };
+
+/** An error shaped like the one `execFileSync` throws, carrying git's stderr. */
+function gitError(stderr: string): Error {
+  return Object.assign(new Error('Command failed: git'), { stderr: Buffer.from(stderr) });
 }
 
-function writeFile(path: string, content: string): void {
-  const full = join(repo, path);
-  mkdirSync(dirname(full), { recursive: true });
-  writeFileSync(full, content, 'utf8');
-}
-
-function commit(msg: string, opts: { files?: Record<string, string> } = {}): string {
-  for (const [p, c] of Object.entries(opts.files ?? {})) {
-    writeFile(p, c);
-  }
-  git(['add', '-A']);
-  git(['commit', '-m', msg, '--allow-empty']);
-  return git(['rev-parse', 'HEAD']);
+/** Assert git was invoked with exactly this argv (ignoring the options bag). */
+function expectArgv(args: string[]): void {
+  expect(execMock).toHaveBeenCalledWith('git', args, expect.objectContaining({ cwd: 'repo' }));
 }
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'putitoutthere-git-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
+  vi.resetAllMocks();
+  execMock.mockReturnValue(''); // default: a clean, empty-stdout git run
 });
 
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 describe('headCommit', () => {
-  it('returns the current HEAD sha', () => {
-    const sha = commit('first');
-    expect(headCommit({ cwd: repo })).toBe(sha);
+  it('returns the current HEAD sha (trimmed)', () => {
+    execMock.mockReturnValue('abc123\n');
+    expect(headCommit(OPTS)).toBe('abc123');
+    expectArgv(['rev-parse', 'HEAD']);
   });
 });
 
 describe('commitBody', () => {
-  it('returns the body of a commit', () => {
-    const sha = commit('subject\n\nline one\nline two\n\nrelease: minor');
-    const body = commitBody(sha, { cwd: repo });
+  it('returns the raw body of a commit', () => {
+    execMock.mockReturnValue('subject\n\nline one\nline two\n\nrelease: minor');
+    const body = commitBody('sha', OPTS);
     expect(body).toContain('line one');
     expect(body).toContain('release: minor');
+    expectArgv(['log', '-1', '--format=%B', 'sha']);
   });
 
   it('throws on an unknown sha', () => {
-    expect(() => commitBody('abc0123', { cwd: repo })).toThrow();
+    execMock.mockImplementation(() => {
+      throw gitError("fatal: bad object abc0123");
+    });
+    expect(() => commitBody('abc0123', OPTS)).toThrow();
   });
 });
 
 describe('commitParents', () => {
   it('returns one parent for a plain commit', () => {
-    commit('first');
-    const second = commit('second');
-    const parents = commitParents(second, { cwd: repo });
-    expect(parents).toHaveLength(1);
+    execMock.mockReturnValue('p1');
+    expect(commitParents('sha', OPTS)).toHaveLength(1);
+    expectArgv(['log', '-1', '--format=%P', 'sha']);
   });
 
   it('returns zero parents for the root commit', () => {
-    const root = commit('root');
-    expect(commitParents(root, { cwd: repo })).toEqual([]);
+    execMock.mockReturnValue('');
+    expect(commitParents('sha', OPTS)).toEqual([]);
   });
 
   it('returns two parents for a merge commit', () => {
-    commit('base');
-    git(['checkout', '-b', 'feat']);
-    const featSha = commit('feature work');
-    git(['checkout', 'main']);
-    git(['merge', '--no-ff', 'feat', '-m', 'Merge feat']);
-    const mergeSha = git(['rev-parse', 'HEAD']);
-    const parents = commitParents(mergeSha, { cwd: repo });
+    execMock.mockReturnValue('p1 p2');
+    const parents = commitParents('mergesha', OPTS);
     expect(parents).toHaveLength(2);
-    expect(parents[1]).toBe(featSha);
+    expect(parents[1]).toBe('p2');
   });
 });
 
 describe('diffNames', () => {
   it('lists files changed between two commits', () => {
-    const a = commit('first', { files: { 'a.txt': '1' } });
-    commit('second', { files: { 'b.txt': '2' } });
-    const names = diffNames(a, 'HEAD', { cwd: repo });
-    expect(names).toEqual(['b.txt']);
+    execMock.mockReturnValue('b.txt');
+    expect(diffNames('a', 'HEAD', OPTS)).toEqual(['b.txt']);
+    expectArgv(['diff', '--name-only', 'a..HEAD']);
   });
 
   it('returns empty when no changes', () => {
-    const a = commit('one');
-    expect(diffNames(a, 'HEAD', { cwd: repo })).toEqual([]);
+    execMock.mockReturnValue('');
+    expect(diffNames('a', 'HEAD', OPTS)).toEqual([]);
   });
 
   it('handles multi-file commits', () => {
-    const a = commit('first', { files: { 'a.txt': '1' } });
-    commit('changes', { files: { 'b.txt': '2', 'dir/c.txt': '3' } });
-    const names = diffNames(a, 'HEAD', { cwd: repo }).sort();
-    expect(names).toEqual(['b.txt', 'dir/c.txt']);
+    execMock.mockReturnValue('b.txt\ndir/c.txt');
+    expect(diffNames('a', 'HEAD', OPTS).sort()).toEqual(['b.txt', 'dir/c.txt']);
   });
 });
 
 describe('createTag + tagList', () => {
   it('creates an annotated tag pointing at a given sha', () => {
-    const sha = commit('first');
-    createTag('v0.1.0', sha, { cwd: repo, message: 'release 0.1.0' });
-    expect(tagList('v*', { cwd: repo })).toEqual(['v0.1.0']);
-    expect(git(['rev-list', '-n', '1', 'v0.1.0'])).toBe(sha);
+    createTag('v0.1.0', 'sha', { cwd: 'repo', message: 'release 0.1.0' });
+    expectArgv(['tag', '-a', '-m', 'release 0.1.0', 'v0.1.0', 'sha']);
   });
 
-  it('glob filters the list', () => {
-    const sha = commit('first');
-    createTag('pkg-a-v0.1.0', sha, { cwd: repo });
-    createTag('pkg-b-v0.1.0', sha, { cwd: repo });
-    expect(tagList('pkg-a-*', { cwd: repo })).toEqual(['pkg-a-v0.1.0']);
+  it('defaults the annotation message to the tag name', () => {
+    createTag('v0.1.0', 'sha', OPTS);
+    expectArgv(['tag', '-a', '-m', 'v0.1.0', 'v0.1.0', 'sha']);
   });
 
-  it('returns empty list when no tags match', () => {
-    commit('first');
-    expect(tagList('never-*', { cwd: repo })).toEqual([]);
+  it('parses and glob-filters the tag list', () => {
+    execMock.mockReturnValue('pkg-a-v0.1.0');
+    expect(tagList('pkg-a-*', OPTS)).toEqual(['pkg-a-v0.1.0']);
+    expectArgv(['tag', '-l', 'pkg-a-*']);
   });
 
-  it('throws if a tag already exists at a different sha', () => {
-    const a = commit('first');
-    const b = commit('second');
-    createTag('v0.1.0', a, { cwd: repo });
-    expect(() => createTag('v0.1.0', b, { cwd: repo })).toThrow();
+  it('returns an empty list when no tags match', () => {
+    execMock.mockReturnValue('');
+    expect(tagList('never-*', OPTS)).toEqual([]);
+  });
+
+  it('throws if git rejects the tag creation (e.g. it exists at a different sha)', () => {
+    execMock.mockImplementation(() => {
+      throw gitError("fatal: tag 'v0.1.0' already exists");
+    });
+    expect(() => createTag('v0.1.0', 'b', OPTS)).toThrow();
   });
 });
 
 describe('lastTag', () => {
-  it('finds the highest semver among pkg-v*.*.* tags', () => {
-    const sha = commit('first');
-    for (const v of ['pkg-v0.1.0', 'pkg-v0.1.9', 'pkg-v0.10.0', 'pkg-v0.2.0']) {
-      createTag(v, sha, { cwd: repo });
-    }
-    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.10.0');
+  it('finds the highest-semver among pkg-v*.*.* tags (numeric, not lexical)', () => {
+    execMock.mockReturnValue(['pkg-v0.1.0', 'pkg-v0.1.9', 'pkg-v0.10.0', 'pkg-v0.2.0'].join('\n'));
+    expect(lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.10.0');
+    // {version} globs to *.*.* so only semver-shaped candidates are listed.
+    expectArgv(['tag', '-l', 'pkg-v*.*.*']);
   });
 
   it('returns null when no tags for this package exist', () => {
-    commit('first');
-    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBeNull();
+    execMock.mockReturnValue('');
+    expect(lastTag('pkg', '{name}-v{version}', OPTS)).toBeNull();
   });
 
   it('ignores tags from other packages', () => {
-    const sha = commit('first');
-    createTag('other-v9.9.9', sha, { cwd: repo });
-    createTag('pkg-v0.1.0', sha, { cwd: repo });
-    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.1.0');
+    execMock.mockReturnValue('other-v9.9.9\npkg-v0.1.0');
+    expect(lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.1.0');
   });
 
   it('skips malformed tags under the package prefix', () => {
-    const sha = commit('first');
-    createTag('pkg-v0.1.0', sha, { cwd: repo });
-    createTag('pkg-vnope', sha, { cwd: repo });
-    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.1.0');
+    execMock.mockReturnValue('pkg-v0.1.0\npkg-vnope');
+    expect(lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.1.0');
   });
 
   it('skips tags matching the glob but rejected by strict semver', () => {
-    // `*.*.*` matches `01.02.03` (has three dots). parseSemver rejects
-    // leading zeros, so this exercises the try/catch skip path.
-    const sha = commit('first');
-    createTag('pkg-v0.1.0', sha, { cwd: repo });
-    createTag('pkg-v01.02.03', sha, { cwd: repo });
-    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.1.0');
+    // parseSemver rejects leading zeros, exercising the try/catch skip path.
+    execMock.mockReturnValue('pkg-v0.1.0\npkg-v01.02.03');
+    expect(lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.1.0');
   });
 
   it('honors a custom `v{version}` tag_format for single-package repos', () => {
-    const sha = commit('first');
-    createTag('v0.1.0', sha, { cwd: repo });
-    createTag('v0.2.11', sha, { cwd: repo });
-    // Pre-existing default-shaped tag should NOT be selected when the
-    // template is `v{version}` — the glob won't match it.
-    createTag('pkg-v9.9.9', sha, { cwd: repo });
-    expect(lastTag('pkg', 'v{version}', { cwd: repo })).toBe('v0.2.11');
+    execMock.mockReturnValue('v0.1.0\nv0.2.11');
+    expect(lastTag('pkg', 'v{version}', OPTS)).toBe('v0.2.11');
+    // The `v*.*.*` glob won't match a default-shaped `pkg-v...` tag.
+    expectArgv(['tag', '-l', 'v*.*.*']);
   });
 });
 
 describe('pushTag', () => {
-  it('pushes to origin', () => {
-    const bare = mkdtempSync(join(tmpdir(), 'putitoutthere-remote-'));
-    try {
-      execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: bare });
-      git(['remote', 'add', 'origin', bare]);
-
-      const sha = commit('first');
-      createTag('v0.1.0', sha, { cwd: repo });
-
-      pushTag('v0.1.0', { cwd: repo });
-
-      const remoteTags = execFileSync('git', ['tag', '-l'], {
-        cwd: bare,
-        encoding: 'utf8',
-      }).trim();
-      expect(remoteTags).toBe('v0.1.0');
-    } finally {
-      rmSync(bare, { recursive: true, force: true });
-    }
+  it('pushes to origin by bare name', () => {
+    pushTag('v0.1.0', OPTS);
+    expectArgv(['push', 'origin', 'v0.1.0']);
   });
 });
 
 describe('tagsPointingAtHead', () => {
   it('lists the tags whose commit is HEAD', () => {
-    const sha = commit('first');
-    createTag('pkg-v1.0.0', sha, { cwd: repo });
-    createTag('other-v2.0.0', sha, { cwd: repo });
-    expect(tagsPointingAtHead({ cwd: repo }).sort()).toEqual(['other-v2.0.0', 'pkg-v1.0.0']);
-  });
-
-  it('excludes tags left behind on an earlier commit', () => {
-    const first = commit('first');
-    createTag('pkg-v1.0.0', first, { cwd: repo });
-    commit('second'); // HEAD moves past the tagged commit
-    expect(tagsPointingAtHead({ cwd: repo })).toEqual([]);
+    execMock.mockReturnValue('pkg-v1.0.0\nother-v2.0.0');
+    expect(tagsPointingAtHead(OPTS).sort()).toEqual(['other-v2.0.0', 'pkg-v1.0.0']);
+    expectArgv(['tag', '--points-at', 'HEAD']);
   });
 
   it('returns empty when HEAD carries no tag', () => {
-    commit('first');
-    expect(tagsPointingAtHead({ cwd: repo })).toEqual([]);
+    execMock.mockReturnValue('');
+    expect(tagsPointingAtHead(OPTS)).toEqual([]);
   });
 });
 
 describe('pushTagRef', () => {
   it('pushes a single tag ref-scoped and is idempotent', () => {
-    const bare = mkdtempSync(join(tmpdir(), 'putitoutthere-remote-'));
-    try {
-      execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: bare });
-      git(['remote', 'add', 'origin', bare]);
-      const sha = commit('first');
-      createTag('pkg-v1.0.0', sha, { cwd: repo });
-
-      pushTagRef('pkg-v1.0.0', { cwd: repo });
-      const remoteTags = () =>
-        execFileSync('git', ['tag', '-l'], { cwd: bare, encoding: 'utf8' }).trim();
-      expect(remoteTags()).toBe('pkg-v1.0.0');
-
-      // A second push of the same ref at the same commit is a clean no-op,
-      // not an error — the idempotency the release path relies on.
-      expect(() => pushTagRef('pkg-v1.0.0', { cwd: repo })).not.toThrow();
-      expect(remoteTags()).toBe('pkg-v1.0.0');
-    } finally {
-      rmSync(bare, { recursive: true, force: true });
-    }
+    pushTagRef('pkg-v1.0.0', OPTS);
+    expectArgv(['push', 'origin', 'refs/tags/pkg-v1.0.0']);
+    // A second push of the same ref is a clean no-op, not an error.
+    expect(() => pushTagRef('pkg-v1.0.0', OPTS)).not.toThrow();
   });
 
-  it('fails loudly when the remote already holds the tag at a different commit', () => {
-    const bare = mkdtempSync(join(tmpdir(), 'putitoutthere-remote-'));
-    try {
-      execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: bare });
-      git(['remote', 'add', 'origin', bare]);
-      const a = commit('first');
-      createTag('pkg-v1.0.0', a, { cwd: repo });
-      pushTagRef('pkg-v1.0.0', { cwd: repo });
-
-      // Move the local tag to a new commit; the remote still holds the old
-      // one, so a ref-scoped push is a non-fast-forward tag update that
-      // git rejects — the "two runs released the same version" guard.
-      const b = commit('second');
-      git(['tag', '-f', '-a', '-m', 'move', 'pkg-v1.0.0', b]);
-      expect(() => pushTagRef('pkg-v1.0.0', { cwd: repo })).toThrow();
-    } finally {
-      rmSync(bare, { recursive: true, force: true });
-    }
+  it('fails loudly when the remote holds the tag at a different commit', () => {
+    execMock.mockImplementation(() => {
+      throw gitError('! [rejected] pkg-v1.0.0 -> pkg-v1.0.0 (non-fast-forward)');
+    });
+    expect(() => pushTagRef('pkg-v1.0.0', OPTS)).toThrow();
   });
 });
 
 describe('forceTag + pushTagRefForce + fetchTagsForce (floating-tag move; #446)', () => {
-  function withBareRemote(fn: (bare: string) => void): void {
-    const bare = mkdtempSync(join(tmpdir(), 'putitoutthere-remote-'));
-    try {
-      execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: bare });
-      git(['remote', 'add', 'origin', bare]);
-      fn(bare);
-    } finally {
-      rmSync(bare, { recursive: true, force: true });
-    }
-  }
-
-  it('forceTag creates a lightweight tag and moves an existing one', () => {
-    const a = commit('first');
-    forceTag('v0', a, { cwd: repo });
-    expect(git(['rev-parse', 'v0'])).toBe(a);
-    const b = commit('second');
-    forceTag('v0', b, { cwd: repo });
-    expect(git(['rev-parse', 'v0'])).toBe(b);
+  it('forceTag creates or moves a lightweight tag', () => {
+    forceTag('v0', 'a', OPTS);
+    expectArgv(['tag', '-f', 'v0', 'a']);
   });
 
-  it('pushTagRefForce overwrites a diverged remote tag a plain push would reject', () => {
-    withBareRemote((bare) => {
-      const a = commit('first');
-      createTag('v0', a, { cwd: repo });
-      pushTagRef('v0', { cwd: repo });
-
-      // Move the local tag; the remote still holds the old commit. A plain
-      // ref-scoped push rejects (non-fast-forward); the forced one lands.
-      const b = commit('second');
-      forceTag('v0', b, { cwd: repo });
-      expect(() => pushTagRef('v0', { cwd: repo })).toThrow();
-      pushTagRefForce('v0', { cwd: repo });
-      const remoteCommit = execFileSync('git', ['rev-parse', 'v0^{commit}'], {
-        cwd: bare,
-        encoding: 'utf8',
-      }).trim();
-      expect(remoteCommit).toBe(b);
-    });
+  it('pushTagRefForce force-publishes the moved tag ref-scoped', () => {
+    pushTagRefForce('v0', OPTS);
+    expectArgv(['push', '--force', 'origin', 'refs/tags/v0']);
   });
 
-  it('fetchTagsForce pulls a tag the remote moved without rejecting', () => {
-    withBareRemote(() => {
-      const a = commit('first');
-      createTag('rel-v1.0.0', a, { cwd: repo });
-      pushTagRef('rel-v1.0.0', { cwd: repo });
-      // Delete the local tag so the fetch has something to bring back.
-      git(['tag', '-d', 'rel-v1.0.0']);
-      expect(tagList('rel-v1.0.0', { cwd: repo })).toEqual([]);
-      fetchTagsForce({ cwd: repo });
-      expect(tagList('rel-v1.0.0', { cwd: repo })).toEqual(['rel-v1.0.0']);
-    });
+  it('fetchTagsForce refreshes remote tags with --force', () => {
+    fetchTagsForce(OPTS);
+    expectArgv(['fetch', '--tags', '--force', 'origin']);
   });
 });
 
 describe('addForce + hasStagedChanges + commitWithBody (fold; #446)', () => {
-  it('addForce stages a gitignored path and hasStagedChanges detects it', () => {
-    commit('seed', { files: { '.gitignore': 'dist-action/\n' } });
-    writeFile('dist-action/index.js', '// bundle\n');
-    expect(hasStagedChanges({ cwd: repo })).toBe(false);
-    addForce('dist-action/', { cwd: repo });
-    expect(hasStagedChanges({ cwd: repo })).toBe(true);
+  it('addForce stages a pathspec overriding .gitignore', () => {
+    addForce('dist-action/', OPTS);
+    expectArgv(['add', '-f', 'dist-action/']);
   });
 
-  it('commitWithBody forwards the body as a second paragraph under the subject', () => {
-    commit('parent subject\n\nrelease: minor', { files: { 'a.txt': '1' } });
-    const parentBody = commitBody('HEAD', { cwd: repo });
-    writeFile('dist-action/index.js', '// bundle\n');
-    addForce('dist-action/', { cwd: repo });
-    commitWithBody('chore(release): bundle action', parentBody, { cwd: repo });
-    const body = commitBody('HEAD', { cwd: repo });
-    expect(body).toMatch(/^chore\(release\): bundle action/);
-    expect(body).toMatch(/release:\s*minor/);
-    // The staged bundle landed in the new commit.
-    expect(git(['ls-files', 'dist-action/index.js'])).toContain('dist-action/index.js');
+  it('hasStagedChanges is false on a clean index and true when the quiet diff exits non-zero', () => {
+    execMock.mockReturnValue(''); // `git diff --cached --quiet` exits 0
+    expect(hasStagedChanges(OPTS)).toBe(false);
+    expectArgv(['diff', '--cached', '--quiet']);
+
+    execMock.mockImplementation(() => {
+      throw gitError(''); // non-zero exit => staged changes present
+    });
+    expect(hasStagedChanges(OPTS)).toBe(true);
+  });
+
+  it('commitWithBody forwards subject + body as two -m paragraphs', () => {
+    commitWithBody('chore(release): bundle action', 'parent subject\n\nrelease: minor', OPTS);
+    expectArgv([
+      'commit',
+      '-m',
+      'chore(release): bundle action',
+      '-m',
+      'parent subject\n\nrelease: minor',
+    ]);
   });
 });
 
 describe('error surfacing', () => {
-  it('surfaces git stderr in thrown errors', () => {
-    expect(() =>
-      diffNames('nonexistent-sha-zzz', 'HEAD', { cwd: repo }),
-    ).toThrow(/nonexistent-sha-zzz|bad|unknown|revision/i);
+  it('folds git stderr into the thrown error', () => {
+    execMock.mockImplementation(() => {
+      throw gitError("fatal: bad revision 'nonexistent-sha-zzz'");
+    });
+    expect(() => diffNames('nonexistent-sha-zzz', 'HEAD', OPTS)).toThrow(
+      /nonexistent-sha-zzz|bad|unknown|revision/i,
+    );
   });
 
-  it('throws when run outside a repo', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'putitoutthere-nonrepo-'));
-    try {
-      expect(() => headCommit({ cwd: dir })).toThrow();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  it('throws when git itself fails (e.g. run outside a repo)', () => {
+    execMock.mockImplementation(() => {
+      throw gitError('fatal: not a git repository');
+    });
+    expect(() => headCommit(OPTS)).toThrow();
   });
 });

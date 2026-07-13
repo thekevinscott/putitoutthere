@@ -1,60 +1,46 @@
 /**
  * `advanceFloatingMajor` — move the floating `v<major>` tag to the newest
- * release in its major line (#446). Real git + a real bare remote + a real
- * config file; stdout captured for the log-line assertions.
+ * release in its major line (#446).
  *
- * Covers all three branches: the move, the idempotent "already at" no-op,
- * and the "no release tag yet" no-op.
+ * The config loader and git collaborators (`loadConfig`, `fetchTagsForce`,
+ * `lastTag`, `tagCommit`, `tagList`, `forceMoveTag`) are mocked so this
+ * isolates the three branches — move, idempotent "already at" no-op, and
+ * "no release tag yet" no-op — with stdout captured for the log lines. The
+ * real semver selection lives in `lastTag` (see git.test.ts) and the real
+ * git round trip in test/integration/tag-plumbing.integration.test.ts + the
+ * e2e tier. `parseTagVersion` (pure) runs for real.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { advanceFloatingMajor } from './advance-floating-major.js';
+import { loadConfig } from './config.js';
+import { forceMoveTag } from './force-move-tag.js';
+import { fetchTagsForce, lastTag, tagCommit, tagList } from './git.js';
 
-let repo: string;
-let bare: string;
+vi.mock('./config.js');
+vi.mock('./git.js');
+vi.mock('./force-move-tag.js');
+
+const loadConfigMock = vi.mocked(loadConfig);
+const lastTagMock = vi.mocked(lastTag);
+const tagCommitMock = vi.mocked(tagCommit);
+const tagListMock = vi.mocked(tagList);
+const forceMoveMock = vi.mocked(forceMoveTag);
+const fetchTagsMock = vi.mocked(fetchTagsForce);
 const out: string[] = [];
 
-function git(args: string[], cwd = repo): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
-function writeConfig(): void {
-  writeFileSync(
-    join(repo, 'putitoutthere.toml'),
-    [
-      '[putitoutthere]',
-      'version = 1',
-      '',
-      '[[package]]',
-      'name = "putitoutthere"',
-      'kind = "npm"',
-      'path = "."',
-      'globs = ["src/**/*.ts"]',
-      'access = "public"',
-      '',
-    ].join('\n'),
-    'utf8',
-  );
+// The single package the floating-major mover tracks. Only the fields the
+// resolver reads are supplied.
+function config(): ReturnType<typeof loadConfig> {
+  return {
+    packages: [{ name: 'putitoutthere', tag_format: '{name}-v{version}' }],
+  } as unknown as ReturnType<typeof loadConfig>;
 }
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'piot-afm-'));
-  bare = mkdtempSync(join(tmpdir(), 'piot-afm-remote-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
-  git(['init', '--bare', '-q'], bare);
-  git(['remote', 'add', 'origin', bare]);
-  writeConfig();
-  git(['add', '-A']);
-  git(['commit', '-q', '-m', 'c1']);
+  vi.resetAllMocks();
+  loadConfigMock.mockReturnValue(config());
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
@@ -64,59 +50,59 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const d of [repo, bare]) {
-    rmSync(d, { recursive: true, force: true });
-  }
 });
 
 describe('advanceFloatingMajor', () => {
-  it('moves v<major> to the newest release commit on local + remote', () => {
-    git(['tag', 'putitoutthere-v0.1.0', 'HEAD']);
-    git(['push', '-q', 'origin', 'refs/tags/putitoutthere-v0.1.0']);
-    git(['commit', '-q', '--allow-empty', '-m', 'c2']);
-    git(['tag', 'putitoutthere-v0.2.0', 'HEAD']);
-    git(['push', '-q', 'origin', 'refs/tags/putitoutthere-v0.2.0']);
-    const target = git(['rev-parse', 'putitoutthere-v0.2.0^{commit}']);
+  it('moves v<major> to the newest release commit, logging the move', () => {
+    lastTagMock.mockReturnValue('putitoutthere-v0.2.0');
+    tagCommitMock.mockReturnValue('targetsha');
+    tagListMock.mockReturnValue([]); // no existing floating tag yet
 
-    const code = advanceFloatingMajor({ cwd: repo });
+    const code = advanceFloatingMajor({ cwd: 'repo' });
 
     expect(code).toBe(0);
-    expect(git(['rev-parse', 'v0^{commit}'])).toBe(target);
-    expect(git(['rev-parse', 'v0^{commit}'], bare)).toBe(target);
+    // The remote tags are refreshed before "latest release" is re-derived.
+    expect(fetchTagsMock).toHaveBeenCalledWith({ cwd: 'repo' });
     expect(out.join('')).toBe(
-      `Moving floating tag v0 -> ${target} (latest release putitoutthere-v0.2.0)\n`,
+      'Moving floating tag v0 -> targetsha (latest release putitoutthere-v0.2.0)\n',
     );
+    expect(forceMoveMock).toHaveBeenCalledWith('v0', 'targetsha', { cwd: 'repo' });
   });
 
-  it('picks the highest-semver release (not lexical) across a major boundary', () => {
-    git(['tag', 'putitoutthere-v1.2.0', 'HEAD']);
-    git(['commit', '-q', '--allow-empty', '-m', 'c2']);
-    git(['tag', 'putitoutthere-v1.10.0', 'HEAD']);
-    git(['push', '-q', 'origin', 'refs/tags/putitoutthere-v1.10.0']);
-    const target = git(['rev-parse', 'putitoutthere-v1.10.0^{commit}']);
+  it('derives the floating tag from the major of the release lastTag selected', () => {
+    // lastTag owns the highest-semver selection (git.test.ts covers it); this
+    // pins that a v1.10.0 release drives the `v1` floating tag, not `v1.2`.
+    lastTagMock.mockReturnValue('putitoutthere-v1.10.0');
+    tagCommitMock.mockReturnValue('targetsha');
+    tagListMock.mockReturnValue([]);
 
-    advanceFloatingMajor({ cwd: repo });
+    advanceFloatingMajor({ cwd: 'repo' });
 
-    expect(git(['rev-parse', 'v1^{commit}'])).toBe(target);
     expect(out.join('')).toContain('latest release putitoutthere-v1.10.0');
+    expect(forceMoveMock).toHaveBeenCalledWith('v1', 'targetsha', { cwd: 'repo' });
   });
 
   it('is idempotent: reports no update when the floating tag already matches', () => {
-    git(['tag', 'putitoutthere-v2.0.0', 'HEAD']);
-    git(['push', '-q', 'origin', 'refs/tags/putitoutthere-v2.0.0']);
-    advanceFloatingMajor({ cwd: repo }); // first move
-    out.length = 0;
+    lastTagMock.mockReturnValue('putitoutthere-v2.0.0');
+    // Both the release tag and the existing floating tag point at the same
+    // commit, so no move is issued.
+    tagCommitMock.mockReturnValue('samesha');
+    tagListMock.mockReturnValue(['v2']);
 
-    const code = advanceFloatingMajor({ cwd: repo }); // second run
+    const code = advanceFloatingMajor({ cwd: 'repo' });
 
     expect(code).toBe(0);
     expect(out.join('')).toBe('Floating tag v2 already at putitoutthere-v2.0.0; no update.\n');
+    expect(forceMoveMock).not.toHaveBeenCalled();
   });
 
   it('no-ops with a message when no release tag exists yet', () => {
-    const code = advanceFloatingMajor({ cwd: repo });
+    lastTagMock.mockReturnValue(null);
+
+    const code = advanceFloatingMajor({ cwd: 'repo' });
 
     expect(code).toBe(0);
     expect(out.join('')).toBe('No putitoutthere-v* tags yet; nothing to track.\n');
+    expect(forceMoveMock).not.toHaveBeenCalled();
   });
 });
