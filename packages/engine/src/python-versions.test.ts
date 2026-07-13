@@ -3,7 +3,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_PYTHON_VERSION,
@@ -122,9 +122,6 @@ describe('expandRequiresPython', () => {
 describe('resolvePythonVersions', () => {
   beforeEach(() => {
     readFileMock.mockReset();
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   // `cwd`/`path` are opaque to the mocked reader; the pyproject *contents* it

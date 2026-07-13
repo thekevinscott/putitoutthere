@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   addForce,
@@ -50,10 +50,6 @@ function expectArgv(args: string[]): void {
 beforeEach(() => {
   vi.resetAllMocks();
   execMock.mockReturnValue(''); // default: a clean, empty-stdout git run
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('headCommit', () => {

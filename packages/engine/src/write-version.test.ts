@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findWorkspaceRoot } from './find-workspace-root.js';
 import { writeVersionForBuild } from './write-version.js';
@@ -34,10 +34,6 @@ const dynamicPyproject = [
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('writeVersionForBuild (#276, #428)', () => {

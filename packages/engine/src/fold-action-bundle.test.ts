@@ -6,7 +6,7 @@
  * tiers.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { foldActionBundle } from './fold-action-bundle.js';
 import { addForce, commitBody, commitWithBody, hasStagedChanges } from './git.js';
@@ -23,9 +23,6 @@ const hasStagedChangesMock = vi.mocked(hasStagedChanges);
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('foldActionBundle', () => {

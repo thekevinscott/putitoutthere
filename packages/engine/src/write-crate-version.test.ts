@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findWorkspaceRoot } from './find-workspace-root.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
@@ -27,10 +27,6 @@ const ENOENT = (): never => {
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('writeCrateVersionForBuild (#366)', () => {

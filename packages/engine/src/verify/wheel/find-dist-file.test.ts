@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findDistFile } from './find-dist-file.js';
 
@@ -21,9 +21,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   existsMock.mockReturnValue(true);
   statMock.mockReturnValue({ isFile: () => true } as never);
-});
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('findDistFile', () => {

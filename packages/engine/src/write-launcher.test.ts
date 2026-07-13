@@ -13,7 +13,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadConfig } from './config.js';
 import {
@@ -58,10 +58,6 @@ const pkgJson = (extra: Record<string, unknown> = {}): string =>
 
 beforeEach(() => {
   vi.resetAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('writeLauncher (#299)', () => {

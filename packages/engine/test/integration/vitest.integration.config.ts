@@ -15,5 +15,8 @@ export default defineConfig({
     setupFiles: ['./test/setup.ts'],
     environment: 'node',
     testTimeout: 10_000,
+    // See vitest.config.ts: vi.restoreAllMocks() no longer clears automock
+    // call/result history in Vitest 4; clearMocks restores that behavior.
+    clearMocks: true,
   },
 });

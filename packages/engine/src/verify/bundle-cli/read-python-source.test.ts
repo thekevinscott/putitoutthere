@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { readPythonSource } from './read-python-source.js';
 
@@ -23,10 +23,6 @@ function withPyproject(body: string | null): void {
   existsSyncMock.mockReturnValue(body !== null);
   readFileSyncMock.mockReturnValue(body ?? '');
 }
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('readPythonSource', () => {
   it('returns "" when there is no pyproject.toml', () => {
