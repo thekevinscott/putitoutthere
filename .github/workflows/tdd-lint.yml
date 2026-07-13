@@ -7,9 +7,16 @@ name: TDD Lint
 # Escape hatch: a commit in the PR range with a `Skip-Gates: <reason>`
 # trailer bypasses this check. The trailer is visible in the PR commit
 # list, so reviewers can push back if it's abused. See notes/gates.md.
+#
+# The gate logic lives in tested TypeScript (`packages/ci/src/tdd-lint/`,
+# the `piot-ci tdd-lint` command), not inline bash — see AGENTS.md >
+# "Repo-internal CI gates" (#452, epic #442).
 
 on:
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: tdd-lint-${{ github.ref }}
@@ -23,52 +30,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check for Skip-Gates trailer
-        id: skip
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        # packages/ci's `prepare` script builds its dist during install, so
+        # `piot-ci` is linked into node_modules/.bin and resolvable below.
+        run: pnpm install --frozen-lockfile
+
+      - name: Enforce red/green TDD discipline
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          reason=$(git log --format=%B "$BASE_SHA..$HEAD_SHA" | grep -E '^Skip-Gates:[[:space:]]*.+' | head -1 || true)
-          if [ -n "$reason" ]; then
-            {
-              echo "skip=1"
-              echo "reason<<EOF"
-              echo "$reason"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=0" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Annotate skip
-        if: steps.skip.outputs.skip == '1'
-        run: echo "::notice title=TDD lint bypassed::${{ steps.skip.outputs.reason }}"
-
-      - name: Check src/ changes are accompanied by tests
-        if: steps.skip.outputs.skip != '1'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'packages/engine/src/')
-          if [ -z "$changed" ]; then
-            echo "No src/ changes in this PR -- skipping TDD lint."
-            exit 0
-          fi
-          # A PR is test-bearing if the diff touches any *.test.ts file.
-          tests_changed=$(echo "$changed" | grep -E '\.test\.ts$' || true)
-          non_test_changed=$(echo "$changed" | grep -v -E '\.test\.ts$' || true)
-          if [ -n "$non_test_changed" ] && [ -z "$tests_changed" ]; then
-            echo "::error::src/ changes detected without matching *.test.ts changes."
-            echo "PR modifies:"
-            # shellcheck disable=SC2001
-            echo "$non_test_changed" | sed 's/^/  /'
-            echo ""
-            echo "Write a failing test first (red) then implement it (green)."
-            echo "See plan.md §23.7. Or add a \`Skip-Gates: <reason>\` trailer to any commit in this PR to bypass (notes/gates.md)."
-            exit 1
-          fi
-          echo "OK: src/ changes include *.test.ts updates."
+        run: pnpm exec piot-ci tdd-lint

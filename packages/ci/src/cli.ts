@@ -12,7 +12,9 @@
  * Returns the process exit code.
  */
 
+import { runActionlintIdToken } from './actionlint-idtoken/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
+import { runTddLint } from './tdd-lint/run.js';
 import { printUsage } from './usage.js';
 
 export function run(argv: readonly string[]): number {
@@ -27,6 +29,12 @@ export function run(argv: readonly string[]): number {
   }
   if (cmd === 'changelog-check') {
     return runChangelogCheck();
+  }
+  if (cmd === 'tdd-lint') {
+    return runTddLint();
+  }
+  if (cmd === 'actionlint-idtoken') {
+    return runActionlintIdToken();
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();
