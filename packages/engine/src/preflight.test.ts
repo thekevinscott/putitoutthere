@@ -2,11 +2,17 @@
  * Pre-flight check tests. Auth (§16.3) + npm provenance metadata (#280).
  *
  * Issue #14, #280.
+ *
+ * `node:fs` is automocked and backed by an in-memory virtual filesystem
+ * (`vfs`) so each case isolates the branching logic under test rather
+ * than touching real temp dirs. The subject builds paths with the real
+ * `node:path`; the harness normalizes separators (and any Windows drive
+ * letter) before looking a path up, so keys are stable on POSIX and
+ * Windows alike. Path assertions are separator-agnostic (`[/\\]`) for
+ * the same reason.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkAuth,
@@ -28,6 +34,62 @@ import {
   type AuthStatus,
 } from './preflight.js';
 import type { Package } from './config.js';
+
+vi.mock('node:fs');
+
+/* --------------------------- fs harness --------------------------- */
+
+/** Virtual filesystem: normalized absolute path -> file contents. */
+const vfs = new Map<string, string>();
+/** Directories known to exist (normalized). Derived from `vfs` writes. */
+const knownDirs = new Set<string>();
+
+/** Separator-normalize a path (Windows `\` -> `/`, strip a `C:` drive). */
+function norm(p: unknown): string {
+  return String(p).replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
+}
+
+/** Join path segments with `/` — input construction only, never asserted. */
+function j(...parts: string[]): string {
+  return parts.join('/');
+}
+
+/** Write a file into the vfs, registering its ancestor directories. */
+function setFile(path: string, content: string): void {
+  const key = norm(path);
+  vfs.set(key, content);
+  let dir = key.slice(0, key.lastIndexOf('/'));
+  while (dir.length > 0 && !knownDirs.has(dir)) {
+    knownDirs.add(dir);
+    const i = dir.lastIndexOf('/');
+    dir = i > 0 ? dir.slice(0, i) : '';
+  }
+}
+
+/** Immediate children of a directory as Dirent-like entries. */
+function childDirents(dirKey: string): Array<{
+  name: string;
+  isDirectory: () => boolean;
+  isFile: () => boolean;
+}> {
+  const prefix = dirKey.endsWith('/') ? dirKey : dirKey + '/';
+  const seen = new Map<string, boolean>();
+  for (const key of vfs.keys()) {
+    if (!key.startsWith(prefix)) {continue;}
+    const rest = key.slice(prefix.length);
+    const slash = rest.indexOf('/');
+    if (slash === -1) {
+      if (!seen.has(rest)) {seen.set(rest, false);}
+    } else {
+      seen.set(rest.slice(0, slash), true);
+    }
+  }
+  return [...seen].map(([name, isDir]) => ({
+    name,
+    isDirectory: () => isDir,
+    isFile: () => !isDir,
+  }));
+}
 
 function pkg(kind: Package['kind'], overrides: Partial<Package> = {}): Package {
   return {
@@ -52,6 +114,29 @@ const AUTH_VARS = [
 ];
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  vfs.clear();
+  knownDirs.clear();
+
+  vi.mocked(readFileSync).mockImplementation((path: unknown) => {
+    const key = norm(path);
+    const found = vfs.get(key);
+    if (found !== undefined) {return found;}
+    const err = new Error(
+      `ENOENT: no such file or directory, open '${String(path)}'`,
+    ) as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    throw err;
+  });
+
+  vi.mocked(existsSync).mockImplementation((path: unknown) => {
+    const key = norm(path);
+    return knownDirs.has(key) || vfs.has(key);
+  });
+
+  vi.mocked(readdirSync).mockImplementation(((path: unknown) =>
+    childDirents(norm(path))) as unknown as typeof readdirSync);
+
   for (const k of AUTH_VARS) {delete process.env[k];}
 });
 
@@ -236,25 +321,18 @@ describe('requireAuth', () => {
 /* ----------------------- npm provenance metadata ----------------------- */
 
 describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'piot-prov-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/vfs/prov';
 
   function npmPkg(name: string, path: string): Package {
     return pkg('npm', { name, path });
   }
 
   function writePkgJson(path: string, body: unknown): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'package.json'), JSON.stringify(body), 'utf8');
+    setFile(j(path, 'package.json'), JSON.stringify(body));
   }
 
   it('passes when an npm package has a non-empty repository.url object', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -265,7 +343,7 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
   });
 
   it('passes when repository is the legacy non-empty string form', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -275,7 +353,7 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
   });
 
   it('fails when repository is missing entirely', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0' });
     const findings = checkProvenanceMetadata([npmPkg('a', p)]);
     expect(findings).toHaveLength(1);
@@ -283,19 +361,19 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
   });
 
   it('fails when repository is an empty string', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0', repository: '' });
     expect(checkProvenanceMetadata([npmPkg('a', p)])).toHaveLength(1);
   });
 
   it('fails when repository is an object without a url', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0', repository: { type: 'git' } });
     expect(checkProvenanceMetadata([npmPkg('a', p)])).toHaveLength(1);
   });
 
   it('fails when repository.url is whitespace', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -305,7 +383,7 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
   });
 
   it('reports a missing package.json as a finding rather than crashing', () => {
-    const p = join(dir, 'does-not-exist');
+    const p = j(dir, 'does-not-exist');
     const findings = checkProvenanceMetadata([npmPkg('a', p)]);
     expect(findings).toHaveLength(1);
     expect(findings[0]!.reason).toBe('missing');
@@ -316,8 +394,8 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
   });
 
   it('reports every failing npm package, not just the first', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writePkgJson(a, { name: 'a', version: '0.0.0' });
     writePkgJson(b, { name: 'b', version: '0.0.0' });
     const findings = checkProvenanceMetadata([npmPkg('a', a), npmPkg('b', b)]);
@@ -325,7 +403,7 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
   });
 
   it('throws with PIOT_NPM_MISSING_REPOSITORY when any npm package fails', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0' });
     expect(() => requireProvenanceMetadata([npmPkg('a', p)])).toThrow(
       /PIOT_NPM_MISSING_REPOSITORY/,
@@ -333,8 +411,8 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
   });
 
   it('error message names every failing package + its package.json path', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writePkgJson(a, { name: 'a', version: '0.0.0' });
     writePkgJson(b, { name: 'b', version: '0.0.0' });
     try {
@@ -344,13 +422,13 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
       const msg = (err as Error).message;
       expect(msg).toContain('a');
       expect(msg).toContain('b');
-      expect(msg).toContain(join(a, 'package.json'));
-      expect(msg).toContain(join(b, 'package.json'));
+      expect(msg).toMatch(/[/\\]a[/\\]package\.json/);
+      expect(msg).toMatch(/[/\\]b[/\\]package\.json/);
     }
   });
 
   it('error message includes the canonical repository shape and a docs pointer', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0' });
     try {
       requireProvenanceMetadata([npmPkg('a', p)]);
@@ -373,25 +451,18 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
 /* ----------------------- crates.io required metadata ----------------------- */
 
 describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'piot-crates-meta-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/vfs/crates-meta';
 
   function cratesPkg(name: string, path: string): Package {
     return pkg('crates', { name, path });
   }
 
   function writeCargoToml(path: string, ...lines: string[]): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'Cargo.toml'), lines.join('\n') + '\n', 'utf8');
+    setFile(j(path, 'Cargo.toml'), lines.join('\n') + '\n');
   }
 
   it('passes when description + license are both present', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       '[package]',
@@ -405,7 +476,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('accepts license-file in place of license', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       '[package]',
@@ -418,7 +489,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('reports missing description', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       '[package]',
@@ -432,7 +503,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('reports missing license when neither license nor license-file is set', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       '[package]',
@@ -446,7 +517,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('reports both fields together when both are missing', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(p, '[package]', 'name = "a"', 'version = "0.0.0"');
     const findings = checkCratesMetadata([cratesPkg('a', p)]);
     expect(findings).toHaveLength(1);
@@ -454,7 +525,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('treats whitespace-only fields as empty', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       '[package]',
@@ -469,11 +540,11 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('skips a missing Cargo.toml (the handler surfaces that error)', () => {
-    expect(checkCratesMetadata([cratesPkg('a', join(dir, 'nope'))])).toEqual([]);
+    expect(checkCratesMetadata([cratesPkg('a', j(dir, 'nope'))])).toEqual([]);
   });
 
   it('skips a malformed Cargo.toml (cargo surfaces the diagnostic)', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(p, '[[broken', 'this = is not valid toml');
     expect(checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
   });
@@ -483,8 +554,8 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('reports every failing crates package, not just the first', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writeCargoToml(a, '[package]', 'name = "a"', 'version = "0.0.0"');
     writeCargoToml(b, '[package]', 'name = "b"', 'version = "0.0.0"');
     const findings = checkCratesMetadata([cratesPkg('a', a), cratesPkg('b', b)]);
@@ -492,7 +563,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('throws with PIOT_CRATES_MISSING_METADATA when any crates package fails', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(p, '[package]', 'name = "a"', 'version = "0.0.0"');
     expect(() => requireCratesMetadata([cratesPkg('a', p)])).toThrow(
       /PIOT_CRATES_MISSING_METADATA/,
@@ -500,8 +571,8 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
   });
 
   it('error message names every failing package, its Cargo.toml path, and the missing fields', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writeCargoToml(a, '[package]', 'name = "a"', 'version = "0.0.0"', 'license = "MIT"');
     writeCargoToml(b, '[package]', 'name = "b"', 'version = "0.0.0"', 'description = "x"');
     try {
@@ -511,15 +582,15 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       const msg = (err as Error).message;
       expect(msg).toContain('a');
       expect(msg).toContain('b');
-      expect(msg).toContain(join(a, 'Cargo.toml'));
-      expect(msg).toContain(join(b, 'Cargo.toml'));
+      expect(msg).toMatch(/[/\\]a[/\\]Cargo\.toml/);
+      expect(msg).toMatch(/[/\\]b[/\\]Cargo\.toml/);
       expect(msg).toContain('description');
       expect(msg).toContain('license');
     }
   });
 
   it('error message includes a docs pointer to the cargo manifest reference', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(p, '[package]', 'name = "a"', 'version = "0.0.0"');
     try {
       requireCratesMetadata([cratesPkg('a', p)]);
@@ -553,7 +624,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         '[workspace.package]',
         'license = "MIT"',
       );
-      const p = join(dir, 'a');
+      const p = j(dir, 'a');
       writeCargoToml(
         p,
         '[package]',
@@ -574,7 +645,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         '[workspace.package]',
         'description = "Inherited description."',
       );
-      const p = join(dir, 'a');
+      const p = j(dir, 'a');
       writeCargoToml(
         p,
         '[package]',
@@ -596,7 +667,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'description = "Shared."',
         'license = "Apache-2.0"',
       );
-      const p = join(dir, 'a');
+      const p = j(dir, 'a');
       writeCargoToml(
         p,
         '[package]',
@@ -617,7 +688,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         '[workspace.package]',
         'license-file = "LICENSE"',
       );
-      const p = join(dir, 'a');
+      const p = j(dir, 'a');
       writeCargoToml(
         p,
         '[package]',
@@ -641,7 +712,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         '[workspace.package]',
         'description = "Only description shared."',
       );
-      const p = join(dir, 'a');
+      const p = j(dir, 'a');
       writeCargoToml(
         p,
         '[package]',
@@ -660,7 +731,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       // has no `[workspace.package]` block. Inherited fields resolve
       // to nothing, so the publish would fail.
       writeCargoToml(dir, '[workspace]', 'members = ["a"]');
-      const p = join(dir, 'a');
+      const p = j(dir, 'a');
       writeCargoToml(
         p,
         '[package]',
@@ -679,13 +750,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
 /* ----------------------- pyproject.toml shape (#301) ----------------------- */
 
 describe('checkPyprojectShape / requirePyprojectShape (#301)', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'piot-pyproject-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/vfs/pyproject';
 
   function pypiPkg(
     name: string,
@@ -696,12 +761,11 @@ describe('checkPyprojectShape / requirePyprojectShape (#301)', () => {
   }
 
   function writePyproject(path: string, body: string): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'pyproject.toml'), body, 'utf8');
+    setFile(j(path, 'pyproject.toml'), body);
   }
 
   it('passes for a well-formed setuptools pyproject (name + backend match)', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -719,7 +783,7 @@ version = "0.0.0"
   });
 
   it('passes for a well-formed maturin pyproject with bundle_cli include glob', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -745,7 +809,7 @@ include = ["a/bin/*"]
   });
 
   it('flags PIOT_PYPI_NAME_MISMATCH when [project].name differs from configured name', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -765,7 +829,7 @@ version = "0.0.0"
   });
 
   it('honors the `pypi` override when checking [project].name', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -782,7 +846,7 @@ version = "0.0.0"
   });
 
   it('flags PIOT_PYPI_BUILD_BACKEND_MISMATCH when backend disagrees with `build`', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -805,7 +869,7 @@ version = "0.0.0"
       ['hatch', 'hatchling.build'],
     ];
     for (const [build, backend] of cases) {
-      const p = join(dir, `${backend.replace(/[^a-z]/g, '-')}`);
+      const p = j(dir, `${backend.replace(/[^a-z]/g, '-')}`);
       writePyproject(
         p,
         `[build-system]
@@ -827,7 +891,7 @@ version = "0.0.0"
   });
 
   it('flags PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND when dynamic = ["version"] has no version source', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -843,7 +907,7 @@ dynamic = ["version"]
   });
 
   it('accepts dynamic version when [tool.hatch.version] is present', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -866,7 +930,7 @@ path = "a/__init__.py"
     // dynamic = ["version"] maturin pyproject is well-formed without either
     // setuptools-scm or hatch-vcs declared — exercise that path so the
     // gate doesn't fire false positives on the maturin recipe.
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -882,7 +946,7 @@ dynamic = ["version"]
   });
 
   it('accepts dynamic version when [tool.setuptools_scm] is present', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -901,7 +965,7 @@ write_to = "a/_version.py"
   });
 
   it('flags PIOT_PYPI_MATURIN_INCLUDE_MISSING when bundle_cli stage_to is not covered by [tool.maturin].include', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -927,7 +991,7 @@ include = ["docs/*"]
   });
 
   it('flags PIOT_PYPI_MATURIN_INCLUDE_MISSING when [tool.maturin] table is absent entirely', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -953,7 +1017,7 @@ version = "0.0.0"
     // string path" arm (preflight.ts:510). The whole `include` list
     // collapses to "no covering entry", so MATURIN_INCLUDE_MISSING
     // fires.
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -979,7 +1043,7 @@ include = [{ format = "wheel" }]
   });
 
   it('accepts object-form maturin include entries with a `path` field', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
@@ -1008,16 +1072,16 @@ include = [{ path = "a/bin/*", format = "wheel" }]
   });
 
   it('skips a missing or malformed pyproject.toml (the publish path surfaces those)', () => {
-    const p = join(dir, 'missing');
+    const p = j(dir, 'missing');
     expect(checkPyprojectShape([pypiPkg('a', p, { build: 'setuptools' })])).toEqual([]);
-    const m = join(dir, 'malformed');
+    const m = j(dir, 'malformed');
     writePyproject(m, '[[broken\nnot toml');
     expect(checkPyprojectShape([pypiPkg('a', m, { build: 'setuptools' })])).toEqual([]);
   });
 
   it('aggregates findings across every pypi package, not just the first', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writePyproject(a, `[build-system]\nbuild-backend = "setuptools.build_meta"\n[project]\nname = "wrong-a"\nversion = "0"\n`);
     writePyproject(b, `[build-system]\nbuild-backend = "setuptools.build_meta"\n[project]\nname = "wrong-b"\nversion = "0"\n`);
     const findings = checkPyprojectShape([
@@ -1028,7 +1092,7 @@ include = [{ path = "a/bin/*", format = "wheel" }]
   });
 
   it('requirePyprojectShape throws naming every failing package + the error code', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(p, `[build-system]\nbuild-backend = "setuptools.build_meta"\n[project]\nname = "wrong"\nversion = "0"\n`);
     try {
       requirePyprojectShape([pypiPkg('a', p, { build: 'setuptools' })]);
@@ -1037,7 +1101,7 @@ include = [{ path = "a/bin/*", format = "wheel" }]
       const msg = (err as Error).message;
       expect(msg).toContain('PIOT_PYPI_NAME_MISMATCH');
       expect(msg).toContain('a');
-      expect(msg).toContain(join(p, 'pyproject.toml'));
+      expect(msg).toMatch(/[/\\]a[/\\]pyproject\.toml/);
     }
   });
 
@@ -1049,25 +1113,18 @@ include = [{ path = "a/bin/*", format = "wheel" }]
 /* ----------------------- Cargo.toml shape (#301) ----------------------- */
 
 describe('checkCargoShape / requireCargoShape (#301)', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'piot-cargo-shape-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/vfs/cargo-shape';
 
   function cratesPkg(name: string, path: string, overrides: Partial<Package> = {}): Package {
     return pkg('crates', { name, path, ...overrides });
   }
 
   function writeCargoToml(path: string, body: string): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'Cargo.toml'), body, 'utf8');
+    setFile(j(path, 'Cargo.toml'), body);
   }
 
   it('passes for a well-formed Cargo.toml whose [package].name matches the configured name', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1080,7 +1137,7 @@ version = "0.0.0"
   });
 
   it('flags PIOT_CRATES_NAME_MISMATCH when [package].name differs from configured name', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1096,7 +1153,7 @@ version = "0.0.0"
   });
 
   it('honors the `crate` override when checking [package].name', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1109,7 +1166,7 @@ version = "0.0.0"
   });
 
   it('flags PIOT_CRATES_FEATURE_NOT_DECLARED when a configured feature is not in [features]', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1128,7 +1185,7 @@ foo = []
 
   it('flags PIOT_CRATES_WORKSPACE_VERSION_MISMATCH when `version.workspace = true` but no workspace ancestor declares [workspace.package].version', () => {
     // Crate sits at <root>/crates/a; no workspace Cargo.toml above it.
-    const p = join(dir, 'crates', 'a');
+    const p = j(dir, 'crates', 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1142,7 +1199,7 @@ version.workspace = true
 
   it('accepts `version.workspace = true` when a workspace Cargo.toml above declares [workspace.package].version', () => {
     const root = dir;
-    const p = join(root, 'crates', 'a');
+    const p = j(root, 'crates', 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1165,7 +1222,7 @@ version = "0.1.0"
 
   it('also validates the Cargo.toml at bundle_cli.crate_path on a pypi package (PIOT_CRATES_MISSING_BIN)', () => {
     const root = dir;
-    const cratePath = join(root, 'crates', 'cli');
+    const cratePath = j(root, 'crates', 'cli');
     writeCargoToml(
       cratePath,
       `[package]
@@ -1177,8 +1234,8 @@ name = "other-bin"
 path = "src/main.rs"
 `,
     );
-    const pypiPath = join(root, 'py');
-    mkdirSync(pypiPath, { recursive: true });
+    const pypiPath = j(root, 'py');
+    setFile(j(pypiPath, '.keep'), '');
     const pyPkg = pkg('pypi', {
       name: 'py-lib',
       path: pypiPath,
@@ -1206,7 +1263,7 @@ resolver = "2"
 `,
     );
     writeCargoToml(
-      join(root, 'packages', 'rust'),
+      j(root, 'packages', 'rust'),
       `[package]
 name = "rust-core"
 version = "0.0.0"
@@ -1216,8 +1273,8 @@ name = "my-cli"
 path = "src/main.rs"
 `,
     );
-    const pypiPath = join(root, 'py');
-    mkdirSync(pypiPath, { recursive: true });
+    const pypiPath = j(root, 'py');
+    setFile(j(pypiPath, '.keep'), '');
     const pyPkg = pkg('pypi', {
       name: 'py-lib',
       path: pypiPath,
@@ -1237,7 +1294,7 @@ path = "src/main.rs"
     // happy-path passes; if `resolve(cwd, ...)` ran, the read would land
     // somewhere else and `CRATES_MISSING_BIN` would fire spuriously.
     const root = dir;
-    const cratePath = join(root, 'crates', 'cli');
+    const cratePath = j(root, 'crates', 'cli');
     writeCargoToml(
       cratePath,
       `[package]
@@ -1245,8 +1302,8 @@ name = "my-cli"
 version = "0.0.0"
 `,
     );
-    const pypiPath = join(root, 'py');
-    mkdirSync(pypiPath, { recursive: true });
+    const pypiPath = j(root, 'py');
+    setFile(j(pypiPath, '.keep'), '');
     const pyPkg = pkg('pypi', {
       name: 'py-lib',
       path: pypiPath,
@@ -1257,13 +1314,13 @@ version = "0.0.0"
     // Deliberately wrong cwd. If the absolute branch is bypassed, the
     // resolve() would point at a non-existent file and the bin check
     // would skip silently — covered by checking we get zero findings.
-    const findings = checkCargoShape([pyPkg], { cwd: join(root, 'does-not-exist') });
+    const findings = checkCargoShape([pyPkg], { cwd: j(root, 'does-not-exist') });
     expect(findings).toEqual([]);
   });
 
   it('accepts bundle_cli.bin matching either an explicit [[bin]] or the implicit `[package].name`', () => {
     const root = dir;
-    const cratePath = join(root, 'crates', 'cli');
+    const cratePath = j(root, 'crates', 'cli');
     writeCargoToml(
       cratePath,
       `[package]
@@ -1271,8 +1328,8 @@ name = "my-cli"
 version = "0.0.0"
 `,
     );
-    const pypiPath = join(root, 'py');
-    mkdirSync(pypiPath, { recursive: true });
+    const pypiPath = j(root, 'py');
+    setFile(j(pypiPath, '.keep'), '');
     const pyPkg = pkg('pypi', {
       name: 'py-lib',
       path: pypiPath,
@@ -1285,7 +1342,7 @@ version = "0.0.0"
 
   it('flags PIOT_CRATES_FEATURE_NOT_DECLARED when bundle_cli.features mentions a feature the crate does not declare', () => {
     const root = dir;
-    const cratePath = join(root, 'crates', 'cli');
+    const cratePath = j(root, 'crates', 'cli');
     writeCargoToml(
       cratePath,
       `[package]
@@ -1297,8 +1354,8 @@ default = []
 cli = []
 `,
     );
-    const pypiPath = join(root, 'py');
-    mkdirSync(pypiPath, { recursive: true });
+    const pypiPath = j(root, 'py');
+    setFile(j(pypiPath, '.keep'), '');
     const pyPkg = pkg('pypi', {
       name: 'py-lib',
       path: pypiPath,
@@ -1311,8 +1368,8 @@ cli = []
   });
 
   it('skips a missing or malformed Cargo.toml (cargo surfaces those diagnostics)', () => {
-    expect(checkCargoShape([cratesPkg('a', join(dir, 'nope'))])).toEqual([]);
-    const m = join(dir, 'malformed');
+    expect(checkCargoShape([cratesPkg('a', j(dir, 'nope'))])).toEqual([]);
+    const m = j(dir, 'malformed');
     writeCargoToml(m, '[[broken\nthis = is not valid toml');
     expect(checkCargoShape([cratesPkg('a', m)])).toEqual([]);
   });
@@ -1322,8 +1379,8 @@ cli = []
   });
 
   it('aggregates findings across every crates package, not just the first', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writeCargoToml(a, `[package]\nname = "wrong-a"\nversion = "0.0.0"\n`);
     writeCargoToml(b, `[package]\nname = "wrong-b"\nversion = "0.0.0"\n`);
     const findings = checkCargoShape([cratesPkg('a', a), cratesPkg('b', b)]);
@@ -1331,8 +1388,8 @@ cli = []
   });
 
   it('requireCargoShape throws naming every failing package + every error code', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writeCargoToml(a, `[package]\nname = "wrong-a"\nversion = "0.0.0"\n`);
     writeCargoToml(
       b,
@@ -1366,32 +1423,25 @@ default = []
 /* ----------------------- package.json shape (npm) ----------------------- */
 
 describe('checkPackageJsonShape / requirePackageJsonShape', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'piot-pkgjson-shape-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/vfs/pkgjson';
 
   function npmPkg(name: string, path: string, overrides: Partial<Package> = {}): Package {
     return pkg('npm', { name, path, ...overrides });
   }
 
   function writePkgJson(path: string, body: unknown): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'package.json'), JSON.stringify(body), 'utf8');
+    setFile(j(path, 'package.json'), JSON.stringify(body));
   }
 
   it('passes when package.json name matches the configured name', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0' });
     expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
     expect(() => requirePackageJsonShape([npmPkg('a', p)])).not.toThrow();
   });
 
   it('flags PIOT_NPM_NAME_MISMATCH when package.json name differs from configured name', () => {
-    const p = join(dir, 'foo');
+    const p = j(dir, 'foo');
     writePkgJson(p, { name: 'foo', version: '0.0.0' });
     const findings = checkPackageJsonShape([npmPkg('js/foo', p)]);
     expect(findings).toHaveLength(1);
@@ -1401,21 +1451,21 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
   });
 
   it('honors the `npm` override when checking package.json name', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'pkg-name', version: '0.0.0' });
     const pkgs = [npmPkg('js/foo', p, { npm: 'pkg-name' })];
     expect(checkPackageJsonShape(pkgs)).toEqual([]);
   });
 
   it('matches a scoped npm name set via the override', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: '@scope/foo', version: '0.0.0' });
     const pkgs = [npmPkg('js/foo', p, { npm: '@scope/foo' })];
     expect(checkPackageJsonShape(pkgs)).toEqual([]);
   });
 
   it('flags a scoped-name mismatch when the override disagrees with package.json', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: '@scope/foo', version: '0.0.0' });
     const findings = checkPackageJsonShape([npmPkg('foo', p, { npm: '@scope/bar' })]);
     expect(findings).toHaveLength(1);
@@ -1423,19 +1473,18 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
   });
 
   it('skips a missing package.json (a different failure surface)', () => {
-    const p = join(dir, 'does-not-exist');
+    const p = j(dir, 'does-not-exist');
     expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
   });
 
   it('skips a malformed package.json (build tooling surfaces those)', () => {
-    const p = join(dir, 'a');
-    mkdirSync(p, { recursive: true });
-    writeFileSync(join(p, 'package.json'), '{ not json', 'utf8');
+    const p = j(dir, 'a');
+    setFile(j(p, 'package.json'), '{ not json');
     expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
   });
 
   it('skips a package.json with no name field', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { version: '0.0.0' });
     expect(checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
   });
@@ -1445,8 +1494,8 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
   });
 
   it('reports every failing npm package, not just the first', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writePkgJson(a, { name: 'wrong-a', version: '0.0.0' });
     writePkgJson(b, { name: 'wrong-b', version: '0.0.0' });
     const findings = checkPackageJsonShape([npmPkg('a', a), npmPkg('b', b)]);
@@ -1454,7 +1503,7 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
   });
 
   it('requirePackageJsonShape throws naming the failing package + the error code', () => {
-    const p = join(dir, 'foo');
+    const p = j(dir, 'foo');
     writePkgJson(p, { name: 'foo', version: '0.0.0' });
     try {
       requirePackageJsonShape([npmPkg('js/foo', p)]);
@@ -1463,7 +1512,7 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
       const msg = (err as Error).message;
       expect(msg).toContain('PIOT_NPM_NAME_MISMATCH');
       expect(msg).toContain('js/foo');
-      expect(msg).toContain(join(p, 'package.json'));
+      expect(msg).toMatch(/[/\\]foo[/\\]package\.json/);
     }
   });
 
@@ -1473,13 +1522,7 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
 });
 
 describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GITHUB_REPOSITORY', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'piot-repo-url-'));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const dir = '/vfs/repo-url';
 
   function npmPkg(name: string, path: string): Package {
     return pkg('npm', { name, path });
@@ -1491,20 +1534,17 @@ describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GI
     return pkg('pypi', { name, path });
   }
   function writePkgJson(path: string, body: unknown): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'package.json'), JSON.stringify(body), 'utf8');
+    setFile(j(path, 'package.json'), JSON.stringify(body));
   }
   function writeCargoToml(path: string, body: string): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'Cargo.toml'), body, 'utf8');
+    setFile(j(path, 'Cargo.toml'), body);
   }
   function writePyproject(path: string, body: string): void {
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'pyproject.toml'), body, 'utf8');
+    setFile(j(path, 'pyproject.toml'), body);
   }
 
   it('npm: passes when repository.url (object form) parses to the same owner/repo as GITHUB_REPOSITORY', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1516,7 +1556,7 @@ describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GI
   });
 
   it('npm: passes when repository is the legacy non-empty string form and matches', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1528,7 +1568,7 @@ describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GI
   });
 
   it('npm: fails when repository.url resolves to a different owner/repo (the 422 provenance bug)', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1546,7 +1586,7 @@ describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GI
   });
 
   it('npm: fails when repository (string form) resolves to a different owner/repo', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1560,7 +1600,7 @@ describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GI
   });
 
   it('crates: passes when [package].repository matches', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1577,7 +1617,7 @@ repository = "https://github.com/acme/widget"
   });
 
   it('crates: fails when [package].repository resolves to a different owner/repo', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1600,7 +1640,7 @@ repository = "https://github.com/wrong/repo"
   });
 
   it('pypi: passes when [project.urls].Repository matches', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[project]
@@ -1616,7 +1656,7 @@ Repository = "https://github.com/acme/widget"
   });
 
   it('pypi: fails when [project.urls].Repository resolves to a different owner/repo', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[project]
@@ -1634,7 +1674,7 @@ Repository = "https://github.com/wrong/repo"
   });
 
   it('skips packages whose manifest does not declare a repository field (other checks own that)', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0' });
     expect(
       checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
@@ -1642,7 +1682,7 @@ Repository = "https://github.com/wrong/repo"
   });
 
   it('skips crates packages whose Cargo.toml declares no [package].repository field', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writeCargoToml(
       p,
       `[package]
@@ -1658,7 +1698,7 @@ license = "MIT"
   });
 
   it('skips pypi packages whose pyproject.toml has no [project.urls] block', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePyproject(
       p,
       `[project]
@@ -1672,7 +1712,7 @@ dynamic = ["version"]
   });
 
   it('skips a missing or unreadable manifest (other checks own that diagnostic)', () => {
-    const missing = join(dir, 'missing');
+    const missing = j(dir, 'missing');
     expect(
       checkRepoUrlMatch(
         [
@@ -1686,15 +1726,12 @@ dynamic = ["version"]
   });
 
   it('skips a malformed package.json / Cargo.toml / pyproject.toml (build tooling surfaces those)', () => {
-    const npmDir = join(dir, 'npm');
-    const cratesDir = join(dir, 'crates');
-    const pypiDir = join(dir, 'pypi');
-    mkdirSync(npmDir, { recursive: true });
-    mkdirSync(cratesDir, { recursive: true });
-    mkdirSync(pypiDir, { recursive: true });
-    writeFileSync(join(npmDir, 'package.json'), '{ not json', 'utf8');
-    writeFileSync(join(cratesDir, 'Cargo.toml'), '[broken\nnope', 'utf8');
-    writeFileSync(join(pypiDir, 'pyproject.toml'), '[broken\nnope', 'utf8');
+    const npmDir = j(dir, 'npm');
+    const cratesDir = j(dir, 'crates');
+    const pypiDir = j(dir, 'pypi');
+    setFile(j(npmDir, 'package.json'), '{ not json');
+    setFile(j(cratesDir, 'Cargo.toml'), '[broken\nnope');
+    setFile(j(pypiDir, 'pyproject.toml'), '[broken\nnope');
     expect(
       checkRepoUrlMatch(
         [
@@ -1708,8 +1745,8 @@ dynamic = ["version"]
   });
 
   it('falls back to other [project.urls] keys when Repository is absent (Source / Homepage)', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writePyproject(
       a,
       `[project]
@@ -1740,7 +1777,7 @@ Homepage = "https://github.com/wrong/repo"
     // Defensive: the GHA env var is documented as `owner/repo`, but a
     // consumer who exports a full URL to the same env name shouldn't
     // false-positive against a manifest that already agrees.
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1754,7 +1791,7 @@ Homepage = "https://github.com/wrong/repo"
   });
 
   it('skips manifests pointing at non-github hosts (provenance catches those at publish time)', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1766,7 +1803,7 @@ Homepage = "https://github.com/wrong/repo"
   });
 
   it('skips the check entirely when githubRepository is undefined (local CLI run, no GHA context)', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1777,7 +1814,7 @@ Homepage = "https://github.com/wrong/repo"
   });
 
   it('parses the ssh URL form (git@github.com:owner/repo.git) to owner/repo', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1789,8 +1826,8 @@ Homepage = "https://github.com/wrong/repo"
   });
 
   it('parses plain https URLs without the .git suffix or with a trailing slash', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writePkgJson(a, {
       name: 'a',
       version: '0.0.0',
@@ -1810,8 +1847,8 @@ Homepage = "https://github.com/wrong/repo"
   });
 
   it('reports every failing package, not just the first', () => {
-    const a = join(dir, 'a');
-    const b = join(dir, 'b');
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
     writePkgJson(a, {
       name: 'a',
       version: '0.0.0',
@@ -1830,7 +1867,7 @@ Homepage = "https://github.com/wrong/repo"
   });
 
   it('requireRepoUrlMatch throws with PIOT_REPO_URL_MISMATCH when any package mismatches', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1842,7 +1879,7 @@ Homepage = "https://github.com/wrong/repo"
   });
 
   it('requireRepoUrlMatch error message names declared + expected owner/repo and the manifest path', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',
@@ -1855,12 +1892,12 @@ Homepage = "https://github.com/wrong/repo"
       const msg = (err as Error).message;
       expect(msg).toContain('wrong/repo');
       expect(msg).toContain('acme/widget');
-      expect(msg).toContain(join(p, 'package.json'));
+      expect(msg).toMatch(/[/\\]a[/\\]package\.json/);
     }
   });
 
   it('requireRepoUrlMatch returns silently when every package matches', () => {
-    const p = join(dir, 'a');
+    const p = j(dir, 'a');
     writePkgJson(p, {
       name: 'a',
       version: '0.0.0',

@@ -2,14 +2,21 @@
  * Artifact completeness check tests. Default-on guardrail that refuses
  * to publish any package whose matrix didn't fully produce.
  *
+ * The `node:fs` boundary is automocked so each case isolates the
+ * branching logic in `completeness.ts` — `existsSync` / `readdirSync` /
+ * `statSync` are driven to stage an artifact directory (present /
+ * absent / empty / wrong-shape) and the completeness verdict is
+ * asserted, not real temp files. `node:path` stays real so the
+ * subject's `join` still builds paths; the test never imports it and
+ * feeds a plain string root, so assertions stay separator-agnostic and
+ * hold on Windows as well as POSIX.
+ *
  * Plan: §13.2.
  * Issue #13.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   checkCompleteness,
@@ -18,21 +25,54 @@ import {
   type MatrixRow,
 } from './completeness.js';
 
-let root: string;
+vi.mock('node:fs');
+
+const existsMock = vi.mocked(existsSync);
+const readdirMock = vi.mocked(readdirSync);
+const statMock = vi.mocked(statSync);
+
+// Plain string root — no `node:os`/`node:path` in the test. The subject
+// joins this with each row's artifact_name via real `node:path`.
+const root = 'artifacts';
+
+/**
+ * Stage a virtual artifacts tree from a map of artifact-directory name
+ * to the file entries it contains. A name mapped to `[]` is a present-
+ * but-empty directory; a name absent from the map does not exist.
+ *
+ * Membership is matched by the trailing path segment so the test never
+ * hard-codes a separator: the subject builds `join(root, artifact_name)`
+ * and the dir path therefore ends with `artifact_name` on every OS.
+ * Every listed entry is reported as a non-empty file (the completeness
+ * check only recurses into subdirectories, which none of these cases
+ * needs).
+ */
+function stageDirs(dirs: Record<string, string[]>): void {
+  const names = Object.keys(dirs);
+  existsMock.mockImplementation((p) =>
+    names.some((name) => String(p).endsWith(name)),
+  );
+  readdirMock.mockImplementation((p) => {
+    const name = names.find((n) => String(p).endsWith(n));
+    return (name ? dirs[name] : []) as unknown as ReturnType<typeof readdirSync>;
+  });
+}
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'putitoutthere-artifacts-'));
+  vi.clearAllMocks();
+  // Default: nothing staged — every directory is absent.
+  existsMock.mockReturnValue(false);
+  readdirMock.mockReturnValue([]);
+  // Every staged entry is a non-empty file.
+  statMock.mockImplementation(
+    () =>
+      ({
+        isDirectory: () => false,
+        isFile: () => true,
+        size: 1,
+      }) as unknown as ReturnType<typeof statSync>,
+  );
 });
-
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
-});
-
-function write(relative: string, contents = 'x'): void {
-  const full = join(root, relative);
-  mkdirSync(dirname(full), { recursive: true });
-  writeFileSync(full, contents, 'utf8');
-}
 
 function row(over: Partial<MatrixRow>): MatrixRow {
   return {
@@ -57,7 +97,7 @@ describe('checkCompleteness: single package, all present', () => {
   });
 
   it('pypi sdist is ok when a .tar.gz is present', () => {
-    write('demo-sdist/demo-0.1.0.tar.gz');
+    stageDirs({ 'demo-sdist': ['demo-0.1.0.tar.gz'] });
     const out = checkCompleteness(
       [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
       root,
@@ -66,9 +106,11 @@ describe('checkCompleteness: single package, all present', () => {
   });
 
   it('pypi wheel is ok when a .whl is present', () => {
-    write(
-      'demo-wheel-x86_64-unknown-linux-gnu/demo-0.1.0-cp310-cp310-manylinux_2_17_x86_64.whl',
-    );
+    stageDirs({
+      'demo-wheel-x86_64-unknown-linux-gnu': [
+        'demo-0.1.0-cp310-cp310-manylinux_2_17_x86_64.whl',
+      ],
+    });
     const out = checkCompleteness(
       [
         row({
@@ -83,7 +125,7 @@ describe('checkCompleteness: single package, all present', () => {
   });
 
   it('npm platform package is ok when a .node or binary is present', () => {
-    write('demo-npm-linux-x64-gnu/demo.node');
+    stageDirs({ 'demo-npm-linux-x64-gnu': ['demo.node'] });
     const out = checkCompleteness(
       [
         row({
@@ -98,7 +140,7 @@ describe('checkCompleteness: single package, all present', () => {
   });
 
   it('npm main is ok when a package.json is present', () => {
-    write('demo-npm-main/package.json', '{}');
+    stageDirs({ 'demo-npm-main': ['package.json'] });
     const out = checkCompleteness(
       [row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' })],
       root,
@@ -107,7 +149,7 @@ describe('checkCompleteness: single package, all present', () => {
   });
 
   it('npm vanilla (target=noarch) is ok when package.json is present', () => {
-    write('demo-vanilla/package.json', '{}');
+    stageDirs({ 'demo-vanilla': ['package.json'] });
     const out = checkCompleteness(
       [row({ kind: 'npm', target: 'noarch', artifact_name: 'demo-vanilla' })],
       root,
@@ -128,7 +170,7 @@ describe('checkCompleteness: single package, issues', () => {
   });
 
   it('reports an empty artifact directory as empty', () => {
-    mkdirSync(join(root, 'demo-sdist'));
+    stageDirs({ 'demo-sdist': [] });
     const out = checkCompleteness(
       [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
       root,
@@ -137,7 +179,7 @@ describe('checkCompleteness: single package, issues', () => {
   });
 
   it('reports a pypi artifact with no .whl as wrong-shape', () => {
-    write('demo-wheel-x86_64-unknown-linux-gnu/something.txt');
+    stageDirs({ 'demo-wheel-x86_64-unknown-linux-gnu': ['something.txt'] });
     const out = checkCompleteness(
       [
         row({
@@ -152,7 +194,7 @@ describe('checkCompleteness: single package, issues', () => {
   });
 
   it('reports a pypi sdist artifact with no .tar.gz as wrong-shape', () => {
-    write('demo-sdist/junk.txt');
+    stageDirs({ 'demo-sdist': ['junk.txt'] });
     const out = checkCompleteness(
       [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
       root,
@@ -161,7 +203,7 @@ describe('checkCompleteness: single package, issues', () => {
   });
 
   it('reports an npm main artifact with no package.json as wrong-shape', () => {
-    write('demo-npm-main/junk.txt');
+    stageDirs({ 'demo-npm-main': ['junk.txt'] });
     const out = checkCompleteness(
       [row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' })],
       root,
@@ -172,8 +214,8 @@ describe('checkCompleteness: single package, issues', () => {
 
 describe('checkCompleteness: multi-package', () => {
   it('reports per package independently', () => {
-    write('a-sdist/a-0.1.0.tar.gz');
-    // b's artifact is missing entirely
+    // a's sdist is present; b's artifact is missing entirely.
+    stageDirs({ 'a-sdist': ['a-0.1.0.tar.gz'] });
     const matrix: MatrixRow[] = [
       row({ name: 'a', kind: 'pypi', target: 'sdist', artifact_name: 'a-sdist' }),
       row({ name: 'b', kind: 'pypi', target: 'sdist', artifact_name: 'b-sdist' }),
@@ -185,7 +227,7 @@ describe('checkCompleteness: multi-package', () => {
 
   it('reports every missing target on a package, not just the first', () => {
     // Package c expects 3 matrix rows; only one of its artifacts is present.
-    write('c-wheel-x86/w.whl');
+    stageDirs({ 'c-wheel-x86': ['w.whl'] });
     const matrix: MatrixRow[] = [
       row({
         name: 'c',
@@ -218,7 +260,7 @@ describe('checkCompleteness: multi-package', () => {
 
 describe('requireCompleteness', () => {
   it('returns silently when every package is ok', () => {
-    write('demo-sdist/demo-0.1.0.tar.gz');
+    stageDirs({ 'demo-sdist': ['demo-0.1.0.tar.gz'] });
     expect(() =>
       requireCompleteness(
         [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],

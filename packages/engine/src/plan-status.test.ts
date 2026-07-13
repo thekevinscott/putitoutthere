@@ -1,151 +1,119 @@
 /**
- * `plan` publish/skip + skew unit coverage — drives the CLI end to end
- * (`run(['plan', …])`) against a real temp repo with only `global.fetch`
- * mocked (crates `isPublished`), the tier patch-coverage reads. Exercises
- * `computePlanStatus`, the skew detector, and the CLI rendering (both
- * `--json` and the human verdict marks). End-to-end behaviour is pinned
- * at the integration + e2e tiers; here we cover the wiring.
+ * `computePlanStatus` unit coverage (#412, #403 slice 4).
  *
- * Issue #412, #403 slice 4.
+ * The subject layers a per-package verdict (PUBLISH / SKIP / UNKNOWN)
+ * over the build matrix and derives dependency skew. Its collaborators
+ * are isolated: `loadConfig`, `plan`, and `handlerFor` are automocked and
+ * driven per scenario, so each case exercises the verdict loop and the
+ * degrade-to-`unknown` catch without a real repo or registry. The pure
+ * `computeSkew` runs for real. End-to-end behaviour (and the CLI's
+ * `--json` / human rendering) is pinned at the integration + e2e tiers.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { run } from './cli.js';
+import type { Package } from './config.js';
+import { loadConfig } from './config.js';
+import { handlerFor } from './handlers/index.js';
+import type { MatrixRow } from './plan.js';
+import { plan } from './plan.js';
+import { computePlanStatus } from './plan-status.js';
+import type { Handler } from './types.js';
 
-let repo: string;
-const stdoutChunks: string[] = [];
-
-function git(args: string[]): void {
-  execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
-}
-
-/** Mock crates.io `isPublished`: GET /api/v1/crates/{name}/{version}. */
-function mockRegistry(opts: { published?: string[]; transient?: string[] }): void {
-  const published = new Set(opts.published ?? []);
-  const transient = new Set(opts.transient ?? []);
-  vi.spyOn(global, 'fetch').mockImplementation((input) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const m = /\/api\/v1\/crates\/([^/?]+)\/([^/?]+)/.exec(url);
-    const name = m?.[1];
-    const version = m?.[2];
-    if (name !== undefined && transient.has(name)) {
-      return Promise.resolve(new Response('{}', { status: 503 }));
-    }
-    return Promise.resolve(
-      name !== undefined && version !== undefined && published.has(`${name}@${version}`)
-        ? new Response(JSON.stringify({ version: { num: version } }), { status: 200 })
-        : new Response('{"errors":[]}', { status: 404 }),
-    );
-  });
-}
-
-function writeConfig(body: string): void {
-  writeFileSync(join(repo, 'putitoutthere.toml'), body, 'utf8');
-  git(['add', '-A']);
-  git(['commit', '-q', '-m', 'config']);
-}
+vi.mock('./config.js');
+vi.mock('./plan.js');
+vi.mock('./handlers/index.js');
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'plan-status-unit-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  stdoutChunks.length = 0;
-  vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-    stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-    return true;
+  vi.clearAllMocks();
+});
+
+function pkg(name: string, depends_on: string[] = []): Package {
+  return {
+    name,
+    kind: 'crates',
+    crate: name,
+    path: `packages/${name}`,
+    globs: [`packages/${name}/**`],
+    depends_on,
+    first_version: '0.1.0',
+    tag_format: '{name}-v{version}',
+  };
+}
+
+function configWith(...packages: Package[]): void {
+  vi.mocked(loadConfig).mockReturnValue({
+    putitoutthere: { version: 1 },
+    packages,
   });
-  vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-});
+}
 
-afterEach(() => {
-  vi.restoreAllMocks();
-  rmSync(repo, { recursive: true, force: true });
-});
+function row(name: string): MatrixRow {
+  return {
+    name,
+    kind: 'crates',
+    version: '1.0.0',
+    target: 'noarch',
+    runs_on: 'ubuntu-latest',
+    artifact_name: `${name}-crate`,
+    artifact_path: 'target/package',
+    path: `packages/${name}`,
+  };
+}
 
-const TWO = `[putitoutthere]
-version = 1
-[[package]]
-name = "a"
-kind = "crates"
-crate = "acrate"
-path = "packages/a"
-globs = ["packages/a/**"]
-[[package]]
-name = "b"
-kind = "crates"
-crate = "bcrate"
-path = "packages/b"
-globs = ["packages/b/**"]
-`;
+/**
+ * Install a handler whose `isPublished` verdict is keyed by package name:
+ * `published` names resolve true (→ SKIP), `throws` names reject (→
+ * UNKNOWN), everything else resolves false (→ PUBLISH).
+ */
+function stubHandler(opts: { published?: string[]; throws?: string[] }): void {
+  const published = new Set(opts.published ?? []);
+  const throwing = new Set(opts.throws ?? []);
+  const handler: Handler = {
+    kind: 'crates',
+    isPublished: vi.fn((p: { name: string }) => {
+      if (throwing.has(p.name)) {return Promise.reject(new Error('registry down'));}
+      return Promise.resolve(published.has(p.name));
+    }),
+    latestVersion: vi.fn().mockResolvedValue(null),
+    trustPosture: vi.fn().mockResolvedValue('token'),
+    writeVersion: vi.fn().mockResolvedValue([]),
+    publish: vi.fn().mockResolvedValue({ status: 'published', url: 'x' }),
+  };
+  vi.mocked(handlerFor).mockReturnValue(handler);
+}
 
-describe('cli: plan publish/skip', () => {
-  it('emits {matrix, verdicts, skew} on --json', async () => {
-    writeConfig(TWO);
-    mockRegistry({ published: ['acrate@1.0.0'] }); // a SKIP, b PUBLISH
-    const code = await run([
-      'node', 'piot', 'plan', '--json', '--cwd', repo,
-      '--release-packages', 'a@1.0.0, b@1.0.0',
-    ]);
-    const out = JSON.parse(stdoutChunks.join('')) as {
-      matrix: Array<{ name: string }>;
-      verdicts: Array<{ package: string; verdict: string }>;
-      skew: unknown[];
-    };
+describe('computePlanStatus', () => {
+  it('assigns skip/publish verdicts per package and reports no skew when none applies', async () => {
+    configWith(pkg('a'), pkg('b'));
+    vi.mocked(plan).mockResolvedValue([row('a'), row('b')]);
+    stubHandler({ published: ['a'] }); // a already published → skip; b → publish
+
+    const out = await computePlanStatus({ cwd: '/repo', releasePackages: 'a@1.0.0, b@1.0.0' });
+
     expect(out.matrix.map((r) => r.name).sort()).toEqual(['a', 'b']);
     expect(Object.fromEntries(out.verdicts.map((v) => [v.package, v.verdict]))).toEqual({
       a: 'skip',
       b: 'publish',
     });
     expect(out.skew).toEqual([]);
-    expect(code).toBe(0);
   });
 
-  it('renders verdict marks + a skew warning in the human output', async () => {
-    writeConfig(`[putitoutthere]
-version = 1
-[[package]]
-name = "core"
-kind = "crates"
-crate = "corecrate"
-path = "packages/core"
-globs = ["packages/core/**"]
-[[package]]
-name = "wrap"
-kind = "crates"
-crate = "wrapcrate"
-path = "packages/wrap"
-globs = ["packages/wrap/**"]
-depends_on = ["core", "flaky"]
-[[package]]
-name = "flaky"
-kind = "crates"
-crate = "flakycrate"
-path = "packages/flaky"
-globs = ["packages/flaky/**"]
-`);
-    // core SKIP (live); wrap PUBLISH and depends on core (→ skew) + flaky
-    // (UNKNOWN, not skip → no skew pair); flaky 5xx → UNKNOWN.
-    mockRegistry({ published: ['corecrate@1.0.0'], transient: ['flakycrate'] });
-    const code = await run([
-      'node', 'piot', 'plan', '--cwd', repo,
-      '--release-packages', 'core@1.0.0, wrap@1.0.0, flaky@1.0.0',
-    ]);
-    const out = stdoutChunks.join('');
+  it('reports unknown for an unreachable registry and flags a publish-over-skip dependency skew', async () => {
+    // wrap PUBLISHes and depends on core (SKIP → skew) and flaky
+    // (UNKNOWN, not skip → no skew pair).
+    configWith(pkg('core'), pkg('wrap', ['core', 'flaky']), pkg('flaky'));
+    vi.mocked(plan).mockResolvedValue([row('core'), row('wrap'), row('flaky')]);
+    stubHandler({ published: ['core'], throws: ['flaky'] });
 
-    expect(out).toContain('publish plan:');
-    expect(out).toContain('core  1.0.0  SKIP');
-    expect(out).toContain('wrap  1.0.0  PUBLISH');
-    expect(out).toContain('flaky  1.0.0  UNKNOWN');
-    expect(out).toContain('version skew: wrap would PUBLISH while its dependency core SKIPs');
-    // flaky is a dependency of wrap but UNKNOWN, not skip — no skew pair.
-    expect(out).not.toContain('dependency flaky');
-    expect(code).toBe(0);
+    const out = await computePlanStatus({ cwd: '/repo' });
+
+    expect(Object.fromEntries(out.verdicts.map((v) => [v.package, v.verdict]))).toEqual({
+      core: 'skip',
+      wrap: 'publish',
+      flaky: 'unknown',
+    });
+    // The dependent publishing ahead of its skipped dependency is the skew.
+    expect(out.skew).toEqual([{ dependent: 'wrap', dependency: 'core' }]);
   });
 });

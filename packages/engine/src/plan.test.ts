@@ -5,25 +5,76 @@
  *
  * Issue #21. Plan: §12.4 (matrix contract), §11 (cascade), §10
  * (trailer), §14 (version).
+ *
+ * Isolation: this suite drives `plan`'s real config parse, cascade,
+ * version-bump, and row-building logic while mocking only its I/O
+ * collaborators — `readFileSync` (so `loadConfig` sees each test's
+ * TOML), the `git.js` observers (`headCommit`/`lastTag`/`diffNames`/
+ * `commitBody`/`commitParents`), and the two pypi helpers
+ * (`resolvePythonVersions`, `isVersionIndependentWheel`). `config.js`,
+ * `cascade.js`, `version.js`, `tag-template.js`, and the npm-platform
+ * helpers run for real, so every assertion below exercises the
+ * planner's genuine output.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
 import { plan } from './plan.js';
+import { resolvePythonVersions } from './python-versions.js';
+import { isVersionIndependentWheel } from './wheel-abi.js';
 
-// Mock resolvePythonVersions so plan.test.ts is insulated from
-// RELEASED_CPYTHON_VERSIONS growing. What the planner does with the
-// version list is what these tests cover; the resolution logic itself
-// is covered by python-versions.test.ts and the integration suite.
-vi.mock('./python-versions.js', () => ({
-  resolvePythonVersions: (
-    pkg: { python_versions?: readonly string[] },
-    _cwd: string,
-  ): string[] => {
+// Mock only the I/O boundary. `readFileSync` is driven so `loadConfig`'s
+// real `parseConfig` runs on each test's TOML; the `git.js` observers are
+// driven to describe the repo state the planner would otherwise read from
+// a real temp git repo; the pypi helpers are driven so the planner's
+// version-fan logic is exercised without touching the filesystem.
+vi.mock('node:fs');
+vi.mock('./git.js');
+vi.mock('./python-versions.js');
+vi.mock('./wheel-abi.js');
+
+// The planner treats `cwd` opaquely (it only threads it into the mocked
+// collaborators), so any string does. No path literals are asserted.
+const CWD = 'repo';
+const HEAD = 'HEADSHA';
+
+/** Drive `loadConfig` to see `toml` as the `putitoutthere.toml` contents. */
+function useToml(toml: string): void {
+  vi.mocked(readFileSync).mockReturnValue(toml);
+}
+
+/** The commit message the planner reads the `release:` trailer from. */
+function setHeadBody(msg: string): void {
+  vi.mocked(commitBody).mockReturnValue(msg);
+}
+
+/** Map each package name to its resolved last tag (or absent → first release). */
+function setTags(tags: Record<string, string>): void {
+  vi.mocked(lastTag).mockImplementation((name: string) => tags[name] ?? null);
+}
+
+/** Map each tag to the file paths changed since it (drives the cascade). */
+function setDiff(byTag: Record<string, string[]>): void {
+  vi.mocked(diffNames).mockImplementation((from: string) => byTag[from] ?? []);
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Sane defaults: HEAD is a plain, trailer-less, non-merge commit and no
+  // package has a tag (the first-release shape). Tests override per case.
+  vi.mocked(headCommit).mockReturnValue(HEAD);
+  vi.mocked(commitBody).mockReturnValue('feat: initial');
+  vi.mocked(commitParents).mockReturnValue(['parent']);
+  vi.mocked(lastTag).mockReturnValue(null);
+  vi.mocked(diffNames).mockReturnValue([]);
+  vi.mocked(isVersionIndependentWheel).mockReturnValue(false);
+  // Restore the real resolution shape the prior factory encoded: an
+  // explicit `python_versions` is sorted numerically, else a single
+  // default. The resolution logic itself is covered by
+  // python-versions.test.ts and the integration suite.
+  vi.mocked(resolvePythonVersions).mockImplementation((pkg) => {
     if (pkg.python_versions !== undefined) {
       return [...pkg.python_versions].sort((a, b) => {
         const av = a.split('.').map(Number);
@@ -36,35 +87,7 @@ vi.mock('./python-versions.js', () => ({
       });
     }
     return ['3.12'];
-  },
-}));
-
-let repo: string;
-function git(args: string[]): string {
-  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-}
-function commit(msg: string, files: Record<string, string> = {}): string {
-  for (const [p, c] of Object.entries(files)) {
-    const full = join(repo, p);
-    mkdirSync(dirname(full), { recursive: true });
-    writeFileSync(full, c, 'utf8');
-  }
-  git(['add', '-A']);
-  git(['commit', '-m', msg, '--allow-empty']);
-  return git(['rev-parse', 'HEAD']);
-}
-
-beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'plan-test-'));
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 'test@example.com']);
-  git(['config', 'user.name', 'Test']);
-  git(['config', 'commit.gpgsign', 'false']);
-  git(['config', 'tag.gpgsign', 'false']);
-});
-
-afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  });
 });
 
 const PUTITOUTTHERE_TOML = `
@@ -90,13 +113,9 @@ depends_on = ["lib-rust"]
 
 describe('plan: first release (no tags)', () => {
   it('cascades every package and uses first_version', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const names = matrix.map((r) => r.name);
     expect(names).toContain('lib-rust');
     expect(names).toContain('lib-python');
@@ -105,13 +124,9 @@ describe('plan: first release (no tags)', () => {
   });
 
   it('emits crates row + per-target pypi rows + sdist row', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const pypi = matrix.filter((r) => r.kind === 'pypi');
     const targets = pypi.map((r) => r.target);
     expect(targets).toContain('x86_64-unknown-linux-gnu');
@@ -124,13 +139,9 @@ describe('plan: first release (no tags)', () => {
   });
 
   it('artifact_name follows the {name}-(crate|wheel-{target}|sdist) convention', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.find((r) => r.name === 'lib-rust')!.artifact_name).toBe('lib-rust-crate');
     expect(matrix.find((r) => r.name === 'lib-python' && r.target === 'sdist')!.artifact_name).toBe(
       'lib-python-sdist',
@@ -147,9 +158,7 @@ describe('plan: first release (no tags)', () => {
   // actions/upload-artifact@v4 rejects. The planner now encodes `/`
   // to `__` so the round-trip works without consumer-side workarounds.
   it('encodes `/` in pkg.name to `__` for every artifact_name slot', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -174,16 +183,9 @@ build   = "napi"
 path    = "js/cachetta"
 targets = ["x86_64-unknown-linux-gnu"]
 globs   = ["js/cachetta/**"]
-`,
-      'utf8',
-    );
-    commit('feat: initial', {
-      'rust/core/lib.rs': '// rust',
-      'py/cachetta/lib.py': '# python',
-      'js/cachetta/index.js': '// js',
-    });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const names = matrix.map((r) => r.artifact_name);
 
     // No artifact_name should contain a forward slash.
@@ -215,13 +217,9 @@ globs   = ["js/cachetta/**"]
   // values produce nested upload-artifact layouts; the directory
   // shape uploads contents flat under `<artifact_name>/`.
   it('emits directory-shaped `artifact_path` for every slot (no glob)', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     for (const row of matrix) {
       expect(row.artifact_path).not.toMatch(/\*/);
     }
@@ -238,9 +236,7 @@ globs   = ["js/cachetta/**"]
   });
 
   it('leaves the human-facing `name` field unchanged (encoding is artifact-side only)', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -249,131 +245,107 @@ name  = "py/cachetta"
 kind  = "pypi"
 path  = "py/cachetta"
 globs = ["py/cachetta/**"]
-`,
-      'utf8',
-    );
-    commit('feat: initial', { 'py/cachetta/lib.py': '# python' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.every((r) => r.name === 'py/cachetta')).toBe(true);
   });
 });
 
 describe('plan: subsequent release with last_tag', () => {
   it('only cascades packages whose globs changed', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    // Both packages tagged at the same seed commit; the only change since
+    // is to python, so both tags diff to the same python-only file set.
+    setDiff({
+      'lib-rust-v0.1.0': ['packages/python/lib.py'],
+      'lib-python-v0.1.0': ['packages/python/lib.py'],
     });
-    git(['tag', '-a', 'lib-rust-v0.1.0', '-m', 'r1']);
-    git(['tag', '-a', 'lib-python-v0.1.0', '-m', 'p1']);
+    setHeadBody('fix: only python');
 
-    commit('fix: only python', { 'packages/python/lib.py': '# python v2' });
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.map((r) => r.name).sort()).toEqual([
       'lib-python', 'lib-python', 'lib-python',
     ]);
   });
 
   it('cascades python via depends_on when only rust files changed', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setDiff({
+      'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
+      'lib-python-v0.1.0': ['packages/rust/lib.rs'],
     });
-    git(['tag', '-a', 'lib-rust-v0.1.0', '-m', 'r1']);
-    git(['tag', '-a', 'lib-python-v0.1.0', '-m', 'p1']);
+    setHeadBody('fix: only rust');
 
-    commit('fix: only rust', { 'packages/rust/lib.rs': '// rust v2' });
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const names = new Set(matrix.map((r) => r.name));
     expect(names).toContain('lib-rust');
     expect(names).toContain('lib-python');
   });
 
   it('default bump is patch from the last tag', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.3.4', 'lib-python': 'lib-python-v1.2.0' });
+    setDiff({
+      'lib-rust-v0.3.4': ['packages/rust/lib.rs', 'packages/python/lib.py'],
+      'lib-python-v1.2.0': ['packages/rust/lib.rs', 'packages/python/lib.py'],
     });
-    git(['tag', '-a', 'lib-rust-v0.3.4', '-m', 'r']);
-    git(['tag', '-a', 'lib-python-v1.2.0', '-m', 'p']);
+    setHeadBody('fix: x');
 
-    commit('fix: x', { 'packages/rust/lib.rs': '// v2', 'packages/python/lib.py': '# v2' });
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('0.3.5');
     expect(matrix.find((r) => r.name === 'lib-python')!.version).toBe('1.2.1');
   });
 
   it('release: minor trailer bumps minor for cascaded packages', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setDiff({
+      'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
+      'lib-python-v0.1.0': ['packages/rust/lib.rs'],
     });
-    git(['tag', '-a', 'lib-rust-v0.1.0', '-m', 'r']);
-    git(['tag', '-a', 'lib-python-v0.1.0', '-m', 'p']);
+    setHeadBody('feat: add x\n\nrelease: minor');
 
-    commit('feat: add x\n\nrelease: minor', { 'packages/rust/lib.rs': '// v2' });
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('0.2.0');
   });
 
   it('release: skip suppresses release entirely', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
-    git(['tag', '-a', 'lib-rust-v0.1.0', '-m', 'r']);
-    git(['tag', '-a', 'lib-python-v0.1.0', '-m', 'p']);
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setHeadBody('chore: typo\n\nrelease: skip');
 
-    commit('chore: typo\n\nrelease: skip', {
-      'packages/rust/lib.rs': '// v2',
-    });
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix).toEqual([]);
   });
 
   it('release: list scopes the bump to specific packages', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setDiff({
+      'lib-rust-v0.1.0': ['packages/rust/lib.rs', 'packages/python/lib.py'],
+      'lib-python-v0.1.0': ['packages/rust/lib.rs', 'packages/python/lib.py'],
     });
-    git(['tag', '-a', 'lib-rust-v0.1.0', '-m', 'r']);
-    git(['tag', '-a', 'lib-python-v0.1.0', '-m', 'p']);
+    setHeadBody('feat: x\n\nrelease: major [lib-python]');
 
-    commit('feat: x\n\nrelease: major [lib-python]', {
-      'packages/rust/lib.rs': '// v2',
-      'packages/python/lib.py': '# v2',
-    });
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     // python gets major (listed); rust still cascades at default patch.
     expect(matrix.find((r) => r.name === 'lib-python')!.version).toBe('1.0.0');
     expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('0.1.1');
   });
 
   it('returns [] when no path changes match', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setDiff({
+      'lib-rust-v0.1.0': ['README.md'],
+      'lib-python-v0.1.0': ['README.md'],
     });
-    git(['tag', '-a', 'lib-rust-v0.1.0', '-m', 'r']);
-    git(['tag', '-a', 'lib-python-v0.1.0', '-m', 'p']);
+    setHeadBody('docs: README');
 
-    commit('docs: README', { 'README.md': 'hi' });
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix).toEqual([]);
   });
 
@@ -405,23 +377,20 @@ kind  = "crates"
 path  = "packages/c"
 globs = ["packages/c/**"]
 `;
-    writeFileSync(join(repo, 'putitoutthere.toml'), sharedTomlStructure, 'utf8');
-    commit('feat: initial', {
-      'packages/a/Cargo.toml': '[package]\nname="a"',
-      'packages/b/Cargo.toml': '[package]\nname="b"',
-      'packages/c/Cargo.toml': '[package]\nname="c"',
-    });
+    useToml(sharedTomlStructure);
     // All three tag at the same commit — this is the cache-hit scenario.
-    git(['tag', '-a', 'pkg-a-v0.1.0', '-m', 'a']);
-    git(['tag', '-a', 'pkg-b-v0.1.0', '-m', 'b']);
-    git(['tag', '-a', 'pkg-c-v0.1.0', '-m', 'c']);
-
+    setTags({ 'pkg-a': 'pkg-a-v0.1.0', 'pkg-b': 'pkg-b-v0.1.0', 'pkg-c': 'pkg-c-v0.1.0' });
     // Change only pkg-b. Only pkg-b should cascade; pkg-a/pkg-c must
     // see the same diff set via the cache but correctly decide they
     // don't match their own path globs.
-    commit('fix: only b', { 'packages/b/src.rs': '// b' });
+    setDiff({
+      'pkg-a-v0.1.0': ['packages/b/src.rs'],
+      'pkg-b-v0.1.0': ['packages/b/src.rs'],
+      'pkg-c-v0.1.0': ['packages/b/src.rs'],
+    });
+    setHeadBody('fix: only b');
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.map((r) => r.name).sort()).toEqual(['pkg-b']);
   });
 });
@@ -452,10 +421,9 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 
 describe('plan: npm kinds', () => {
   it('vanilla npm emits a single noarch row', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), NPM_TOML, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'export const x = 1;' });
+    useToml(NPM_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix).toHaveLength(1);
     expect(matrix[0]).toMatchObject({
       name: 'lib-ts',
@@ -467,10 +435,9 @@ describe('plan: npm kinds', () => {
   });
 
   it('napi emits per-target rows + a main row', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), NPM_NAPI_TOML, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+    useToml(NPM_NAPI_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const targets = matrix.map((r) => r.target).sort();
     expect(targets).toEqual(['main', 'x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu']);
     const main = matrix.find((r) => r.target === 'main')!;
@@ -485,7 +452,7 @@ describe('plan: npm kinds', () => {
   });
 
   it('honors per-target runner override on napi npm (#159)', async () => {
-    const toml = `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -500,11 +467,9 @@ targets = [
   { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" },
   { triple = "aarch64-apple-darwin",      runner = "macos-14" },
 ]
-`;
-    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     // Bare string → hardcoded mapping default.
     const linux = matrix.find((r) => r.target === 'x86_64-unknown-linux-gnu')!;
     expect(linux.runs_on).toBe('ubuntu-latest');
@@ -520,7 +485,7 @@ targets = [
   });
 
   it('honors per-target runner override on maturin pypi (#159)', async () => {
-    const toml = `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -534,11 +499,9 @@ targets = [
   "x86_64-unknown-linux-gnu",
   { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" },
 ]
-`;
-    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
-    commit('feat: initial', { 'packages/py/lib.py': '# py' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const arm = matrix.find((r) => r.target === 'aarch64-unknown-linux-gnu')!;
     expect(arm.runs_on).toBe('ubuntu-24.04-arm');
     expect(arm.artifact_name).toBe('lib-py-wheel-aarch64-unknown-linux-gnu');
@@ -564,19 +527,10 @@ globs   = ["packages/ts/**"]
 build   = "napi"
 targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 `;
-    writeFileSync(join(repo, 'putitoutthere.toml'), bare, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
-    const bareMatrix = await plan({ cwd: repo });
+    useToml(bare);
+    const bareMatrix = await plan({ cwd: CWD });
 
-    // Reset the repo and rerun with the object-form equivalent.
-    rmSync(repo, { recursive: true, force: true });
-    repo = mkdtempSync(join(tmpdir(), 'plan-test-'));
-    git(['init', '-q', '-b', 'main']);
-    git(['config', 'user.email', 'test@example.com']);
-    git(['config', 'user.name', 'Test']);
-    git(['config', 'commit.gpgsign', 'false']);
-    git(['config', 'tag.gpgsign', 'false']);
-
+    // Rerun with the object-form equivalent.
     const objForm = `
 [putitoutthere]
 version = 1
@@ -592,15 +546,14 @@ targets = [
   { triple = "x86_64-pc-windows-msvc" },
 ]
 `;
-    writeFileSync(join(repo, 'putitoutthere.toml'), objForm, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
-    const objMatrix = await plan({ cwd: repo });
+    useToml(objForm);
+    const objMatrix = await plan({ cwd: CWD });
 
     expect(objMatrix).toEqual(bareMatrix);
   });
 
   it('multi-mode npm (#dirsql) emits per-(mode, triple) rows with mode-infix artifact names', async () => {
-    const toml = `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -614,11 +567,9 @@ build   = [
   { mode = "bundled-cli", name = "@dirsql/cli-{triple}" },
 ]
 targets = ["linux-x64-gnu", "darwin-arm64"]
-`;
-    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     // 2 modes × 2 triples + 1 main row = 5 total
     expect(matrix).toHaveLength(5);
 
@@ -646,7 +597,7 @@ targets = ["linux-x64-gnu", "darwin-arm64"]
   });
 
   it('single-entry array form preserves single-mode artifact naming (no mode infix)', async () => {
-    const toml = `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -657,11 +608,9 @@ path    = "packages/ts"
 globs   = ["packages/ts/**"]
 build   = ["napi"]
 targets = ["x86_64-unknown-linux-gnu"]
-`;
-    writeFileSync(join(repo, 'putitoutthere.toml'), toml, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const linux = matrix.find((r) => r.target === 'x86_64-unknown-linux-gnu')!;
     // Length-1 array equivalent to string form: no mode infix.
     expect(linux.artifact_name).toBe('lib-napi-x86_64-unknown-linux-gnu');
@@ -672,7 +621,7 @@ targets = ["x86_64-unknown-linux-gnu"]
     // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
     // TRIPLE_MAP entry. Without this guard, the mistake surfaces only
     // mid-publish, after the CI matrix has already burned compute.
-    const unmappedToml = `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -683,14 +632,12 @@ path    = "packages/ts"
 globs   = ["packages/ts/**"]
 build   = "napi"
 targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
-`;
-    writeFileSync(join(repo, 'putitoutthere.toml'), unmappedToml, 'utf8');
-    commit('feat: initial', { 'packages/ts/index.ts': 'x' });
+`);
 
     // `plan()` throws synchronously from `rowsForPackage` before it
     // can wrap the result in a Promise, so assert on the synchronous
     // call rather than `.rejects`.
-    expect(() => plan({ cwd: repo })).toThrow(
+    expect(() => plan({ cwd: CWD })).toThrow(
       /lib-napi.*mips64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
     );
   });
@@ -698,13 +645,9 @@ targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
 
 describe('plan: matrix row shape', () => {
   it('every row has the required fields', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     for (const row of matrix) {
       expect(row.name).toBeTruthy();
       expect(row.kind).toBeTruthy();
@@ -716,13 +659,9 @@ describe('plan: matrix row shape', () => {
   });
 
   it('runs_on defaults to ubuntu-latest for sdist + crates rows', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.find((r) => r.name === 'lib-rust')!.runs_on).toBe('ubuntu-latest');
     expect(matrix.find((r) => r.name === 'lib-python' && r.target === 'sdist')!.runs_on).toBe(
       'ubuntu-latest',
@@ -730,13 +669,9 @@ describe('plan: matrix row shape', () => {
   });
 
   it('runs_on per target uses the platform-specific default', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const linux = matrix.find(
       (r) => r.name === 'lib-python' && r.target === 'x86_64-unknown-linux-gnu',
     )!;
@@ -750,28 +685,23 @@ describe('plan: matrix row shape', () => {
 
 describe('plan: merge-commit trailer resolution', () => {
   it('reads the trailer from the feature parent when HEAD is a merge commit', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
+    useToml(PUTITOUTTHERE_TOML);
     // Seed main + tag so the cascade has something to diff against.
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setDiff({
+      'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
+      'lib-python-v0.1.0': ['packages/rust/lib.rs'],
     });
-    git(['tag', 'lib-rust-v0.1.0']);
-    git(['tag', 'lib-python-v0.1.0']);
+    // HEAD is a merge commit: its body has no trailer; the trailer lives
+    // on the second (feature) parent whose message carried `release: minor`.
+    vi.mocked(commitParents).mockReturnValue(['main-parent', 'feat-parent']);
+    vi.mocked(commitBody).mockImplementation((sha: string) =>
+      sha === 'feat-parent'
+        ? 'change rust\n\nrelease: minor'
+        : 'Merge pull request #1 from feat',
+    );
 
-    // Feature branch: change + trailer on the feature tip.
-    git(['checkout', '-b', 'feat']);
-    commit('change rust\n\nrelease: minor', {
-      'packages/rust/lib.rs': '// rust v2',
-    });
-
-    // Back to main, merge with --no-ff so a merge commit is created.
-    // The merge commit body has no trailer; the trailer lives on the
-    // second parent. parseTrailer on HEAD would return null.
-    git(['checkout', 'main']);
-    git(['merge', '--no-ff', 'feat', '-m', 'Merge pull request #1 from feat']);
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     // Without the fallback this would be empty (cascade runs, but the
     // bump defaults to patch → 0.1.1). With the fallback we see 0.2.0.
     const rust = matrix.find((r) => r.name === 'lib-rust');
@@ -779,35 +709,32 @@ describe('plan: merge-commit trailer resolution', () => {
   });
 
   it('still prefers the HEAD trailer when present (non-merge commits)', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setDiff({
+      'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
+      'lib-python-v0.1.0': ['packages/rust/lib.rs'],
     });
-    git(['tag', 'lib-rust-v0.1.0']);
-    git(['tag', 'lib-python-v0.1.0']);
-    commit('change\n\nrelease: major', { 'packages/rust/lib.rs': '// rust v2' });
+    setHeadBody('change\n\nrelease: major');
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const rust = matrix.find((r) => r.name === 'lib-rust');
     expect(rust?.version).toBe('1.0.0');
   });
 
   it('returns null when neither HEAD nor merge parents carry a trailer', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
+    setDiff({
+      'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
+      'lib-python-v0.1.0': ['packages/rust/lib.rs'],
     });
-    git(['tag', 'lib-rust-v0.1.0']);
-    git(['tag', 'lib-python-v0.1.0']);
+    vi.mocked(commitParents).mockReturnValue(['main-parent', 'feat-parent']);
+    vi.mocked(commitBody).mockImplementation((sha: string) =>
+      sha === 'feat-parent' ? 'change rust (no trailer)' : 'Merge feat',
+    );
 
-    git(['checkout', '-b', 'feat']);
-    commit('change rust (no trailer)', { 'packages/rust/lib.rs': '// rust v2' });
-    git(['checkout', 'main']);
-    git(['merge', '--no-ff', 'feat', '-m', 'Merge feat']);
-
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     // Default bump = patch.
     const rust = matrix.find((r) => r.name === 'lib-rust');
     expect(rust?.version).toBe('0.1.1');
@@ -816,9 +743,7 @@ describe('plan: merge-commit trailer resolution', () => {
 
 describe('plan: bundle_cli passthrough (#217)', () => {
   it('attaches bundle_cli to per-target wheel rows but NOT to the sdist row', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -834,12 +759,9 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 bin = "my-cli"
 stage_to = "src/my_py/_binary"
 crate_path = "crates/my-rust"
-`,
-      'utf8',
-    );
-    commit('seed', { 'py/my-py/pyproject.toml': 'x' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const wheelRows = matrix.filter((r) => r.target !== 'sdist');
     const sdistRow = matrix.find((r) => r.target === 'sdist');
 
@@ -861,10 +783,9 @@ crate_path = "crates/my-rust"
   });
 
   it('omits bundle_cli entirely when the package does not declare one', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML);
-    commit('seed', { 'packages/rust/Cargo.toml': 'x' });
+    useToml(PUTITOUTTHERE_TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     for (const r of matrix) {
       expect(r.bundle_cli).toBeUndefined();
     }
@@ -873,9 +794,7 @@ crate_path = "crates/my-rust"
   // #300: features / no_default_features get plumbed through the planner so
   // the matrix workflow can pass them to `cargo build`.
   it('passes features and no_default_features through to per-target wheel rows', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -893,12 +812,9 @@ stage_to = "src/my_py/_binary"
 crate_path = "crates/my-rust"
 features = ["cli"]
 no_default_features = true
-`,
-      'utf8',
-    );
-    commit('seed', { 'py/my-py/pyproject.toml': 'x' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const wheelRow = matrix.find((r) => r.target !== 'sdist');
     expect(wheelRow?.bundle_cli).toEqual({
       bin: 'my-cli',
@@ -929,19 +845,17 @@ build = "hatch"
 `;
 
   it('emits an sdist row AND a wheel-any row for a pure-Python hatch package', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
-    commit('feat: initial', { 'py/lib.py': '# python' });
+    useToml(TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const targets = matrix.map((r) => r.target).sort();
     expect(targets).toEqual(['any', 'sdist']);
   });
 
   it('wheel-any row uses artifact_name `<safe>-wheel-any` and carries build = "hatch"', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
-    commit('feat: initial', { 'py/lib.py': '# python' });
+    useToml(TOML);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const wheel = matrix.find((r) => r.target === 'any');
     expect(wheel).toBeDefined();
     expect(wheel!.artifact_name).toBe('py-hatch-wheel-any');
@@ -951,9 +865,7 @@ build = "hatch"
   });
 
   it('setuptools still emits only an sdist row (no wheel-any)', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -963,21 +875,16 @@ kind  = "pypi"
 path  = "py"
 globs = ["py/**"]
 build = "setuptools"
-`,
-      'utf8',
-    );
-    commit('feat: initial', { 'py/lib.py': '# python' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(matrix.map((r) => r.target)).toEqual(['sdist']);
   });
 });
 
 describe('plan: npm bundle_cli passthrough (#298)', () => {
   it('attaches bundle_cli to per-target bundled-cli rows but NOT to the main row', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -992,12 +899,9 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 [package.bundle_cli]
 bin = "my-cli"
 crate_path = "crates/my-cli"
-`,
-      'utf8',
-    );
-    commit('seed', { 'packages/ts-cli/package.json': '{}' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const perTarget = matrix.filter((r) => r.target !== 'main');
     const mainRow = matrix.find((r) => r.target === 'main');
 
@@ -1018,9 +922,7 @@ crate_path = "crates/my-cli"
   });
 
   it('attaches bundle_cli only to bundled-cli rows in a multi-mode (napi + bundled-cli) build', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -1038,12 +940,9 @@ targets = ["x86_64-unknown-linux-gnu"]
 [package.bundle_cli]
 bin = "my-cli"
 crate_path = "crates/my-cli"
-`,
-      'utf8',
-    );
-    commit('seed', { 'packages/ts/package.json': '{}' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const napiRow = matrix.find((r) => r.build === 'napi' && r.target !== 'main');
     const bundledRow = matrix.find((r) => r.build === 'bundled-cli' && r.target !== 'main');
     const mainRow = matrix.find((r) => r.target === 'main');
@@ -1064,9 +963,7 @@ crate_path = "crates/my-cli"
   });
 
   it('passes features and no_default_features through to per-target bundled-cli rows', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -1082,12 +979,9 @@ targets = ["x86_64-unknown-linux-gnu"]
 bin = "my-cli"
 features = ["cli"]
 no_default_features = true
-`,
-      'utf8',
-    );
-    commit('seed', { 'package.json': '{}' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     const perTarget = matrix.find((r) => r.target !== 'main');
     expect(perTarget?.bundle_cli).toEqual({
       bin: 'my-cli',
@@ -1098,9 +992,7 @@ no_default_features = true
   });
 
   it('omits bundle_cli entirely on bundled-cli rows when the package does not declare one', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -1111,12 +1003,9 @@ path = "."
 globs = ["**"]
 build = "bundled-cli"
 targets = ["x86_64-unknown-linux-gnu"]
-`,
-      'utf8',
-    );
-    commit('seed', { 'package.json': '{}' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     for (const r of matrix) {
       expect(r.bundle_cli).toBeUndefined();
     }
@@ -1140,9 +1029,7 @@ describe('plan: npm bundled-cli rust_target (#387)', () => {
     (r as Record<string, unknown>)['rust_target'] as string | undefined;
 
   it('maps each napi-flavor target to its Rust triple on the bundled-cli rows, not the main row', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -1157,12 +1044,9 @@ targets = ["linux-x64-gnu", "darwin-arm64", "win32-x64-msvc"]
 [package.bundle_cli]
 bin = "my-cli"
 crate_path = "crates/my-cli"
-`,
-      'utf8',
-    );
-    commit('seed', { 'packages/ts/package.json': '{}' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
 
     expect(rustTarget(matrix.find((r) => r.target === 'linux-x64-gnu'))).toBe(
       'x86_64-unknown-linux-gnu',
@@ -1179,9 +1063,7 @@ crate_path = "crates/my-cli"
   });
 
   it('passes a rust-flavor target through unchanged (identity)', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -1196,21 +1078,16 @@ targets = ["x86_64-unknown-linux-gnu"]
 [package.bundle_cli]
 bin = "my-cli"
 crate_path = "crates/my-cli"
-`,
-      'utf8',
-    );
-    commit('seed', { 'packages/ts/package.json': '{}' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
     expect(rustTarget(matrix.find((r) => r.target === 'x86_64-unknown-linux-gnu'))).toBe(
       'x86_64-unknown-linux-gnu',
     );
   });
 
   it('sets rust_target only on the bundled-cli row of a multi-mode (napi + bundled-cli) build', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `
+    useToml(`
 [putitoutthere]
 version = 1
 
@@ -1228,12 +1105,9 @@ targets = ["linux-x64-gnu"]
 [package.bundle_cli]
 bin = "my-cli"
 crate_path = "crates/my-cli"
-`,
-      'utf8',
-    );
-    commit('seed', { 'packages/ts/package.json': '{}' });
+`);
 
-    const matrix = await plan({ cwd: repo });
+    const matrix = await plan({ cwd: CWD });
 
     // The bundled-cli row carries the mapped Rust triple…
     expect(
@@ -1267,12 +1141,8 @@ globs   = ["pkg/**"]
     (r as Record<string, unknown>)['python_version'] as string | undefined;
 
   it('fans the wheel matrix across the resolved python version set', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), `${TOML}python_versions = ["3.11", "3.12", "3.13"]\n`, 'utf8');
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
-      'pkg/lib.rs': '// rust',
-    });
-    const matrix = await plan({ cwd: repo });
+    useToml(`${TOML}python_versions = ["3.11", "3.12", "3.13"]\n`);
+    const matrix = await plan({ cwd: CWD });
     const wheels = matrix.filter(
       (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
     );
@@ -1280,12 +1150,8 @@ globs   = ["pkg/**"]
   });
 
   it('suffixes wheel artifact names per python version when more than one applies', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), `${TOML}python_versions = ["3.12", "3.13"]\n`, 'utf8');
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
-      'pkg/lib.rs': '// rust',
-    });
-    const matrix = await plan({ cwd: repo });
+    useToml(`${TOML}python_versions = ["3.12", "3.13"]\n`);
+    const matrix = await plan({ cwd: CWD });
     const wheels = matrix.filter(
       (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
     );
@@ -1296,16 +1162,8 @@ globs   = ["pkg/**"]
   });
 
   it('a python_versions override pins the wheel matrix to the subset', async () => {
-    writeFileSync(
-      join(repo, 'putitoutthere.toml'),
-      `${TOML}python_versions = ["3.10"]\n`,
-      'utf8',
-    );
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\nrequires-python = ">=3.10"\n',
-      'pkg/lib.rs': '// rust',
-    });
-    const matrix = await plan({ cwd: repo });
+    useToml(`${TOML}python_versions = ["3.10"]\n`);
+    const matrix = await plan({ cwd: CWD });
     const wheels = matrix.filter(
       (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
     );
@@ -1316,12 +1174,8 @@ globs   = ["pkg/**"]
   });
 
   it('every pypi row carries a python_version, including the sdist row', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), `${TOML}python_versions = ["3.11", "3.12", "3.13"]\n`, 'utf8');
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
-      'pkg/lib.rs': '// rust',
-    });
-    const matrix = await plan({ cwd: repo });
+    useToml(`${TOML}python_versions = ["3.11", "3.12", "3.13"]\n`);
+    const matrix = await plan({ cwd: CWD });
     const pypi = matrix.filter((r) => r.kind === 'pypi');
     expect(pypi.length).toBeGreaterThan(0);
     for (const row of pypi) {expect(typeof pyVer(row)).toBe('string');}
@@ -1330,12 +1184,8 @@ globs   = ["pkg/**"]
   });
 
   it('falls back to a single default version when requires-python is absent', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
-      'pkg/lib.rs': '// rust',
-    });
-    const matrix = await plan({ cwd: repo });
+    useToml(TOML);
+    const matrix = await plan({ cwd: CWD });
     const wheels = matrix.filter(
       (r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu',
     );
@@ -1346,11 +1196,11 @@ globs   = ["pkg/**"]
 });
 
 describe('plan: version-independent maturin wheels collapse the fan (#401)', () => {
-  // `isVersionIndependentWheel` is NOT mocked here (only resolvePythonVersions
-  // is), so these tests write a real `pkg/pyproject.toml` / `pkg/Cargo.toml`
-  // and assert the planner collapses a genuine multi-version fan (3 versions)
-  // to a single wheel row — the N→1 reduction, not the 1→1 no-op the maturin
-  // fixture happens to exercise.
+  // `isVersionIndependentWheel` is driven per case here (only its return
+  // value matters to the planner): the two collapsing cases set it `true`
+  // and the plain-extension case leaves the default `false`. Combined with
+  // a genuine 3-version fan (via `resolvePythonVersions`), this asserts the
+  // N→1 reduction, not the 1→1 no-op a single-version fixture exercises.
   const TOML = `
 [putitoutthere]
 version = 1
@@ -1371,38 +1221,27 @@ python_versions = ["3.11", "3.12", "3.13"]
     matrix.filter((r) => r.kind === 'pypi' && r.target === 'x86_64-unknown-linux-gnu');
 
   it('collapses a `bindings = "bin"` wheel to one unsuffixed row despite a 3-version fan', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n\n[tool.maturin]\nbindings = "bin"\n',
-      'pkg/lib.rs': '// rust',
-    });
-    const wheels = wheelRows(await plan({ cwd: repo }));
+    useToml(TOML);
+    vi.mocked(isVersionIndependentWheel).mockReturnValue(true);
+    const wheels = wheelRows(await plan({ cwd: CWD }));
     expect(wheels).toHaveLength(1);
     expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
     expect(pyVer(wheels[0]!)).toBe('3.13');
   });
 
   it('collapses a pyo3 abi3 Cargo wheel to one unsuffixed row despite a 3-version fan', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
-      'pkg/Cargo.toml':
-        '[package]\nname = "py-lib"\n\n[dependencies]\npyo3 = { version = "0.22", features = ["extension-module", "abi3-py38"] }\n',
-    });
-    const wheels = wheelRows(await plan({ cwd: repo }));
+    useToml(TOML);
+    vi.mocked(isVersionIndependentWheel).mockReturnValue(true);
+    const wheels = wheelRows(await plan({ cwd: CWD }));
     expect(wheels).toHaveLength(1);
     expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
     expect(pyVer(wheels[0]!)).toBe('3.13');
   });
 
   it('keeps the full fan for a plain extension module (no abi3, no bin bindings)', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), TOML, 'utf8');
-    commit('feat: initial', {
-      'pkg/pyproject.toml': '[project]\nname = "py-lib"\n',
-      'pkg/Cargo.toml':
-        '[package]\nname = "py-lib"\n\n[dependencies]\npyo3 = { version = "0.22", features = ["extension-module"] }\n',
-    });
-    const wheels = wheelRows(await plan({ cwd: repo }));
+    useToml(TOML);
+    // isVersionIndependentWheel defaults to false (beforeEach): no collapse.
+    const wheels = wheelRows(await plan({ cwd: CWD }));
     expect(wheels.map((r) => r.artifact_name).sort()).toEqual([
       'py-lib-wheel-x86_64-unknown-linux-gnu-py3.11',
       'py-lib-wheel-x86_64-unknown-linux-gnu-py3.12',
@@ -1419,49 +1258,37 @@ describe('plan: manual release (release-packages)', () => {
   // override that releases exactly the named packages anyway.
 
   it('releases only the named package even with no changes since its tag', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
-    git(['tag', 'lib-rust-v1.2.3']);
-    git(['tag', 'lib-python-v1.2.3']);
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v1.2.3', 'lib-python': 'lib-python-v1.2.3' });
 
-    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@minor' });
+    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust@minor' });
     const names = [...new Set(matrix.map((r) => r.name))];
     expect(names).toEqual(['lib-rust']);
     expect(matrix.every((r) => r.version === '1.3.0')).toBe(true);
   });
 
   it('bumps a bare name by patch', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
-    git(['tag', 'lib-rust-v1.2.3']);
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v1.2.3' });
 
-    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust' });
+    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust' });
     expect(matrix.every((r) => r.version === '1.2.4')).toBe(true);
   });
 
   it('uses an explicit version verbatim', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
-    git(['tag', 'lib-rust-v1.2.3']);
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v1.2.3' });
 
-    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@2.0.1' });
+    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust@2.0.1' });
     expect(matrix.every((r) => r.version === '2.0.1')).toBe(true);
   });
 
   it('releases multiple named packages at their per-package versions', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
-    git(['tag', 'lib-rust-v1.2.3']);
-    git(['tag', 'lib-python-v0.4.0']);
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v1.2.3', 'lib-python': 'lib-python-v0.4.0' });
 
     const matrix = await plan({
-      cwd: repo,
+      cwd: CWD,
       releasePackages: 'lib-rust@major, lib-python@9.9.9',
     });
     expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('2.0.0');
@@ -1469,36 +1296,31 @@ describe('plan: manual release (release-packages)', () => {
   });
 
   it('ignores change-detected packages not named in the spec', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', {
-      'packages/rust/lib.rs': '// rust',
-      'packages/python/lib.py': '# python',
-    });
-    git(['tag', 'lib-rust-v1.2.3']);
-    git(['tag', 'lib-python-v1.2.3']);
-    // A real change to lib-python lands after the tags.
-    commit('feat: python change', { 'packages/python/lib.py': '# changed' });
+    useToml(PUTITOUTTHERE_TOML);
+    setTags({ 'lib-rust': 'lib-rust-v1.2.3', 'lib-python': 'lib-python-v1.2.3' });
+    // A real change to lib-python lands after the tags — but the manual
+    // path bypasses change detection entirely, so it's irrelevant.
+    setHeadBody('feat: python change');
 
-    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@patch' });
+    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust@patch' });
     const names = [...new Set(matrix.map((r) => r.name))];
     expect(names).toEqual(['lib-rust']);
   });
 
   it('uses first_version for a named package that has no tag', async () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
+    useToml(PUTITOUTTHERE_TOML);
+    // No tags: lib-rust has never been released.
 
-    const matrix = await plan({ cwd: repo, releasePackages: 'lib-rust@minor' });
+    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust@minor' });
     expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
   });
 
   it('throws when a named package is not declared in the config', () => {
-    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
-    commit('feat: initial', { 'packages/rust/lib.rs': '// rust' });
+    useToml(PUTITOUTTHERE_TOML);
 
     // Like `loadConfig`, the manual planner rejects bad input
     // synchronously — before any promise is returned.
-    expect(() => plan({ cwd: repo, releasePackages: 'lib-ghost@minor' })).toThrow(
+    expect(() => plan({ cwd: CWD, releasePackages: 'lib-ghost@minor' })).toThrow(
       /lib-ghost/,
     );
   });

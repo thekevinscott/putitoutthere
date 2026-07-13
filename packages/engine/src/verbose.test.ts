@@ -3,40 +3,109 @@
  *
  * Plan: §22.4.
  * Issue #15.
+ *
+ * Unit-isolated: `verbose.ts`'s two collaborators are mocked so this
+ * suite exercises only `dumpFailure`'s own branching.
+ *  - `node:fs` is automocked; the markdown written to
+ *    `$GITHUB_STEP_SUMMARY` is asserted through the captured
+ *    `appendFileSync` call rather than a real temp file.
+ *  - `./log.js` is automocked; the pure `redact` helper is restored with
+ *    a tiny faithful reimplementation (env-key secret match + length
+ *    floor + longest-first replacement with an 8-hex marker) so the
+ *    redaction contract is still exercised, and the structured record is
+ *    asserted through a fake logger's `error` mock instead of parsing
+ *    JSON off a real stream.
+ *
+ * The GHA-annotation cases capture `process.stdout.write` directly, as
+ * the implementation writes there and it is not a module boundary.
  */
 
-import { Writable } from 'node:stream';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { appendFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { dumpFailure, type FailureContext } from './verbose.js';
-import { createLogger } from './log.js';
+import { redact } from './log.js';
 
-class BufStream extends Writable {
-  chunks: string[] = [];
-  override _write(chunk: Buffer, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString('utf8'));
-    cb();
+vi.mock('node:fs');
+vi.mock('./log.js');
+
+/**
+ * Credential-shaped env-var matcher — copied from `log.ts` so the mocked
+ * `redact` stays faithful to which keys the real redactor treats as
+ * secrets. Word-boundary anchored so `TOKENIZER`/`KEYCLOAK`-style names
+ * don't false-positive.
+ */
+const SECRET_KEY = /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PAT)(?:_|$)|(?:^|_)[A-Z0-9]*KEY$/i;
+const MIN_OPAQUE_LEN = 8;
+
+/**
+ * 8-hex digest for the `[REDACTED:<digest>]` marker. The real redactor
+ * uses a SHA-256 prefix; these tests only assert the `[0-9a-f]{8}` shape
+ * (never the exact bytes), so a cheap stable hash keeps the reimpl free
+ * of a `node:crypto` import while preserving the observable contract.
+ */
+function digest8(v: string): string {
+  let h = 0;
+  for (let i = 0; i < v.length; i++) {
+    h = (h * 31 + v.charCodeAt(i)) >>> 0;
   }
-  get text(): string {
-    return this.chunks.join('');
+  return h.toString(16).padStart(8, '0').slice(0, 8);
+}
+
+/** Tiny faithful reimplementation of `log.ts#redact` (see module note). */
+function faithfulRedact(
+  s: string,
+  sources: readonly Record<string, string | undefined>[] = [process.env],
+): string {
+  let out = s;
+  for (const src of sources) {
+    const values: string[] = [];
+    for (const k of Object.keys(src)) {
+      const v = src[k];
+      if (!v || v.length < MIN_OPAQUE_LEN) {continue;}
+      if (!SECRET_KEY.test(k)) {continue;}
+      values.push(v);
+    }
+    // Longest-first so a shorter secret that is a substring of a longer
+    // one doesn't leave the longer one's tail unredacted.
+    values.sort((a, b) => b.length - a.length);
+    for (const v of values) {
+      if (!out.includes(v)) {continue;}
+      out = out.split(v).join(`[REDACTED:${digest8(v)}]`);
+    }
   }
+  return out;
+}
+
+/** Fresh fake logger — dumpFailure only ever calls `.error`. */
+function makeLog() {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+}
+
+/** The markdown handed to `appendFileSync` for the job summary. */
+function writtenSummary(): string {
+  const calls = vi.mocked(appendFileSync).mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  return String(calls[calls.length - 1]?.[1]);
 }
 
 const ENV_BAK = { ...process.env };
-let tmpDir: string;
-let summaryPath: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'putitoutthere-verbose-'));
-  summaryPath = join(tmpDir, 'summary.md');
-  process.env.GITHUB_STEP_SUMMARY = summaryPath;
+  vi.clearAllMocks();
+  vi.mocked(redact).mockImplementation(faithfulRedact);
+  // A truthy path so `writeSummary` reaches `appendFileSync`; no real
+  // file is touched (fs is mocked). Bare basename — no separator, so
+  // nothing here is OS-specific.
+  process.env.GITHUB_STEP_SUMMARY = 'summary.md';
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
   for (const k of Object.keys(process.env)) {
     if (!(k in ENV_BAK)) {delete process.env[k];}
   }
@@ -58,10 +127,9 @@ function baseCtx(over: Partial<FailureContext> = {}): FailureContext {
 
 describe('dumpFailure: GitHub step summary', () => {
   it('writes a markdown report to $GITHUB_STEP_SUMMARY', () => {
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('publish failed'), baseCtx(), { log });
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).toContain('publish failed');
     expect(md).toContain('demo');
     expect(md).toContain('crates');
@@ -73,18 +141,16 @@ describe('dumpFailure: GitHub step summary', () => {
 
   it('no-ops when $GITHUB_STEP_SUMMARY is unset', () => {
     delete process.env.GITHUB_STEP_SUMMARY;
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
-    // Should not throw, and should not create the file.
+    const log = makeLog();
+    // Should not throw, and should not write the summary.
     dumpFailure(new Error('nope'), baseCtx(), { log });
-    expect(() => readFileSync(summaryPath, 'utf8')).toThrow();
+    expect(appendFileSync).not.toHaveBeenCalled();
   });
 
   it('includes handler-specific extras when supplied', () => {
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('fail'), baseCtx({ extras: { wheelTags: ['cp310-linux'] } }), { log });
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).toContain('wheelTags');
     expect(md).toContain('cp310-linux');
   });
@@ -92,58 +158,56 @@ describe('dumpFailure: GitHub step summary', () => {
 
 describe('dumpFailure: empty streams', () => {
   it('renders "(empty)" for missing stdout/stderr', () => {
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('blank'), baseCtx({ stdout: '', stderr: '' }), { log });
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).toContain('(empty)');
   });
 
   it('omits the tool-versions block when no versions supplied', () => {
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('no-versions'), baseCtx({ toolVersions: {} }), { log });
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).not.toContain('Tool versions');
   });
 });
 
 describe('dumpFailure: structured log', () => {
   it('emits a single error-level record summarizing the failure', () => {
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('boom'), baseCtx(), { log });
-    const line = logDest.text.trim();
-    const record = JSON.parse(line) as Record<string, unknown>;
-    expect(record.level).toBe('error');
-    expect(record.package).toBe('demo');
-    expect(record.handler).toBe('crates');
-    expect(record.exitCode).toBe(1);
-    expect(record.msg).toContain('boom');
+    // Exactly one error-level record; no other level was emitted.
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.debug).not.toHaveBeenCalled();
+    expect(log.info).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
+    const [msg, fields] = log.error.mock.calls[0] as [string, Record<string, unknown>];
+    expect(msg).toContain('boom');
+    expect(fields.package).toBe('demo');
+    expect(fields.handler).toBe('crates');
+    expect(fields.exitCode).toBe(1);
   });
 });
 
 describe('dumpFailure: redaction', () => {
   it('redacts env-matched secrets from stderr before writing', () => {
     process.env.CARGO_REGISTRY_TOKEN = 'tok-abc-123';
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(
       new Error('auth'),
       baseCtx({ stderr: 'sent token tok-abc-123 in header' }),
       { log },
     );
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).not.toContain('tok-abc-123');
     expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
   });
 
   it('redacts secrets from stdout too', () => {
     process.env.NPM_SECRET = 'super-secret-xyz';
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('x'), baseCtx({ stdout: 'super-secret-xyz' }), { log });
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).not.toContain('super-secret-xyz');
   });
 
@@ -158,14 +222,13 @@ describe('dumpFailure: redaction', () => {
     };
     // Sanity: process.env does NOT have this token.
     expect(process.env.CARGO_REGISTRY_TOKEN).toBeUndefined();
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(
       new Error('handler failed'),
       baseCtx({ stderr: 'used token ctx-only-abcdef1234 from ctx.env' }),
       { log, envSources: [ctxEnv] },
     );
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).not.toContain('ctx-only-abcdef1234');
     expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
   });
@@ -173,14 +236,13 @@ describe('dumpFailure: redaction', () => {
   it('still redacts process.env secrets when an envSource is also supplied', () => {
     process.env.NPM_TOKEN = 'proc-tok-xxxxxxxx';
     const ctxEnv: Record<string, string> = { PYPI_API_TOKEN: 'ctx-pypi-yyyyyyyy' };
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(
       new Error('both'),
       baseCtx({ stderr: 'proc-tok-xxxxxxxx and ctx-pypi-yyyyyyyy both appear' }),
       { log, envSources: [ctxEnv] },
     );
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md).not.toContain('proc-tok-xxxxxxxx');
     expect(md).not.toContain('ctx-pypi-yyyyyyyy');
   });
@@ -219,16 +281,14 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
   });
 
   it('emits a single ::error:: annotation when running in GHA', () => {
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('publish failed'), baseCtx(), { log });
     const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
     expect(annotations).toHaveLength(1);
   });
 
   it('annotation tags handler/package and includes the first message line', () => {
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('publish failed: 401 unauthorized'), baseCtx(), { log });
     const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
     expect(line).toContain('crates/demo');
@@ -240,8 +300,7 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     // a `[PIOT_*]` code; the annotation should surface the bracketed
     // code so external observers can fingerprint on it without needing
     // to read the full markdown.
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(
       new Error('pypi: no auth available [PIOT_AUTH_NO_TOKEN]'),
       baseCtx({ handler: 'pypi', package: 'demo-pkg' }),
@@ -253,8 +312,7 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
 
   it('redacts env-matched secrets from the annotation body', () => {
     process.env.PYPI_API_TOKEN = 'pypi-tok-zzz';
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(
       new Error('publish: leaked pypi-tok-zzz'),
       baseCtx(),
@@ -266,8 +324,7 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
 
   it('no-ops outside GitHub Actions', () => {
     delete process.env.GITHUB_ACTIONS;
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('local run'), baseCtx(), { log });
     const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
     expect(annotations).toEqual([]);
@@ -278,8 +335,7 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     // truncate the annotation at the break point. The dumpFailure
     // implementation must collapse to one line (either by encoding
     // %0A or by taking the first line only).
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(
       new Error('first line\nsecond line\nthird line'),
       baseCtx(),
@@ -297,10 +353,9 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
 describe('dumpFailure: size cap (4MB)', () => {
   it('truncates oversized stdout and notes the truncation', () => {
     const big = 'x'.repeat(5 * 1024 * 1024);
-    const logDest = new BufStream();
-    const log = createLogger({ stream: logDest, pretty: false });
+    const log = makeLog();
     dumpFailure(new Error('huge'), baseCtx({ stdout: big }), { log });
-    const md = readFileSync(summaryPath, 'utf8');
+    const md = writtenSummary();
     expect(md.length).toBeLessThanOrEqual(4 * 1024 * 1024);
     expect(md).toMatch(/truncated/i);
   });
