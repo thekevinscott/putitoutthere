@@ -12,6 +12,7 @@
  * Returns the process exit code.
  */
 
+import { runChangelogCheck } from './changelog-check/run.js';
 import { printUsage } from './usage.js';
 
 export function run(argv: readonly string[]): number {
@@ -23,6 +24,9 @@ export function run(argv: readonly string[]): number {
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') {
     printUsage();
     return 0;
+  }
+  if (cmd === 'changelog-check') {
+    return runChangelogCheck();
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();
