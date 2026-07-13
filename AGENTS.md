@@ -96,7 +96,7 @@ repo's own CI — the evidence-check, changelog, and patch-coverage gates,
 fixture-harness setup — is not consumer surface, so it must not ship in
 the engine package. It lives in `packages/ci`.
 
-Three rules for a repo-internal CI gate:
+Four rules for a repo-internal CI gate:
 
 1. **All of it lives under `packages/ci/src/<gate>/`** — the I/O-free
    orchestrator (the decision logic, unit- and integration-tested like
@@ -126,6 +126,28 @@ Three rules for a repo-internal CI gate:
    resolving in a fresh CI checkout (a workflow's own `build` step runs
    too late, after bin-linking). Because `packages/ci` is a private
    workspace package, the bin never ships to consumers.
+
+4. **Once a gate's logic lives in `packages/ci`, its workflow `run:`
+   holds no logic.** The step is wiring, not decisions: standard setup
+   (checkout, `pnpm`/node toolchain) followed by a single
+   `pnpm exec piot-ci <gate>` invocation, and nothing more. YAML is
+   for wiring — `pnpm exec …`, `env:`, `if:`, `with:` — never for
+   branching, `case` dispatch, loops, `grep`/`sed` text-munging, or any
+   decision the gate itself should own. Anything with logic belongs in
+   the gate's `decide.ts`/`run.ts` under `packages/ci/src/<gate>/`,
+   where it is unit- and integration-tested and runs locally; an inline
+   `run:` block is the untestable, silently-drifting bash this epic
+   exists to remove, so re-inlining even a one-liner of it defeats the
+   extraction. The narrow exemptions are the same non-logic glue a
+   consumer step would carry — toolchain installs, a `cargo build`,
+   checkout/`env:` plumbing — not a re-implementation of the gate. This
+   is why the `test/workflows/` text-contract tier shrinks as gates
+   move to code: once the decision lives in a colocated test, asserting
+   its shape against workflow YAML text is redundant ceremony (see
+   "Workflow-contract tests are earned" — a text-contract test earns
+   its place only when it guards a reviewer-invisible invariant that did
+   *not* move to code, e.g. `npm-install-fallback`'s `strict || lenient`
+   self-heal or `publish-github-token`'s `env:` presence).
 
 The shipped engine (`packages/engine`, the `putitoutthere` bin) is the
 other tier — logic a *consumer's* workflow runs (artifact `verify`,
