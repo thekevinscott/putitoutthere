@@ -18,6 +18,7 @@ import { runChangelogCheck } from './changelog-check/run.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
 import { runTddLint } from './tdd-lint/run.js';
+import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
 import { printUsage } from './usage.js';
 
@@ -51,6 +52,9 @@ export function run(argv: readonly string[]): number {
   }
   if (cmd === 'cargo-registry') {
     return runCargoRegistry(argv);
+  }
+  if (cmd === 'testpypi-verify') {
+    return runTestpypiVerify(argv);
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();
