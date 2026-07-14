@@ -174,7 +174,7 @@ describe('runPatchCoverage: coverageFor wiring', () => {
     covered.mockReturnValue({ covered: new Set([1]), uncovered: new Set() });
 
     runPatchCoverage();
-    const input = decide.mock.calls[0][0];
+    const input = decide.mock.calls[0]![0];
     const result = input.coverageFor('packages/engine/src/foo.ts');
     expect(covered).toHaveBeenCalledWith(record);
     expect(result).toEqual({ covered: new Set([1]), uncovered: new Set() });
@@ -187,7 +187,7 @@ describe('runPatchCoverage: coverageFor wiring', () => {
     covered.mockReturnValue(null);
 
     runPatchCoverage();
-    const input = decide.mock.calls[0][0];
+    const input = decide.mock.calls[0]![0];
     input.coverageFor('packages/engine/src/missing.ts');
     expect(covered).toHaveBeenCalledWith(undefined);
   });
