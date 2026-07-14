@@ -30,6 +30,13 @@ describe('parseHunkStart', () => {
     expect(parseHunkStart('@@ -100,4 +1234,8 @@')).toBe(1234);
   });
 
+  it('reads a start line containing the boundary digits 0 and 9', () => {
+    // Pins both ends of the `'0'..'9'` character-range validation: a `9` must
+    // count as a digit (not rejected by `> '9'` slipping to `>= '9'`), and a
+    // `0` likewise (not rejected by `< '0'` slipping to `<= '0'`).
+    expect(parseHunkStart('@@ -1,2 +90,3 @@')).toBe(90);
+  });
+
   it('returns null when the post-image token is absent', () => {
     expect(parseHunkStart('@@')).toBeNull();
   });
