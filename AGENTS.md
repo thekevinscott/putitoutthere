@@ -141,7 +141,7 @@ Four rules for a repo-internal CI gate:
    extraction. The narrow exemptions are the same non-logic glue a
    consumer step would carry — toolchain installs, a `cargo build`,
    checkout/`env:` plumbing — not a re-implementation of the gate. This
-   is why the `tests/workflows/` text-contract tier shrinks as gates
+   is why the `test/workflows/` text-contract tier shrinks as gates
    move to code: once the decision lives in a colocated test, asserting
    its shape against workflow YAML text is redundant ceremony (see
    "Workflow-contract tests are earned" — a text-contract test earns
@@ -473,7 +473,7 @@ when redirecting is cheapest.
 
 ## Workflow-contract tests are earned
 
-`tests/workflows/` pins invariants in workflow YAML that a reviewer
+`test/workflows/` pins invariants in workflow YAML that a reviewer
 cannot see break: behavior wired through shell text that a refactor
 silently drops (`npm-install-fallback` — the `strict || lenient`
 self-heal), an `env:` whose absence degrades silently at runtime
@@ -495,7 +495,7 @@ buys no coverage. Put the reasoning where the value lives — a comment
 citing the upstream issue and, for a temporary pin, a dated follow-up
 issue naming when to revisit — and stop.
 
-The bar, stated once: before adding a `tests/workflows/` file, name
+The bar, stated once: before adding a `test/workflows/` file, name
 the regression it catches that a reviewer reading the diff would
 miss. If the answer is "someone might change the value," that is
 review's job, not a test's.

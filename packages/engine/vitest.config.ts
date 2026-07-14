@@ -4,8 +4,12 @@ export default defineConfig({
   test: {
     include: [
       'src/**/*.test.ts',
-      'tests/fixtures/**/*.test.ts',
-      'tests/workflows/**/*.test.ts',
+      // Workflow-contract tests assert static YAML invariants (AGENTS.md
+      // "Workflow-contract tests are earned"). They aren't a unit/
+      // integration/e2e suite, so they stay in the singular `test/` tree
+      // (not `tests/`), which the testing-conventions tool does not scan —
+      // no `unknown-tier` waiver needed. Their final disposition is #442/#448.
+      'test/workflows/**/*.test.ts',
     ],
     setupFiles: ['./tests/setup.ts'],
     environment: 'node',

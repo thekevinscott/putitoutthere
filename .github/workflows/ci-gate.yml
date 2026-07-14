@@ -20,7 +20,7 @@ jobs:
     steps:
       # Floating-major-tag pinned to pr-monitor's @v1. A bare `@main` ref is
       # rejected by this repo's own workflow-YAML invariant
-      # (tests/workflows/workflow-yaml-invariants.test.ts): external refs
+      # (test/workflows/workflow-yaml-invariants.test.ts): external refs
       # must pin a major tag, a full SHA, or a release/vN branch. A major
       # tag is allowed, and pr-monitor keeps `v1` re-pointed to its main
       # HEAD via a move-major-tag workflow, so `@v1` always tracks latest
