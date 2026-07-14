@@ -11,6 +11,10 @@ name: Patch coverage
 # markers in unchanged code are grandfathered; touching their region is
 # treated as a new introduction.
 #
+# The gate logic lives in tested TypeScript (`packages/ci/src/patch-coverage/`,
+# the `piot-ci patch-coverage` command), not authored `.mjs` in `.github/` —
+# see AGENTS.md > "Repo-internal CI gates" (#468, epic #442).
+#
 # Aggregator (CI Gate) automatically requires this job once it appears, so
 # branch protection doesn't need updating to make it a merge prerequisite.
 
@@ -40,6 +44,8 @@ jobs:
         run: npm install -g pnpm@9
 
       - name: Install dependencies
+        # packages/ci's `prepare` script builds its dist during install, so
+        # `piot-ci` is linked into node_modules/.bin and resolvable below.
         run: pnpm install --frozen-lockfile
 
       - name: Run unit tests with coverage
@@ -49,4 +55,4 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node .github/workflows/patch-coverage.mjs
+        run: pnpm exec piot-ci patch-coverage
