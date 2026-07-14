@@ -6,6 +6,7 @@ import { runChangelogCheck } from './changelog-check/run.js';
 import { run } from './cli.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
+import { runPatchCoverage } from './patch-coverage/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
@@ -15,6 +16,7 @@ vi.mock('./cargo-registry/run.js');
 vi.mock('./changelog-check/run.js');
 vi.mock('./evidence-check/run.js');
 vi.mock('./fixture-materialize/run.js');
+vi.mock('./patch-coverage/run.js');
 vi.mock('./tdd-lint/run.js');
 vi.mock('./testpypi-verify/run.js');
 vi.mock('./verdaccio-auth/run.js');
@@ -115,6 +117,14 @@ describe('piot-ci dispatcher', () => {
     const code = run(argv('cargo-registry', 'start'));
     expect(code).toBe(1);
     expect(runCargoRegistry).toHaveBeenCalledWith(['node', 'piot-ci', 'cargo-registry', 'start']);
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches patch-coverage to its gate and returns its exit code', () => {
+    vi.mocked(runPatchCoverage).mockReturnValue(2);
+    const code = run(argv('patch-coverage'));
+    expect(code).toBe(2);
+    expect(runPatchCoverage).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 

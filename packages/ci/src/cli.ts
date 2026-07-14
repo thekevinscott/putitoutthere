@@ -17,6 +17,7 @@ import { runCargoRegistry } from './cargo-registry/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
+import { runPatchCoverage } from './patch-coverage/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
@@ -43,6 +44,9 @@ export function run(argv: readonly string[]): number {
   }
   if (cmd === 'evidence-check') {
     return runEvidenceCheck();
+  }
+  if (cmd === 'patch-coverage') {
+    return runPatchCoverage();
   }
   if (cmd === 'fixture-materialize') {
     return runFixtureMaterialize(argv);

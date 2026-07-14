@@ -47,8 +47,11 @@ function steps(name: string): WorkflowStep[] {
 /** A step that invokes `putitoutthere publish`, in any of its forms. */
 function isPublishStep(step: WorkflowStep): boolean {
   if (step.with?.command === 'publish') return true;
+  // Dogfood workflows invoke the engine via its declared bin
+  // (`pnpm exec putitoutthere publish`, #467), not a `dist/cli-bin.js`
+  // path, so match the bin name rather than the old script path.
   if (typeof step.run === 'string' && /\bpublish\b/.test(step.run) &&
-      step.run.includes('cli-bin.js')) {
+      /\bputitoutthere\b/.test(step.run)) {
     return true;
   }
   return false;

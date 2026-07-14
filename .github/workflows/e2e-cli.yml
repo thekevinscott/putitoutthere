@@ -1,8 +1,9 @@
 name: E2E (CLI)
 
 # Runs the node CLI e2e tier (tests/e2e/**/*.e2e.test.ts): vitest tests
-# that shell out to the built CLI (`node dist/cli-bin.js …`) and hit the
-# real registries, pointed at piot's own piot-fixture-zzz-* fixtures.
+# that shell out to the built CLI (a real `node` subprocess of the
+# engine's bin) and hit the real registries, pointed at piot's own
+# piot-fixture-zzz-* fixtures.
 # Lighter than the fixture suite (e2e.yml): no publish happens, so it's
 # reliable per-PR and its red->green is visible. See tests/e2e/README.md.
 
