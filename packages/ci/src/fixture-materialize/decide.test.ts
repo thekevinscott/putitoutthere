@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { decideFixtureMaterialize, type FixtureMaterializeInput } from './decide.js';
 
 const base: Omit<FixtureMaterializeInput, 'mode'> = {
+  // A real fixture dir name under packages/engine/tests/fixtures/ (see decide.ts).
   fixture: 'js-vanilla',
   version: '0.0.42',
   runId: '111',
