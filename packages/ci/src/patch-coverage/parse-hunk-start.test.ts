@@ -47,4 +47,16 @@ describe('parseHunkStart', () => {
   it('returns null when the post-image token has no digits after the +', () => {
     expect(parseHunkStart('@@ -1,2 +abc @@')).toBeNull();
   });
+
+  it('returns null when there is nothing after the + (empty digit run)', () => {
+    expect(parseHunkStart('@@ -1,2 + @@')).toBeNull();
+  });
+
+  it('returns null when a digit-run character sorts below 0', () => {
+    expect(parseHunkStart('@@ -1,2 +5.5 @@')).toBeNull();
+  });
+
+  it('returns null when a digit-run character sorts above 9', () => {
+    expect(parseHunkStart('@@ -1,2 +5a @@')).toBeNull();
+  });
 });

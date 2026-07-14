@@ -38,6 +38,10 @@ describe('isEscapeHatch', () => {
     expect(isEscapeHatch('/* v8ignore */')).toBe(false);
   });
 
+  it('matches with multiple whitespace before "ignore" (\\s+, not exactly one \\s)', () => {
+    expect(isEscapeHatch('/* v8  ignore */')).toBe(true);
+  });
+
   it('does not match an ordinary comment', () => {
     expect(isEscapeHatch('/* a normal comment */')).toBe(false);
   });

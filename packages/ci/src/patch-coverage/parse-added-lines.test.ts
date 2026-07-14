@@ -121,6 +121,73 @@ describe('parseAddedLines', () => {
     expect(parseAddedLines('')).toEqual([]);
   });
 
+  it('trims trailing whitespace off the +++ post-image path before scoping it', () => {
+    // Without the trim, the path would keep its trailing space and fail the
+    // `.ts` suffix check, so the added line would be silently dropped.
+    const diff = ['+++ packages/engine/src/foo.ts   ', '@@ -0,0 +1,1 @@', '+const x = 1;', ''].join('\n');
+    expect(parseAddedLines(diff)).toEqual([
+      { file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'const x = 1;' }] },
+    ]);
+  });
+
+  it('leaves the running line counter unchanged across a hunk header it cannot parse', () => {
+    // The second `@@` line is malformed, so the start-line parse returns null;
+    // the counter must keep counting from where the first hunk left it (6),
+    // not reset to a null/NaN line number.
+    const diff = [
+      '+++ packages/engine/src/foo.ts',
+      '@@ -0,0 +5,1 @@',
+      '+const a = 1;',
+      '@@ malformed',
+      '+const b = 2;',
+      '',
+    ].join('\n');
+    expect(parseAddedLines(diff)).toEqual([
+      {
+        file: 'packages/engine/src/foo.ts',
+        added: [
+          { line: 5, text: 'const a = 1;' },
+          { line: 6, text: 'const b = 2;' },
+        ],
+      },
+    ]);
+  });
+
+  it('ignores an added line that appears before any +++ file header', () => {
+    // While no post-image file is set, an added line is skipped outright — it
+    // is a header artefact, not code in a counted file.
+    const diff = [
+      '+orphan before any header',
+      '+++ packages/engine/src/foo.ts',
+      '@@ -0,0 +1,1 @@',
+      '+const x = 1;',
+      '',
+    ].join('\n');
+    expect(parseAddedLines(diff)).toEqual([
+      { file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'const x = 1;' }] },
+    ]);
+  });
+
+  it('advances the counter by exactly one per context line', () => {
+    // A single context line between the hunk start (5) and the added line must
+    // push the added line to 6 — not 4 (a decrement) or 5 (no move).
+    const diff = ['+++ packages/engine/src/foo.ts', '@@ -5,1 +5,2 @@', ' const kept = 0;', '+const added = 1;', ''].join(
+      '\n',
+    );
+    expect(parseAddedLines(diff)).toEqual([
+      { file: 'packages/engine/src/foo.ts', added: [{ line: 6, text: 'const added = 1;' }] },
+    ]);
+  });
+
+  it('records a counted added line whose text ends with --- (not a header)', () => {
+    // The in-hunk `---` guard must be a startsWith check: a `+` line whose body
+    // merely ends with `---` is real code and must be recorded.
+    const diff = ['+++ packages/engine/src/foo.ts', '@@ -0,0 +1,1 @@', '+const x = 1; ---', ''].join('\n');
+    expect(parseAddedLines(diff)).toEqual([
+      { file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'const x = 1; ---' }] },
+    ]);
+  });
+
   it('does not record an added line that itself begins with +++', () => {
     // The `+++`/`---` in-hunk guard: a `+` line whose body starts with `++`
     // (so the raw line is `+++…`) is treated as a header artefact, not code.

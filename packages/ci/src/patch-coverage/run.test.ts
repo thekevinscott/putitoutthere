@@ -163,6 +163,18 @@ describe('runPatchCoverage: coverage read gating', () => {
     expect(err.join('')).toBe(`::error::patch-coverage: cannot read ${COV_PATH}: ENOENT\n`);
     expect(decide).not.toHaveBeenCalled();
   });
+
+  it('stringifies a non-Error thrown by the coverage read', () => {
+    routeGit('');
+    parse.mockReturnValue([{ file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'x' }] }]);
+    readFile.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately a non-Error to exercise run's String(err) fallback
+      throw 'disk gone';
+    });
+    const code = runPatchCoverage();
+    expect(code).toBe(2);
+    expect(err.join('')).toBe(`::error::patch-coverage: cannot read ${COV_PATH}: disk gone\n`);
+  });
 });
 
 describe('runPatchCoverage: coverageFor wiring', () => {

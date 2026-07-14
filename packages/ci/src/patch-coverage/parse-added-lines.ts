@@ -22,8 +22,10 @@ export function parseAddedLines(diffOut: string): AddedFile[] {
 
   for (const raw of diffOut.split('\n')) {
     if (raw.startsWith('+++ ')) {
-      const p = raw.slice(4).trim();
-      currentFile = p === '/dev/null' ? null : p;
+      // The post-image path. A deletion's `+++ /dev/null` needs no special
+      // case: `/dev/null` is not a counted src path, so `isCountedSrcPath`
+      // rejects it below exactly as the `.mjs`'s explicit null did.
+      currentFile = raw.slice(4).trim();
       continue;
     }
     if (raw.startsWith('@@ ')) {
@@ -40,14 +42,17 @@ export function parseAddedLines(diffOut: string): AddedFile[] {
       continue;
     }
     if (raw.startsWith('+')) {
-      if (!isCountedSrcPath(currentFile)) {
+      // Only counted files record and advance the counter. An added line in a
+      // test/decl/out-of-scope file records nothing, and its counter value is
+      // never observed (the next `@@` resets `nextLine`), so it is skipped
+      // outright rather than counted — matching the `.mjs`'s behaviour without
+      // a dead increment.
+      if (isCountedSrcPath(currentFile)) {
+        const list = byFile.get(currentFile) ?? [];
+        list.push({ line: nextLine, text: raw.slice(1) });
+        byFile.set(currentFile, list);
         nextLine++;
-        continue;
       }
-      const list = byFile.get(currentFile) ?? [];
-      list.push({ line: nextLine, text: raw.slice(1) });
-      byFile.set(currentFile, list);
-      nextLine++;
     } else if (raw.startsWith(' ')) {
       nextLine++;
     }

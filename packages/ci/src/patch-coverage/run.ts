@@ -51,7 +51,10 @@ export function runPatchCoverage(): number {
 
   const cwd = process.cwd();
   const covPath = `${cwd}/${COVERAGE_PATH}`;
-  let cov: Record<string, FileCoverage> | null = null;
+  // Empty when there are no additions (the file is never read then); decide
+  // only consults `coverageFor` when there are additions, at which point this
+  // holds the parsed coverage — so the lookup never sees a null map.
+  let cov: Record<string, FileCoverage> = {};
   if (addedByFile.length > 0) {
     try {
       cov = JSON.parse(readFileSync(covPath, 'utf8')) as Record<string, FileCoverage>;
@@ -64,7 +67,7 @@ export function runPatchCoverage(): number {
 
   const result = decidePatchCoverage({
     addedByFile,
-    coverageFor: (file) => coveredLines(cov?.[`${cwd}/${file}`]),
+    coverageFor: (file) => coveredLines(cov[`${cwd}/${file}`]),
   });
   for (const line of result.out) {
     process.stdout.write(`${line}\n`);
