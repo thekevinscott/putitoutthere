@@ -6,7 +6,7 @@
  * `putitoutthere.toml` (an explicit `python_versions` override) or,
  * failing that, the real `pyproject.toml` `[project].requires-python`.
  *
- * Lives in `test/integration/` because the behavior is only observable
+ * Lives in `tests/integration/` because the behavior is only observable
  * when the real config loader, the real planner, and the real
  * `pyproject.toml` reader run together against an on-disk repo — a
  * unit test with a stubbed config or stubbed pyproject cannot see the

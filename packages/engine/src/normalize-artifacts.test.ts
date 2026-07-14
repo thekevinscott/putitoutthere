@@ -2,7 +2,7 @@
  * Unit tests for `normalizeArtifactLayout`.
  *
  * The integration story lives in
- * `test/integration/artifact-layout.integration.test.ts` (the failing
+ * `tests/integration/artifact-layout.integration.test.ts` (the failing
  * test that drove this module's creation per #311). These unit cases
  * cover the no-op branches and edge shapes the integration tier
  * doesn't exercise: multi-artifact plans, already-subdir layouts,

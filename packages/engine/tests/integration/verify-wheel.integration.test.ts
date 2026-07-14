@@ -11,7 +11,7 @@
  * This tier drives the CLI in-process (`run([...])`) against real `.whl`
  * (a real deflate-compressed zip, built here in pure Node) and `.tar.gz`
  * files on disk — deterministic, no network, cross-platform (no `unzip`).
- * The e2e twin (`test/e2e/verify-wheel.e2e.test.ts`) shells out to the
+ * The e2e twin (`tests/e2e/verify-wheel.e2e.test.ts`) shells out to the
  * built CLI against a real published wheel.
  *
  * Contract preserved verbatim from the bash: same file selection, same

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // download collaborators, the recursive-listing helper, and `node:fs` are
 // driven directly, so no real registry, temp dirs, or extraction happen.
 // Real download/IO round-tripping is covered by
-// test/integration/verify-npm-tarball.integration.test.ts and the e2e tier.
+// tests/integration/verify-npm-tarball.integration.test.ts and the e2e tier.
 vi.mock('./resolve-url.js');
 vi.mock('./download.js');
 vi.mock('../../utils/list-files-recursive.js');

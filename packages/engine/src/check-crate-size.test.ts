@@ -9,7 +9,7 @@
  *
  * The end-to-end path through `runChecks` (real config loader, real
  * check dispatch) is covered by
- * `test/integration/check-crate-size.integration.test.ts`.
+ * `tests/integration/check-crate-size.integration.test.ts`.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // module, so it can't drift from the source — satisfying the unit-suite
 // isolation lint without a hand-written (untyped) factory. Only spawnSync
 // is exercised; the real `cargo package` subprocess round-trip is covered
-// by test/integration/check-crate-size.integration.test.ts.
+// by tests/integration/check-crate-size.integration.test.ts.
 vi.mock('node:child_process');
 
 import { checkCratesPackageSize } from './check-crate-size.js';

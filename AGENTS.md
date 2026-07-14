@@ -189,7 +189,7 @@ The CLI e2e tier runs in CI (`e2e-cli.yml` → `pnpm test:e2e`) against
 piot's own `piot-fixture-zzz-*` fixtures, so its red→green is visible
 per-PR alongside the integration gate. It also runs locally
 (`pnpm test:e2e`, which builds `dist/` first). The separate, heavier
-fixture suite — `e2e.yml` over `test/fixtures/` — exercises real OIDC
+fixture suite — `e2e.yml` over `tests/fixtures/` — exercises real OIDC
 publishes and is CI-only; see `tests/e2e/README.md`.
 
 ### We do not use e2e attestations (`e2e-verify`)

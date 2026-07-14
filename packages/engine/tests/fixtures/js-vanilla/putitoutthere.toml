@@ -3,7 +3,7 @@ version = 1
 
 # Live canary. Publishes the `@putitoutthere/piot-fixture-zzz-js-vanilla`
 # package on every PR and push to main via OIDC trusted publishing — see
-# test/e2e/README.md. Single npm vanilla shape; covers the npm OIDC +
+# tests/e2e/README.md. Single npm vanilla shape; covers the npm OIDC +
 # plain `npm publish` manifestation in the e2e matrix.
 
 [[package]]

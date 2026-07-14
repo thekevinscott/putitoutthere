@@ -12,7 +12,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/e2e/**/*.e2e.test.ts'],
-    setupFiles: ['./test/setup.ts'],
+    setupFiles: ['./tests/setup.ts'],
     environment: 'node',
     // Real network: a handful of registry GETs per test.
     testTimeout: 60_000,

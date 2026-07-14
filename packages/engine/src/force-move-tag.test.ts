@@ -6,7 +6,7 @@
  * isolates the delegation contract — the local move then the ref-scoped
  * force-push, in that order. The real git + bare-remote round trip (the tag
  * actually overwriting a diverged remote) is covered by
- * test/integration/tag-plumbing.integration.test.ts and the e2e tier.
+ * tests/integration/tag-plumbing.integration.test.ts and the e2e tier.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

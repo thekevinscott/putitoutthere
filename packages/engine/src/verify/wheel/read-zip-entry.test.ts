@@ -8,8 +8,8 @@
  * Unit-isolated: `node:zlib` is mocked so no real deflate stream is built —
  * fixtures store their bytes raw and the method-8 branch is exercised through
  * the mocked `inflateRawSync` (driven as an identity decode). Real deflate
- * round-tripping is covered in `test/integration/verify-wheel.integration.test.ts`
- * and `test/e2e/verify-wheel.e2e.test.ts`.
+ * round-tripping is covered in `tests/integration/verify-wheel.integration.test.ts`
+ * and `tests/e2e/verify-wheel.e2e.test.ts`.
  */
 
 import { inflateRawSync } from 'node:zlib';

@@ -1,13 +1,13 @@
 /**
  * `piot status` against the REAL registries — the e2e twin of
- * `test/integration/status.integration.test.ts`.
+ * `tests/integration/status.integration.test.ts`.
  *
  * Where the integration test imports the engine in-process and mocks the
  * registry HTTP (msw), this one **shells out to the built CLI**
  * (`node dist/cli-bin.js status …`) and hits crates.io / npm / PyPI for
  * real — pointed at piot's own stable fixture packages
  * (`piot-fixture-zzz-*`, published to the real registries by the CI e2e
- * suite; see test/fixtures/README.md). Same scenario, same assertions —
+ * suite; see tests/fixtures/README.md). Same scenario, same assertions —
  * but nothing is mocked, so this is the tier that fails if a registry's
  * real "latest" shape doesn't match what `latestVersion` parses. The
  * integration test, which mocks those shapes, cannot catch that.

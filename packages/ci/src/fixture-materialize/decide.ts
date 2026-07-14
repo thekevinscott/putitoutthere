@@ -19,7 +19,7 @@ export type FixtureMaterializeMode = 'plan' | 'build' | 'publish';
 
 export interface FixtureMaterializeInput {
   mode: FixtureMaterializeMode;
-  /** The fixture directory name under `packages/engine/test/fixtures/`. */
+  /** The fixture directory name under `packages/engine/tests/fixtures/`. */
   fixture: string;
   /** The version string that replaces every `__VERSION__` token. */
   version: string;

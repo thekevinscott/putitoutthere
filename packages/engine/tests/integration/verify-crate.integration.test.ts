@@ -14,7 +14,7 @@
  *
  * This tier drives the CLI in-process (`run([...])`) against real `.crate`
  * files it builds on disk with the real `tar` — deterministic, no network.
- * The e2e twin (`test/e2e/verify-crate.e2e.test.ts`) shells out to the
+ * The e2e twin (`tests/e2e/verify-crate.e2e.test.ts`) shells out to the
  * built CLI against the real published fixture crate downloaded from
  * crates.io.
  *

@@ -1,6 +1,6 @@
 /**
  * Tag-plumbing engine commands against the real CLI + real git — the e2e
- * twin of `test/integration/tag-plumbing.integration.test.ts`. Epic #442,
+ * twin of `tests/integration/tag-plumbing.integration.test.ts`. Epic #442,
  * sub-issue #446.
  *
  * Where the integration test drives the engine in-process, this one

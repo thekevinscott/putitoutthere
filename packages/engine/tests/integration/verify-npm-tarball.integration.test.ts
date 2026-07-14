@@ -11,7 +11,7 @@
  * (download) and `tar` (extract); this tier mocks only that subprocess
  * boundary. `npm view` + `curl` are faked (registry state); `tar` is the
  * REAL binary, so extraction is exercised for real. The e2e twin
- * (`test/e2e/verify-npm-tarball.e2e.test.ts`) shells out to the built CLI
+ * (`tests/e2e/verify-npm-tarball.e2e.test.ts`) shells out to the built CLI
  * against the real `@putitoutthere/piot-fixture-zzz-js-vanilla` package.
  *
  * Contract preserved verbatim from the bash: same row selection, same

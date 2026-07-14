@@ -1,6 +1,6 @@
 /**
  * `piot reconcile` against the real CLI + real crates.io — the e2e twin
- * of `test/integration/reconcile.integration.test.ts`.
+ * of `tests/integration/reconcile.integration.test.ts`.
  *
  * Where the integration test imports the engine in-process and mocks the
  * registry HTTP (msw), this one **shells out to the built CLI**

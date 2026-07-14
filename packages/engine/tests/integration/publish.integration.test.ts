@@ -9,7 +9,7 @@
  * piece of putitoutthere's own code (config loader, plan, preflight,
  * completeness, handler dispatch, npm handler body) runs verbatim.
  *
- * Lives in `test/integration/` so the unit-test config doesn't pick
+ * Lives in `tests/integration/` so the unit-test config doesn't pick
  * it up. Invoked via `pnpm run test:integration`.
  *
  * Issue #280.

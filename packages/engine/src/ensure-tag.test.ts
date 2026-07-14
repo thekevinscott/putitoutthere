@@ -5,7 +5,7 @@
  * this isolates the exists-check / create / warn-on-push-failure branches;
  * `formatTag` (pure) runs for real. The real git round trip — the tag
  * actually landing — is covered by
- * test/integration/tag-plumbing.integration.test.ts and the e2e tier.
+ * tests/integration/tag-plumbing.integration.test.ts and the e2e tier.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

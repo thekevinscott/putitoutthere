@@ -12,7 +12,7 @@
  * success, no-tag-on-failure — without a real repo, network, or tool.
  *
  * The whole flow against real plan/preflight/completeness is pinned in
- * `test/integration/publish.integration.test.ts` and the e2e tier.
+ * `tests/integration/publish.integration.test.ts` and the e2e tier.
  *
  * Issue #22.
  */

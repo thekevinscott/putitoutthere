@@ -1,6 +1,6 @@
 /**
  * `piot verify wheel` against a REAL published wheel — the e2e twin of
- * `test/integration/verify-wheel.integration.test.ts`. Epic #442, #450.
+ * `tests/integration/verify-wheel.integration.test.ts`. Epic #442, #450.
  *
  * Where the integration test drives the engine in-process against wheels it
  * builds locally, this one **shells out to the built CLI**

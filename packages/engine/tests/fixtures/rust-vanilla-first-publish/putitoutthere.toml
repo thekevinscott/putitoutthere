@@ -13,7 +13,7 @@ version = 1
 # `__VERSION__` is rewritten by the materialize step to
 # `0.0.${unix_seconds}`.
 #
-# The crates analogue of test/fixtures/js-vanilla-first-publish (#315),
+# The crates analogue of tests/fixtures/js-vanilla-first-publish (#315),
 # wiring the symmetric counterpart of the npm `PIOT_NPM_REGISTRY` seam
 # (#304) on the cargo handler side (#331).
 

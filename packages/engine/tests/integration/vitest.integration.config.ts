@@ -12,7 +12,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/integration/**/*.integration.test.ts'],
-    setupFiles: ['./test/setup.ts'],
+    setupFiles: ['./tests/setup.ts'],
     environment: 'node',
     testTimeout: 10_000,
     // See vitest.config.ts: vi.restoreAllMocks() no longer clears automock

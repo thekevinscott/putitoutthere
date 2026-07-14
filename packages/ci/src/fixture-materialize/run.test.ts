@@ -170,7 +170,7 @@ describe('runFixtureMaterialize: filesystem materialization', () => {
   it('wipes then copies the fixture into fixture-tree', () => {
     runFixtureMaterialize(argv('build'));
     expect(rmSync).toHaveBeenCalledWith('fixture-tree', { recursive: true, force: true });
-    expect(cpSync).toHaveBeenCalledWith('packages/engine/test/fixtures/js-vanilla', 'fixture-tree', {
+    expect(cpSync).toHaveBeenCalledWith('packages/engine/tests/fixtures/js-vanilla', 'fixture-tree', {
       recursive: true,
     });
   });

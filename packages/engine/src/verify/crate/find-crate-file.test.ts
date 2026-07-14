@@ -2,7 +2,7 @@
  * `findCrateFile` — recursive, non-empty `.crate` lookup (#449). Isolated:
  * `listFilesRecursive` and `node:fs` (`statSync`) are mocked so each branch
  * is driven by return values, not real temp files. Real on-disk lookup is
- * covered by test/integration/verify-crate.integration.test.ts and e2e.
+ * covered by tests/integration/verify-crate.integration.test.ts and e2e.
  */
 
 import { statSync, type Stats } from 'node:fs';

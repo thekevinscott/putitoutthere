@@ -7,7 +7,7 @@ import { downloadNpmTarball } from './download.js';
 // Bare automocks (no factory): vitest derives the doubles from the real
 // modules so they can't drift, satisfying unit-suite isolation without a
 // hand-written (untyped) factory. Real curl/tar/extraction is covered by
-// test/integration/verify-npm-tarball.integration.test.ts and the e2e tier.
+// tests/integration/verify-npm-tarball.integration.test.ts and the e2e tier.
 vi.mock('node:child_process');
 vi.mock('node:fs');
 

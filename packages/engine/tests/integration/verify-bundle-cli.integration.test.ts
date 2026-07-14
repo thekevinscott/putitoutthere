@@ -16,7 +16,7 @@
  * This tier drives the CLI in-process (`run([...])`) against real `.whl`
  * files (genuine deflate-compressed zips, built here in pure Node) on disk
  * — deterministic, no network, cross-platform (no `unzip`). The e2e twin
- * (`test/e2e/verify-bundle-cli.e2e.test.ts`) shells out to the built CLI
+ * (`tests/e2e/verify-bundle-cli.e2e.test.ts`) shells out to the built CLI
  * against a real published wheel downloaded from PyPI.
  *
  * Contract preserved verbatim from the bash: same wheel selection, same

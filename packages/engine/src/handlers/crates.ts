@@ -261,7 +261,7 @@ function isRateLimited(stderr: string | undefined): boolean {
 /**
  * Match cargo's stderr shape when crates.io rejects the TP exchange
  * because the crate has never been published. The fixture at
- * `test/integration/fixtures/registry-responses/crates-io/publish-first-publish-tp-rejected.txt`
+ * `tests/integration/fixtures/registry-responses/crates-io/publish-first-publish-tp-rejected.txt`
  * captures the canonical shape; the catalog at
  * `notes/upstream-behaviors.md` is the source of truth for the contract.
  *

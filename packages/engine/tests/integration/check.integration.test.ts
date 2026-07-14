@@ -6,7 +6,7 @@
  * repo state alone runs at PR time, before a release run could fail
  * mid-publish on a precondition checkable in milliseconds.
  *
- * Lives in `test/integration/` because the bug class this exists to
+ * Lives in `tests/integration/` because the bug class this exists to
  * prevent — a misconfigured `putitoutthere.toml` shipping a real
  * release — is only observable when the real config loader, the real
  * cascade graph, the real `git ls-files` walk, and the real per-kind

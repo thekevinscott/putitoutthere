@@ -1,6 +1,6 @@
 /**
  * `piot release-github` against the real CLI + real git — the e2e twin of
- * `test/integration/release-github.integration.test.ts`. Epic #442, #444.
+ * `tests/integration/release-github.integration.test.ts`. Epic #442, #444.
  *
  * Where the integration test drives the engine in-process with the
  * subprocess boundary mocked, this one **shells out to the built CLI**
