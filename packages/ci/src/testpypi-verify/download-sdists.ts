@@ -22,6 +22,13 @@ import { sdistFilenameFromHref } from './sdist-filename.js';
 
 const SDISTS_DIR = 'downloaded-sdists';
 const MAX_ATTEMPTS = 6;
+// A PEP 503 simple-index page lists every file ever published for the
+// project, so it grows without bound as fixtures accumulate versions (the
+// maturin fixture's page is already ~1.1 MiB). `execFileSync` captures the
+// curl stdout into a fixed buffer whose default is 1 MiB and throws
+// `ENOBUFS` when the page exceeds it — a limit the original bash never had
+// (it piped curl into a streaming HTML parser). Give the capture ample room.
+const SIMPLE_INDEX_MAX_BUFFER = 64 * 1024 * 1024;
 
 export function downloadSdists(requirements: readonly string[], indexUrl: string): number {
   const indexNorm = normalizeIndexUrl(indexUrl);
@@ -31,7 +38,10 @@ export function downloadSdists(requirements: readonly string[], indexUrl: string
     const expectedSuffix = `-${version}.tar.gz`;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       try {
-        const html = execFileSync('curl', ['-fsS', projectUrl], { encoding: 'utf8' });
+        const html = execFileSync('curl', ['-fsS', projectUrl], {
+          encoding: 'utf8',
+          maxBuffer: SIMPLE_INDEX_MAX_BUFFER,
+        });
         const href = findSdistHref(parseSimpleIndexHrefs(html), expectedSuffix);
         if (href === null) {
           throw new Error(`no sdist ending ${expectedSuffix} on ${projectUrl}`);

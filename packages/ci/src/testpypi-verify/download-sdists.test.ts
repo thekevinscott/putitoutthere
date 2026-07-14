@@ -82,7 +82,12 @@ describe('downloadSdists', () => {
     expect(downloadSdists(['pkg==1.0'], 'IDX')).toBe(0);
     expect(normalizeIndexUrl).toHaveBeenCalledWith('IDX');
     expect(parseRequirement).toHaveBeenCalledWith('pkg==1.0');
-    expect(exec).toHaveBeenCalledWith('curl', ['-fsS', 'https://norm/pkg/'], { encoding: 'utf8' });
+    // 64 MiB cap so the capture doesn't ENOBUFS on a large simple-index page
+    // (the maturin fixture's is ~1.1 MiB, past execFileSync's 1 MiB default).
+    expect(exec).toHaveBeenCalledWith('curl', ['-fsS', 'https://norm/pkg/'], {
+      encoding: 'utf8',
+      maxBuffer: 67108864,
+    });
     expect(parseSimpleIndexHrefs).toHaveBeenCalledWith('HTML');
     expect(findSdistHref).toHaveBeenCalledWith(['H1'], '-1.0.tar.gz');
     expect(sdistFilenameFromHref).toHaveBeenCalledWith('https://files/pkg-1.0.tar.gz#s');
