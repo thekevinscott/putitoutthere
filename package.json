@@ -17,6 +17,7 @@
     "test:e2e": "pnpm --filter putitoutthere run test:e2e"
   },
   "devDependencies": {
-    "@putitoutthere/ci": "workspace:*"
+    "@putitoutthere/ci": "workspace:*",
+    "putitoutthere": "workspace:*"
   }
 }
