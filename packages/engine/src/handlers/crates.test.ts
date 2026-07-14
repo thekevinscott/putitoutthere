@@ -8,7 +8,7 @@
  * unit under test. Cargo.toml contents are driven through `readFileSync`
  * returns; the dirty-tree scan is driven through mocked `git` output rather
  * than a real repo. Real end-to-end file + git behavior is covered by the
- * crates integration tier (test/integration/crates.integration.test.ts).
+ * crates integration tier (tests/integration/crates.integration.test.ts).
  */
 
 import { execFileSync } from 'node:child_process';

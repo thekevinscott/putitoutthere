@@ -54,7 +54,7 @@ describe('piot-ci fixture-materialize (integration)', () => {
   it('plan: substitutes version + placeholder, exports FIXTURE_VERSION, and git-inits a first-publish fixture', () => {
     expect(materialize('plan')).toBe(0);
     expect(rmSync).toHaveBeenCalledWith('fixture-tree', { recursive: true, force: true });
-    expect(cpSync).toHaveBeenCalledWith('packages/engine/test/fixtures/rust-vanilla-first-publish', 'fixture-tree', {
+    expect(cpSync).toHaveBeenCalledWith('packages/engine/tests/fixtures/rust-vanilla-first-publish', 'fixture-tree', {
       recursive: true,
     });
     expect(writeFile).toHaveBeenCalledWith('fixture-tree/Cargo.toml', 'name = "crate-77-3"\nversion = "0.0.1700000000"\n');

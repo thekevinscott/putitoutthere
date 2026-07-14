@@ -16,7 +16,7 @@
  * since last release" from the tag's commit. reconcile prefers a sibling
  * package already tagged at the same version (the real release commit),
  * falling back to HEAD only when no sibling tag exists. This is the
- * e2e twin of `test/e2e/reconcile.e2e.test.ts`.
+ * e2e twin of `tests/e2e/reconcile.e2e.test.ts`.
  *
  * Issue #410, #403 slice 3.
  */

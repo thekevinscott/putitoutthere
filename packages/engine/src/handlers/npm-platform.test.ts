@@ -10,7 +10,7 @@
  * so synthesized staging dirs, artifact reads, and package.json rewrites all
  * observe the same state without a real temp tree. Real end-to-end file
  * behavior is covered by the npm integration tier
- * (test/integration/npm.integration.test.ts).
+ * (tests/integration/npm.integration.test.ts).
  *
  * Issue #19. Plan: §13.7.
  */

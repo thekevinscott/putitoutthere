@@ -1,6 +1,6 @@
 /**
  * `piot verify npm-tarball` against the REAL npm registry — the e2e twin
- * of `test/integration/verify-npm-tarball.integration.test.ts`.
+ * of `tests/integration/verify-npm-tarball.integration.test.ts`.
  *
  * Shells out to the built CLI (`node dist/cli-bin.js verify npm-tarball …`)
  * pointed at piot's own stable, OIDC-published fixture package

@@ -2,7 +2,7 @@
  * `hasCrateSource` — src/lib.rs || src/main.rs presence in an extracted
  * crate tree (#449). Isolated: `listFilesRecursive` is mocked so each branch
  * is driven by the returned file list, not a real temp tree. Real extraction
- * is covered by test/integration/verify-crate.integration.test.ts and e2e.
+ * is covered by tests/integration/verify-crate.integration.test.ts and e2e.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

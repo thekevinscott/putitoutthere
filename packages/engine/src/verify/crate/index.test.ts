@@ -6,7 +6,7 @@
  * crate, empty crate, missing source, and the no-rows short-circuit — through
  * return values rather than real tarballs. Real end-to-end extraction over a
  * live registry root is covered by
- * test/integration/verify-crate.integration.test.ts and e2e.
+ * tests/integration/verify-crate.integration.test.ts and e2e.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

@@ -3,7 +3,7 @@
  *
  * Per AGENTS.md's test-tier split, the behavioural contract for each
  * check is *also* exercised in
- * `test/integration/check.integration.test.ts` — the tier #319's
+ * `tests/integration/check.integration.test.ts` — the tier #319's
  * acceptance criteria call out. These cases own coverage: the
  * integration config is excluded from `test:unit:coverage` per
  * `vitest.config.ts`, so every branch in `check.ts` needs a unit

@@ -10,7 +10,7 @@ name: e2e fixture
 # Fidelity: every action call below (actions/setup-python@v6,
 # PyO3/maturin-action@v1, actions/upload-artifact@v7, etc.) and the
 # step ordering matches release.yml. The only difference is the
-# "Materialize fixture" step that copies test/fixtures/${{ inputs.fixture }}/
+# "Materialize fixture" step that copies tests/fixtures/${{ inputs.fixture }}/
 # into a fixture-tree/ subdir at workflow start, plus `uses: ./` (vs.
 # `uses: thekevinscott/putitoutthere@v0`) so the engine under PR review
 # is the one being exercised.
@@ -22,7 +22,7 @@ on:
   workflow_call:
     inputs:
       fixture:
-        description: 'Fixture directory under test/fixtures/ to exercise.'
+        description: 'Fixture directory under tests/fixtures/ to exercise.'
         type: string
         required: true
       simulate_no_dist:

@@ -1,6 +1,6 @@
 /**
  * `piot verify` against the REAL registries — the e2e twin of
- * `test/integration/verify.integration.test.ts`.
+ * `tests/integration/verify.integration.test.ts`.
  *
  * Shells out to the built CLI (`node dist/cli-bin.js verify …`) pointed at
  * piot's own fixture packages, all published to the real registries via

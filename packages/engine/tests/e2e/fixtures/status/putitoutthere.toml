@@ -1,5 +1,5 @@
 # Live, piot-owned fixture packages published to the real registries by
-# the CI e2e suite (inventory in test/fixtures/README.md). Their versions
+# the CI e2e suite (inventory in tests/fixtures/README.md). Their versions
 # follow the suite's `0.0.{unix_seconds}` scheme. `status` reads each
 # one's real latest version; with no local tag, each is
 # published-but-untagged.

@@ -18,7 +18,7 @@ import { decideFixtureMaterialize, type FixtureMaterializeMode } from './decide.
 // these files carry the `__VERSION__` / `-placeholder` tokens.
 const MANIFEST_NAMES = ['putitoutthere.toml', 'package.json', 'Cargo.toml', 'pyproject.toml'];
 const FIXTURE_TREE = 'fixture-tree';
-const FIXTURES_ROOT = 'packages/engine/test/fixtures';
+const FIXTURES_ROOT = 'packages/engine/tests/fixtures';
 
 // The throwaway-repo git commands, in order, matching the bash exactly.
 const GIT_STEPS: readonly (readonly string[])[] = [

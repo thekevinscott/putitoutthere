@@ -24,10 +24,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { run as runCli } from '../../src/cli.js';
 import { plan } from '../../src/plan.js';
 
-// The fixture data (sample consumer repos) lives at `test/fixtures/`, shared
+// The fixture data (sample consumer repos) lives at `tests/fixtures/`, shared
 // with the e2e-fixture-job.yml publish harness; this test consumes it from
 // there rather than owning it.
-const FIXTURES_DIR = join(import.meta.dirname, '..', '..', 'test', 'fixtures');
+const FIXTURES_DIR = join(import.meta.dirname, '..', '..', 'tests', 'fixtures');
 
 let repo: string;
 

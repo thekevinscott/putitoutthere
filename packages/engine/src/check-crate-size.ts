@@ -12,7 +12,7 @@
  *
  * Wired into `runChecks` (`check.ts`). The end-to-end path through the
  * config loader is covered by
- * `test/integration/check-crate-size.integration.test.ts`.
+ * `tests/integration/check-crate-size.integration.test.ts`.
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';

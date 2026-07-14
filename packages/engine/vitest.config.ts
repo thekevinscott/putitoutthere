@@ -4,10 +4,10 @@ export default defineConfig({
   test: {
     include: [
       'src/**/*.test.ts',
-      'test/fixtures/**/*.test.ts',
-      'test/workflows/**/*.test.ts',
+      'tests/fixtures/**/*.test.ts',
+      'tests/workflows/**/*.test.ts',
     ],
-    setupFiles: ['./test/setup.ts'],
+    setupFiles: ['./tests/setup.ts'],
     environment: 'node',
     testTimeout: 10_000,
     // Vitest 4: vi.restoreAllMocks() no longer resets automocks (only

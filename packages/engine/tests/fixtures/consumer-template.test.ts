@@ -1,5 +1,5 @@
 /**
- * Every fixture under `test/fixtures/` carries a
+ * Every fixture under `tests/fixtures/` carries a
  * `.github/workflows/release.yml` snapshot of the canonical consumer
  * template (the one the README's Quickstart shows). This test asserts
  * every snapshot is byte-identical to that template.
@@ -9,7 +9,7 @@
  * each fixture that the reusable workflow runs against a real
  * consumer's tree. For that to be a faithful test of the consumer
  * experience, each fixture has to be self-describing: opening
- * `test/fixtures/python-rust-maturin/` should show exactly what a
+ * `tests/fixtures/python-rust-maturin/` should show exactly what a
  * maturin consumer would write. If any fixture's workflow drifts
  * from the canonical template, this test fails — preventing the
  * fixtures from quietly becoming a parallel testing universe with
@@ -17,7 +17,7 @@
  *
  * This is a snapshot, not an executor. GitHub Actions parses
  * workflows from the trigger commit's repo root at workflow-load
- * time; a workflow living under `test/fixtures/...` is never
+ * time; a workflow living under `tests/fixtures/...` is never
  * actually run by GitHub. Execution lives in
  * `.github/workflows/e2e-fixture.yml`. Issue #244.
  *
@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
-const fixturesRoot = join(packageRoot, 'test/fixtures');
+const fixturesRoot = join(packageRoot, 'tests/fixtures');
 // README.md stays at the repo root, two levels above this engine package.
 const repoRoot = fileURLToPath(new URL('../../../..', import.meta.url));
 

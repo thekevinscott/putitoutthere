@@ -4,7 +4,7 @@
  * (`execFileSync`) are mocked, so the unit is exercised without a real
  * archive or a real `tar` subprocess — this test asserts the wiring (a fresh
  * temp dir returned, `tar -xzf … -C <dir>` invoked). Real tar extraction is
- * covered by test/integration/verify-crate.integration.test.ts and e2e.
+ * covered by tests/integration/verify-crate.integration.test.ts and e2e.
  */
 
 import { execFileSync } from 'node:child_process';

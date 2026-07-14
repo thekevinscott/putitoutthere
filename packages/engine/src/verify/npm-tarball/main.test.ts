@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // download collaborators, the recursive-listing and local-diagnostic
 // helpers, and `node:fs` are all driven directly, so no real registry,
 // temp dirs, or source trees are touched. Real download/IO round-tripping
-// is covered by test/integration/verify-npm-tarball.integration.test.ts and
+// is covered by tests/integration/verify-npm-tarball.integration.test.ts and
 // the e2e tier.
 vi.mock('./resolve-url.js');
 vi.mock('./download.js');

@@ -1,6 +1,6 @@
 /**
  * `piot verify crate` against a REAL published `.crate` — the e2e twin of
- * `test/integration/verify-crate.integration.test.ts`. Epic #442, #449.
+ * `tests/integration/verify-crate.integration.test.ts`. Epic #442, #449.
  *
  * Where the integration test drives the engine in-process against `.crate`
  * files it builds locally, this one **shells out to the built CLI**

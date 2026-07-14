@@ -13,7 +13,7 @@
  * directly in their own colocated suites (`status-classify.test.ts`,
  * `status-format.test.ts`); the registry-vs-tag drift the feature exists
  * to catch is pinned end-to-end in
- * `test/integration/status.integration.test.ts`.
+ * `tests/integration/status.integration.test.ts`.
  *
  * Issue #403.
  */

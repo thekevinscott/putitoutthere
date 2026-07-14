@@ -1,6 +1,6 @@
 /**
  * `piot verify bundle-cli` against a REAL published wheel — the e2e twin of
- * `test/integration/verify-bundle-cli.integration.test.ts`. Epic #442, #451.
+ * `tests/integration/verify-bundle-cli.integration.test.ts`. Epic #442, #451.
  *
  * Where the integration test drives the engine in-process against `.whl`
  * files it builds locally, this one **shells out to the built CLI**

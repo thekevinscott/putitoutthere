@@ -18,7 +18,7 @@
  * download (`twine check` → `zipfile.BadZipFile`). The fix: collapse the
  * fan to a single wheel row per target for these packages.
  *
- * This lives in `test/integration/` because the behavior is only
+ * This lives in `tests/integration/` because the behavior is only
  * observable when the real config loader, the real planner, and the real
  * `pyproject.toml` / `Cargo.toml` readers run together against an on-disk
  * repo — the config → plan → manifest seam a unit test with stubbed

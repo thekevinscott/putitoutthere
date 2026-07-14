@@ -14,7 +14,7 @@
  * to mock here — the only external surface these commands touch is `git`,
  * and a real `git` over throwaway temp dirs is fully deterministic, so it
  * runs unmocked (mirroring `src/git.test.ts`). The e2e twin
- * (`test/e2e/tag-plumbing.e2e.test.ts`) shells out to the built CLI against
+ * (`tests/e2e/tag-plumbing.e2e.test.ts`) shells out to the built CLI against
  * the same real-git shape.
  *
  * Red before the commands exist: each is an unknown subcommand, so `run`

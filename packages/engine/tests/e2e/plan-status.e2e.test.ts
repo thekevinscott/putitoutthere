@@ -1,6 +1,6 @@
 /**
  * `piot plan` publish/skip verdict against the real CLI + real crates.io
- * — the e2e twin of `test/integration/plan-status.integration.test.ts`.
+ * — the e2e twin of `tests/integration/plan-status.integration.test.ts`.
  *
  * Shells out to the built CLI (`node dist/cli-bin.js plan … --json`)
  * pointed at piot's own live fixture crate `piot-fixture-zzz-poly-rust`.

@@ -5,7 +5,7 @@
  * isolates the derive-target / log / delegate sequence; stdout is captured
  * for the log-line assertion. The real git + bare-remote round trip (the tag
  * actually landing on local + remote) is covered by
- * test/integration/tag-plumbing.integration.test.ts and the e2e tier.
+ * tests/integration/tag-plumbing.integration.test.ts and the e2e tier.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

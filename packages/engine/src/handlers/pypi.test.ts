@@ -14,7 +14,7 @@
  * the filesystem (`node:fs`) are mocked so each case isolates the unit under
  * test — pyproject.toml contents are driven through `readFileSync` returns
  * rather than a real temp tree. Real end-to-end file behavior is covered by
- * the pypi integration tier (test/integration/pypi.integration.test.ts).
+ * the pypi integration tier (tests/integration/pypi.integration.test.ts).
  */
 
 import { execFileSync } from 'node:child_process';

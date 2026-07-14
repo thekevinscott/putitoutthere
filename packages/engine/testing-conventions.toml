@@ -1,0 +1,75 @@
+# testing-conventions waivers for packages/engine.
+#
+# The engine keeps a category of test the unit/integration/e2e taxonomy
+# does not model: **workflow-contract tests** that pin invariants in
+# `.github/workflows/*.yml` a reviewer cannot see break (see AGENTS.md,
+# "Workflow-contract tests are earned"). They run under vitest via
+# `tests/workflows/**` and `tests/fixtures/consumer-template.test.ts`,
+# but they are not suites — they assert YAML text, not engine behaviour,
+# so they cannot live in `tests/integration/` or `tests/e2e/`.
+#
+# When #518 consolidated the singular `test/` tree into `tests/`, these
+# files moved under `tests/` and became visible to the `unknown-tier`
+# structural check. Each is waived here with a reason; a stale path is a
+# hard error, so this list cannot rot. Reclassification/dissolution of
+# these text-tests is tracked in #442.
+
+[[typescript.exempt]]
+path = "tests/fixtures/consumer-template.test.ts"
+rules = ["unknown-tier"]
+reason = "workflow/template-contract test: asserts each fixture's release.yml is byte-identical to the canonical consumer template (#244); not an engine-behaviour suite. Reclassification tracked in #442."
+
+[[typescript.exempt]]
+path = "tests/workflows/action-manifest.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/bundle-cli-musl-target.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/cargo-cache.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/dogfood-globs.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/evidence-check-workflow.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/napi-crate-version.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/npm-build-target-env.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/npm-bundled-cli-crate-version.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/npm-install-fallback.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/publish-github-token.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."
+
+[[typescript.exempt]]
+path = "tests/workflows/workflow-yaml-invariants.test.ts"
+rules = ["unknown-tier"]
+reason = "earned workflow-contract test over .github/workflows YAML (AGENTS.md 'Workflow-contract tests are earned'); not a unit/integration/e2e suite."

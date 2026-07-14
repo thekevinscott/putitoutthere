@@ -7,7 +7,7 @@
  * isolates the three branches — move, idempotent "already at" no-op, and
  * "no release tag yet" no-op — with stdout captured for the log lines. The
  * real semver selection lives in `lastTag` (see git.test.ts) and the real
- * git round trip in test/integration/tag-plumbing.integration.test.ts + the
+ * git round trip in tests/integration/tag-plumbing.integration.test.ts + the
  * e2e tier. `parseTagVersion` (pure) runs for real.
  */
 

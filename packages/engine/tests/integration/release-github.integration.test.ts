@@ -21,7 +21,7 @@
  *
  * This tier drives the CLI in-process (`run([...])`) and mocks only the
  * subprocess boundary (`execFileSync`, for both `git` and `gh`). The e2e
- * twin (`test/e2e/release-github.e2e.test.ts`) shells out to the built CLI
+ * twin (`tests/e2e/release-github.e2e.test.ts`) shells out to the built CLI
  * against a real git repo + bare remote with a stubbed `gh`.
  *
  * Red before the command exists: `release-github` is an unrecognized

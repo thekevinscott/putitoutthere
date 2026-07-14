@@ -6,7 +6,7 @@
  * highest-semver selection is genuinely exercised.
  *
  * The real git round trip — tags actually landing on a repo + bare remote —
- * is covered by test/integration/tag-plumbing.integration.test.ts and the
+ * is covered by tests/integration/tag-plumbing.integration.test.ts and the
  * e2e tier.
  */
 

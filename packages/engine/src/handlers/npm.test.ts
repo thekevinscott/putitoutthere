@@ -9,7 +9,7 @@
  * so package.json rewrites, artifact reads, and synthesized platform staging
  * dirs all observe the same state without a real temp tree. Real end-to-end
  * file behavior is covered by the npm integration tier
- * (test/integration/npm.integration.test.ts).
+ * (tests/integration/npm.integration.test.ts).
  */
 
 import { execFileSync } from 'node:child_process';

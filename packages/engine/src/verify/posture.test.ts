@@ -8,7 +8,7 @@
  *
  * The CLI wiring this once drove end-to-end — `--json` / `--check` /
  * rendering, the live crates reads, cross-registry behaviour — is exercised
- * at the integration + e2e tiers (`test/integration/verify.integration.test.ts`)
+ * at the integration + e2e tiers (`tests/integration/verify.integration.test.ts`)
  * and the renderer at `posture-format.test.ts`, so this stays a focused unit
  * over the classification the engine owns.
  *

@@ -2,14 +2,14 @@
 
 putitoutthere has **two** e2e mechanisms, both run in CI:
 
-- **Fixture suite** (`e2e.yml` → `e2e-fixture.yml`, over `test/fixtures/`) — the heavy path documented below. Real OIDC publishes; the job is the assertion; can't run locally (no OIDC).
-- **CLI e2e** (`test/e2e/*.e2e.test.ts`, `pnpm test:e2e`, `e2e-cli.yml`) — vitest tests that shell out to the built CLI (`node dist/cli-bin.js …`) and hit the real registries for read-mostly behaviours that need no publish: `status` (a registry read) and the publish-path auto-heal (the already-published skip path, which never publishes). Pointed at piot's own stable `piot-fixture-zzz-*` packages, so it's reliable in CI; runs locally too (`pnpm test:e2e`, which builds `dist/` first).
+- **Fixture suite** (`e2e.yml` → `e2e-fixture.yml`, over `tests/fixtures/`) — the heavy path documented below. Real OIDC publishes; the job is the assertion; can't run locally (no OIDC).
+- **CLI e2e** (`tests/e2e/*.e2e.test.ts`, `pnpm test:e2e`, `e2e-cli.yml`) — vitest tests that shell out to the built CLI (`node dist/cli-bin.js …`) and hit the real registries for read-mostly behaviours that need no publish: `status` (a registry read) and the publish-path auto-heal (the already-published skip path, which never publishes). Pointed at piot's own stable `piot-fixture-zzz-*` packages, so it's reliable in CI; runs locally too (`pnpm test:e2e`, which builds `dist/` first).
 
 The rest of this doc covers the **fixture suite**. Its point is to **mirror what an external library experiences** — a consumer writes a 5-line `release.yml` that calls our reusable workflow, and the same `plan → build → publish` flow runs against their working tree, end-to-end against real registries via OIDC.
 
 ## How it runs
 
-`.github/workflows/e2e.yml` is a thin matrix over the 9 fixtures under `test/fixtures/`. Each matrix entry calls `.github/workflows/e2e-fixture.yml`, which mirrors `release.yml`'s job graph step-for-step (same `actions/setup-python@v5`, same `PyO3/maturin-action@v1`, same `actions/upload-artifact@v4` / `download-artifact@v4`, same engine action). The only difference: a "Materialize fixture" step that copies `test/fixtures/${fixture}/` into a `fixture-tree/` subdirectory at workflow start, bumps `__VERSION__` placeholders to a throwaway `0.0.{unix_seconds}` version, and points each step at that subdirectory via `working_directory:`.
+`.github/workflows/e2e.yml` is a thin matrix over the 9 fixtures under `tests/fixtures/`. Each matrix entry calls `.github/workflows/e2e-fixture.yml`, which mirrors `release.yml`'s job graph step-for-step (same `actions/setup-python@v5`, same `PyO3/maturin-action@v1`, same `actions/upload-artifact@v4` / `download-artifact@v4`, same engine action). The only difference: a "Materialize fixture" step that copies `tests/fixtures/${fixture}/` into a `fixture-tree/` subdirectory at workflow start, bumps `__VERSION__` placeholders to a throwaway `0.0.{unix_seconds}` version, and points each step at that subdirectory via `working_directory:`.
 
 The fixture suite's job pass/fail **is** the assertion — no per-fixture test file (the CLI e2e above is the vitest path). If every step the reusable workflow runs against this fixture passes against real registries, the matrix entry is green.
 
