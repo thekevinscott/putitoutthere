@@ -67,11 +67,11 @@ jobs:
       # only in the commit subject.
       - name: Fold action bundle into v0 commit
         run: |
-          node packages/engine/dist/cli-bin.js fold-bundle --subject 'chore(v0): bundle action'
+          pnpm exec putitoutthere fold-bundle --subject 'chore(v0): bundle action'
 
       # Force-move `v0` to the freshly-folded HEAD via the `advance-v0`
       # engine command, which shares `forceMoveTag` with
       # `advance-floating-major` so the two floating-tag movers can't
       # diverge (`src/advance-v0.ts`).
       - name: Force-move v0 to bundle commit
-        run: node packages/engine/dist/cli-bin.js advance-v0
+        run: pnpm exec putitoutthere advance-v0

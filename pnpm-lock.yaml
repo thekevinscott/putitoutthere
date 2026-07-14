@@ -11,6 +11,9 @@ importers:
       '@putitoutthere/ci':
         specifier: workspace:*
         version: link:packages/ci
+      putitoutthere:
+        specifier: workspace:*
+        version: link:packages/engine
 
   packages/ci:
     devDependencies:
