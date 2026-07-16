@@ -142,6 +142,20 @@ describe('piot-ci patch-coverage (integration)', () => {
     expect(out.join('')).toBe('patch-coverage: every added src/ line is covered, no escape hatches. ✓\n');
   });
 
+  it('passes when the added line is a bare v8 ignore stop closer (no reason needed)', () => {
+    git(diffAdding('packages/engine/src/foo.ts', 5, '/* v8 ignore stop */'));
+    readFile.mockReturnValue(
+      JSON.stringify({
+        [covKey('packages/engine/src/foo.ts')]: {
+          s: { '0': 1 },
+          statementMap: { '0': { start: { line: 5 }, end: { line: 5 } } },
+        },
+      }),
+    );
+    expect(patchCoverage()).toBe(0);
+    expect(out.join('')).toBe('patch-coverage: every added src/ line is covered, no escape hatches. ✓\n');
+  });
+
   it('fails with exit 2 when BASE_SHA / HEAD_SHA are unset', () => {
     delete process.env.BASE_SHA;
     delete process.env.HEAD_SHA;

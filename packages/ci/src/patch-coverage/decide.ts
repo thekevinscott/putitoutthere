@@ -16,6 +16,7 @@
 
 import { hasIgnoreReason } from './has-ignore-reason.js';
 import { isEscapeHatch } from './is-escape-hatch.js';
+import { isIgnoreStop } from './is-ignore-stop.js';
 import { isNonStatementLine } from './is-non-statement-line.js';
 import type { PatchCoverageInput, PatchCoverageResult, Violation } from './patch-coverage-types.js';
 
@@ -33,7 +34,7 @@ export function decidePatchCoverage(input: PatchCoverageInput): PatchCoverageRes
   for (const { file, added } of addedByFile) {
     const cl = coverageFor(file);
     for (const { line, text } of added) {
-      if (isEscapeHatch(text) && !hasIgnoreReason(text)) {
+      if (isEscapeHatch(text) && !hasIgnoreReason(text) && !isIgnoreStop(text)) {
         violations.push({ file, line, kind: 'escape-hatch', msg: `new ignore marker introduced: ${text.trim()}` });
         continue;
       }

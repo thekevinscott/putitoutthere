@@ -225,4 +225,16 @@ describe('decidePatchCoverage: reasoned ignore markers are permitted', () => {
       '::error file=packages/engine/src/foo.ts,line=26::patch-coverage [escape-hatch] new ignore marker introduced: /* v8 ignore next */',
     );
   });
+
+  it('permits a bare `stop` closer without a reason (it ends a justified block)', () => {
+    // A `/* v8 ignore stop */` introduces no exclusion — it closes a reasoned
+    // `start` — so it needs no reason of its own even though it matches the
+    // escape-hatch shape.
+    const r = decide({
+      addedByFile: [{ file: 'packages/engine/src/foo.ts', added: [{ line: 27, text: '  /* v8 ignore stop */' }] }],
+      coverageFor: () => cov([27], []),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.out).toEqual(['patch-coverage: every added src/ line is covered, no escape hatches. ✓']);
+  });
 });
