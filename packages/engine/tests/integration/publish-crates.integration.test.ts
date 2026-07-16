@@ -24,7 +24,6 @@
  * Issue #290.
  */
 
-import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,17 +40,24 @@ import {
 } from 'vitest';
 
 import { publish } from '../../src/publish.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
 import { makeServer, makeState, type RegistryState } from './mock-registries.js';
 
-const real = vi.hoisted(() => ({ execFileSync: undefined as unknown as typeof execFileSync }));
+// Dual-mock window: cargo + git both flow through the process seam
+// (`execCapture`) now. Intercept `cargo` here (record-only, never invoke
+// the real binary) and delegate everything else — `git` in particular —
+// to the real `execCapture` so plan()'s git reads and the handler's
+// dirty-tree scan run against the real fixture repo.
+type ExecCapture = typeof execCapture;
+const real = vi.hoisted(() => ({ execCapture: undefined as unknown as ExecCapture }));
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  real.execFileSync = actual.execFileSync;
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+vi.mock('../../src/utils/exec-capture.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
+  real.execCapture = actual.execCapture;
+  return { ...actual, execCapture: vi.fn(actual.execCapture) };
 });
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execCapture);
 
 let state: RegistryState;
 const server = (() => {
@@ -65,7 +71,7 @@ afterAll(() => server.close());
 let repo: string;
 
 function gitInRepo(args: string[]): void {
-  real.execFileSync('git', args, { cwd: repo });
+  execFileSync('git', args, { cwd: repo });
 }
 
 function writeRepoFile(rel: string, body: string): void {
@@ -118,14 +124,14 @@ beforeEach(() => {
       // body never executes. If it does run (sanity-check test),
       // pretend the publish succeeded so the handler's downstream path
       // doesn't crash the test on an unexpected stderr shape.
-      return Buffer.from('');
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
-    return real.execFileSync(
+    return real.execCapture(
       cmd,
-      args as readonly string[],
-      opts as Parameters<typeof execFileSync>[2],
+      args,
+      opts as Parameters<ExecCapture>[2],
     );
-  }) as typeof execFileSync);
+  }) as ExecCapture);
 
   gitInRepo(['init', '-q', '-b', 'main']);
   gitInRepo(['config', 'user.email', 'test@example.com']);

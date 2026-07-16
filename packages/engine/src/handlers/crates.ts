@@ -27,8 +27,7 @@
  * up (same for classic token fallback).
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult, TrustPosture } from '../types.js';
@@ -36,6 +35,8 @@ import { TransientError } from '../types.js';
 import { ErrorCodes } from '../error-codes.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
+import { execCapture } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
 
 const REGISTRY = 'https://crates.io';
 
@@ -59,7 +60,7 @@ async function isPublishedImpl(
   throw new Error(`crates.io GET ${url} returned ${res.status}`);
 }
 
-function writeVersionImpl(
+async function writeVersionImpl(
   pkg: { path: string },
   version: string,
   _ctx: Ctx,
@@ -67,23 +68,23 @@ function writeVersionImpl(
   const cargoPath = join(pkg.path, 'Cargo.toml');
   let original: string;
   try {
-    original = readFileSync(cargoPath, 'utf8');
+    original = await readFile(cargoPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return Promise.reject(new Error(`Cargo.toml not found at ${cargoPath}`));
+      throw new Error(`Cargo.toml not found at ${cargoPath}`, { cause: err });
     }
     /* v8 ignore next -- non-ENOENT read errors are rare (perms/io); surface as-is */
-    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    throw err instanceof Error ? err : new Error(String(err));
   }
   let updated: string;
   try {
     updated = replaceCargoVersion(original, version);
   } catch (err) {
-    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    throw err instanceof Error ? err : new Error(String(err));
   }
-  if (updated === original) {return Promise.resolve([]);}
-  writeFileSync(cargoPath, updated, 'utf8');
-  return Promise.resolve([cargoPath]);
+  if (updated === original) {return [];}
+  await writeFile(cargoPath, updated, 'utf8');
+  return [cargoPath];
 }
 
 async function publishImpl(
@@ -107,7 +108,7 @@ async function publishImpl(
   // `npm install + npm run build` per npm package before the engine
   // publishes). cargo only packs files inside its own package dir, so
   // sibling-package state can't end up in the crate tarball anyway.
-  const unexpected = scanDirtyOutsideManifest(
+  const unexpected = await scanDirtyOutsideManifest(
     ctx.cwd,
     pkg.path,
     ctx.artifactsRoot,
@@ -147,7 +148,7 @@ async function publishImpl(
   const primaryOverride = nonEmpty(ctx.env.PIOT_CRATES_REGISTRY_PRIMARY);
   const fallbackUrl = nonEmpty(ctx.env.PIOT_CRATES_REGISTRY_FALLBACK);
 
-  const runPublish = (registryUrl?: string): void => {
+  const runPublish = async (registryUrl?: string): Promise<void> => {
     // cargo refuses to invoke `publish --index <url>` without an
     // explicit `--token` argument at the CLI parser level — neither
     // CARGO_REGISTRY_TOKEN nor credentials.toml entries unblock it.
@@ -161,21 +162,20 @@ async function publishImpl(
     const args = registryUrl
       ? [...baseArgs, '--index', registryUrl, '--token', 'piot-alt-registry-placeholder']
       : baseArgs;
-    execFileSync('cargo', args, {
+    await execCapture('cargo', args, {
       cwd: ctx.cwd,
       // #138: minimal env. The parent process.env leaks unrelated
       // secrets to cargo; forward only a known-safe baseline plus the
       // workflow-declared ctx.env (which carries CARGO_REGISTRY_TOKEN
       // and OIDC vars when present).
       env: buildSubprocessEnv(ctx.env, { CARGO_TERM_VERBOSE: 'true' }),
-      stdio: ['ignore', 'pipe', 'pipe'],
     });
   };
 
   try {
-    runPublish(primaryOverride);
+    await runPublish(primaryOverride);
   } catch (err) {
-    const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    const stderr = err instanceof ExecError ? err.stderr.trim() : undefined;
     // 429-only fallback. Predicate scoped narrowly to rate-limit prose
     // so non-rate-limit failures (auth, network, validation) surface
     // verbatim. Only fires when the workflow provisioned a fallback AND
@@ -193,9 +193,9 @@ async function publishImpl(
         `::warning::crates.io returned 429; falling back to ${fallbackUrl} (real OIDC-TP path not exercised this run)\n`,
       );
       try {
-        runPublish(fallbackUrl);
+        await runPublish(fallbackUrl);
       } catch (retryErr) {
-        const retryStderr = (retryErr as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+        const retryStderr = retryErr instanceof ExecError ? retryErr.stderr.trim() : undefined;
         const retryBase = retryErr instanceof Error ? retryErr.message : String(retryErr);
         throw new Error(
           `cargo publish (fallback ${fallbackUrl}) failed${retryStderr ? `:\n${retryStderr}` : `: ${retryBase}`}`,
@@ -316,20 +316,18 @@ export function replaceCargoVersion(source: string, version: string): string {
  * a git work tree, git command missing, etc) — callers treat null as
  * "can't verify, fall through to cargo's own --allow-dirty behavior."
  */
-export function scanDirtyOutsideManifest(
+export async function scanDirtyOutsideManifest(
   cwd: string,
   pkgPath: string,
   artifactsRoot?: string,
   siblingPackagePaths?: readonly string[],
-): string[] | null {
+): Promise<string[] | null> {
   // Confirm we're inside a git work tree. If not, bail and let cargo's
   // own --allow-dirty handling take over.
   try {
-    const topOut = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    const topOut = (await execCapture('git', ['rev-parse', '--show-toplevel'], {
       cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    })).stdout;
     if (!topOut.trim()) {return null;}
   } catch {
     return null;
@@ -340,11 +338,9 @@ export function scanDirtyOutsideManifest(
   // Windows 8.3 short names + case-insensitive FS).
   let managedRel = '';
   try {
-    managedRel = execFileSync('git', ['ls-files', '--full-name', '--', 'Cargo.toml'], {
+    managedRel = (await execCapture('git', ['ls-files', '--full-name', '--', 'Cargo.toml'], {
       cwd: pkgPath,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
+    })).stdout.trim();
     /* v8 ignore next 4 -- Cargo.toml is always tracked at publish time */
   } catch {
     // Cargo.toml not tracked (e.g. first release on a fresh tree).
@@ -352,11 +348,9 @@ export function scanDirtyOutsideManifest(
   }
   let porcelain: string;
   try {
-    porcelain = execFileSync('git', ['status', '--porcelain'], {
+    porcelain = (await execCapture('git', ['status', '--porcelain'], {
       cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    })).stdout;
     /* v8 ignore start -- rev-parse succeeded above, status shouldn't fail */
   } catch {
     return null;
