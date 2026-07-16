@@ -10,19 +10,35 @@
  * the actual command.
  */
 
+import { EventEmitter } from 'node:events';
+import type * as ChildProcess from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { appendFile, cp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
-import { execInherit } from '../../src/utils/exec-inherit.js';
 
+// Integration tests run first-party code (the exec seam) for real and mock
+// only the Node built-in underneath it: `spawn` (what `execInherit` uses).
+// Mocking the seam module itself would trip the testing-conventions
+// `no-first-party-mock` gate.
 vi.mock('node:fs/promises');
-vi.mock('../../src/utils/exec-inherit.js');
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, spawn: vi.fn() };
+});
 
 const readdirMock = vi.mocked(readdir);
 const readFileMock = vi.mocked(readFile);
 const writeFileMock = vi.mocked(writeFile);
-const exec = vi.mocked(execInherit);
+const spawnMock = vi.mocked(spawn);
+
+/** A minimal spawn() stand-in that emits `close` with `code` on the next tick. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
 
 function dirent(name: string, parentPath: string): { name: string; parentPath: string; isFile: () => boolean } {
   return { name, parentPath, isFile: () => true };
@@ -31,7 +47,8 @@ function dirent(name: string, parentPath: string): { name: string; parentPath: s
 beforeEach(() => {
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-  exec.mockResolvedValue(undefined);
+  // Every git subprocess `execInherit` spawns exits 0.
+  spawnMock.mockImplementation(((() => fakeChild(0)) as unknown) as typeof spawn);
   process.env.FIXTURE = 'rust-vanilla-first-publish';
   process.env.RUN_ID = '77';
   process.env.RUN_ATTEMPT = '3';
@@ -60,9 +77,16 @@ describe('piot-ci fixture-materialize (integration)', () => {
     });
     expect(writeFileMock).toHaveBeenCalledWith('fixture-tree/Cargo.toml', 'name = "crate-77-3"\nversion = "0.0.1700000000"\n');
     expect(appendFile).toHaveBeenCalledWith('/gh-env', 'FIXTURE_VERSION=0.0.1700000000\n');
-    expect(exec).toHaveBeenCalledWith('git', ['init', '-q', '-b', 'main'], { cwd: 'fixture-tree' });
-    expect(exec).toHaveBeenCalledWith('git', ['commit', '-q', '-m', 'e2e: initial fixture'], {
+    // `execInherit('git', args, { cwd })` spawns with stdio inherited and no env override.
+    expect(spawnMock).toHaveBeenCalledWith('git', ['init', '-q', '-b', 'main'], {
+      stdio: 'inherit',
       cwd: 'fixture-tree',
+      env: undefined,
+    });
+    expect(spawnMock).toHaveBeenCalledWith('git', ['commit', '-q', '-m', 'e2e: initial fixture'], {
+      stdio: 'inherit',
+      cwd: 'fixture-tree',
+      env: undefined,
     });
   });
 
@@ -70,7 +94,7 @@ describe('piot-ci fixture-materialize (integration)', () => {
     await expect(materialize('build')).resolves.toBe(0);
     expect(writeFileMock).toHaveBeenCalledWith('fixture-tree/Cargo.toml', 'name = "crate-placeholder"\nversion = "0.0.1"\n');
     expect(appendFile).not.toHaveBeenCalled();
-    expect(exec).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('publish: uses FIXTURE_VERSION, rewrites placeholder, git-inits, does not export', async () => {
@@ -78,6 +102,6 @@ describe('piot-ci fixture-materialize (integration)', () => {
     await expect(materialize('publish')).resolves.toBe(0);
     expect(writeFileMock).toHaveBeenCalledWith('fixture-tree/Cargo.toml', 'name = "crate-77-3"\nversion = "0.0.500"\n');
     expect(appendFile).not.toHaveBeenCalled();
-    expect(exec).toHaveBeenCalledWith('git', ['add', '.'], { cwd: 'fixture-tree' });
+    expect(spawnMock).toHaveBeenCalledWith('git', ['add', '.'], { stdio: 'inherit', cwd: 'fixture-tree', env: undefined });
   });
 });

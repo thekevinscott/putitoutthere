@@ -262,6 +262,21 @@ describe('runEvidenceCheck: injected poll dependencies', () => {
     expect((await pollDeps()).jobsForRun(3)).toEqual([]);
   });
 
+  it('prefetches each run id once, skipping a duplicate id in the same response', async () => {
+    // Two runs share id 9: the prefetch loop fetches its jobs on the first
+    // entry, then the `jobsByRun.has(run.id)` guard skips the second — one
+    // jobs query, not two.
+    routeExec({
+      runs: '{"workflow_runs":[{"id":9},{"id":9}]}',
+      jobs: '{"jobs":[{"name":"integration"}]}',
+    });
+    const deps = await pollDeps();
+
+    await deps.loadRuns();
+    expect(jobsQueryCount()).toBe(1);
+    expect(deps.jobsForRun(9)).toEqual([{ name: 'integration' }]);
+  });
+
   it('jobsForRun() yields [] for a run id absent from the cache', async () => {
     expect((await pollDeps()).jobsForRun(999)).toEqual([]);
   });

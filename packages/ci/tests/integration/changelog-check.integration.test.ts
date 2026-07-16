@@ -10,14 +10,22 @@
  * are asserted through the actual command.
  */
 
+import type * as ChildProcess from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
 
-vi.mock('../../src/utils/exec-capture.js');
+// Integration tests run first-party code (the exec seam) for real and mock
+// only the Node built-in underneath it: `execFile` (what `execCapture` uses).
+// Mocking the seam module itself would trip the testing-conventions
+// `no-first-party-mock` gate.
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
+});
 
-const exec = vi.mocked(execCapture);
+const execFileMock = vi.mocked(execFile);
 let out: string[];
 
 beforeEach(() => {
@@ -40,12 +48,15 @@ afterEach(() => {
 // public-surface `git --glob-pathspecs diff`, and the plain changed-files
 // `git diff`.
 function git({ log = '', surface = '', changed = '' }: { log?: string; surface?: string; changed?: string }): void {
-  exec.mockImplementation((_cmd, args) => {
-    if (args.includes('log')) {
-      return Promise.resolve({ stdout: log, stderr: '' });
+  execFileMock.mockImplementation(((_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    const a = [...(args ?? [])];
+    if (a.includes('log')) {
+      cb(null, log, '');
+    } else {
+      cb(null, a.includes('--glob-pathspecs') ? surface : changed, '');
     }
-    return Promise.resolve({ stdout: args.includes('--glob-pathspecs') ? surface : changed, stderr: '' });
-  });
+    return undefined as unknown as ChildProcess.ChildProcess;
+  }) as unknown as typeof execFile);
 }
 
 const changelogCheck = (): Promise<number> => run(['node', 'piot-ci', 'changelog-check']);

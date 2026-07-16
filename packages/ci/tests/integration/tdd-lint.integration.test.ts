@@ -10,14 +10,22 @@
  * asserted through the actual command a maintainer would run.
  */
 
+import type * as ChildProcess from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
 
-vi.mock('../../src/utils/exec-capture.js');
+// Integration tests run first-party code (the exec seam) for real and mock
+// only the Node built-in underneath it: `execFile` (what `execCapture` uses).
+// Mocking the seam module itself would trip the testing-conventions
+// `no-first-party-mock` gate.
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
+});
 
-const exec = vi.mocked(execCapture);
+const execFileMock = vi.mocked(execFile);
 let out: string[];
 
 beforeEach(() => {
@@ -36,12 +44,15 @@ afterEach(() => {
   delete process.env.HEAD_SHA;
 });
 
-// Serve the two git reads the gate performs, routed by subcommand.
+// Serve the two git reads the gate performs, routed by subcommand. Mock at
+// `execFile` (under `execCapture`) — the callback shape `execCapture` reads is
+// `(err, stdout, stderr)`.
 function git({ log = '', changed = '' }: { log?: string; changed?: string }): void {
-  exec.mockImplementation((_cmd, args) => {
-    const a = args.join(' ');
-    return Promise.resolve({ stdout: a.includes('log') ? log : changed, stderr: '' });
-  });
+  execFileMock.mockImplementation(((_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    const a = [...(args ?? [])].join(' ');
+    cb(null, a.includes('log') ? log : changed, '');
+    return undefined as unknown as ChildProcess.ChildProcess;
+  }) as unknown as typeof execFile);
 }
 
 const tddLint = (): Promise<number> => run(['node', 'piot-ci', 'tdd-lint']);

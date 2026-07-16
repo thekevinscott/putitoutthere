@@ -16,24 +16,31 @@
  * passed-evidence.test.ts).
  */
 
+import type * as ChildProcess from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
-import { sleep } from '../../src/utils/sleep.js';
 
-vi.mock('../../src/utils/exec-capture.js');
-vi.mock('../../src/utils/sleep.js');
+// Integration tests run first-party code (the exec seam + the real `sleep`)
+// for real and mock only the Node built-in underneath: `execFile` (what
+// `execCapture` uses). These scenarios cite no evidence, so `citedRunNeedles`
+// is empty and `pollUntilResolved` returns before ever awaiting `sleep` — the
+// real `sleep` is left un-mocked (mocking it would trip the
+// testing-conventions `no-first-party-mock` gate) and is simply never reached.
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
+});
 vi.mock('node:fs/promises');
 
-const exec = vi.mocked(execCapture);
+const execFileMock = vi.mocked(execFile);
 const read = vi.mocked(readFile);
 let out: string[];
 
 beforeEach(() => {
   out = [];
-  vi.mocked(sleep).mockResolvedValue(undefined);
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
     return true;
@@ -48,15 +55,13 @@ afterEach(() => {
   delete process.env.HEAD_SHA;
 });
 
-// Serve the `git diff` of CHANGELOG.md and the CHANGELOG.md read. `gh` and
-// `sleep` are stubbed defensively but must not be reached in these cases.
+// Serve the `git diff` of CHANGELOG.md and the CHANGELOG.md read. `gh` is
+// stubbed defensively but must not be reached in these cases.
 function repo({ diff, changelog }: { diff: string; changelog: string }): void {
-  exec.mockImplementation((cmd) =>
-    Promise.resolve({
-      stdout: cmd === 'gh' ? '{"workflow_runs":[]}' : diff, // git diff (sleep/gh unreached with empty needles)
-      stderr: '',
-    }),
-  );
+  execFileMock.mockImplementation(((cmd: string, _args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    cb(null, cmd === 'gh' ? '{"workflow_runs":[]}' : diff, ''); // git diff (sleep/gh unreached with empty needles)
+    return undefined as unknown as ChildProcess.ChildProcess;
+  }) as unknown as typeof execFile);
   read.mockResolvedValue(changelog);
 }
 
@@ -90,6 +95,6 @@ describe('piot-ci evidence-check (integration)', async () => {
     delete process.env.BASE_SHA;
     await expect(evidenceCheck()).resolves.toBe(1);
     expect(out.join('')).toBe('::error::evidence-check: BASE_SHA and HEAD_SHA must be set.\n');
-    expect(exec).not.toHaveBeenCalled();
+    expect(execFileMock).not.toHaveBeenCalled();
   });
 });

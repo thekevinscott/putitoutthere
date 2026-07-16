@@ -12,16 +12,24 @@
  * the actual command and streams.
  */
 
+import type * as ChildProcess from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { readFile as readFileFn } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
 
-vi.mock('../../src/utils/exec-capture.js');
+// Integration tests run first-party code (the exec seam) for real and mock
+// only the Node built-in underneath it: `execFile` (what `execCapture` uses).
+// Mocking the seam module itself would trip the testing-conventions
+// `no-first-party-mock` gate.
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
+});
 vi.mock('node:fs/promises');
 
-const exec = vi.mocked(execCapture);
+const execFileMock = vi.mocked(execFile);
 const readFile = vi.mocked(readFileFn);
 let out: string[];
 let err: string[];
@@ -30,10 +38,11 @@ const covKey = (rel: string): string => `${cwd}/${rel}`;
 
 // git cat-file probes succeed; `git diff` returns the supplied post-image.
 function git(diffOut: string): void {
-  exec.mockImplementation((_cmd, args) => {
-    const a = args ?? [];
-    return Promise.resolve({ stdout: a.includes('cat-file') ? '' : diffOut, stderr: '' });
-  });
+  execFileMock.mockImplementation(((_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    const a = [...(args ?? [])];
+    cb(null, a.includes('cat-file') ? '' : diffOut, '');
+    return undefined as unknown as ChildProcess.ChildProcess;
+  }) as unknown as typeof execFile);
 }
 
 beforeEach(() => {
@@ -135,7 +144,12 @@ describe('piot-ci patch-coverage (integration)', async () => {
   });
 
   it('fails with exit 2 when a SHA is unreachable in the clone', async () => {
-    exec.mockRejectedValue(new Error('bad object'));
+    // `git cat-file` fails → the seam rejects with ExecError; the gate maps it
+    // to the "not reachable" diagnostic.
+    execFileMock.mockImplementation(((_cmd: string, _args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+      cb(new Error('bad object'), '', '');
+      return undefined as unknown as ChildProcess.ChildProcess;
+    }) as unknown as typeof execFile);
     await expect(patchCoverage()).resolves.toBe(2);
     expect(err.join('')).toBe('::error::patch-coverage: base or head not reachable in this clone\n');
   });
