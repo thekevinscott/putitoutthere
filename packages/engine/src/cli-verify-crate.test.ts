@@ -20,7 +20,7 @@ const crateMock = vi.mocked(verifyCrate);
 const stderr: string[] = [];
 
 beforeEach(() => {
-  crateMock.mockReset().mockReturnValue(0);
+  crateMock.mockReset().mockResolvedValue(0);
   stderr.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(process.stderr, 'write').mockImplementation((c) => {

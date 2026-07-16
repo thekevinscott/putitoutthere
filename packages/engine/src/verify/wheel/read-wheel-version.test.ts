@@ -1,49 +1,50 @@
 /**
- * `readWheelVersion` (#450): the METADATA `Version:` parser. `node:fs` and the
- * zip reader are mocked so this isolates the line-parsing / null-propagation
- * logic; the real zip decode is covered in `read-zip-entry.test.ts` and the
- * full round trip in the integration + e2e tiers.
+ * `readWheelVersion` (#450): the METADATA `Version:` parser.
+ * `node:fs/promises` and the zip reader are mocked so this isolates the
+ * line-parsing / null-propagation logic; the real zip decode is covered in
+ * `read-zip-entry.test.ts` and the full round trip in the integration + e2e
+ * tiers.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { readWheelVersion } from './read-wheel-version.js';
 import { readZipEntry } from './read-zip-entry.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./read-zip-entry.js');
 
-const readFileMock = vi.mocked(readFileSync);
+const readFileMock = vi.mocked(readFile);
 const readZipMock = vi.mocked(readZipEntry);
 
 const META = (v: string) => `Metadata-Version: 2.1\nName: demo\nVersion: ${v}\n`;
 
 beforeEach(() => {
   vi.resetAllMocks();
-  readFileMock.mockReturnValue(Buffer.from('wheel-bytes'));
+  readFileMock.mockResolvedValue(Buffer.from('wheel-bytes'));
 });
 
 describe('readWheelVersion', () => {
-  it('reads the Version from a METADATA entry', () => {
+  it('reads the Version from a METADATA entry', async () => {
     readZipMock.mockReturnValue(Buffer.from(META('1.2.3')));
-    expect(readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBe('1.2.3');
+    expect(await readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBe('1.2.3');
   });
 
-  it('reads a different Version string', () => {
+  it('reads a different Version string', async () => {
     readZipMock.mockReturnValue(Buffer.from(META('4.5.6')));
-    expect(readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBe('4.5.6');
+    expect(await readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBe('4.5.6');
   });
 
-  it('ignores the Metadata-Version line (matches ^Version: only)', () => {
+  it('ignores the Metadata-Version line (matches ^Version: only)', async () => {
     // A METADATA whose only Version-ish line is Metadata-Version must not be
     // mistaken for the package version.
     readZipMock.mockReturnValue(Buffer.from('Metadata-Version: 2.1\nName: demo\n'));
-    expect(readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBeNull();
+    expect(await readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBeNull();
   });
 
-  it('returns null when the wheel has no METADATA entry', () => {
+  it('returns null when the wheel has no METADATA entry', async () => {
     readZipMock.mockReturnValue(null);
-    expect(readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBeNull();
+    expect(await readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBeNull();
   });
 });

@@ -1,17 +1,17 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Bare automocks (no factory) isolate the unit under test: the resolve/
 // download collaborators, the recursive-listing and local-diagnostic
-// helpers, and `node:fs` are all driven directly, so no real registry,
-// temp dirs, or source trees are touched. Real download/IO round-tripping
-// is covered by tests/integration/verify-npm-tarball.integration.test.ts and
-// the e2e tier.
+// helpers, and `node:fs/promises` are all driven directly, so no real
+// registry, temp dirs, or source trees are touched. Real download/IO
+// round-tripping is covered by
+// tests/integration/verify-npm-tarball.integration.test.ts and the e2e tier.
 vi.mock('./resolve-url.js');
 vi.mock('./download.js');
 vi.mock('./local-dir-state.js');
 vi.mock('../../utils/list-files-recursive.js');
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 
 import { downloadNpmTarball } from './download.js';
 import { resolveNpmTarballUrl } from './resolve-url.js';
@@ -23,9 +23,8 @@ const resolveMock = vi.mocked(resolveNpmTarballUrl);
 const downloadMock = vi.mocked(downloadNpmTarball);
 const localDirStateMock = vi.mocked(localDirState);
 const listMock = vi.mocked(listFilesRecursive);
-const readFileMock = vi.mocked(readFileSync);
-const existsMock = vi.mocked(existsSync);
-const statMock = vi.mocked(statSync);
+const readFileMock = vi.mocked(readFile);
+const statMock = vi.mocked(stat);
 
 // `downloadNpmTarball`'s return is opaque here — the four tarball shapes are
 // expressed through the mocked fs/listing responses, not a real extraction.
@@ -36,11 +35,15 @@ const TARBALL = { root: 'tarball-root', packageDir: 'tarball-root/package' };
 const PRESENT_DIAG = 'local packages/npm/dist: present, 1 file(s) — packages/npm/dist/index.js ';
 const MISSING_DIAG = 'local packages/npm/dist: missing';
 
+// `pathExists` returns false when `stat` rejects; ENOENT drives the
+// tarball-target-absent branches.
+const ENOENT = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+
 const out: string[] = [];
 
 const row = { name: '@scope/pkg', kind: 'npm', version: '1.0.0', target: 'main', path: 'packages/npm' };
 
-/** The package.json JSON the mocked `readFileSync` hands back. */
+/** The package.json JSON the mocked `readFile` hands back. */
 function pkgJson(files?: string[]): string {
   return JSON.stringify(files === undefined ? { name: '@scope/pkg' } : { name: '@scope/pkg', files });
 }
@@ -67,7 +70,7 @@ describe('verifyNpmTarballMain', () => {
   });
 
   it('skips rows whose files[] has no directory entries', async () => {
-    readFileMock.mockReturnValue(pkgJson(['README.md']));
+    readFileMock.mockResolvedValue(pkgJson(['README.md']));
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '', registry: 'http://r' });
     expect(out.join('')).toContain('[@scope/pkg@1.0.0] no directory entries in files[]; skipping.');
     expect(code).toBe(0);
@@ -75,12 +78,11 @@ describe('verifyNpmTarballMain', () => {
   });
 
   it('passes when every declared dir is present in the tarball', async () => {
-    readFileMock.mockReturnValue(pkgJson(['dist']));
+    readFileMock.mockResolvedValue(pkgJson(['dist']));
     resolveMock.mockResolvedValue('https://reg/pkg.tgz');
-    downloadMock.mockReturnValue(TARBALL);
-    existsMock.mockReturnValue(true);
-    statMock.mockReturnValue({ isDirectory: () => true } as never);
-    listMock.mockReturnValue(['tarball-root/package/dist/index.js']);
+    downloadMock.mockResolvedValue(TARBALL);
+    statMock.mockResolvedValue({ isDirectory: () => true } as never);
+    listMock.mockResolvedValue(['tarball-root/package/dist/index.js']);
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '', registry: 'http://localhost:4873' });
     const text = out.join('');
@@ -90,11 +92,11 @@ describe('verifyNpmTarballMain', () => {
   });
 
   it('fails with a present-locally diagnostic when the tarball drops a dir', async () => {
-    readFileMock.mockReturnValue(pkgJson(['dist']));
+    readFileMock.mockResolvedValue(pkgJson(['dist']));
     resolveMock.mockResolvedValue('https://reg/pkg.tgz');
-    downloadMock.mockReturnValue(TARBALL);
-    existsMock.mockReturnValue(false); // tarball target absent
-    localDirStateMock.mockReturnValue(PRESENT_DIAG);
+    downloadMock.mockResolvedValue(TARBALL);
+    statMock.mockRejectedValue(ENOENT); // tarball target absent
+    localDirStateMock.mockResolvedValue(PRESENT_DIAG);
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '', registry: 'http://r' });
     const text = out.join('');
@@ -104,11 +106,11 @@ describe('verifyNpmTarballMain', () => {
   });
 
   it('fails with a missing diagnostic when the dir is absent locally too', async () => {
-    readFileMock.mockReturnValue(pkgJson(['dist']));
+    readFileMock.mockResolvedValue(pkgJson(['dist']));
     resolveMock.mockResolvedValue('https://reg/pkg.tgz');
-    downloadMock.mockReturnValue(TARBALL);
-    existsMock.mockReturnValue(false);
-    localDirStateMock.mockReturnValue(MISSING_DIAG);
+    downloadMock.mockResolvedValue(TARBALL);
+    statMock.mockRejectedValue(ENOENT);
+    localDirStateMock.mockResolvedValue(MISSING_DIAG);
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '', registry: 'http://r' });
     expect(out.join('')).toContain(MISSING_DIAG);
@@ -116,13 +118,12 @@ describe('verifyNpmTarballMain', () => {
   });
 
   it('fails when the declared dir is present but empty in the tarball', async () => {
-    readFileMock.mockReturnValue(pkgJson(['dist']));
+    readFileMock.mockResolvedValue(pkgJson(['dist']));
     resolveMock.mockResolvedValue('https://reg/pkg.tgz');
-    downloadMock.mockReturnValue(TARBALL);
-    existsMock.mockReturnValue(true);
-    statMock.mockReturnValue({ isDirectory: () => true } as never);
-    listMock.mockReturnValue([]); // present dir, but no files under it
-    localDirStateMock.mockReturnValue(MISSING_DIAG);
+    downloadMock.mockResolvedValue(TARBALL);
+    statMock.mockResolvedValue({ isDirectory: () => true } as never);
+    listMock.mockResolvedValue([]); // present dir, but no files under it
+    localDirStateMock.mockResolvedValue(MISSING_DIAG);
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '', registry: 'http://r' });
     expect(out.join('')).toContain("tarball missing 'dist'");
@@ -130,12 +131,11 @@ describe('verifyNpmTarballMain', () => {
   });
 
   it('fails when the declared dir exists as a file in the tarball', async () => {
-    readFileMock.mockReturnValue(pkgJson(['dist']));
+    readFileMock.mockResolvedValue(pkgJson(['dist']));
     resolveMock.mockResolvedValue('https://reg/pkg.tgz');
-    downloadMock.mockReturnValue(TARBALL);
-    existsMock.mockReturnValue(true);
-    statMock.mockReturnValue({ isDirectory: () => false } as never); // it's a file
-    localDirStateMock.mockReturnValue(MISSING_DIAG);
+    downloadMock.mockResolvedValue(TARBALL);
+    statMock.mockResolvedValue({ isDirectory: () => false } as never); // it's a file
+    localDirStateMock.mockResolvedValue(MISSING_DIAG);
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '', registry: 'http://r' });
     expect(out.join('')).toContain("tarball missing 'dist'");
@@ -144,7 +144,7 @@ describe('verifyNpmTarballMain', () => {
 
   it('selects noarch npm rows, ignores other kinds/targets, defaults an absent files[]', async () => {
     // package.json without a `files` key → the `files ?? []` default.
-    readFileMock.mockReturnValue(pkgJson(undefined));
+    readFileMock.mockResolvedValue(pkgJson(undefined));
     const rows = [
       { ...row, kind: 'crates' },          // non-npm → filtered
       { ...row, target: 'noarch' },        // npm noarch → selected
@@ -157,7 +157,7 @@ describe('verifyNpmTarballMain', () => {
   });
 
   it('uses the real-npm label and fails when no URL ever resolves', async () => {
-    readFileMock.mockReturnValue(pkgJson(['dist']));
+    readFileMock.mockResolvedValue(pkgJson(['dist']));
     resolveMock.mockResolvedValue(null);
 
     // No `registry` → real npm; label is registry.npmjs.org, 6 attempts.

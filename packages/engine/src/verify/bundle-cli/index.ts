@@ -17,11 +17,11 @@
  * the pure-Node reader `verify wheel` (#450) already ships — no `unzip`, so
  * this runs on every platform the maturin matrix builds on, Windows
  * included — and the match mirrors the bash `grep -qE
- * "(^|/)<stage_suffix>/<expected>$"`. Synchronous throughout. Returns the
+ * "(^|/)<stage_suffix>/<expected>$"`. Async throughout. Returns the
  * process exit code (0 ok, 1 on a miss).
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { findDistFile } from '../wheel/find-dist-file.js';
@@ -30,16 +30,16 @@ import { computeStageSuffix } from './compute-stage-suffix.js';
 import { readPythonSource } from './read-python-source.js';
 import type { VerifyBundleCliOptions } from './types.js';
 
-export function verifyBundleCli(opts: VerifyBundleCliOptions): number {
+export async function verifyBundleCli(opts: VerifyBundleCliOptions): Promise<number> {
   const pkgDir = isAbsolute(opts.path) ? opts.path : resolve(opts.cwd, opts.path);
   const distDir = join(pkgDir, 'dist');
-  const wheel = findDistFile(distDir, '.whl');
+  const wheel = await findDistFile(distDir, '.whl');
   if (wheel === null) {
     process.stdout.write(`::error::no wheel produced under ${distDir}\n`);
     return 1;
   }
 
-  const stageSuffix = computeStageSuffix(opts.stageTo, readPythonSource(pkgDir));
+  const stageSuffix = computeStageSuffix(opts.stageTo, await readPythonSource(pkgDir));
   const ext = opts.target.includes('windows') ? '.exe' : '';
   const expected = `${opts.bin}${ext}`;
   const suffix = `${stageSuffix}/${expected}`;
@@ -56,7 +56,7 @@ export function verifyBundleCli(opts: VerifyBundleCliOptions): number {
   // every name for the diagnostic listing the bash dumps with `unzip -l`; on
   // a hit it short-circuits, and the listing is not needed.
   const entries: string[] = [];
-  const present = readZipEntry(readFileSync(wheel), (name) => {
+  const present = readZipEntry(await readFile(wheel), (name) => {
     entries.push(name);
     return `/${name}`.endsWith(`/${suffix}`);
   }) !== null;

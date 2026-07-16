@@ -6,15 +6,10 @@ import tseslint from 'typescript-eslint';
 // only be DELETED (by the sub-issue that migrates them), never added.
 const SYNC_EXEMPT = [
   'src/handlers/crates.ts', 'src/handlers/npm-platform.ts', 'src/handlers/npm.ts',
-  'src/handlers/pypi.ts', 'src/python-versions.ts', 'src/utils/list-files-recursive.ts',
-  'src/verbose.ts', 'src/verify/bundle-cli/index.ts',
-  'src/verify/bundle-cli/read-python-source.ts', 'src/verify/crate/extract-crate.ts',
-  'src/verify/crate/find-crate-file.ts', 'src/verify/crate/index.ts',
-  'src/verify/npm-tarball/download.ts', 'src/verify/npm-tarball/local-dir-state.ts',
-  'src/verify/npm-tarball/main.ts', 'src/verify/npm-tarball/resolve-url.ts',
-  'src/verify/npm-tarball/triple.ts', 'src/verify/wheel/find-dist-file.ts',
-  'src/verify/wheel/index.ts', 'src/verify/wheel/read-wheel-version.ts',
-  'src/wheel-abi.ts', ];
+  'src/handlers/pypi.ts', 'src/python-versions.ts',
+  'src/verbose.ts',
+  'src/wheel-abi.ts',
+];
 
 export default tseslint.config(
   {

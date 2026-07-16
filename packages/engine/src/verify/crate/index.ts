@@ -13,11 +13,11 @@
  *
  * The diagnostic this gate gives (the rust-vanilla-first-publish fixture):
  * without it, a publish that silently no-op'd or produced an empty `.crate`
- * would still go green. Synchronous throughout, per the engine convention.
+ * would still go green. Async throughout, per the engine convention.
  * Returns the process exit code (0 ok, 1 on any miss).
  */
 
-import { rmSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 
 import { extractCrate } from './extract-crate.js';
 import { findCrateFile } from './find-crate-file.js';
@@ -25,7 +25,7 @@ import { hasCrateSource } from './has-crate-source.js';
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 import type { CrateRow, VerifyCrateOptions } from './types.js';
 
-export function verifyCrate(opts: VerifyCrateOptions): number {
+export async function verifyCrate(opts: VerifyCrateOptions): Promise<number> {
   const rows = (JSON.parse(opts.matrix) as CrateRow[]).filter((r) => r.kind === 'crates');
   if (rows.length === 0) {
     process.stdout.write('No crates rows; nothing to verify.\n');
@@ -34,7 +34,7 @@ export function verifyCrate(opts: VerifyCrateOptions): number {
 
   let fail = 0;
   for (const row of rows) {
-    const crateFile = findCrateFile(opts.registryRoot, row.name, row.version);
+    const crateFile = await findCrateFile(opts.registryRoot, row.name, row.version);
     if (crateFile === null) {
       process.stdout.write(
         `::error::[${row.name}@${row.version}] no .crate file found (or empty) under ${opts.registryRoot}\n`,
@@ -43,17 +43,17 @@ export function verifyCrate(opts: VerifyCrateOptions): number {
       continue;
     }
 
-    const extracted = extractCrate(crateFile);
-    if (hasCrateSource(extracted)) {
+    const extracted = await extractCrate(crateFile);
+    if (await hasCrateSource(extracted)) {
       process.stdout.write(`ok: ${crateFile} contains src/lib.rs or src/main.rs\n`);
     } else {
-      const listing = listFilesRecursive(extracted).join(' ');
+      const listing = (await listFilesRecursive(extracted)).join(' ');
       process.stdout.write(
         `::error::[${row.name}@${row.version}] .crate tarball missing src/lib.rs and src/main.rs. Tarball contents: ${listing}\n`,
       );
       fail = 1;
     }
-    rmSync(extracted, { recursive: true, force: true });
+    await rm(extracted, { recursive: true, force: true });
   }
   return fail;
 }
