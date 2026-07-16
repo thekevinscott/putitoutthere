@@ -11,7 +11,7 @@
  * Issue #15.
  */
 
-import { appendFileSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 import { redact, type EnvSource } from './log.js';
 import type { Logger } from './types.js';
 
@@ -62,11 +62,11 @@ export interface DumpOptions {
 const SUMMARY_CAP = 4 * 1024 * 1024; // GHA job-summary ceiling: 1 MiB per step, 20 MiB total. Cap at 4 MiB to stay well under on a single failure.
 const TRUNC_NOTE = '\n\n_… truncated. Run `gh run view --log` for the full log._\n';
 
-export function dumpFailure(
+export async function dumpFailure(
   err: Error,
   ctx: FailureContext,
   opts: DumpOptions,
-): void {
+): Promise<void> {
   // Default redact() already scans process.env. When callers supply
   // additional envSources (ctx.env from publish.ts, or a per-handler
   // env layer), prepend process.env so both get scanned and the cache
@@ -76,7 +76,7 @@ export function dumpFailure(
       ? [process.env, ...opts.envSources]
       : undefined;
   const md = redact(renderMarkdown(err, ctx), sources);
-  writeSummary(truncate(md));
+  await writeSummary(truncate(md));
 
   // Phase 3 / Idea 6. The markdown summary above is auth-gated on
   // private repos and not always reachable to a foreign agent helping
@@ -190,8 +190,8 @@ function truncate(md: string): string {
   return head + TRUNC_NOTE;
 }
 
-function writeSummary(md: string): void {
+async function writeSummary(md: string): Promise<void> {
   const path = process.env.GITHUB_STEP_SUMMARY;
   if (!path) {return;} // local runs / non-GHA CI — summary is a no-op
-  appendFileSync(path, md, 'utf8');
+  await appendFile(path, md, 'utf8');
 }

@@ -104,9 +104,10 @@ Rules:
 
 - New code awaits its I/O. `*Sync` fs calls, `execFileSync`, `execSync`,
   and `spawnSync` are banned in `src/` (enforced by the
-  `no-restricted-imports` ratchet in each package's `eslint.config.js`;
-  files still awaiting migration are listed in `SYNC_EXEMPT`, and that
-  list only shrinks).
+  `no-restricted-imports` rule in each package's `eslint.config.js`). The
+  #469 migration is complete: both packages are async throughout, so there
+  is no longer a `SYNC_EXEMPT` escape list — the ban applies to all of
+  `src/` with no exemptions.
 - Pure functions stay sync. `async` marks I/O, not fashion — a parser or
   formatter that touches no I/O keeps a plain signature.
 - Sequential semantics are preserved: the release pipeline is

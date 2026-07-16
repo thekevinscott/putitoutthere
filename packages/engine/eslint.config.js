@@ -2,12 +2,6 @@ import js from '@eslint/js';
 import stylistic from '@stylistic/eslint-plugin';
 import tseslint from 'typescript-eslint';
 
-// #469 async-migration ratchet: files still using sync I/O. Entries may
-// only be DELETED (by the sub-issue that migrates them), never added.
-const SYNC_EXEMPT = [
-  'src/verbose.ts',
-];
-
 export default tseslint.config(
   {
     ignores: ['dist/**', 'dist-action/**', 'coverage/**', 'node_modules/**'],
@@ -36,6 +30,10 @@ export default tseslint.config(
     },
   },
   {
+    // #469: the engine is async throughout. Sync fs and sync subprocess
+    // calls are banned in src/ — use node:fs/promises and the exec seam
+    // (src/utils/exec-capture.ts / exec-inherit.ts). The migration is
+    // complete, so there is no longer an exemption list.
     files: ['src/**/*.ts'],
     ignores: ['**/*.test.ts'],
     rules: {
@@ -46,10 +44,6 @@ export default tseslint.config(
         ],
       }],
     },
-  },
-  {
-    files: SYNC_EXEMPT,
-    rules: { 'no-restricted-imports': 'off' },
   },
   {
     files: ['**/*.test.ts'],

@@ -6,9 +6,9 @@
  *
  * Unit-isolated: `verbose.ts`'s two collaborators are mocked so this
  * suite exercises only `dumpFailure`'s own branching.
- *  - `node:fs` is automocked; the markdown written to
+ *  - `node:fs/promises` is automocked; the markdown written to
  *    `$GITHUB_STEP_SUMMARY` is asserted through the captured
- *    `appendFileSync` call rather than a real temp file.
+ *    `appendFile` call rather than a real temp file.
  *  - `./log.js` is automocked; the pure `redact` helper is restored with
  *    a tiny faithful reimplementation (env-key secret match + length
  *    floor + longest-first replacement with an 8-hex marker) so the
@@ -20,13 +20,13 @@
  * the implementation writes there and it is not a module boundary.
  */
 
-import { appendFileSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { dumpFailure, type FailureContext } from './verbose.js';
 import { redact } from './log.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./log.js');
 
 /**
@@ -87,11 +87,11 @@ function makeLog() {
   };
 }
 
-/** The markdown handed to `appendFileSync` for the job summary. */
+/** The markdown handed to `appendFile` for the job summary. */
 function writtenSummary(): string {
-  const calls = vi.mocked(appendFileSync).mock.calls;
+  const calls = vi.mocked(appendFile).mock.calls;
   expect(calls.length).toBeGreaterThan(0);
-  return String(calls[calls.length - 1]?.[1]);
+  return calls[calls.length - 1]?.[1] as string;
 }
 
 const ENV_BAK = { ...process.env };
@@ -99,7 +99,7 @@ const ENV_BAK = { ...process.env };
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(redact).mockImplementation(faithfulRedact);
-  // A truthy path so `writeSummary` reaches `appendFileSync`; no real
+  // A truthy path so `writeSummary` reaches `appendFile`; no real
   // file is touched (fs is mocked). Bare basename — no separator, so
   // nothing here is OS-specific.
   process.env.GITHUB_STEP_SUMMARY = 'summary.md';
@@ -126,9 +126,9 @@ function baseCtx(over: Partial<FailureContext> = {}): FailureContext {
 }
 
 describe('dumpFailure: GitHub step summary', () => {
-  it('writes a markdown report to $GITHUB_STEP_SUMMARY', () => {
+  it('writes a markdown report to $GITHUB_STEP_SUMMARY', async () => {
     const log = makeLog();
-    dumpFailure(new Error('publish failed'), baseCtx(), { log });
+    await dumpFailure(new Error('publish failed'), baseCtx(), { log });
     const md = writtenSummary();
     expect(md).toContain('publish failed');
     expect(md).toContain('demo');
@@ -139,17 +139,17 @@ describe('dumpFailure: GitHub step summary', () => {
     expect(md).toContain('cargo 1.78.0');
   });
 
-  it('no-ops when $GITHUB_STEP_SUMMARY is unset', () => {
+  it('no-ops when $GITHUB_STEP_SUMMARY is unset', async () => {
     delete process.env.GITHUB_STEP_SUMMARY;
     const log = makeLog();
     // Should not throw, and should not write the summary.
-    dumpFailure(new Error('nope'), baseCtx(), { log });
-    expect(appendFileSync).not.toHaveBeenCalled();
+    await dumpFailure(new Error('nope'), baseCtx(), { log });
+    expect(appendFile).not.toHaveBeenCalled();
   });
 
-  it('includes handler-specific extras when supplied', () => {
+  it('includes handler-specific extras when supplied', async () => {
     const log = makeLog();
-    dumpFailure(new Error('fail'), baseCtx({ extras: { wheelTags: ['cp310-linux'] } }), { log });
+    await dumpFailure(new Error('fail'), baseCtx({ extras: { wheelTags: ['cp310-linux'] } }), { log });
     const md = writtenSummary();
     expect(md).toContain('wheelTags');
     expect(md).toContain('cp310-linux');
@@ -157,25 +157,25 @@ describe('dumpFailure: GitHub step summary', () => {
 });
 
 describe('dumpFailure: empty streams', () => {
-  it('renders "(empty)" for missing stdout/stderr', () => {
+  it('renders "(empty)" for missing stdout/stderr', async () => {
     const log = makeLog();
-    dumpFailure(new Error('blank'), baseCtx({ stdout: '', stderr: '' }), { log });
+    await dumpFailure(new Error('blank'), baseCtx({ stdout: '', stderr: '' }), { log });
     const md = writtenSummary();
     expect(md).toContain('(empty)');
   });
 
-  it('omits the tool-versions block when no versions supplied', () => {
+  it('omits the tool-versions block when no versions supplied', async () => {
     const log = makeLog();
-    dumpFailure(new Error('no-versions'), baseCtx({ toolVersions: {} }), { log });
+    await dumpFailure(new Error('no-versions'), baseCtx({ toolVersions: {} }), { log });
     const md = writtenSummary();
     expect(md).not.toContain('Tool versions');
   });
 });
 
 describe('dumpFailure: structured log', () => {
-  it('emits a single error-level record summarizing the failure', () => {
+  it('emits a single error-level record summarizing the failure', async () => {
     const log = makeLog();
-    dumpFailure(new Error('boom'), baseCtx(), { log });
+    await dumpFailure(new Error('boom'), baseCtx(), { log });
     // Exactly one error-level record; no other level was emitted.
     expect(log.error).toHaveBeenCalledTimes(1);
     expect(log.debug).not.toHaveBeenCalled();
@@ -190,10 +190,10 @@ describe('dumpFailure: structured log', () => {
 });
 
 describe('dumpFailure: redaction', () => {
-  it('redacts env-matched secrets from stderr before writing', () => {
+  it('redacts env-matched secrets from stderr before writing', async () => {
     process.env.CARGO_REGISTRY_TOKEN = 'tok-abc-123';
     const log = makeLog();
-    dumpFailure(
+    await dumpFailure(
       new Error('auth'),
       baseCtx({ stderr: 'sent token tok-abc-123 in header' }),
       { log },
@@ -203,15 +203,15 @@ describe('dumpFailure: redaction', () => {
     expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
   });
 
-  it('redacts secrets from stdout too', () => {
+  it('redacts secrets from stdout too', async () => {
     process.env.NPM_SECRET = 'super-secret-xyz';
     const log = makeLog();
-    dumpFailure(new Error('x'), baseCtx({ stdout: 'super-secret-xyz' }), { log });
+    await dumpFailure(new Error('x'), baseCtx({ stdout: 'super-secret-xyz' }), { log });
     const md = writtenSummary();
     expect(md).not.toContain('super-secret-xyz');
   });
 
-  it('redacts secrets that live ONLY on a passed envSource (ctx.env), not process.env (#195)', () => {
+  it('redacts secrets that live ONLY on a passed envSource (ctx.env), not process.env (#195)', async () => {
     // The handler-injected credential case: an OIDC-minted twine or npm
     // token that's put on ctx.env but never touches process.env. Without
     // the envSources passthrough, the job-summary markdown leaks the
@@ -223,7 +223,7 @@ describe('dumpFailure: redaction', () => {
     // Sanity: process.env does NOT have this token.
     expect(process.env.CARGO_REGISTRY_TOKEN).toBeUndefined();
     const log = makeLog();
-    dumpFailure(
+    await dumpFailure(
       new Error('handler failed'),
       baseCtx({ stderr: 'used token ctx-only-abcdef1234 from ctx.env' }),
       { log, envSources: [ctxEnv] },
@@ -233,11 +233,11 @@ describe('dumpFailure: redaction', () => {
     expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
   });
 
-  it('still redacts process.env secrets when an envSource is also supplied', () => {
+  it('still redacts process.env secrets when an envSource is also supplied', async () => {
     process.env.NPM_TOKEN = 'proc-tok-xxxxxxxx';
     const ctxEnv: Record<string, string> = { PYPI_API_TOKEN: 'ctx-pypi-yyyyyyyy' };
     const log = makeLog();
-    dumpFailure(
+    await dumpFailure(
       new Error('both'),
       baseCtx({ stderr: 'proc-tok-xxxxxxxx and ctx-pypi-yyyyyyyy both appear' }),
       { log, envSources: [ctxEnv] },
@@ -280,28 +280,28 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     delete process.env.GITHUB_ACTIONS;
   });
 
-  it('emits a single ::error:: annotation when running in GHA', () => {
+  it('emits a single ::error:: annotation when running in GHA', async () => {
     const log = makeLog();
-    dumpFailure(new Error('publish failed'), baseCtx(), { log });
+    await dumpFailure(new Error('publish failed'), baseCtx(), { log });
     const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
     expect(annotations).toHaveLength(1);
   });
 
-  it('annotation tags handler/package and includes the first message line', () => {
+  it('annotation tags handler/package and includes the first message line', async () => {
     const log = makeLog();
-    dumpFailure(new Error('publish failed: 401 unauthorized'), baseCtx(), { log });
+    await dumpFailure(new Error('publish failed: 401 unauthorized'), baseCtx(), { log });
     const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
     expect(line).toContain('crates/demo');
     expect(line).toContain('401 unauthorized');
   });
 
-  it('annotation includes the PIOT_ error code when present in the error message', () => {
+  it('annotation includes the PIOT_ error code when present in the error message', async () => {
     // Registry handlers may tag their auth-failure error message with
     // a `[PIOT_*]` code; the annotation should surface the bracketed
     // code so external observers can fingerprint on it without needing
     // to read the full markdown.
     const log = makeLog();
-    dumpFailure(
+    await dumpFailure(
       new Error('pypi: no auth available [PIOT_AUTH_NO_TOKEN]'),
       baseCtx({ handler: 'pypi', package: 'demo-pkg' }),
       { log },
@@ -310,10 +310,10 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     expect(line).toContain('PIOT_AUTH_NO_TOKEN');
   });
 
-  it('redacts env-matched secrets from the annotation body', () => {
+  it('redacts env-matched secrets from the annotation body', async () => {
     process.env.PYPI_API_TOKEN = 'pypi-tok-zzz';
     const log = makeLog();
-    dumpFailure(
+    await dumpFailure(
       new Error('publish: leaked pypi-tok-zzz'),
       baseCtx(),
       { log },
@@ -322,21 +322,21 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     expect(line).not.toContain('pypi-tok-zzz');
   });
 
-  it('no-ops outside GitHub Actions', () => {
+  it('no-ops outside GitHub Actions', async () => {
     delete process.env.GITHUB_ACTIONS;
     const log = makeLog();
-    dumpFailure(new Error('local run'), baseCtx(), { log });
+    await dumpFailure(new Error('local run'), baseCtx(), { log });
     const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
     expect(annotations).toEqual([]);
   });
 
-  it('keeps the annotation to a single line (encodes embedded newlines)', () => {
+  it('keeps the annotation to a single line (encodes embedded newlines)', async () => {
     // GitHub annotations are line-oriented; an embedded newline would
     // truncate the annotation at the break point. The dumpFailure
     // implementation must collapse to one line (either by encoding
     // %0A or by taking the first line only).
     const log = makeLog();
-    dumpFailure(
+    await dumpFailure(
       new Error('first line\nsecond line\nthird line'),
       baseCtx(),
       { log },
@@ -351,10 +351,10 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
 });
 
 describe('dumpFailure: size cap (4MB)', () => {
-  it('truncates oversized stdout and notes the truncation', () => {
+  it('truncates oversized stdout and notes the truncation', async () => {
     const big = 'x'.repeat(5 * 1024 * 1024);
     const log = makeLog();
-    dumpFailure(new Error('huge'), baseCtx({ stdout: big }), { log });
+    await dumpFailure(new Error('huge'), baseCtx({ stdout: big }), { log });
     const md = writtenSummary();
     expect(md.length).toBeLessThanOrEqual(4 * 1024 * 1024);
     expect(md).toMatch(/truncated/i);

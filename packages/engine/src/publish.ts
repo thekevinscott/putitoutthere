@@ -225,7 +225,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       // Phase 2 / Idea 9: handler-attached metadata (tool versions, etc.)
       // rides through to the failure renderer.
       const meta = readHandlerMeta(error);
-      dumpFailure(
+      await dumpFailure(
         error,
         {
           package: name,
