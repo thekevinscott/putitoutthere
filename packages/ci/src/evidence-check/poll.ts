@@ -18,21 +18,21 @@ export interface PollDeps {
   needles: ReadonlySet<string>;
   deadlineMs: number;
   now: () => number;
-  sleep: () => void;
+  sleep: () => Promise<void>;
   log: (message: string) => void;
-  loadRuns: () => readonly WorkflowRun[];
+  loadRuns: () => Promise<readonly WorkflowRun[]>;
   jobsForRun: (runId: number) => readonly WorkflowJob[];
   resetCaches: () => void;
 }
 
-export function pollUntilResolved(deps: PollDeps): void {
+export async function pollUntilResolved(deps: PollDeps): Promise<void> {
   if (deps.needles.size === 0) {
     return;
   }
   const start = deps.now();
   const deadline = start + deps.deadlineMs;
   while (deps.now() < deadline) {
-    const runs = deps.loadRuns();
+    const runs = await deps.loadRuns();
     const pending = [...deps.needles].filter(
       (citation) => citationResolution(citation, runs, deps.jobsForRun) === 'pending',
     );
@@ -41,7 +41,7 @@ export function pollUntilResolved(deps: PollDeps): void {
     }
     const elapsedSeconds = Math.round((deps.now() - start) / 1000);
     deps.log(pollPendingMessage(elapsedSeconds, pending));
-    deps.sleep();
+    await deps.sleep();
     deps.resetCaches();
   }
 }

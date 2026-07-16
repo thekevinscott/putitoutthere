@@ -65,7 +65,7 @@ describe('piot-ci dispatcher', () => {
   });
 
   it('dispatches changelog-check to its gate and returns its exit code', async () => {
-    vi.mocked(runChangelogCheck).mockReturnValue(1);
+    vi.mocked(runChangelogCheck).mockResolvedValue(1);
     const code = await run(argv('changelog-check'));
     expect(code).toBe(1);
     expect(runChangelogCheck).toHaveBeenCalledOnce();
@@ -73,7 +73,7 @@ describe('piot-ci dispatcher', () => {
   });
 
   it('dispatches tdd-lint to its gate and returns its exit code', async () => {
-    vi.mocked(runTddLint).mockReturnValue(1);
+    vi.mocked(runTddLint).mockResolvedValue(1);
     const code = await run(argv('tdd-lint'));
     expect(code).toBe(1);
     expect(runTddLint).toHaveBeenCalledOnce();
@@ -81,7 +81,7 @@ describe('piot-ci dispatcher', () => {
   });
 
   it('dispatches actionlint-idtoken to its gate and returns its exit code', async () => {
-    vi.mocked(runActionlintIdToken).mockReturnValue(1);
+    vi.mocked(runActionlintIdToken).mockResolvedValue(1);
     const code = await run(argv('actionlint-idtoken'));
     expect(code).toBe(1);
     expect(runActionlintIdToken).toHaveBeenCalledOnce();
@@ -89,7 +89,7 @@ describe('piot-ci dispatcher', () => {
   });
 
   it('dispatches evidence-check to its gate and returns its exit code', async () => {
-    vi.mocked(runEvidenceCheck).mockReturnValue(1);
+    vi.mocked(runEvidenceCheck).mockResolvedValue(1);
     const code = await run(argv('evidence-check'));
     expect(code).toBe(1);
     expect(runEvidenceCheck).toHaveBeenCalledOnce();
@@ -121,7 +121,7 @@ describe('piot-ci dispatcher', () => {
   });
 
   it('dispatches patch-coverage to its gate and returns its exit code', async () => {
-    vi.mocked(runPatchCoverage).mockReturnValue(2);
+    vi.mocked(runPatchCoverage).mockResolvedValue(2);
     const code = await run(argv('patch-coverage'));
     expect(code).toBe(2);
     expect(runPatchCoverage).toHaveBeenCalledOnce();

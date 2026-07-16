@@ -2,15 +2,6 @@ import js from '@eslint/js';
 import stylistic from '@stylistic/eslint-plugin';
 import tseslint from 'typescript-eslint';
 
-// #469 async-migration ratchet: files still using sync I/O. Entries may
-// only be DELETED (by the sub-issue that migrates them), never added.
-const SYNC_EXEMPT = [
-  'src/actionlint-idtoken/run.ts',
-  'src/changelog-check/run.ts', 'src/evidence-check/run.ts',
-  'src/patch-coverage/run.ts',
-  'src/tdd-lint/run.ts',
-];
-
 export default tseslint.config(
   {
     ignores: ['dist/**', 'coverage/**', 'node_modules/**'],
@@ -46,10 +37,6 @@ export default tseslint.config(
         ],
       }],
     },
-  },
-  {
-    files: SYNC_EXEMPT,
-    rules: { 'no-restricted-imports': 'off' },
   },
   {
     files: ['**/*.test.ts'],

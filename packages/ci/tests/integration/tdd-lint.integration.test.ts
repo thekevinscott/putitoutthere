@@ -3,21 +3,21 @@
  *
  * Drives the real `piot-ci tdd-lint` dispatch in-process — `run()` from
  * `cli.ts` → `runTddLint` → `decideTddLint` — with only the git-subprocess
- * boundary (`node:child_process`) mocked. Unlike `src/tdd-lint/run.test.ts`
+ * boundary (the exec seam) mocked. Unlike `src/tdd-lint/run.test.ts`
  * (which also mocks `decide` to isolate the composition root's wiring), this
  * exercises the real decision, so the end-to-end output the workflow relies
  * on — the `::notice` bypass, the `::error` block, the OK/skip messages — is
  * asserted through the actual command a maintainer would run.
  */
 
-import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
 
-vi.mock('node:child_process');
+vi.mock('../../src/utils/exec-capture.js');
 
-const exec = vi.mocked(execFileSync);
+const exec = vi.mocked(execCapture);
 let out: string[];
 
 beforeEach(() => {
@@ -39,8 +39,8 @@ afterEach(() => {
 // Serve the two git reads the gate performs, routed by subcommand.
 function git({ log = '', changed = '' }: { log?: string; changed?: string }): void {
   exec.mockImplementation((_cmd, args) => {
-    const a = (args as readonly string[]).join(' ');
-    return a.includes('log') ? log : changed;
+    const a = args.join(' ');
+    return Promise.resolve({ stdout: a.includes('log') ? log : changed, stderr: '' });
   });
 }
 

@@ -3,21 +3,21 @@
  *
  * Drives the real `piot-ci changelog-check` dispatch in-process — `run()`
  * from `cli.ts` → `runChangelogCheck` → `decideChangelogCheck` — with only
- * the git-subprocess boundary (`node:child_process`) mocked. Unlike
+ * the git-subprocess boundary (the exec seam) mocked. Unlike
  * `src/changelog-check/run.test.ts` (which also mocks `decide` to isolate the
  * composition root's wiring), this exercises the real decision, so the
  * skip-trailer bypass, the missing-file `::error`, and the OK/skip messages
  * are asserted through the actual command.
  */
 
-import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
 
-vi.mock('node:child_process');
+vi.mock('../../src/utils/exec-capture.js');
 
-const exec = vi.mocked(execFileSync);
+const exec = vi.mocked(execCapture);
 let out: string[];
 
 beforeEach(() => {
@@ -41,11 +41,10 @@ afterEach(() => {
 // `git diff`.
 function git({ log = '', surface = '', changed = '' }: { log?: string; surface?: string; changed?: string }): void {
   exec.mockImplementation((_cmd, args) => {
-    const a = args as readonly string[];
-    if (a.includes('log')) {
-      return log;
+    if (args.includes('log')) {
+      return Promise.resolve({ stdout: log, stderr: '' });
     }
-    return a.includes('--glob-pathspecs') ? surface : changed;
+    return Promise.resolve({ stdout: args.includes('--glob-pathspecs') ? surface : changed, stderr: '' });
   });
 }
 

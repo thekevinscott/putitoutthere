@@ -3,33 +3,37 @@
  *
  * Drives the real `piot-ci evidence-check` dispatch in-process — `run()` from
  * `cli.ts` → `runEvidenceCheck` → the added-bullet parse → the (empty-needle)
- * poll → `decideEvidenceCheck` — with only the OS boundary mocked
- * (`node:child_process` for git/gh/sleep, `node:fs` for the CHANGELOG read).
+ * poll → `decideEvidenceCheck` — with only the OS boundary mocked (the exec
+ * seam for git/gh, the sleep seam, `node:fs/promises` for the CHANGELOG read).
  * Unlike `src/evidence-check/run.test.ts` (which mocks the decision helpers to
  * isolate wiring), this exercises the real cross-module decision, so the
  * end-to-end pass/fail output is asserted through the actual command.
  *
  * These scenarios have no `(verified by: …)` citations, so `citedRunNeedles`
  * is empty and `pollUntilResolved` returns without touching `gh` or `sleep`
- * (see poll.ts). The live-run / `gh api` polling path is covered at the unit
- * tier (run.test.ts, passed-evidence.test.ts).
+ * (see poll.ts), and the gate skips the run query entirely. The live-run /
+ * `gh api` polling path is covered at the unit tier (run.test.ts,
+ * passed-evidence.test.ts).
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
+import { sleep } from '../../src/utils/sleep.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../../src/utils/exec-capture.js');
+vi.mock('../../src/utils/sleep.js');
+vi.mock('node:fs/promises');
 
-const exec = vi.mocked(execFileSync);
-const read = vi.mocked(readFileSync);
+const exec = vi.mocked(execCapture);
+const read = vi.mocked(readFile);
 let out: string[];
 
 beforeEach(() => {
   out = [];
+  vi.mocked(sleep).mockResolvedValue(undefined);
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
     return true;
@@ -47,13 +51,13 @@ afterEach(() => {
 // Serve the `git diff` of CHANGELOG.md and the CHANGELOG.md read. `gh` and
 // `sleep` are stubbed defensively but must not be reached in these cases.
 function repo({ diff, changelog }: { diff: string; changelog: string }): void {
-  exec.mockImplementation((cmd) => {
-    if (cmd === 'gh') {
-      return '{"workflow_runs":[],"jobs":[]}';
-    }
-    return diff; // git diff (sleep is never reached with empty needles)
-  });
-  read.mockReturnValue(changelog);
+  exec.mockImplementation((cmd) =>
+    Promise.resolve({
+      stdout: cmd === 'gh' ? '{"workflow_runs":[]}' : diff, // git diff (sleep/gh unreached with empty needles)
+      stderr: '',
+    }),
+  );
+  read.mockResolvedValue(changelog);
 }
 
 const evidenceCheck = (): Promise<number> => run(['node', 'piot-ci', 'evidence-check']);

@@ -3,21 +3,21 @@
  *
  * Drives the real `piot-ci actionlint-idtoken` dispatch in-process — `run()`
  * from `cli.ts` → `runActionlintIdToken` → `decideActionlintIdToken` — with
- * only the filesystem boundary (`node:fs`) mocked. Unlike
+ * only the filesystem boundary (`node:fs/promises`) mocked. Unlike
  * `src/actionlint-idtoken/run.test.ts` (which also mocks `decide` to isolate
  * the composition root's wiring), this exercises the real matcher, so the
  * `grep -n` line-number echo and the `::error file=…` output the workflow
  * relies on are asserted through the actual command.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 
-const read = vi.mocked(readFileSync);
+const read = vi.mocked(readFile);
 let out: string[];
 
 beforeEach(() => {
@@ -34,7 +34,7 @@ afterEach(() => {
 
 // Serve each PR-time-path file its own YAML text; unmapped paths read empty.
 function files(map: Record<string, string>): void {
-  read.mockImplementation((path) => map[String(path)] ?? '');
+  read.mockImplementation(((path: string) => Promise.resolve(map[path] ?? '')) as unknown as typeof readFile);
 }
 
 const actionlint = (): Promise<number> => run(['node', 'piot-ci', 'actionlint-idtoken']);

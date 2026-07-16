@@ -5,11 +5,10 @@
  * exit code. The only I/O lives here; the decision is `decide.ts`'s.
  */
 
-import { execFileSync } from 'node:child_process';
-
+import { execCapture } from '../utils/exec-capture.js';
 import { decideTddLint } from './decide.js';
 
-export function runTddLint(): number {
+export async function runTddLint(): Promise<number> {
   const base = process.env.BASE_SHA;
   const head = process.env.HEAD_SHA;
   if (base === undefined || base === '' || head === undefined || head === '') {
@@ -17,10 +16,9 @@ export function runTddLint(): number {
     return 1;
   }
 
-  const commitLog = execFileSync('git', ['log', '--format=%B', `${base}..${head}`], { encoding: 'utf8' });
-  const changedFiles = execFileSync('git', ['diff', '--name-only', base, head, '--', 'packages/engine/src/'], {
-    encoding: 'utf8',
-  })
+  const commitLog = (await execCapture('git', ['log', '--format=%B', `${base}..${head}`])).stdout;
+  const changedFiles = (await execCapture('git', ['diff', '--name-only', base, head, '--', 'packages/engine/src/']))
+    .stdout
     .split('\n')
     .filter((l) => l !== '');
 

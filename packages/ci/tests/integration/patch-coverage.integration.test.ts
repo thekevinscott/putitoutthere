@@ -3,8 +3,8 @@
  *
  * Drives the real `piot-ci patch-coverage` dispatch in-process — `run()` from
  * `cli.ts` → `runPatchCoverage` → the real parseAddedLines / coveredLines /
- * decidePatchCoverage — with only the git-subprocess (`node:child_process`)
- * and file-read (`node:fs`) boundaries mocked. Unlike
+ * decidePatchCoverage — with only the git-subprocess (the exec seam) and
+ * file-read (`node:fs/promises`) boundaries mocked. Unlike
  * `src/patch-coverage/run.test.ts` (which mocks the decision modules to isolate
  * the composition root's wiring), this exercises the real strict-100% /
  * no-escape-hatch decision end to end: the no-additions pass, the clean pass,
@@ -12,17 +12,17 @@
  * the actual command and streams.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFile as readFileFn } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../../src/utils/exec-capture.js');
+vi.mock('node:fs/promises');
 
-const exec = vi.mocked(execFileSync);
-const readFile = vi.mocked(readFileSync);
+const exec = vi.mocked(execCapture);
+const readFile = vi.mocked(readFileFn);
 let out: string[];
 let err: string[];
 const cwd = process.cwd();
@@ -31,8 +31,8 @@ const covKey = (rel: string): string => `${cwd}/${rel}`;
 // git cat-file probes succeed; `git diff` returns the supplied post-image.
 function git(diffOut: string): void {
   exec.mockImplementation((_cmd, args) => {
-    const a = (args as readonly string[]) ?? [];
-    return a.includes('cat-file') ? '' : diffOut;
+    const a = args ?? [];
+    return Promise.resolve({ stdout: a.includes('cat-file') ? '' : diffOut, stderr: '' });
   });
 }
 
@@ -72,7 +72,7 @@ describe('piot-ci patch-coverage (integration)', async () => {
 
   it('passes when every added engine src line is covered', async () => {
     git(diffAdding('packages/engine/src/foo.ts', 5, 'const x = 1;'));
-    readFile.mockReturnValue(
+    readFile.mockResolvedValue(
       JSON.stringify({
         [covKey('packages/engine/src/foo.ts')]: {
           s: { '0': 1 },
@@ -86,7 +86,7 @@ describe('piot-ci patch-coverage (integration)', async () => {
 
   it('fails, naming the uncovered added line, when coverage shows it never ran', async () => {
     git(diffAdding('packages/engine/src/foo.ts', 5, 'const x = 1;'));
-    readFile.mockReturnValue(
+    readFile.mockResolvedValue(
       JSON.stringify({
         [covKey('packages/engine/src/foo.ts')]: {
           s: { '0': 0 },
@@ -113,7 +113,7 @@ describe('piot-ci patch-coverage (integration)', async () => {
 
   it('fails when the added line introduces a v8 ignore escape hatch, even if covered', async () => {
     git(diffAdding('packages/engine/src/foo.ts', 5, '/* v8 ignore next */'));
-    readFile.mockReturnValue(
+    readFile.mockResolvedValue(
       JSON.stringify({
         [covKey('packages/engine/src/foo.ts')]: {
           s: { '0': 1 },
@@ -135,9 +135,7 @@ describe('piot-ci patch-coverage (integration)', async () => {
   });
 
   it('fails with exit 2 when a SHA is unreachable in the clone', async () => {
-    exec.mockImplementation(() => {
-      throw new Error('bad object');
-    });
+    exec.mockRejectedValue(new Error('bad object'));
     await expect(patchCoverage()).resolves.toBe(2);
     expect(err.join('')).toBe('::error::patch-coverage: base or head not reachable in this clone\n');
   });

@@ -9,16 +9,16 @@
  * covered in `decide.test.ts`.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { decideActionlintIdToken } from './decide.js';
 import { runActionlintIdToken } from './run.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./decide.js');
 
-const read = vi.mocked(readFileSync);
+const read = vi.mocked(readFile);
 const decide = vi.mocked(decideActionlintIdToken);
 const out: string[] = [];
 
@@ -29,7 +29,7 @@ beforeEach(() => {
     out.push(typeof c === 'string' ? c : c.toString());
     return true;
   });
-  read.mockImplementation((path) => `content of ${String(path)}`);
+  read.mockImplementation(((path: string) => Promise.resolve(`content of ${path}`)) as unknown as typeof readFile);
   decide.mockReturnValue({ exitCode: 0, lines: [] });
 });
 
@@ -38,16 +38,16 @@ afterEach(() => {
 });
 
 describe('runActionlintIdToken', () => {
-  it('reads exactly the three PR-time-path files, each as utf8', () => {
-    runActionlintIdToken();
+  it('reads exactly the three PR-time-path files, each as utf8', async () => {
+    await runActionlintIdToken();
     expect(read).toHaveBeenNthCalledWith(1, '.github/workflows/build.yml', 'utf8');
     expect(read).toHaveBeenNthCalledWith(2, '.github/workflows/_matrix.yml', 'utf8');
     expect(read).toHaveBeenNthCalledWith(3, '.github/workflows/check.yml', 'utf8');
     expect(read).toHaveBeenCalledTimes(3);
   });
 
-  it('assembles the files (path + content) into decide()’s input', () => {
-    runActionlintIdToken();
+  it('assembles the files (path + content) into decide()’s input', async () => {
+    await runActionlintIdToken();
     expect(decide).toHaveBeenCalledWith({
       files: [
         { path: '.github/workflows/build.yml', content: 'content of .github/workflows/build.yml' },
@@ -57,16 +57,16 @@ describe('runActionlintIdToken', () => {
     });
   });
 
-  it('writes decide()’s lines verbatim (one per line) and returns its exit code', () => {
+  it('writes decide()’s lines verbatim (one per line) and returns its exit code', async () => {
     decide.mockReturnValue({ exitCode: 1, lines: ['42:  id-token: write', '::error file=x::boom'] });
-    const code = runActionlintIdToken();
+    const code = await runActionlintIdToken();
     expect(code).toBe(1);
     expect(out.join('')).toBe('42:  id-token: write\n::error file=x::boom\n');
   });
 
-  it('returns 0 and writes nothing when decide passes with no lines', () => {
+  it('returns 0 and writes nothing when decide passes with no lines', async () => {
     decide.mockReturnValue({ exitCode: 0, lines: [] });
-    expect(runActionlintIdToken()).toBe(0);
+    await expect(runActionlintIdToken()).resolves.toBe(0);
     expect(out.join('')).toBe('');
   });
 });

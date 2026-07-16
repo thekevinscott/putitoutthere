@@ -24,7 +24,7 @@ const SDISTS_DIR = 'downloaded-sdists';
 const MAX_ATTEMPTS = 6;
 // A PEP 503 simple-index page lists every file ever published for the
 // project, so it grows without bound as fixtures accumulate versions (the
-// maturin fixture's page is already ~1.1 MiB). `execFileSync` captures the
+// maturin fixture's page is already ~1.1 MiB). The exec seam captures the
 // curl stdout into a fixed buffer whose default is 1 MiB and throws
 // `ENOBUFS` when the page exceeds it — a limit the original bash never had
 // (it piped curl into a streaming HTML parser). Give the capture ample room.
