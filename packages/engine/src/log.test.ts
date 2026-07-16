@@ -126,6 +126,25 @@ describe('createLogger: redaction (§22.5)', () => {
     expect(line).not.toContain('apikey-value-456');
   });
 
+  it('skips a scanned secret that never appears in the message', () => {
+    // Exercises redact()'s "secret absent from output" arm (log.ts:220
+    // `if (!out.includes(v)) continue`) deterministically. A credential-
+    // shaped env var (matches SECRET_KEY, clears the 8-char floor) whose
+    // value is nowhere in the logged line: it is scanned, found absent, and
+    // skipped without redaction. Setting it inside the test pins this branch
+    // regardless of ambient env — otherwise its coverage rides on whatever
+    // secret-shaped vars the host happens to inject (a dev shell's GH_TOKEN /
+    // *_ACCESS_TOKEN cover it; a CI job without them does not), which made
+    // the unit-coverage gate flake between local (100%) and CI (99.94%).
+    process.env.ABSENT_SECRET_TOKEN = 'never-in-any-logged-line';
+    const dest = makeStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('a routine message carrying nothing sensitive');
+    const line = dest.text;
+    expect(line).toContain('a routine message carrying nothing sensitive');
+    expect(line).not.toMatch(/\[REDACTED:/);
+  });
+
   it('does not redact values from keys outside the secret patterns', () => {
     process.env.PROJECT_NAME = 'example-lib';
     const dest = makeStream();
