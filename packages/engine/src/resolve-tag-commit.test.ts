@@ -31,12 +31,12 @@ function pkg(name: string): Package {
 }
 
 describe('resolveTagCommit', () => {
-  it('uses a sibling tag when one exists for the version', () => {
-    vi.mocked(tagList).mockReturnValue(['core-v1.2.3']);
-    vi.mocked(tagCommit).mockReturnValue('sib-sha');
-    vi.mocked(headCommit).mockReturnValue('head-sha');
+  it('uses a sibling tag when one exists for the version', async () => {
+    vi.mocked(tagList).mockResolvedValue(['core-v1.2.3']);
+    vi.mocked(tagCommit).mockResolvedValue('sib-sha');
+    vi.mocked(headCommit).mockResolvedValue('head-sha');
 
-    const result = resolveTagCommit('1.2.3', [pkg('core')], { cwd: '/repo' });
+    const result = await resolveTagCommit('1.2.3', [pkg('core')], { cwd: '/repo' });
 
     expect(result).toEqual({ commit: 'sib-sha', source: 'sibling' });
     // The sibling's own tag template drove the lookup + commit read.
@@ -45,33 +45,33 @@ describe('resolveTagCommit', () => {
     expect(vi.mocked(headCommit)).not.toHaveBeenCalled();
   });
 
-  it('falls back to HEAD when no sibling is tagged for the version', () => {
-    vi.mocked(tagList).mockReturnValue([]);
-    vi.mocked(headCommit).mockReturnValue('head-sha');
+  it('falls back to HEAD when no sibling is tagged for the version', async () => {
+    vi.mocked(tagList).mockResolvedValue([]);
+    vi.mocked(headCommit).mockResolvedValue('head-sha');
 
-    const result = resolveTagCommit('1.2.3', [pkg('core')], { cwd: '/repo' });
+    const result = await resolveTagCommit('1.2.3', [pkg('core')], { cwd: '/repo' });
 
     expect(result).toEqual({ commit: 'head-sha', source: 'head' });
     expect(vi.mocked(headCommit)).toHaveBeenCalledWith({ cwd: '/repo' });
   });
 
-  it('falls back to HEAD when there are no siblings at all', () => {
-    vi.mocked(headCommit).mockReturnValue('head-sha');
+  it('falls back to HEAD when there are no siblings at all', async () => {
+    vi.mocked(headCommit).mockResolvedValue('head-sha');
 
-    expect(resolveTagCommit('1.2.3', [], { cwd: '/repo' })).toEqual({
+    expect(await resolveTagCommit('1.2.3', [], { cwd: '/repo' })).toEqual({
       commit: 'head-sha',
       source: 'head',
     });
     expect(vi.mocked(tagList)).not.toHaveBeenCalled();
   });
 
-  it('picks the first sibling that has a tag, skipping untagged earlier ones', () => {
+  it('picks the first sibling that has a tag, skipping untagged earlier ones', async () => {
     vi.mocked(tagList).mockImplementation((glob: string) =>
-      glob === 'b-v1.2.3' ? ['b-v1.2.3'] : [],
+      Promise.resolve(glob === 'b-v1.2.3' ? ['b-v1.2.3'] : []),
     );
-    vi.mocked(tagCommit).mockReturnValue('b-sha');
+    vi.mocked(tagCommit).mockResolvedValue('b-sha');
 
-    const result = resolveTagCommit('1.2.3', [pkg('a'), pkg('b')], { cwd: '/repo' });
+    const result = await resolveTagCommit('1.2.3', [pkg('a'), pkg('b')], { cwd: '/repo' });
 
     expect(result).toEqual({ commit: 'b-sha', source: 'sibling' });
     expect(vi.mocked(tagCommit)).toHaveBeenCalledWith('b-v1.2.3', { cwd: '/repo' });

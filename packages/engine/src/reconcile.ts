@@ -46,10 +46,10 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
     const pkg = byName.get(row.package)!;
     const version = row.registry!;
     const siblings = config.packages.filter((p) => p.name !== row.package);
-    const { commit, source } = resolveTagCommit(version, siblings, { cwd });
+    const { commit, source } = await resolveTagCommit(version, siblings, { cwd });
     const tag = formatTag(pkg.tag_format, { name: pkg.name, version });
     if (!dryRun) {
-      ensureTag(pkg.tag_format, pkg.name, version, commit, { cwd }, log);
+      await ensureTag(pkg.tag_format, pkg.name, version, commit, { cwd }, log);
     }
     actions.push({ package: pkg.name, kind: pkg.kind, version, tag, commit, source, created: !dryRun });
   }

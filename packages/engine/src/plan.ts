@@ -89,7 +89,7 @@ export interface PlanOptions {
   releasePackages?: string | undefined;
 }
 
-export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
+export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
   const config = loadConfig(cfgPath);
@@ -100,15 +100,15 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   // fix). The named packages — and only those — are planned.
   const manual = parseReleasePackages(opts.releasePackages);
   if (manual !== null) {
-    return Promise.resolve(planManual(config.packages, manual, cwd));
+    return planManual(config.packages, manual, cwd);
   }
 
   // What changed since the last release per package?
-  const head = headCommit({ cwd });
-  const trailer = resolveTrailer(head, cwd);
+  const head = await headCommit({ cwd });
+  const trailer = await resolveTrailer(head, cwd);
 
   if (trailer?.bump === 'skip') {
-    return Promise.resolve([]);
+    return [];
   }
 
   // Compute cascade. For each package with a last tag, diff against
@@ -117,7 +117,7 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   //
   // Seed detection is per-package: a package only cascades on its own
   // diff, never on another package's pre-tag history. See #126.
-  const { changesByPackage, firstRelease } = collectChanges(config.packages, cwd);
+  const { changesByPackage, firstRelease } = await collectChanges(config.packages, cwd);
   const cascaded = new Set(
     computeCascade(config.packages, changesByPackage).map((p) => p.name),
   );
@@ -127,16 +127,16 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const forced = new Set(trailer?.packages ?? []);
   for (const name of forced) {cascaded.add(name);}
 
-  if (cascaded.size === 0) {return Promise.resolve([]);}
+  if (cascaded.size === 0) {return [];}
 
   const rows: MatrixRow[] = [];
   for (const p of config.packages) {
     if (!cascaded.has(p.name)) {continue;}
-    const version = nextVersion(p, trailer?.bump, cwd, forced);
+    const version = await nextVersion(p, trailer?.bump, cwd, forced);
     const pkgRows = rowsForPackage(p, version, cwd);
     rows.push(...pkgRows);
   }
-  return Promise.resolve(rows);
+  return rows;
 }
 
 /* ----------------------------- internals ----------------------------- */
@@ -148,11 +148,11 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
  * used verbatim, a bump keyword bumps the last tag (or first_version
  * when the package has no tag yet).
  */
-function planManual(
+async function planManual(
   packages: readonly Package[],
   manual: ReadonlyMap<string, ReleasePackagesEntry>,
   cwd: string,
-): MatrixRow[] {
+): Promise<MatrixRow[]> {
   const known = new Set(packages.map((p) => p.name));
   for (const name of manual.keys()) {
     if (!known.has(name)) {
@@ -167,16 +167,16 @@ function planManual(
   for (const p of packages) {
     const entry = manual.get(p.name);
     if (entry === undefined) {continue;}
-    rows.push(...rowsForPackage(p, manualVersion(p, entry, cwd), cwd));
+    rows.push(...rowsForPackage(p, await manualVersion(p, entry, cwd), cwd));
   }
   return rows;
 }
 
-function manualVersion(
+async function manualVersion(
   pkg: Package,
   entry: ReleasePackagesEntry,
   cwd: string,
-): string {
+): Promise<string> {
   // Explicit semver is used as-is. It is intentionally NOT compared
   // against the last tag: re-releasing the same version is valid when
   // the prior publish failed before reaching the registry, and the
@@ -187,19 +187,19 @@ function manualVersion(
   // A bump keyword bumps the last tag, or first_version when the named
   // package has never been released. `parseTagVersion` is non-null
   // here: `lastTag` only ever returns a tag the format already matched.
-  const tag = lastTag(pkg.name, pkg.tag_format, { cwd });
+  const tag = await lastTag(pkg.name, pkg.tag_format, { cwd });
   if (tag === null) {return firstVersion(pkg);}
   const lastVersion = parseTagVersion(pkg.tag_format, pkg.name, tag)!;
   return bumpVersion(lastVersion, entry.bump!);
 }
 
-function collectChanges(
+async function collectChanges(
   packages: readonly Package[],
   cwd: string,
-): {
+): Promise<{
   changesByPackage: ReadonlyMap<string, ReadonlySet<string>>;
   firstRelease: ReadonlySet<string>;
-} {
+}> {
   const changesByPackage = new Map<string, ReadonlySet<string>>();
   const firstRelease = new Set<string>();
   // Packages in a polyglot repo typically tag together, so many of them
@@ -208,14 +208,14 @@ function collectChanges(
   // instead of one per package (#140).
   const diffCache = new Map<string, ReadonlySet<string>>();
   for (const p of packages) {
-    const tag = lastTag(p.name, p.tag_format, { cwd });
+    const tag = await lastTag(p.name, p.tag_format, { cwd });
     if (tag === null) {
       firstRelease.add(p.name);
       continue;
     }
     let diff = diffCache.get(tag);
     if (diff === undefined) {
-      diff = new Set(diffNames(tag, 'HEAD', { cwd }));
+      diff = new Set(await diffNames(tag, 'HEAD', { cwd }));
       diffCache.set(tag, diff);
     }
     changesByPackage.set(p.name, diff);
@@ -223,13 +223,13 @@ function collectChanges(
   return { changesByPackage, firstRelease };
 }
 
-function nextVersion(
+async function nextVersion(
   pkg: Package,
   trailerBump: Bump | 'skip' | undefined,
   cwd: string,
   trailerPackages: ReadonlySet<string>,
-): string {
-  const tag = lastTag(pkg.name, pkg.tag_format, { cwd });
+): Promise<string> {
+  const tag = await lastTag(pkg.name, pkg.tag_format, { cwd });
   if (tag === null) {
     return firstVersion(pkg);
   }
@@ -501,14 +501,14 @@ function defaultRunsOn(target: string): string {
  * the operator actually wrote the trailer into. Without this fallback,
  * merge-commit merges silently strand every release.
  */
-function resolveTrailer(head: string, cwd: string): Trailer | null {
-  const direct = parseTrailer(commitBody(head, { cwd }));
+async function resolveTrailer(head: string, cwd: string): Promise<Trailer | null> {
+  const direct = parseTrailer(await commitBody(head, { cwd }));
   if (direct) {return direct;}
-  const parents = commitParents(head, { cwd });
+  const parents = await commitParents(head, { cwd });
   if (parents.length < 2) {return null;}
   for (let i = 1; i < parents.length; i++) {
     const parentSha = parents[i]!;
-    const t = parseTrailer(commitBody(parentSha, { cwd }));
+    const t = parseTrailer(await commitBody(parentSha, { cwd }));
     if (t) {return t;}
   }
   return null;

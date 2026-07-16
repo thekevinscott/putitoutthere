@@ -47,28 +47,28 @@ function useToml(toml: string): void {
 
 /** The commit message the planner reads the `release:` trailer from. */
 function setHeadBody(msg: string): void {
-  vi.mocked(commitBody).mockReturnValue(msg);
+  vi.mocked(commitBody).mockResolvedValue(msg);
 }
 
 /** Map each package name to its resolved last tag (or absent → first release). */
 function setTags(tags: Record<string, string>): void {
-  vi.mocked(lastTag).mockImplementation((name: string) => tags[name] ?? null);
+  vi.mocked(lastTag).mockImplementation((name: string) => Promise.resolve(tags[name] ?? null));
 }
 
 /** Map each tag to the file paths changed since it (drives the cascade). */
 function setDiff(byTag: Record<string, string[]>): void {
-  vi.mocked(diffNames).mockImplementation((from: string) => byTag[from] ?? []);
+  vi.mocked(diffNames).mockImplementation((from: string) => Promise.resolve(byTag[from] ?? []));
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   // Sane defaults: HEAD is a plain, trailer-less, non-merge commit and no
   // package has a tag (the first-release shape). Tests override per case.
-  vi.mocked(headCommit).mockReturnValue(HEAD);
-  vi.mocked(commitBody).mockReturnValue('feat: initial');
-  vi.mocked(commitParents).mockReturnValue(['parent']);
-  vi.mocked(lastTag).mockReturnValue(null);
-  vi.mocked(diffNames).mockReturnValue([]);
+  vi.mocked(headCommit).mockResolvedValue(HEAD);
+  vi.mocked(commitBody).mockResolvedValue('feat: initial');
+  vi.mocked(commitParents).mockResolvedValue(['parent']);
+  vi.mocked(lastTag).mockResolvedValue(null);
+  vi.mocked(diffNames).mockResolvedValue([]);
   vi.mocked(isVersionIndependentWheel).mockReturnValue(false);
   // Restore the real resolution shape the prior factory encoded: an
   // explicit `python_versions` is sorted numerically, else a single
@@ -617,7 +617,7 @@ targets = ["x86_64-unknown-linux-gnu"]
     expect(linux.artifact_path).toBe('packages/ts/build/x86_64-unknown-linux-gnu');
   });
 
-  it('throws at plan time when a napi target triple is unmapped (#170)', () => {
+  it('throws at plan time when a napi target triple is unmapped (#170)', async () => {
     // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
     // TRIPLE_MAP entry. Without this guard, the mistake surfaces only
     // mid-publish, after the CI matrix has already burned compute.
@@ -634,10 +634,9 @@ build   = "napi"
 targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
 `);
 
-    // `plan()` throws synchronously from `rowsForPackage` before it
-    // can wrap the result in a Promise, so assert on the synchronous
-    // call rather than `.rejects`.
-    expect(() => plan({ cwd: CWD })).toThrow(
+    // `plan()` is async, so the plan-time guard in `rowsForPackage`
+    // surfaces as a rejection.
+    await expect(plan({ cwd: CWD })).rejects.toThrow(
       /lib-napi.*mips64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
     );
   });
@@ -694,11 +693,13 @@ describe('plan: merge-commit trailer resolution', () => {
     });
     // HEAD is a merge commit: its body has no trailer; the trailer lives
     // on the second (feature) parent whose message carried `release: minor`.
-    vi.mocked(commitParents).mockReturnValue(['main-parent', 'feat-parent']);
+    vi.mocked(commitParents).mockResolvedValue(['main-parent', 'feat-parent']);
     vi.mocked(commitBody).mockImplementation((sha: string) =>
-      sha === 'feat-parent'
-        ? 'change rust\n\nrelease: minor'
-        : 'Merge pull request #1 from feat',
+      Promise.resolve(
+        sha === 'feat-parent'
+          ? 'change rust\n\nrelease: minor'
+          : 'Merge pull request #1 from feat',
+      ),
     );
 
     const matrix = await plan({ cwd: CWD });
@@ -729,9 +730,9 @@ describe('plan: merge-commit trailer resolution', () => {
       'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
       'lib-python-v0.1.0': ['packages/rust/lib.rs'],
     });
-    vi.mocked(commitParents).mockReturnValue(['main-parent', 'feat-parent']);
+    vi.mocked(commitParents).mockResolvedValue(['main-parent', 'feat-parent']);
     vi.mocked(commitBody).mockImplementation((sha: string) =>
-      sha === 'feat-parent' ? 'change rust (no trailer)' : 'Merge feat',
+      Promise.resolve(sha === 'feat-parent' ? 'change rust (no trailer)' : 'Merge feat'),
     );
 
     const matrix = await plan({ cwd: CWD });
@@ -1315,12 +1316,12 @@ describe('plan: manual release (release-packages)', () => {
     expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
   });
 
-  it('throws when a named package is not declared in the config', () => {
+  it('throws when a named package is not declared in the config', async () => {
     useToml(PUTITOUTTHERE_TOML);
 
-    // Like `loadConfig`, the manual planner rejects bad input
-    // synchronously — before any promise is returned.
-    expect(() => plan({ cwd: CWD, releasePackages: 'lib-ghost@minor' })).toThrow(
+    // The manual planner rejects bad input; `plan` is async so the throw
+    // surfaces as a rejection.
+    await expect(plan({ cwd: CWD, releasePackages: 'lib-ghost@minor' })).rejects.toThrow(
       /lib-ghost/,
     );
   });

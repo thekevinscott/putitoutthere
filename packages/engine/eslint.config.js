@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 // only be DELETED (by the sub-issue that migrates them), never added.
 const SYNC_EXEMPT = [
   'src/check-crate-size.ts', 'src/check.ts', 'src/cli.ts', 'src/completeness.ts',
-  'src/config.ts', 'src/find-workspace-root.ts', 'src/git.ts', 'src/glob.ts',
+  'src/config.ts', 'src/find-workspace-root.ts', 'src/glob.ts',
   'src/handlers/crates.ts', 'src/handlers/npm-platform.ts', 'src/handlers/npm.ts',
   'src/handlers/pypi.ts', 'src/normalize-artifacts.ts', 'src/preflight.ts',
   'src/python-versions.ts', 'src/utils/list-files-recursive.ts',

@@ -176,7 +176,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
 
   // 4. Publish each package in dep-graph order.
   const published: PublishOutput['published'] = [];
-  const head = headCommit({ cwd });
+  const head = await headCommit({ cwd });
   const order = publishOrder(config.packages, [...perPackage.keys()]);
 
   for (const name of order) {
@@ -207,7 +207,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         // Auto-heal (#407): a version live on the registry but missing
         // its tag (e.g. an earlier run died before tagging) would never
         // self-heal — the skip path used to return before any tagging.
-        ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
+        await ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
         continue;
       }
       await handler.writeVersion(pkg, version, ctx);
@@ -215,7 +215,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       published.push({ package: name, version, result });
 
       if (result.status === 'published') {
-        ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
+        await ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
         // GitHub Release creation is the reusable workflow's job
         // (`gh release create --generate-notes` after this step). The
         // engine cuts the tag and stops.

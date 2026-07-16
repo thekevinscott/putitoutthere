@@ -465,14 +465,14 @@ export async function run(argv: readonly string[]): Promise<number> {
         // `advance-v0.yml` after `fold-bundle` synthesizes the bundle
         // commit, so `uses: …@v0` resolves to a runnable action. Shares
         // `forceMoveTag` with the floating-major mover.
-        return advanceV0({ cwd: flags.cwd });
+        return await advanceV0({ cwd: flags.cwd });
       }
       case 'advance-floating-major': {
         // #446: move the floating `v<major>` tag to the newest release in
         // its major line. Invoked by `release-npm.yml`'s dogfood publish
         // job; reads the release tag via the same `lastTag` resolver the
         // publish path uses. Idempotent.
-        return advanceFloatingMajor({ cwd: flags.cwd });
+        return await advanceFloatingMajor({ cwd: flags.cwd });
       }
       case 'fold-bundle': {
         // #446: commit the freshly-built `dist-action/` bundle on top of
@@ -480,7 +480,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // `release:` trailer survives. Invoked by both `release-npm.yml`
         // and `advance-v0.yml` (differing only in the subject).
         if (!flags.subject) {throw new Error('fold-bundle: --subject <line> is required');}
-        return foldActionBundle({ cwd: flags.cwd, subject: flags.subject });
+        return await foldActionBundle({ cwd: flags.cwd, subject: flags.subject });
       }
       case 'write-launcher': {
         // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli

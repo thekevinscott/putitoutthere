@@ -29,16 +29,16 @@ beforeEach(() => {
 });
 
 describe('ensureTag', () => {
-  it('creates the missing tag and warns when the push fails', () => {
-    tagListMock.mockReturnValue([]); // tag absent
-    pushTagMock.mockImplementation(() => {
+  it('creates the missing tag and warns when the push fails', async () => {
+    tagListMock.mockResolvedValue([]); // tag absent
+    pushTagMock.mockRejectedValue(
       // A repo with no `origin` (the heal running before a remote exists)
       // fails the push; ensureTag swallows it into a warning.
-      throw new Error('No configured push destination');
-    });
+      new Error('No configured push destination'),
+    );
     const log = makeLog();
 
-    ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
+    await ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
 
     expect(createTagMock).toHaveBeenCalledWith('lib-v1.0.0', 'headsha', {
       cwd: 'repo',
@@ -48,11 +48,11 @@ describe('ensureTag', () => {
     expect(log.warn).toHaveBeenCalledOnce();
   });
 
-  it('is a no-op when the tag already exists', () => {
-    tagListMock.mockReturnValue(['lib-v1.0.0']); // tag present
+  it('is a no-op when the tag already exists', async () => {
+    tagListMock.mockResolvedValue(['lib-v1.0.0']); // tag present
     const log = makeLog();
 
-    ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
+    await ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
 
     // We neither re-created nor tried to push it.
     expect(createTagMock).not.toHaveBeenCalled();

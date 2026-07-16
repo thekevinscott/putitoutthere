@@ -75,7 +75,7 @@ describe('reconcile', () => {
       statusRow({ package: 'other-rust', tag: 'other-rust-v2.0.0', tagVersion: '2.0.0', registry: '2.0.0', state: 'in sync' }),
       statusRow({ package: 'helper-rust', tag: 'helper-rust-v0.1.0', tagVersion: '0.1.0', registry: '0.1.0', state: 'in sync' }),
     ]);
-    vi.mocked(resolveTagCommit).mockReturnValue({ commit: 'sibling-sha', source: 'sibling' });
+    vi.mocked(resolveTagCommit).mockResolvedValue({ commit: 'sibling-sha', source: 'sibling' });
 
     const result = await reconcile({ cwd: '/repo' });
 
@@ -118,7 +118,7 @@ describe('reconcile', () => {
     vi.mocked(computeStatus).mockResolvedValue([
       statusRow({ package: 'core-rust', registry: '0.1.0', state: 'published, untagged', drift: true }),
     ]);
-    vi.mocked(resolveTagCommit).mockReturnValue({ commit: 'head-sha', source: 'head' });
+    vi.mocked(resolveTagCommit).mockResolvedValue({ commit: 'head-sha', source: 'head' });
 
     const result = await reconcile({ cwd: '/repo' });
 
@@ -147,7 +147,7 @@ describe('reconcile', () => {
     vi.mocked(computeStatus).mockResolvedValue([
       statusRow({ package: 'core-rust', registry: '0.1.0', state: 'published, untagged', drift: true }),
     ]);
-    vi.mocked(resolveTagCommit).mockReturnValue({ commit: 'head-sha', source: 'head' });
+    vi.mocked(resolveTagCommit).mockResolvedValue({ commit: 'head-sha', source: 'head' });
 
     const result = await reconcile({ cwd: '/repo', dryRun: true });
 

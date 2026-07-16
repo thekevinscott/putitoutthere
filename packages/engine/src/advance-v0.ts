@@ -9,17 +9,16 @@
  * The workflow's Fold step (`fold-bundle`) synthesizes that commit first;
  * this then points `v0` at it.
  *
- * Synchronous, per the engine convention. Reuses the shared `forceMoveTag`
- * so the local `git tag -f` + ref-scoped force-push match the
- * floating-major mover exactly.
+ * Reuses the shared `forceMoveTag` so the local `git tag -f` + ref-scoped
+ * force-push match the floating-major mover exactly.
  */
 
 import { forceMoveTag } from './force-move-tag.js';
 import { headCommit } from './git.js';
 
-export function advanceV0(opts: { cwd: string }): number {
-  const target = headCommit({ cwd: opts.cwd });
+export async function advanceV0(opts: { cwd: string }): Promise<number> {
+  const target = await headCommit({ cwd: opts.cwd });
   process.stdout.write(`Moving v0 -> ${target}\n`);
-  forceMoveTag('v0', target, { cwd: opts.cwd });
+  await forceMoveTag('v0', target, { cwd: opts.cwd });
   return 0;
 }

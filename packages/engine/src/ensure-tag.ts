@@ -15,19 +15,19 @@ import { createTag, pushTag, tagList } from './git.js';
 import { formatTag } from './tag-template.js';
 import type { Logger } from './types.js';
 
-export function ensureTag(
+export async function ensureTag(
   tagFormat: string,
   name: string,
   version: string,
   commit: string,
   opts: { cwd: string },
   log: Logger,
-): void {
+): Promise<void> {
   const tagName = formatTag(tagFormat, { name, version });
-  if (tagList(tagName, opts).length > 0) {return;}
-  createTag(tagName, commit, { cwd: opts.cwd, message: `Release ${tagName}` });
+  if ((await tagList(tagName, opts)).length > 0) {return;}
+  await createTag(tagName, commit, { cwd: opts.cwd, message: `Release ${tagName}` });
   try {
-    pushTag(tagName, opts);
+    await pushTag(tagName, opts);
   } catch (err) {
     log.warn(
       `publish: failed to push tag ${tagName}: ${err instanceof Error ? err.message : String(err)}`,

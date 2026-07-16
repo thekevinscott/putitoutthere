@@ -37,13 +37,13 @@ import type { ReleaseGithubOptions } from './types.js';
 
 export async function releaseGithub(opts: ReleaseGithubOptions): Promise<number> {
   const gitOpts = { cwd: opts.cwd };
-  const tags = tagsPointingAtHead(gitOpts);
+  const tags = await tagsPointingAtHead(gitOpts);
   if (tags.length === 0) {
     process.stdout.write('No tags on HEAD; nothing to release on GitHub.\n');
     return 0;
   }
   for (const tag of tags) {
-    pushTagRef(tag, gitOpts);
+    await pushTagRef(tag, gitOpts);
     if (await ghReleaseExists(tag, gitOpts)) {
       process.stdout.write(`GitHub Release ${tag} already exists; skipping.\n`);
       continue;

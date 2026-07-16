@@ -49,7 +49,7 @@ export async function computeStatus(opts: StatusOptions): Promise<StatusRow[]> {
 
   const rows: StatusRow[] = [];
   for (const pkg of config.packages) {
-    const tag = lastTag(pkg.name, pkg.tag_format, { cwd });
+    const tag = await lastTag(pkg.name, pkg.tag_format, { cwd });
     const tagVersion = tag === null ? null : parseTagVersion(pkg.tag_format, pkg.name, tag);
 
     let registry: string | null = null;

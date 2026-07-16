@@ -119,7 +119,7 @@ function makeHandler(over: Partial<Handler> = {}): Handler {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(headCommit).mockReturnValue('HEAD-SHA');
+  vi.mocked(headCommit).mockResolvedValue('HEAD-SHA');
   vi.mocked(normalizeArtifactLayout).mockReturnValue(undefined);
   vi.mocked(readHandlerMeta).mockReturnValue(undefined);
   // Preflight gates pass by default; individual tests override one to abort.

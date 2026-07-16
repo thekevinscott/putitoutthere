@@ -9,29 +9,21 @@
  * - **idempotent-create** — the `gh release view` guard skips an existing
  *   Release.
  *
- * The subprocess boundary is mocked. During the #469 async migration this
- * flow is dual-mocked: git.ts still uses `execFileSync` (converted in a
- * later sub-issue), while the gh calls already go through the async seam
- * (`execCapture` for the view guard, `execInherit` for the create). All
- * three mocks record into one ordered `calls` list for ordering / absence
- * assertions.
+ * The subprocess boundary is mocked at the async seam: git.ts and the gh
+ * view guard both go through `execCapture`, and the gh create through
+ * `execInherit`. Both mocks record into one ordered `calls` list for
+ * ordering / absence assertions.
  */
 
-import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { releaseGithub } from './index.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { execInherit } from '../utils/exec-inherit.js';
 
-// Bare automock (no factory): vitest generates the double from the real
-// module, so it can't drift from the source. git.ts still uses execFileSync
-// until its own #469 sub-issue; the gh calls use the async seam.
-vi.mock('node:child_process');
 vi.mock('../utils/exec-capture.js');
 vi.mock('../utils/exec-inherit.js');
 
-const execMock = vi.mocked(execFileSync);
 const captureMock = vi.mocked(execCapture);
 const inheritMock = vi.mocked(execInherit);
 
@@ -46,19 +38,18 @@ interface Call {
  */
 function wire(tags: string[], existing: Set<string> = new Set()): Call[] {
   const calls: Call[] = [];
-  execMock.mockImplementation((cmd, args) => {
-    const a = (args ?? []) as string[];
-    calls.push({ cmd: cmd, args: a });
-    if (cmd === 'git') {
-      if (a[0] === 'tag' && a.includes('--points-at')) {return `${tags.join('\n')}\n`;}
-      return '';
-    }
-    return Buffer.from('');
-  });
-  // gh release view — the idempotency guard (execCapture; reject === absent).
+  // git (tag --points-at, push) and the gh view guard both go through
+  // execCapture. A failed `gh release view` (reject) === Release absent.
   captureMock.mockImplementation((cmd, args) => {
     const a = [...(args ?? [])];
     calls.push({ cmd, args: a });
+    if (cmd === 'git') {
+      if (a[0] === 'tag' && a.includes('--points-at')) {
+        return Promise.resolve({ stdout: `${tags.join('\n')}\n`, stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    }
+    // gh release view
     if (existing.has(a[2]!)) {return Promise.resolve({ stdout: '', stderr: '' });}
     return Promise.reject(new Error(`release not found: ${a[2]}`));
   });
@@ -73,7 +64,6 @@ function wire(tags: string[], existing: Set<string> = new Set()): Call[] {
 const out: string[] = [];
 
 beforeEach(() => {
-  execMock.mockReset();
   captureMock.mockReset();
   inheritMock.mockReset();
   out.length = 0;

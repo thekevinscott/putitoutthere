@@ -69,7 +69,7 @@ describe('computeStatus', () => {
     configWith(pkg('a'), pkg('b'), pkg('c'));
     // a + c are tagged at v1.0.0; b has never been tagged.
     vi.mocked(lastTag).mockImplementation((name) =>
-      name === 'b' ? null : `${name}-v1.0.0`,
+      Promise.resolve(name === 'b' ? null : `${name}-v1.0.0`),
     );
 
     const handler = handlerReturning((name) => {
