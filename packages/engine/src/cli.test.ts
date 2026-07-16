@@ -411,4 +411,75 @@ describe('cli: publish dispatch', () => {
     expect(publishMock).toHaveBeenCalledOnce();
     expect(stdout.join('')).toMatch(/published: \(nothing\)/);
   });
+
+  // #461: surface what actually shipped as $GITHUB_OUTPUT so the reusable
+  // workflow can propagate `released` / `released_packages` outputs a
+  // consumer gates a post-release job on. The cast keeps this test stable
+  // across the red (no `tag` on the output type yet) and green commits.
+  it('appends released=true and released_packages= to $GITHUB_OUTPUT when a package newly ships (#461)', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'lib-js', version: '1.2.3', result: { status: 'published' }, tag: 'lib-js-v1.2.3' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof publish>>);
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const written = appendFileSyncMock.mock.calls
+      .map((c) => String(c[1]))
+      .join('');
+    expect(written).toMatch(/(^|\n)released=true\n/);
+    const line = written.split('\n').find((l) => l.startsWith('released_packages='));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!.slice('released_packages='.length)) as Array<{
+      name: string;
+      version: string;
+      tag: string;
+    }>;
+    expect(parsed).toEqual([{ name: 'lib-js', version: '1.2.3', tag: 'lib-js-v1.2.3' }]);
+    expect(appendFileSyncMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+  });
+
+  it('appends released=false with an empty released_packages= when nothing newly ships (#461)', async () => {
+    publishMock.mockResolvedValue({ ok: true, published: [] });
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const written = appendFileSyncMock.mock.calls
+      .map((c) => String(c[1]))
+      .join('');
+    expect(written).toMatch(/(^|\n)released=false\n/);
+    expect(written).toMatch(/(^|\n)released_packages=\[\]\n/);
+  });
+
+  it('an already-published package does not count as newly released (#461)', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'lib-js', version: '1.2.3', result: { status: 'already-published' }, tag: 'lib-js-v1.2.3' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof publish>>);
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const written = appendFileSyncMock.mock.calls
+      .map((c) => String(c[1]))
+      .join('');
+    expect(written).toMatch(/(^|\n)released=false\n/);
+    expect(written).toMatch(/(^|\n)released_packages=\[\]\n/);
+  });
+
+  it('does NOT touch $GITHUB_OUTPUT when it is unset (#461)', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'lib-js', version: '1.2.3', result: { status: 'published' }, tag: 'lib-js-v1.2.3' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof publish>>);
+    delete process.env.GITHUB_OUTPUT;
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(appendFileSyncMock).not.toHaveBeenCalled();
+  });
 });
