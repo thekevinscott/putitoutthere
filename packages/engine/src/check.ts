@@ -45,6 +45,7 @@ import {
   checkRepoUrlMatch,
 } from './preflight.js';
 import { formatTag } from './tag-template.js';
+import { toError } from './to-error.js';
 import { normalizeTarget, type TargetEntry } from './types.js';
 
 export interface CheckFinding {
@@ -96,10 +97,7 @@ export function runChecks(opts: CheckOptions): CheckFinding[] {
     }));
   } catch (err) {
     findings.push({
-      message: err instanceof Error
-        ? err.message
-        : /* v8 ignore next -- loadConfig only ever throws Error; the String(err) fallback is unreachable */
-          String(err),
+      message: toError(err).message,
     });
     return findings;
   }
@@ -215,10 +213,7 @@ function checkDependsOn(packages: readonly Package[], findings: CheckFinding[]):
     assertNoCycles(packages);
   } catch (err) {
     findings.push({
-      message: err instanceof Error
-        ? err.message
-        : /* v8 ignore next -- assertNoCycles only ever throws Error; the String(err) fallback is unreachable */
-          String(err),
+      message: toError(err).message,
     });
   }
 }
@@ -346,10 +341,7 @@ function checkNpmTargetTriples(
       } catch (err) {
         findings.push({
           package: p.name,
-          message: err instanceof Error
-            ? err.message
-            : /* v8 ignore next -- assertTripleSupported only ever throws Error; the String(err) fallback is unreachable */
-              String(err),
+          message: toError(err).message,
         });
       }
     }

@@ -23,6 +23,7 @@ import {
 } from './npm-platform.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { ErrorCodes } from '../error-codes.js';
+import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 
 type NpmPkg = {
@@ -71,12 +72,7 @@ function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<stri
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return Promise.reject(new Error(`package.json not found at ${p}`));
     }
-    return Promise.reject(
-      err instanceof Error
-        ? err
-        : /* v8 ignore next -- readFileSync only throws ErrnoException Errors, so this String(err) fallback is unreachable */
-          new Error(String(err)),
-    );
+    return Promise.reject(toError(err));
   }
   let parsed: Record<string, unknown>;
   try {
@@ -84,12 +80,7 @@ function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<stri
   } catch (err) {
     return Promise.reject(
       new Error(
-        `package.json JSON parse error: ${
-          err instanceof Error
-            ? err.message
-            : /* v8 ignore next -- JSON.parse only throws SyntaxError; the String(err) fallback is unreachable */
-              String(err)
-        }`,
+        `package.json JSON parse error: ${toError(err).message}`,
       ),
     );
   }

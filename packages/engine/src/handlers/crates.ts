@@ -35,6 +35,7 @@ import type { Ctx, Handler, PublishResult, TrustPosture } from '../types.js';
 import { TransientError } from '../types.js';
 import { ErrorCodes } from '../error-codes.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
+import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://crates.io';
@@ -78,12 +79,7 @@ function writeVersionImpl(
   try {
     updated = replaceCargoVersion(original, version);
   } catch (err) {
-    return Promise.reject(
-      err instanceof Error
-        ? err
-        : /* v8 ignore next -- replaceCargoVersion only ever throws Error, so this String(err) fallback is unreachable */
-          new Error(String(err)),
-    );
+    return Promise.reject(toError(err));
   }
   if (updated === original) {return Promise.resolve([]);}
   writeFileSync(cargoPath, updated, 'utf8');

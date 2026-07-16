@@ -18,6 +18,7 @@ import { parse as parseToml } from 'smol-toml';
 import { z, type ZodError } from 'zod';
 
 import { DEFAULT_TAG_FORMAT } from './tag-template.js';
+import { toError } from './to-error.js';
 
 /* ------------------------------ artifact-name encoding ------------------------------ */
 
@@ -391,11 +392,9 @@ export function parseConfig(toml: string): Config {
   let raw: unknown;
   try {
     raw = parseToml(toml);
-    /* v8 ignore start -- smol-toml always throws Error; non-Error rethrow path is defensive */
   } catch (err) {
-    throw new Error(`putitoutthere.toml: invalid TOML: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(`putitoutthere.toml: invalid TOML: ${toError(err).message}`, { cause: err });
   }
-  /* v8 ignore stop */
   // Surface common typos before zod runs. The discriminated-union path
   // truncates issue lists (`registry =` makes `kind` look missing and the
   // strict() check on the wrong key never fires), so a pre-pass catches
@@ -420,14 +419,12 @@ export function loadConfig(path: string): Config {
   let text: string;
   try {
     text = readFileSync(path, 'utf8');
-    /* v8 ignore start -- node's fs throws Error; non-Error rethrow is defensive */
   } catch (err) {
     throw new Error(
-      `putitoutthere.toml: cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`,
+      `putitoutthere.toml: cannot read ${path}: ${toError(err).message}`,
       { cause: err },
     );
   }
-  /* v8 ignore stop */
   return parseConfig(text);
 }
 
