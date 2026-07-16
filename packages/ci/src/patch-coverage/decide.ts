@@ -7,11 +7,14 @@
  * exit codes match it exactly (pinned in `decide.test.ts`).
  *
  * Two fatal violation kinds, both exit 1: an added line with no statement hit
- * (uncovered new code), or an added line introducing a `v8 ignore`
- * block-comment escape hatch. No additions, or every added line covered with
- * no hatches, passes (exit 0).
+ * (uncovered new code), or an added line introducing a *bare* `v8 ignore`
+ * block-comment escape hatch. A marker documented with a trailing `-- <reason>`
+ * suffix (the v8/c8 reason syntax) is permitted instead — genuinely-unreachable
+ * branches must justify themselves rather than silently drop coverage. No
+ * additions, or every added line covered with no bare hatches, passes (exit 0).
  */
 
+import { hasIgnoreReason } from './has-ignore-reason.js';
 import { isEscapeHatch } from './is-escape-hatch.js';
 import { isNonStatementLine } from './is-non-statement-line.js';
 import type { PatchCoverageInput, PatchCoverageResult, Violation } from './patch-coverage-types.js';
@@ -30,7 +33,7 @@ export function decidePatchCoverage(input: PatchCoverageInput): PatchCoverageRes
   for (const { file, added } of addedByFile) {
     const cl = coverageFor(file);
     for (const { line, text } of added) {
-      if (isEscapeHatch(text)) {
+      if (isEscapeHatch(text) && !hasIgnoreReason(text)) {
         violations.push({ file, line, kind: 'escape-hatch', msg: `new ignore marker introduced: ${text.trim()}` });
         continue;
       }
@@ -55,9 +58,10 @@ export function decidePatchCoverage(input: PatchCoverageInput): PatchCoverageRes
   const err: string[] = [
     'patch-coverage: violations found.',
     '',
-    'Strict 100% on new src/ code; no `/* v8 ignore */` escape hatches.',
-    'Add a unit test that exercises each new line listed below, or restructure',
-    'the new code so it sits on an already-tested path.',
+    'Strict 100% on new src/ code; bare `/* v8 ignore */` escape hatches are rejected.',
+    'Add a unit test that exercises each new line listed below, restructure the new',
+    'code so it sits on an already-tested path, or — for a genuinely-unreachable',
+    'branch — document the marker with a reason: `/* v8 ignore next -- why */`.',
     '',
   ];
   for (const v of violations) {
