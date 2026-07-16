@@ -183,6 +183,31 @@ describe('lastTag', () => {
     // The `v*.*.*` glob won't match a default-shaped `pkg-v...` tag.
     expectArgv(['tag', '-l', 'v*.*.*']);
   });
+
+  it('compares by major first (higher major wins across differing majors)', async () => {
+    // Differing majors exercise the `a.major !== b.major` comparison arm
+    // that same-major fixtures never reach.
+    execMock.mockResolvedValue({ stdout: 'pkg-v1.9.9\npkg-v2.0.0', stderr: '' });
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v2.0.0');
+  });
+});
+
+describe('tagCommit', () => {
+  it('dereferences a tag to its commit sha (trimmed)', async () => {
+    execMock.mockResolvedValue({ stdout: 'deadbeef\n', stderr: '' });
+    expect(await tagCommit('lib-v1.0.0', OPTS)).toBe('deadbeef');
+    expectArgv(['rev-list', '-n', '1', 'lib-v1.0.0']);
+  });
+
+  it('defaults its options bag when called without one', async () => {
+    execMock.mockResolvedValue({ stdout: 'cafef00d\n', stderr: '' });
+    expect(await tagCommit('lib-v1.0.0')).toBe('cafef00d');
+    expect(execMock).toHaveBeenCalledWith(
+      'git',
+      ['rev-list', '-n', '1', 'lib-v1.0.0'],
+      expect.any(Object),
+    );
+  });
 });
 
 describe('pushTag', () => {

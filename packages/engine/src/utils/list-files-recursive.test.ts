@@ -56,4 +56,19 @@ describe('listFilesRecursive', () => {
     statMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     expect(await listFilesRecursive('/root/nope')).toEqual([]);
   });
+
+  it('skips entries that are neither a regular file nor a directory (e.g. a socket)', async () => {
+    statMock.mockResolvedValue({} as never);
+    // A dirent that is neither a directory nor a file (socket/fifo/symlink)
+    // exercises the else-of-else-if fall-through: it is silently dropped.
+    const special = {
+      name: 'sock',
+      isDirectory: () => false,
+      isFile: () => false,
+    } as unknown as Dirent;
+    readdirMock.mockImplementation(((p: Parameters<typeof readdir>[0]): Promise<Dirent[]> =>
+      Promise.resolve(norm(p) === '/root' ? [special, dirent('real.txt', false)] : [])) as unknown as typeof readdir);
+
+    expect((await listFilesRecursive('/root')).map(norm)).toEqual(['/root/real.txt']);
+  });
 });

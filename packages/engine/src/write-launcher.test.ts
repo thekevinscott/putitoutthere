@@ -152,6 +152,23 @@ describe('writeLauncher (#299)', () => {
     // becomes the runtime template substitution.
     expect(writtenTo('my-cli.js')).toContain('`@myorg/cli-${triple}`');
   });
+
+  it('rethrows a non-EEXIST error from the exclusive launcher write', async () => {
+    // EEXIST is the consumer-override race we swallow; any other write
+    // failure (e.g. EACCES) must propagate rather than be silently absorbed.
+    writeMock.mockImplementation((_path, _data, opts) => {
+      if (typeof opts === 'object' && opts !== null && opts.flag === 'wx') {
+        return Promise.reject(
+          Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }),
+        );
+      }
+      return Promise.resolve();
+    });
+    readFileMock.mockResolvedValue(pkgJson());
+    await expect(
+      writeLauncher({ ...baseOpts, pkgDir: 'pkg', triples: ['x86_64-unknown-linux-gnu'] }),
+    ).rejects.toThrow(/EACCES/);
+  });
 });
 
 describe('internals (#299)', () => {
@@ -223,6 +240,26 @@ describe('writeLauncherFromConfig (#299)', () => {
     expect(launcher).toContain("'linux-x64': 'x86_64-unknown-linux-gnu'");
     expect(launcher).toContain("'darwin-arm64': 'aarch64-apple-darwin'");
     expect(launcher).toContain('`my-cli-${triple}`');
+  });
+
+  it('resolves object-form targets via their `triple` field', async () => {
+    // Targets may be object entries `{ triple, runner }` rather than bare
+    // strings; the launcher only needs the triple, exercising the `: t.triple`
+    // arm of the target normalization.
+    withConfig([
+      {
+        name: 'my-cli',
+        kind: 'npm',
+        path: 'packages/ts',
+        build: 'bundled-cli',
+        targets: [{ triple: 'x86_64-unknown-linux-gnu' }],
+        bundle_cli: { bin: 'my-cli', crate_path: '.' },
+      },
+    ]);
+
+    const written = await writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
+    expect(written.length).toBeGreaterThan(0);
+    expect(writtenTo('my-cli.js')!).toContain("'linux-x64': 'x86_64-unknown-linux-gnu'");
   });
 
   it('uses the bundled-cli entry from a multi-mode build array (ignores napi entries)', async () => {

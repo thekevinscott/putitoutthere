@@ -47,4 +47,17 @@ describe('readWheelVersion', () => {
     readZipMock.mockReturnValue(null);
     expect(await readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBeNull();
   });
+
+  it('selects the zip entry by its `.dist-info/METADATA` suffix', async () => {
+    // Capture the predicate handed to the zip reader so the entry-matcher
+    // arrow is actually invoked (matches METADATA, rejects RECORD).
+    let matcher: ((name: string) => boolean) | undefined;
+    readZipMock.mockImplementation((_buf, m) => {
+      matcher = m;
+      return Buffer.from(META('9.9.9'));
+    });
+    expect(await readWheelVersion('demo-1.0.0-py3-none-any.whl')).toBe('9.9.9');
+    expect(matcher!('demo-1.0.0.dist-info/METADATA')).toBe(true);
+    expect(matcher!('demo-1.0.0.dist-info/RECORD')).toBe(false);
+  });
 });

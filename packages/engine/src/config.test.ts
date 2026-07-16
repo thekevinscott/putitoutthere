@@ -7,7 +7,14 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { loadConfig, parseConfig, sanitizeArtifactName } from './config.js';
+
+import {
+  detectCommonMistakes,
+  formatZodError,
+  loadConfig,
+  parseConfig,
+  sanitizeArtifactName,
+} from './config.js';
 
 // `loadConfig`'s only collaborator is `node:fs/promises`; mock it so the loader/parser
 // is isolated from disk. The real read is covered at the integration + e2e
@@ -1329,6 +1336,22 @@ targets = ["linux-x64-gnu"]
     ).toThrow(/unknown placeholder.*\{version\}/);
   });
 
+  it('rejects an empty name template', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "npm"
+path    = "."
+globs   = ["**"]
+build   = [{ mode = "napi", name = "" }]
+targets = ["linux-x64-gnu"]
+`),
+    ).toThrow(/must not be empty/);
+  });
+
   it('rejects two entries that resolve to colliding names', () => {
     expect(() =>
       parseConfig(`
@@ -1419,5 +1442,45 @@ build   = "hatch"
 python_versions = ["3.x"]
 `),
     ).toThrow(/python_versions/i);
+  });
+});
+
+describe('detectCommonMistakes (internal): non-object / non-object-entry guards', () => {
+  // `parseConfig` only ever calls this with a parsed-TOML object root, so the
+  // non-object early-return and the per-entry non-object skip never fire
+  // through the public path. Exercised directly to pin the defensive guards.
+  it('returns no hints for a non-object root', () => {
+    expect(detectCommonMistakes('not-an-object')).toEqual([]);
+    expect(detectCommonMistakes(null)).toEqual([]);
+    expect(detectCommonMistakes(['array', 'root'])).toEqual([]);
+  });
+
+  it('skips non-object entries in the package array while still hinting on object ones', () => {
+    const hints = detectCommonMistakes({
+      package: ['a-bare-string', { registry: 'npm', path: '.' }],
+    });
+    // The string entry is skipped (index 0); the object entry (index 1)
+    // still produces the registry→kind hint.
+    expect(hints).toEqual([expect.stringMatching(/registry.*kind/)]);
+  });
+});
+
+describe('formatZodError (internal): root-path label', () => {
+  // formatZodError only reads `error.issues[].path` / `.message`, so pass a
+  // ZodError-shaped stub rather than importing `zod` — an unmocked collaborator
+  // the unit-lint isolation gate forbids in a unit test.
+  type ZodErrorLike = Parameters<typeof formatZodError>[0];
+  const zodErrorLike = (
+    issues: { path: (string | number)[]; message: string }[],
+  ): ZodErrorLike => ({ issues }) as unknown as ZodErrorLike;
+
+  it('labels an empty issue path as <root>', () => {
+    const err = zodErrorLike([{ path: [], message: 'whole-document problem' }]);
+    expect(formatZodError(err)).toBe('<root>: whole-document problem');
+  });
+
+  it('joins a non-empty issue path with dots', () => {
+    const err = zodErrorLike([{ path: ['package', 0, 'name'], message: 'bad field' }]);
+    expect(formatZodError(err)).toBe('package.0.name: bad field');
   });
 });

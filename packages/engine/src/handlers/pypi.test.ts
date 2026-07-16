@@ -123,6 +123,18 @@ describe('pypi.isPublished', () => {
     ).rejects.toThrow(/503/);
     fetchSpy.mockRestore();
   });
+
+  it('throws a non-transient error on an unexpected 4xx (not 404)', async () => {
+    // The endpoint contract is 200/404, but a 4xx like 403 must surface a
+    // hard (non-retryable) error rather than be misread as "not published".
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('forbidden', { status: 403 }),
+    );
+    await expect(
+      pypi.isPublished(basePkg(), '0.1.0', makeCtx()),
+    ).rejects.toThrow(/403/);
+    fetchSpy.mockRestore();
+  });
 });
 
 describe('pypi.latestVersion', () => {
@@ -189,6 +201,17 @@ describe('pypi.writeVersion', () => {
     ).rejects.toThrow(/pyproject\.toml not found/);
   });
 
+  it('surfaces a non-ENOENT read error as-is (e.g. EACCES)', async () => {
+    // A permission error is not the "missing file" case; it must not be
+    // reported as `pyproject.toml not found` — the original error bubbles.
+    readMock.mockImplementation(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+    await expect(
+      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
+    ).rejects.toThrow(/EACCES/);
+  });
+
   it('throws when [project] is present but declares no version source', async () => {
     readMock.mockResolvedValue(['[project]', 'name = "demo"', ''].join('\n'));
     await expect(
@@ -216,6 +239,34 @@ describe('pypi.writeVersion', () => {
     expect(changed).toEqual([]);
     // Dynamic-version projects are never rewritten.
     expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it('emits a bare "pypi" label in the dynamic-version hint when the package has no name', async () => {
+    // The guidance line is prefixed `${pkg.name ? `pypi: ${pkg.name}` : 'pypi'}`.
+    // A CLI-direct `write-version` on a nameless package (name is optional on
+    // the impl signature) still emits the hint, prefixed with the bare `pypi`
+    // label rather than `pypi: <name>`. Pins the falsy-name branch.
+    const infoLines: string[] = [];
+    readMock.mockResolvedValue(['[project]', 'dynamic = ["version"]', ''].join('\n'));
+    const pkg = { ...basePkg(), path: dir };
+    delete (pkg as { name?: string }).name;
+    const changed = await pypi.writeVersion(
+      pkg,
+      '0.2.0',
+      makeCtx({
+        log: {
+          debug: () => {},
+          info: (m: string) => infoLines.push(m),
+          warn: () => {},
+          error: () => {},
+        },
+      }),
+    );
+    expect(changed).toEqual([]);
+    const joined = infoLines.join('\n');
+    expect(joined).toContain('detected dynamic version');
+    // Bare `pypi:` label, not `pypi: <name>:`.
+    expect(joined.startsWith('pypi: detected dynamic version')).toBe(true);
   });
 
   it('skips the rewrite when "version" is one of several entries in dynamic', async () => {

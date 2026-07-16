@@ -73,7 +73,8 @@ export async function main(): Promise<void> {
 // `main()` was never called, the action exited 0 immediately, and
 // `_matrix.yml`'s pre-maturin write-version step bumped nothing
 // (PR #277, e2e Windows maturin failures). Issue #276.
-/* v8 ignore next 3 -- entry-point guard; only reachable when invoked as a binary */
+/* v8 ignore start -- entry-point guard; only reachable when invoked as a binary */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main();
 }
+/* v8 ignore stop */

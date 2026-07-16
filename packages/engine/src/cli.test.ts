@@ -17,11 +17,21 @@ import { appendFile } from 'node:fs/promises';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { advanceFloatingMajor } from './advance-floating-major.js';
+import { advanceV0 } from './advance-v0.js';
 import { parseFlags, run } from './cli.js';
 import { runChecks } from './check.js';
+import { foldActionBundle } from './fold-action-bundle.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
+import { reconcile } from './reconcile.js';
+import { releaseGithub } from './release-github/index.js';
 import { computeStatus } from './status.js';
+import { verifyBundleCli } from './verify/bundle-cli/index.js';
+import { verifyCrate } from './verify/crate/index.js';
+import { verifyNpmTarball } from './verify/npm-tarball/index.js';
+import { computeVerify } from './verify/posture.js';
+import { verifyWheel } from './verify/wheel/index.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
 import { writeLauncherFromConfig } from './write-launcher.js';
 import { writeVersionForBuild } from './write-version.js';
@@ -31,10 +41,20 @@ import type { PlanStatus } from './plan-status-types.js';
 import type { StatusRow } from './status-types.js';
 
 vi.mock('node:fs/promises');
+vi.mock('./advance-floating-major.js');
+vi.mock('./advance-v0.js');
 vi.mock('./check.js');
+vi.mock('./fold-action-bundle.js');
 vi.mock('./plan-status.js');
 vi.mock('./publish.js');
+vi.mock('./reconcile.js');
+vi.mock('./release-github/index.js');
 vi.mock('./status.js');
+vi.mock('./verify/bundle-cli/index.js');
+vi.mock('./verify/crate/index.js');
+vi.mock('./verify/npm-tarball/index.js');
+vi.mock('./verify/posture.js');
+vi.mock('./verify/wheel/index.js');
 vi.mock('./write-crate-version.js');
 vi.mock('./write-launcher.js');
 vi.mock('./write-version.js');
@@ -43,6 +63,16 @@ const runChecksMock = vi.mocked(runChecks);
 const computePlanStatusMock = vi.mocked(computePlanStatus);
 const publishMock = vi.mocked(publish);
 const computeStatusMock = vi.mocked(computeStatus);
+const reconcileMock = vi.mocked(reconcile);
+const computeVerifyMock = vi.mocked(computeVerify);
+const verifyNpmTarballMock = vi.mocked(verifyNpmTarball);
+const verifyCrateMock = vi.mocked(verifyCrate);
+const verifyWheelMock = vi.mocked(verifyWheel);
+const verifyBundleCliMock = vi.mocked(verifyBundleCli);
+const releaseGithubMock = vi.mocked(releaseGithub);
+const advanceV0Mock = vi.mocked(advanceV0);
+const advanceFloatingMajorMock = vi.mocked(advanceFloatingMajor);
+const foldActionBundleMock = vi.mocked(foldActionBundle);
 const writeCrateVersionMock = vi.mocked(writeCrateVersionForBuild);
 const writeLauncherMock = vi.mocked(writeLauncherFromConfig);
 const writeVersionMock = vi.mocked(writeVersionForBuild);
@@ -108,6 +138,16 @@ beforeEach(() => {
   runChecksMock.mockResolvedValue([]);
   computeStatusMock.mockResolvedValue([]);
   publishMock.mockResolvedValue({ ok: true, published: [] });
+  reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+  computeVerifyMock.mockResolvedValue([]);
+  verifyNpmTarballMock.mockResolvedValue(0);
+  verifyCrateMock.mockResolvedValue(0);
+  verifyWheelMock.mockResolvedValue(0);
+  verifyBundleCliMock.mockResolvedValue(0);
+  releaseGithubMock.mockResolvedValue(0);
+  advanceV0Mock.mockResolvedValue(0);
+  advanceFloatingMajorMock.mockResolvedValue(0);
+  foldActionBundleMock.mockResolvedValue(0);
   writeVersionMock.mockResolvedValue(['pyproject.toml']);
   writeCrateVersionMock.mockResolvedValue(['Cargo.toml']);
   writeLauncherMock.mockResolvedValue([]);
@@ -169,6 +209,16 @@ describe('cli: top-level dispatch', () => {
     expect(stderr.join('')).toMatch(/--dry-run was removed/);
     expect(publishMock).not.toHaveBeenCalled();
   });
+
+  it('stringifies a non-Error rejection in the error prefix', async () => {
+    // The catch clause renders `String(err)` when the thrown value is not an
+    // Error instance — a mocked collaborator rejecting with a bare string
+    // exercises that fallback.
+    computePlanStatusMock.mockRejectedValue('plain string boom');
+    const code = await run(argv('plan', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/putitoutthere: plain string boom/);
+  });
 });
 
 describe('parseFlags', () => {
@@ -180,6 +230,14 @@ describe('parseFlags', () => {
     const flags = parseFlags(['--cwd', 'fixture-tree']);
     expect(flags.cwd).not.toBe('fixture-tree');
     expect(flags.cwd.endsWith('fixture-tree')).toBe(true);
+  });
+
+  it('keeps the default cwd when --cwd is passed with no value', () => {
+    // Trailing `--cwd` with nothing after it: `argv[++i]` is undefined and
+    // the `?? out.cwd` fallback preserves the process cwd rather than
+    // overwriting it with undefined.
+    const flags = parseFlags(['--cwd']);
+    expect(flags.cwd).toBe(process.cwd());
   });
 
   it('leaves an already-absolute --cwd untouched', () => {
@@ -195,6 +253,29 @@ describe('parseFlags', () => {
   it('leaves releasePackages undefined when --release-packages is absent', () => {
     const flags = parseFlags(['--cwd', '/tmp/x']);
     expect(flags.releasePackages).toBeUndefined();
+  });
+
+  it('parses the verify / write / fold flag family', () => {
+    const flags = parseFlags([
+      '--config', '/c/piot.toml',
+      '--matrix', '[]',
+      '--registry', 'https://reg',
+      '--registry-root', '/root',
+      '--target', 'sdist',
+      '--subject', 'chore: bundle',
+      '--stage-to', 'wheel/dir',
+      '--bin', 'demo',
+      '--per-triple',
+    ]);
+    expect(flags.config).toBe('/c/piot.toml');
+    expect(flags.matrix).toBe('[]');
+    expect(flags.registry).toBe('https://reg');
+    expect(flags.registryRoot).toBe('/root');
+    expect(flags.target).toBe('sdist');
+    expect(flags.subject).toBe('chore: bundle');
+    expect(flags.stageTo).toBe('wheel/dir');
+    expect(flags.bin).toBe('demo');
+    expect(flags.perTriple).toBe(true);
   });
 });
 
@@ -215,6 +296,22 @@ describe('cli: check dispatch', () => {
     const code = await run(argv('check', '--cwd', '/x'));
     expect(code).toBe(0);
     expect(stdout.join('')).toMatch(/no findings/);
+  });
+
+  it('renders multiple findings with per-package prefixes and --config (#319)', async () => {
+    runChecksMock.mockResolvedValue([
+      { message: 'top-level problem' },
+      { package: 'demo', message: 'package problem' },
+    ]);
+    const code = await run(argv('check', '--cwd', '/x', '--config', '/x/piot.toml'));
+    expect(code).toBe(1);
+    const err = stderr.join('');
+    expect(err).toMatch(/check: 2 findings/);
+    expect(err).toContain('demo: package problem');
+    expect(err).toContain('top-level problem');
+    expect(runChecksMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configPath: '/x/piot.toml' }),
+    );
   });
 
   it('emits the findings array on stdout under --json', async () => {
@@ -263,6 +360,15 @@ describe('cli: status dispatch', () => {
     ]);
     const code = await run(argv('status', '--cwd', '/x'));
     expect(code).toBe(0);
+  });
+
+  it('forwards --config to computeStatus', async () => {
+    computeStatusMock.mockResolvedValue([]);
+    const code = await run(argv('status', '--cwd', '/x', '--config', '/x/piot.toml'));
+    expect(code).toBe(0);
+    expect(computeStatusMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configPath: '/x/piot.toml' }),
+    );
   });
 });
 
@@ -319,6 +425,26 @@ describe('cli: plan dispatch', () => {
     expect(code).toBe(0);
     expect(stdout.join('')).toMatch(/no packages to release/);
   });
+
+  it('prints SKIP / UNKNOWN verdict marks and skew warnings with --config', async () => {
+    computePlanStatusMock.mockResolvedValue({
+      matrix: [matrixRow('dep'), matrixRow('app')],
+      verdicts: [
+        { package: 'dep', kind: 'crates', version: '1.0.0', verdict: 'skip' },
+        { package: 'app', kind: 'npm', version: '1.0.0', verdict: 'unknown' },
+      ],
+      skew: [{ dependent: 'app', dependency: 'dep' }],
+    });
+    const code = await run(argv('plan', '--cwd', '/x', '--config', '/x/piot.toml'));
+    expect(code).toBe(0);
+    const out = stdout.join('');
+    expect(out).toContain('SKIP');
+    expect(out).toContain('UNKNOWN');
+    expect(out).toContain('version skew: app');
+    expect(computePlanStatusMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configPath: '/x/piot.toml' }),
+    );
+  });
 });
 
 describe('cli: write-version dispatch', () => {
@@ -327,6 +453,17 @@ describe('cli: write-version dispatch', () => {
     expect(code).toBe(0);
     expect(writeVersionMock).toHaveBeenCalledWith('/pkg', '0.2.8');
     expect(stdout.join('')).toMatch(/write-version:/);
+  });
+
+  it('resolves a relative --path against --cwd (#276)', async () => {
+    const code = await run(argv('write-version', '--cwd', '/root', '--path', 'pkg', '--version', '0.2.8'));
+    expect(code).toBe(0);
+    // The resolved target is OS-specific; assert the trailing segment
+    // separator-agnostically.
+    expect(writeVersionMock).toHaveBeenCalledWith(
+      expect.stringMatching(/[/\\]pkg$/),
+      '0.2.8',
+    );
   });
 
   it('errors when --version is missing (#276)', async () => {
@@ -395,6 +532,15 @@ describe('cli: write-launcher dispatch', () => {
     expect(stdout.join('')).toMatch(/no-op/);
   });
 
+  it('forwards --config to the launcher engine (#299)', async () => {
+    writeLauncherMock.mockResolvedValue([]);
+    const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts', '--config', '/tree/piot.toml'));
+    expect(code).toBe(0);
+    expect(writeLauncherMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configPath: '/tree/piot.toml' }),
+    );
+  });
+
   it('errors when --path is missing (#299)', async () => {
     const code = await run(argv('write-launcher', '--cwd', '/tree'));
     expect(code).toBe(1);
@@ -410,5 +556,359 @@ describe('cli: publish dispatch', () => {
     expect(code).toBe(0);
     expect(publishMock).toHaveBeenCalledOnce();
     expect(stdout.join('')).toMatch(/published: \(nothing\)/);
+  });
+
+  it('emits the publish result as JSON under --json', async () => {
+    publishMock.mockResolvedValue({ ok: true, published: [] });
+    const code = await run(argv('publish', '--cwd', '/x', '--json'));
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout.join('').trim()) as { published: unknown[] };
+    expect(parsed.published).toEqual([]);
+  });
+
+  it('lists each published package in the human-readable render', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'demo', version: '1.2.3', result: { status: 'published' }, tag: 'demo-v1.2.3' },
+      ],
+    });
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(stdout.join('')).toContain('published: demo@1.2.3  status=published');
+  });
+
+  it('forwards --config to the publish engine', async () => {
+    publishMock.mockResolvedValue({ ok: true, published: [] });
+    const code = await run(argv('publish', '--cwd', '/x', '--config', '/x/piot.toml'));
+    expect(code).toBe(0);
+    expect(publishMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configPath: '/x/piot.toml' }),
+    );
+  });
+});
+
+describe('cli: reconcile dispatch', () => {
+  it('emits the reconcile result as JSON under --json and forwards --config', async () => {
+    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+    const code = await run(argv('reconcile', '--cwd', '/x', '--json', '--config', '/x/piot.toml'));
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout.join('').trim()) as { actions: unknown[] };
+    expect(parsed.actions).toEqual([]);
+    expect(reconcileMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configPath: '/x/piot.toml', dryRun: false }),
+    );
+  });
+
+  it('prints created tags in the human-readable render', async () => {
+    reconcileMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      actions: [
+        {
+          package: 'demo',
+          kind: 'crates',
+          version: '0.1.0',
+          tag: 'demo-v0.1.0',
+          commit: 'abcdef1234567',
+          source: 'head',
+          created: true,
+        },
+      ],
+    });
+    const code = await run(argv('reconcile', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const out = stdout.join('');
+    expect(out).toContain('demo: 0.1.0 live, no tag → created demo-v0.1.0 at abcdef1 (head)');
+    expect(out).toMatch(/reconcile: created 1 tag/);
+  });
+
+  it('uses "would create" verbs under --dry-run', async () => {
+    reconcileMock.mockResolvedValue({
+      ok: true,
+      dryRun: true,
+      actions: [
+        {
+          package: 'demo',
+          kind: 'crates',
+          version: '0.1.0',
+          tag: 'demo-v0.1.0',
+          commit: 'abcdef1234567',
+          source: 'sibling',
+          created: false,
+        },
+      ],
+    });
+    const code = await run(argv('reconcile', '--cwd', '/x', '--dry-run'));
+    expect(code).toBe(0);
+    const out = stdout.join('');
+    expect(out).toContain('would create demo-v0.1.0');
+    expect(out).toMatch(/reconcile: would create 1 tag/);
+    expect(reconcileMock).toHaveBeenCalledWith(
+      expect.objectContaining({ dryRun: true }),
+    );
+  });
+});
+
+describe('cli: verify dispatch', () => {
+  it('renders posture rows and exits 0 without --check, forwarding --config', async () => {
+    computeVerifyMock.mockResolvedValue([
+      { package: 'demo', kind: 'npm', version: '1.0.0', posture: 'oidc' },
+    ]);
+    const code = await run(argv('verify', '--cwd', '/x', '--config', '/x/piot.toml'));
+    expect(code).toBe(0);
+    const out = stdout.join('');
+    expect(out).toContain('demo');
+    expect(out).toContain('oidc');
+    expect(computeVerifyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configPath: '/x/piot.toml' }),
+    );
+  });
+
+  it('defaults to the posture subcommand on a bare verify invocation', async () => {
+    computeVerifyMock.mockResolvedValue([]);
+    const code = await run(argv('verify'));
+    expect(code).toBe(0);
+    expect(computeVerifyMock).toHaveBeenCalledOnce();
+  });
+
+  it('emits posture rows as JSON under --json', async () => {
+    computeVerifyMock.mockResolvedValue([
+      { package: 'demo', kind: 'npm', version: null, posture: 'unpublished' },
+    ]);
+    const code = await run(argv('verify', '--cwd', '/x', '--json'));
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout.join('').trim()) as Array<{ posture: string }>;
+    expect(parsed[0]!.posture).toBe('unpublished');
+  });
+
+  it('exits 1 under --check when any package is token-dependent', async () => {
+    computeVerifyMock.mockResolvedValue([
+      { package: 'demo', kind: 'npm', version: '1.0.0', posture: 'token' },
+    ]);
+    const code = await run(argv('verify', '--check', '--cwd', '/x'));
+    expect(code).toBe(1);
+  });
+
+  it('exits 0 under --check when no package is token-dependent', async () => {
+    computeVerifyMock.mockResolvedValue([
+      { package: 'demo', kind: 'npm', version: '1.0.0', posture: 'oidc' },
+    ]);
+    const code = await run(argv('verify', '--check', '--cwd', '/x'));
+    expect(code).toBe(0);
+  });
+
+  it('routes verify npm-tarball to the verifier', async () => {
+    verifyNpmTarballMock.mockResolvedValue(0);
+    const code = await run(
+      argv('verify', 'npm-tarball', '--cwd', '/x', '--matrix', '[]', '--registry', 'https://reg', '--per-triple'),
+    );
+    expect(code).toBe(0);
+    expect(verifyNpmTarballMock).toHaveBeenCalledWith(
+      expect.objectContaining({ matrix: '[]', registry: 'https://reg', perTriple: true }),
+    );
+  });
+
+  it('errors when verify npm-tarball is missing --matrix', async () => {
+    const code = await run(argv('verify', 'npm-tarball', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify npm-tarball requires --matrix/);
+  });
+
+  it('routes verify crate to the verifier', async () => {
+    verifyCrateMock.mockResolvedValue(0);
+    const code = await run(argv('verify', 'crate', '--cwd', '/x', '--matrix', '[]', '--registry-root', '/root'));
+    expect(code).toBe(0);
+    expect(verifyCrateMock).toHaveBeenCalledWith({ matrix: '[]', registryRoot: '/root' });
+  });
+
+  it('errors when verify crate is missing --matrix', async () => {
+    const code = await run(argv('verify', 'crate', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify crate requires --matrix/);
+  });
+
+  it('errors when verify crate is missing --registry-root', async () => {
+    const code = await run(argv('verify', 'crate', '--cwd', '/x', '--matrix', '[]'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify crate requires --registry-root/);
+  });
+
+  it('routes verify wheel to the verifier', async () => {
+    verifyWheelMock.mockResolvedValue(0);
+    const code = await run(
+      argv('verify', 'wheel', '--cwd', '/x', '--path', '/pkg', '--version', '1.0.0', '--target', 'sdist'),
+    );
+    expect(code).toBe(0);
+    expect(verifyWheelMock).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/pkg', version: '1.0.0', target: 'sdist' }),
+    );
+  });
+
+  it('errors when verify wheel is missing --path', async () => {
+    const code = await run(argv('verify', 'wheel', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify wheel requires --path/);
+  });
+
+  it('errors when verify wheel is missing --version', async () => {
+    const code = await run(argv('verify', 'wheel', '--cwd', '/x', '--path', '/pkg'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify wheel requires --version/);
+  });
+
+  it('errors when verify wheel is missing --target', async () => {
+    const code = await run(argv('verify', 'wheel', '--cwd', '/x', '--path', '/pkg', '--version', '1.0.0'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify wheel requires --target/);
+  });
+
+  it('routes verify bundle-cli to the verifier', async () => {
+    verifyBundleCliMock.mockResolvedValue(0);
+    const code = await run(
+      argv('verify', 'bundle-cli', '--cwd', '/x', '--path', '/pkg', '--stage-to', 'dir', '--bin', 'demo', '--target', 'x86_64'),
+    );
+    expect(code).toBe(0);
+    expect(verifyBundleCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/pkg', stageTo: 'dir', bin: 'demo', target: 'x86_64' }),
+    );
+  });
+
+  it('errors when verify bundle-cli is missing --path', async () => {
+    const code = await run(argv('verify', 'bundle-cli', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify bundle-cli requires --path/);
+  });
+
+  it('errors when verify bundle-cli is missing --stage-to', async () => {
+    const code = await run(argv('verify', 'bundle-cli', '--cwd', '/x', '--path', '/pkg'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify bundle-cli requires --stage-to/);
+  });
+
+  it('errors when verify bundle-cli is missing --bin', async () => {
+    const code = await run(argv('verify', 'bundle-cli', '--cwd', '/x', '--path', '/pkg', '--stage-to', 'dir'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify bundle-cli requires --bin/);
+  });
+
+  it('errors when verify bundle-cli is missing --target', async () => {
+    const code = await run(argv('verify', 'bundle-cli', '--cwd', '/x', '--path', '/pkg', '--stage-to', 'dir', '--bin', 'demo'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/verify bundle-cli requires --target/);
+  });
+
+  it('errors on an unknown verify subcommand', async () => {
+    const code = await run(argv('verify', 'bogus', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/unknown verify subcommand: bogus/);
+  });
+});
+
+describe('cli: release-github / advance / fold dispatch', () => {
+  it('routes release-github to the engine', async () => {
+    releaseGithubMock.mockResolvedValue(0);
+    const code = await run(argv('release-github', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(releaseGithubMock).toHaveBeenCalledWith({ cwd: '/x' });
+  });
+
+  it('routes advance-v0 to the engine', async () => {
+    advanceV0Mock.mockResolvedValue(0);
+    const code = await run(argv('advance-v0', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(advanceV0Mock).toHaveBeenCalledWith({ cwd: '/x' });
+  });
+
+  it('routes advance-floating-major to the engine', async () => {
+    advanceFloatingMajorMock.mockResolvedValue(0);
+    const code = await run(argv('advance-floating-major', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(advanceFloatingMajorMock).toHaveBeenCalledWith({ cwd: '/x' });
+  });
+
+  it('routes fold-bundle to the engine with the subject', async () => {
+    foldActionBundleMock.mockResolvedValue(0);
+    const code = await run(argv('fold-bundle', '--cwd', '/x', '--subject', 'chore(release): bundle'));
+    expect(code).toBe(0);
+    expect(foldActionBundleMock).toHaveBeenCalledWith({ cwd: '/x', subject: 'chore(release): bundle' });
+  });
+
+  it('errors when fold-bundle is missing --subject', async () => {
+    const code = await run(argv('fold-bundle', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/fold-bundle: --subject/);
+    expect(foldActionBundleMock).not.toHaveBeenCalled();
+  });
+
+  // #461: surface what actually shipped as $GITHUB_OUTPUT so the reusable
+  // workflow can propagate `released` / `released_packages` outputs a
+  // consumer gates a post-release job on. The cast keeps this test stable
+  // across the red (no `tag` on the output type yet) and green commits.
+  it('appends released=true and released_packages= to $GITHUB_OUTPUT when a package newly ships (#461)', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'lib-js', version: '1.2.3', result: { status: 'published' }, tag: 'lib-js-v1.2.3' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof publish>>);
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const written = appendFileMock.mock.calls
+      .map((c) => String(c[1] as string))
+      .join('');
+    expect(written).toMatch(/(^|\n)released=true\n/);
+    const line = written.split('\n').find((l) => l.startsWith('released_packages='));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!.slice('released_packages='.length)) as Array<{
+      name: string;
+      version: string;
+      tag: string;
+    }>;
+    expect(parsed).toEqual([{ name: 'lib-js', version: '1.2.3', tag: 'lib-js-v1.2.3' }]);
+    expect(appendFileMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+  });
+
+  it('appends released=false with an empty released_packages= when nothing newly ships (#461)', async () => {
+    publishMock.mockResolvedValue({ ok: true, published: [] });
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const written = appendFileMock.mock.calls
+      .map((c) => String(c[1] as string))
+      .join('');
+    expect(written).toMatch(/(^|\n)released=false\n/);
+    expect(written).toMatch(/(^|\n)released_packages=\[\]\n/);
+  });
+
+  it('an already-published package does not count as newly released (#461)', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'lib-js', version: '1.2.3', result: { status: 'already-published' }, tag: 'lib-js-v1.2.3' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof publish>>);
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const written = appendFileMock.mock.calls
+      .map((c) => String(c[1] as string))
+      .join('');
+    expect(written).toMatch(/(^|\n)released=false\n/);
+    expect(written).toMatch(/(^|\n)released_packages=\[\]\n/);
+  });
+
+  it('does NOT touch $GITHUB_OUTPUT when it is unset (#461)', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'lib-js', version: '1.2.3', result: { status: 'published' }, tag: 'lib-js-v1.2.3' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof publish>>);
+    delete process.env.GITHUB_OUTPUT;
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(appendFileMock).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,7 @@ import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { ensureTag } from './ensure-tag.js';
+import { formatTag } from './tag-template.js';
 import {
   requireAuth,
   requireCargoShape,
@@ -58,7 +59,18 @@ export interface PublishOptions {
 
 export interface PublishOutput {
   ok: boolean;
-  published: Array<{ package: string; version: string; result: PublishResult }>;
+  published: Array<{
+    package: string;
+    version: string;
+    result: PublishResult;
+    /**
+     * The git tag cut for this package — the canonical `formatTag`
+     * render of its `tag_format` template (#461). Surfaced so the CLI
+     * can emit release facts to `$GITHUB_OUTPUT` without reconstructing
+     * the tag caller-side.
+     */
+    tag: string;
+  }>;
 }
 
 export async function publish(opts: PublishOptions): Promise<PublishOutput> {
@@ -74,8 +86,9 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   for (const p of config.packages) {
     if (!isAbsolute(p.path)) {p.path = resolve(cwd, p.path);}
   }
-  /* v8 ignore next -- tests always inject handlerFor */
+  /* v8 ignore start -- the release path always resolves defaultHandlerFor; tests inject handlerFor */
   const handlerFor = opts.handlerFor ?? defaultHandlerFor;
+  /* v8 ignore stop -- end handlerFor default */
   const log = createLogger();
 
   // 1. Re-run plan. Invariant: if publish was invoked, something
@@ -212,7 +225,12 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       }
       await handler.writeVersion(pkg, version, ctx);
       const result = await withRetry(() => handler.publish(pkg, version, ctx));
-      published.push({ package: name, version, result });
+      published.push({
+        package: name,
+        version,
+        result,
+        tag: formatTag(pkg.tag_format, { name, version }),
+      });
 
       if (result.status === 'published') {
         await ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
@@ -256,8 +274,9 @@ function artifactsRoot(cwd: string): string {
 
 function mustGet(packages: readonly Package[], name: string): Package {
   const p = packages.find((x) => x.name === name);
-  /* v8 ignore next -- name came from the plan output; always exists */
+  /* v8 ignore start -- name came from the plan output, which is derived from config.packages; always exists */
   if (!p) {throw new Error(`publish: unknown package: ${name}`);}
+  /* v8 ignore stop -- end of unreachable guard above */
   return p;
 }
 
@@ -295,7 +314,13 @@ function publishOrder(packages: readonly Package[], selected: readonly string[])
   const visit = (name: string): void => {
     if (visited.has(name)) {return;}
     visited.add(name);
-    for (const d of deps.get(name) ?? []) {visit(d);}
+    // The `?? []` fallback is unreachable: every selected package is seeded
+    // into `deps` above, so the lookup never misses. The recursion below is
+    // covered via the toposort test.
+    /* v8 ignore start -- unreachable `?? []`; `deps` is seeded for every selected package above */
+    const childDeps = deps.get(name) ?? [];
+    /* v8 ignore stop -- end deps default */
+    for (const d of childDeps) {visit(d);}
     order.push(name);
   };
   for (const n of selected) {visit(n);}

@@ -96,7 +96,12 @@ export async function runChecks(opts: CheckOptions): Promise<CheckFinding[]> {
       path: isAbsolute(p.path) ? p.path : resolve(cwd, p.path),
     }));
   } catch (err) {
-    findings.push({ message: err instanceof Error ? err.message : String(err) });
+    findings.push({
+      message: err instanceof Error
+        ? err.message
+        : /* v8 ignore next -- loadConfig only ever throws Error; the String(err) fallback is unreachable */
+          String(err),
+    });
     return findings;
   }
 
@@ -192,9 +197,9 @@ async function checkGlobsMatchTrackedFiles(
   findings: CheckFinding[],
 ): Promise<void> {
   const tracked = await listTrackedFiles(cwd);
-  /* v8 ignore next -- tests always seed a git repo; defensive against
-     callers outside one */
+  /* v8 ignore start -- checks run inside the repo checkout where git ls-files always resolves; the null branch is defensive against callers outside a worktree */
   if (tracked === null) {return;}
+  /* v8 ignore stop -- end of defensive guard above */
   for (const p of packages) {
     const matched = tracked.some((f) => matchesAny(p.globs, f));
     if (!matched) {
@@ -210,7 +215,12 @@ function checkDependsOn(packages: readonly Package[], findings: CheckFinding[]):
   try {
     assertNoCycles(packages);
   } catch (err) {
-    findings.push({ message: err instanceof Error ? err.message : String(err) });
+    findings.push({
+      message: err instanceof Error
+        ? err.message
+        : /* v8 ignore next -- assertNoCycles only ever throws Error; the String(err) fallback is unreachable */
+          String(err),
+    });
   }
 }
 
@@ -337,7 +347,10 @@ function checkNpmTargetTriples(
       } catch (err) {
         findings.push({
           package: p.name,
-          message: err instanceof Error ? err.message : String(err),
+          message: err instanceof Error
+            ? err.message
+            : /* v8 ignore next -- assertTripleSupported only ever throws Error; the String(err) fallback is unreachable */
+              String(err),
         });
       }
     }

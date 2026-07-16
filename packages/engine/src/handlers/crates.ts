@@ -80,7 +80,10 @@ async function writeVersionImpl(
   try {
     updated = replaceCargoVersion(original, version);
   } catch (err) {
-    throw err instanceof Error ? err : new Error(String(err));
+    throw err instanceof Error
+      ? err
+      : /* v8 ignore next -- replaceCargoVersion only ever throws Error, so this String(err) fallback is unreachable */
+        new Error(String(err));
   }
   if (updated === original) {return [];}
   await writeFile(cargoPath, updated, 'utf8');
@@ -227,6 +230,7 @@ async function publishImpl(
           `[${ErrorCodes.CRATES_FIRST_PUBLISH_TP_REJECTED}] cargo publish: crates.io rejected publishing "${crateNameFor(pkg)}" because the crate has never been published.`,
           'crates.io Trusted Publishing binds to an already-published crate, so the very first release of a new crate name cannot use the TP path.',
           'Bootstrap by setting CARGO_REGISTRY_TOKEN (a classic crates.io API token) for the first publish; every release after that can use trusted publishing.',
+          /* v8 ignore next -- looksLikeFirstPublishTpRejection only matches a non-empty stderr, so the '' fallback is unreachable */
           stderr ? `\n--- cargo stderr ---\n${stderr}` : '',
         ].filter((s) => s.length > 0).join('\n'),
         { cause: err },
@@ -382,9 +386,7 @@ export async function scanDirtyOutsideManifest(
     // Porcelain v1: "XY path" or "XY old -> new" for renames. Index 3+
     // is the path; strip quoting if git applied any.
     const rest = raw.slice(3);
-    /* v8 ignore next -- rename-row rendering not exercised by current tests */
     const path = rest.includes(' -> ') ? rest.split(' -> ').pop()! : rest;
-    /* v8 ignore next -- quoted-path rendering not exercised by current tests */
     const normalized = path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path;
     if (normalized === managedRel) {continue;}
     if (
@@ -410,10 +412,13 @@ export async function scanDirtyOutsideManifest(
   return unexpected;
 }
 
-function relativeOrSelf(base: string, target: string): string {
+export function relativeOrSelf(base: string, target: string): string {
   const r = relative(base, target);
-  /* v8 ignore next -- relative() only returns '' when base === target */
-  return r === '' ? target : r;
+  // Normalise to forward slashes: `node:path`'s relative() yields backslashes
+  // on Windows, but this feeds a human-readable error message that should read
+  // consistently across platforms (and matches the repo's forward-slash path
+  // convention).
+  return (r === '' ? target : r).replaceAll('\\', '/');
 }
 
 /**

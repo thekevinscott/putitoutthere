@@ -38,7 +38,7 @@ import {
   requireRepoUrlMatch,
 } from './preflight.js';
 import { publish } from './publish.js';
-import { readHandlerMeta, type Handler } from './types.js';
+import { readHandlerMeta, type Ctx, type Handler } from './types.js';
 import { dumpFailure } from './verbose.js';
 
 vi.mock('./config.js');
@@ -163,6 +163,23 @@ describe('publish: happy path', () => {
     );
     expect(result.ok).toBe(true);
     expect(result.published.map((r) => r.package)).toEqual(['lib-js']);
+  });
+
+  it('surfaces each published package tag from its tag_format (#461)', async () => {
+    // The CLI reads `published[].tag` to emit `released_packages` to
+    // $GITHUB_OUTPUT; publish() must render it via the package's
+    // `tag_format` so no caller reconstructs the tag. Custom template
+    // here proves it's the config's format, not a hard-coded shape.
+    const p = { ...npmPkg('lib-js', 'packages/ts'), tag_format: 'v{version}' };
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const result = await publish({ cwd: CWD, handlerFor: () => makeHandler() });
+
+    expect(result.published).toEqual([
+      expect.objectContaining({ package: 'lib-js', version: '0.1.0', tag: 'v0.1.0' }),
+    ]);
   });
 
   it('short-circuits on already-published (auto-heals the tag, clean exit)', async () => {
@@ -355,6 +372,110 @@ describe('publish: handler failure', () => {
       }),
       expect.anything(),
     );
+  });
+});
+
+describe('publish: additional branch coverage', () => {
+  it('leaves an already-absolute pkg.path unchanged (no re-anchoring)', async () => {
+    // The anchoring loop only resolves relative paths; an absolute path
+    // must pass straight through to the handler untouched.
+    const p = npmPkg('lib-js', '/abs/packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    let seen: string | undefined;
+    const handler = makeHandler({
+      publish: vi.fn().mockImplementation((pkg: { path: string }) => {
+        seen = pkg.path;
+        return Promise.resolve({ status: 'published' as const });
+      }),
+    });
+    await publish({ cwd: CWD, handlerFor: () => handler });
+    expect(seen).toBe('/abs/packages/ts');
+  });
+
+  it('skips tag creation when publish() itself reports already-published', async () => {
+    // isPublished says "not yet", but the handler's publish() collapses an
+    // in-flight race into already-published. That status must not tag.
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const handler = makeHandler({
+      isPublished: vi.fn().mockResolvedValue(false),
+      publish: vi.fn().mockResolvedValue({ status: 'already-published' }),
+    });
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
+
+    expect(handler.publish).toHaveBeenCalledTimes(1);
+    expect(ensureTag).not.toHaveBeenCalled();
+    expect(result.published.map((r) => r.result.status)).toEqual(['already-published']);
+  });
+
+  it('wraps a non-Error handler rejection before dumping and rethrowing', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const handler = makeHandler({
+      publish: vi.fn().mockRejectedValue('raw-string-fail'),
+    });
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow(
+      /raw-string-fail/,
+    );
+    expect(dumpFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores configured packages that are absent from the plan when ordering', async () => {
+    // `b` is configured but never planned; publishOrder must skip it
+    // rather than try to publish it.
+    const a = npmPkg('a', 'packages/a');
+    const b = npmPkg('b', 'packages/b');
+    configWith(a, b);
+    vi.mocked(plan).mockResolvedValue([row(a)]);
+    allComplete(a);
+
+    const handler = makeHandler();
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
+    expect(result.published.map((r) => r.package)).toEqual(['a']);
+  });
+
+  it('tolerates a selected package whose depends_on is undefined', async () => {
+    const p = { ...npmPkg('lib-js', 'packages/ts') };
+    delete (p as { depends_on?: string[] }).depends_on;
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const handler = makeHandler();
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
+    expect(result.ok).toBe(true);
+  });
+
+  it('exposes ctx.artifacts.get()/has() to handlers', async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    let gotPath: string | undefined;
+    let hasResult: boolean | undefined;
+    const handler = makeHandler({
+      publish: vi.fn().mockImplementation((_pkg: unknown, _v: unknown, ctx: Ctx) => {
+        gotPath = ctx.artifacts.get('my-artifact');
+        hasResult = ctx.artifacts.has('my-artifact');
+        return Promise.resolve({ status: 'published' as const });
+      }),
+    });
+    await publish({ cwd: CWD, handlerFor: () => handler });
+
+    // get(n) => join(artifactsRoot(cwd), n); has() is the post-completeness
+    // stub that always returns true.
+    expect(gotPath).toMatch(/[/\\]repo[/\\]artifacts[/\\]my-artifact$/);
+    expect(hasResult).toBe(true);
   });
 });
 

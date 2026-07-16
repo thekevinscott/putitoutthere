@@ -186,7 +186,9 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    /* v8 ignore next -- ?? fallback is for malformed argv; tests always pass the value */
+    // The `?? out.cwd` fallback guards a trailing `--cwd` with no value
+    // (`argv[++i]` is then undefined); it keeps the default cwd rather
+    // than overwriting it with undefined.
     if (a === '--cwd') {out.cwd = argv[++i] ?? out.cwd;}
     else if (a === '--config') {out.config = argv[++i];}
     else if (a === '--json') {out.json = true;}
@@ -536,7 +538,6 @@ export async function run(argv: readonly string[]): Promise<number> {
       case 'publish': {
         const result = await publish({
           cwd: flags.cwd,
-          /* v8 ignore next -- --config test covered in plan arm; publish shares the same plumbing */
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
           releasePackages: flags.releasePackages,
         });
@@ -544,7 +545,6 @@ export async function run(argv: readonly string[]): Promise<number> {
           process.stdout.write(JSON.stringify(result) + '\n');
         } else if (result.published.length === 0) {
           process.stdout.write('published: (nothing)\n');
-          /* v8 ignore start -- non-empty publish path requires real registry access; covered by e2e */
         } else {
           for (const p of result.published) {
             process.stdout.write(
@@ -552,7 +552,32 @@ export async function run(argv: readonly string[]): Promise<number> {
             );
           }
         }
-        /* v8 ignore stop */
+        // #461: surface what actually shipped so the reusable workflow
+        // can propagate `released` / `released_packages` outputs a
+        // consumer gates a post-release job on (changelog assembly,
+        // docs stamping, announcements). This is a publish-time signal
+        // ("did we ship?"), unlike the plan-time `has_pypi`: only
+        // packages the handler *newly* published this run count, so an
+        // idempotent re-run reports `released=false` with an empty list.
+        // The tag rides through from the publish path's canonical
+        // `formatTag` render — no caller-side reconstruction.
+        const publishGithubOutput = process.env.GITHUB_OUTPUT;
+        if (publishGithubOutput) {
+          const shipped = result.published.filter(
+            (p) => p.result.status === 'published',
+          );
+          const releasedPackages = shipped.map((p) => ({
+            name: p.package,
+            version: p.version,
+            tag: p.tag,
+          }));
+          await appendFile(
+            publishGithubOutput,
+            `released=${shipped.length > 0}\n` +
+              `released_packages=${JSON.stringify(releasedPackages)}\n`,
+            'utf8',
+          );
+        }
         return 0;
       }
       /* v8 ignore next 3 -- exhaustive; 'version' handled above */

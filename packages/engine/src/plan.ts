@@ -347,7 +347,9 @@ async function rowsForPackage(pkg: Package, version: string, cwd: string): Promi
         artifact_path: at('dist'),
         path: pkg.path,
         python_version: buildPython,
+        /* v8 ignore start -- pypi build defaults to 'setuptools' at config-load, so it's always defined here; the empty-spread fallback is defensive */
         ...(build !== undefined ? { build } : {}),
+        /* v8 ignore stop */
       });
       // #324: pure-Python hatch packages also emit a `wheel-any` row.
       // `pypa/build`'s default on a pure-Python tree produces both an

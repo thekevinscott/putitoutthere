@@ -62,7 +62,9 @@ async function readTomlOrNull(path: string): Promise<Record<string, unknown> | n
   }
   try {
     const parsed = parseToml(raw);
+    /* v8 ignore start -- smol-toml parses every valid document to a table root; the non-table fallback can't fire */
     return isTable(parsed) ? parsed : null;
+    /* v8 ignore stop */
   } catch {
     return null;
   }

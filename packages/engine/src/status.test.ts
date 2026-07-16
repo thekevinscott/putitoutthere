@@ -23,11 +23,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Package } from './config.js';
 import { loadConfig } from './config.js';
 import { lastTag } from './git.js';
+import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { computeStatus } from './status.js';
-import type { Handler, PackageConfig } from './types.js';
+import type { Ctx, Handler, PackageConfig } from './types.js';
 
 vi.mock('./config.js');
 vi.mock('./git.js');
+vi.mock('./handlers/index.js');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -94,5 +96,33 @@ describe('computeStatus', () => {
     expect(byName.c!.registryUnreachable).toBe(true);
     expect(byName.c!.registry).toBeNull();
     expect(byName.c!.drift).toBe(false);
+  });
+
+  it('falls back to the default handlerFor when none is injected, threading an inert-artifacts ctx', async () => {
+    configWith(pkg('solo'));
+    vi.mocked(lastTag).mockResolvedValue('solo-v1.0.0');
+    const probe: { got?: string; had?: boolean } = {};
+    vi.mocked(defaultHandlerFor).mockReturnValue({
+      kind: 'npm',
+      isPublished: vi.fn().mockResolvedValue(false),
+      latestVersion: (_p: PackageConfig, ctx: Ctx) => {
+        // The stub `artifacts.get`/`has` on the built ctx return ''/false.
+        probe.got = ctx.artifacts.get('anything');
+        probe.had = ctx.artifacts.has('anything');
+        return Promise.resolve('1.0.0');
+      },
+      trustPosture: vi.fn().mockResolvedValue('token'),
+      writeVersion: vi.fn().mockResolvedValue([]),
+      publish: vi.fn().mockResolvedValue({ status: 'published', url: 'x' }),
+    });
+
+    // No `handlerFor` in opts → the `?? defaultHandlerFor` fallback is taken.
+    const rows = await computeStatus({ cwd: '/repo' });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.registry).toBe('1.0.0');
+    expect(vi.mocked(defaultHandlerFor)).toHaveBeenCalled();
+    expect(probe.got).toBe('');
+    expect(probe.had).toBe(false);
   });
 });

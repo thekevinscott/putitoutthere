@@ -8,7 +8,7 @@
  * on-disk manifests are exercised by the integration + e2e tiers.
  */
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findWorkspaceRoot } from './find-workspace-root.js';
@@ -18,6 +18,7 @@ vi.mock('node:fs/promises');
 vi.mock('./find-workspace-root.js');
 
 const writeMock = vi.mocked(writeFile);
+const readMock = vi.mocked(readFile);
 const findRootMock = vi.mocked(findWorkspaceRoot);
 
 beforeEach(() => {
@@ -48,5 +49,18 @@ describe('writeResolvedCargoVersion (#428)', () => {
     await expect(writeResolvedCargoVersion('crate', src, '1.0.0')).rejects.toThrow(
       /no ancestor \[workspace\]/,
     );
+  });
+
+  it('returns the root path without writing when the workspace version already matches', async () => {
+    // Idempotent inheriting-crate path: the root [workspace.package].version
+    // already equals the target, so replaceWorkspacePackageVersion returns it
+    // unchanged and no write is issued — but the root path is still reported.
+    findRootMock.mockResolvedValue('/ws');
+    readMock.mockResolvedValue(['[workspace.package]', 'version = "1.2.3"', ''].join('\n'));
+    const src = ['[package]', 'name = "x"', 'version.workspace = true', ''].join('\n');
+    const written = await writeResolvedCargoVersion('crate', src, '1.2.3');
+    expect(written).toHaveLength(1);
+    expect(written[0]!.endsWith('Cargo.toml')).toBe(true);
+    expect(writeMock).not.toHaveBeenCalled();
   });
 });

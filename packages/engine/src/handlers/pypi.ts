@@ -82,14 +82,20 @@ async function writeVersionImpl(
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(`pyproject.toml not found at ${pyProjectPath}`, { cause: err });
     }
-    /* v8 ignore next -- non-ENOENT read errors surface as-is */
-    throw err instanceof Error ? err : new Error(String(err));
+    throw err instanceof Error
+      ? err
+      : /* v8 ignore next -- readFile only throws ErrnoException Errors, so this String(err) fallback is unreachable */
+        new Error(String(err));
   }
   let parsed: unknown;
   try {
     parsed = parseToml(original);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg =
+      err instanceof Error
+        ? err.message
+        : /* v8 ignore next -- smol-toml only throws Error; the String(err) fallback is unreachable */
+          String(err);
     throw new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${msg}`, { cause: err });
   }
   const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } })?.project;

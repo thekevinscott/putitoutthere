@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { computeVerify } from './posture.js';
 import { type Config, loadConfig } from '../config.js';
 import { handlerFor } from '../handlers/index.js';
+import type { Ctx } from '../types.js';
 
 vi.mock('../config.js');
 vi.mock('../handlers/index.js');
@@ -89,6 +90,26 @@ describe('computeVerify', () => {
     expect(byPkg['pkg-latestflaky']).toMatchObject({ version: null, posture: 'unreachable' });
     // A throwing trust read reports unreachable but keeps the read version.
     expect(byPkg['pkg-trustflaky']).toMatchObject({ version: '2.0.0', posture: 'unreachable' });
+  });
+
+  it('hands the handler a ctx whose inert artifact accessors return empty/false', async () => {
+    // The verify path builds a Ctx with stub `artifacts.get`/`has`; drive a
+    // handler that invokes them so the stub bodies are exercised.
+    loadConfigMock.mockResolvedValue(configWith(['pkg-probe']));
+    const probe: { got?: string; had?: boolean } = {};
+    handlerForMock.mockReturnValue({
+      latestVersion: vi.fn((_pkg: Pkg, ctx: Ctx) => {
+        probe.got = ctx.artifacts.get('anything');
+        probe.had = ctx.artifacts.has('anything');
+        return Promise.resolve('1.0.0');
+      }),
+      trustPosture: vi.fn(() => Promise.resolve('token')),
+    } as unknown as ReturnType<typeof handlerFor>);
+
+    await computeVerify({ cwd: '/repo' });
+
+    expect(probe.got).toBe('');
+    expect(probe.had).toBe(false);
   });
 
   it('does not read trust for an unpublished package', async () => {

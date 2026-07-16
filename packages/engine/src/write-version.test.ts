@@ -164,4 +164,30 @@ describe('writeVersionForBuild (#276, #428)', () => {
     });
     await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow('Cargo.toml is missing');
   });
+
+  // A non-ENOENT read error (e.g. EACCES) is not the "missing file" case, so
+  // it must surface as-is rather than be re-wrapped as a not-found message.
+  const eacces = () => {
+    const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
+    err.code = 'EACCES';
+    return err;
+  };
+
+  it('rethrows a non-ENOENT error from the pyproject read as-is', async () => {
+    readFileMock.mockImplementation((p) => {
+      if ((p as string).endsWith('pyproject.toml')) {return Promise.reject(eacces());}
+      return Promise.resolve('');
+    });
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow(/EACCES/);
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.not.toThrow(/not found/);
+  });
+
+  it('rethrows a non-ENOENT error from the Cargo.toml read as-is', async () => {
+    readFileMock.mockImplementation((p) => {
+      if ((p as string).endsWith('pyproject.toml')) {return Promise.resolve(dynamicPyproject);}
+      return Promise.reject(eacces());
+    });
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow(/EACCES/);
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.not.toThrow(/is missing/);
+  });
 });
