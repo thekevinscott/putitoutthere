@@ -219,6 +219,34 @@ describe('pypi.writeVersion', () => {
     expect(writeMock).not.toHaveBeenCalled();
   });
 
+  it('emits a bare "pypi" label in the dynamic-version hint when the package has no name', async () => {
+    // The guidance line is prefixed `${pkg.name ? `pypi: ${pkg.name}` : 'pypi'}`.
+    // A CLI-direct `write-version` on a nameless package (name is optional on
+    // the impl signature) still emits the hint, prefixed with the bare `pypi`
+    // label rather than `pypi: <name>`. Pins the falsy-name branch.
+    const infoLines: string[] = [];
+    readMock.mockReturnValue(['[project]', 'dynamic = ["version"]', ''].join('\n'));
+    const pkg = { ...basePkg(), path: dir };
+    delete (pkg as { name?: string }).name;
+    const changed = await pypi.writeVersion(
+      pkg,
+      '0.2.0',
+      makeCtx({
+        log: {
+          debug: () => {},
+          info: (m: string) => infoLines.push(m),
+          warn: () => {},
+          error: () => {},
+        },
+      }),
+    );
+    expect(changed).toEqual([]);
+    const joined = infoLines.join('\n');
+    expect(joined).toContain('detected dynamic version');
+    // Bare `pypi:` label, not `pypi: <name>:`.
+    expect(joined.startsWith('pypi: detected dynamic version')).toBe(true);
+  });
+
   it('skips the rewrite when "version" is one of several entries in dynamic', async () => {
     readMock.mockReturnValue(
       [

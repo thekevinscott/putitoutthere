@@ -348,6 +348,39 @@ describe('npm.writeVersion', () => {
     );
     expect(readFileSync(p, 'utf8')).toContain('  "version": "0.2.0"');
   });
+
+  it('preserves a trailing newline when the original package.json has one', async () => {
+    // writeVersion appends `\n` only when the original file ended with one.
+    // The no-trailing-newline path is covered by the JSON.stringify-seeded
+    // tests above (no trailing newline); this pins the with-newline branch.
+    const p = `${dir}/package.json`;
+    writeFileSync(
+      p,
+      JSON.stringify({ name: 'demo', version: '0.1.0' }, null, 2) + '\n',
+      'utf8',
+    );
+    await npm.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ cwd: dir }),
+    );
+    expect(readFileSync(p, 'utf8').endsWith('\n')).toBe(true);
+  });
+
+  it('preserves tab indentation (detectIndent tab branch)', async () => {
+    // A tab-indented package.json must round-trip as tab-indented: detectIndent
+    // returns '\t' rather than a space count.
+    const p = `${dir}/package.json`;
+    writeFileSync(p, '{\n\t"name": "demo",\n\t"version": "0.1.0"\n}', 'utf8');
+    await npm.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ cwd: dir }),
+    );
+    const out = readFileSync(p, 'utf8');
+    expect(out).toContain('\t"version": "0.2.0"');
+    expect(out).not.toContain('  "version"');
+  });
 });
 
 describe('npm.publish', () => {
