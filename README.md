@@ -614,6 +614,66 @@ That's why the canonical template puts the PyPI upload step
 gated on `needs.release.outputs.has_pypi`. In your workflow context
 both claims resolve to your repo, so your TP registration matches.
 
+## Post-release bookkeeping
+
+Some repos have work that must run *when a release actually ships* and
+needs to know *what* shipped — assembling accumulated changelog fragments
+(towncrier-style) into a dated section, stamping a docs version, posting
+an announcement. putitoutthere does not run that logic for you (it runs no
+consumer-supplied code in its pipeline), but it tells you the moment and
+the facts through two reusable-workflow outputs, so you compose a
+downstream job on them exactly like the `pypi-publish` job composes on
+`has_pypi`:
+
+| output | value |
+| --- | --- |
+| `released` | `'true'` when this run **newly** published ≥ 1 package, else `'false'`. Idempotent re-runs (versions already live) report `'false'`. |
+| `released_packages` | JSON array of what newly shipped — `[{"name","version","tag"}, …]` — in publish order. `[]` when nothing shipped. |
+
+`released` is **publish-time** ("did we ship?"), not plan-time ("did we
+plan?") — so a push that re-runs the pipeline without new versions won't
+fire your job. Add the job to your own `release.yml`:
+
+```yaml
+  post-release:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Assemble changelog / stamp docs / announce
+        env:
+          RELEASED_PACKAGES: ${{ needs.release.outputs.released_packages }}
+        run: |
+          # Your own logic. `$RELEASED_PACKAGES` is the JSON array above;
+          # e.g. `jq -r '.[] | "\(.name) \(.version) \(.tag)"'`.
+          your-tool assemble-changelog --shipped "$RELEASED_PACKAGES"
+      - name: Commit the result back to main
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md changelog.d/
+          git commit -m "docs: assemble changelog for release" || exit 0
+          git push
+```
+
+**Don't loop.** The commit above pushes to `main`, which re-triggers your
+release workflow. That's harmless as long as the files it touches are not
+in any package's `globs`: change detection is per-package, so a push that
+only edits `CHANGELOG.md` / `changelog.d/` plans an empty matrix, the
+`publish` job is skipped, `released` comes back empty, and your
+`post-release` job's `if:` is false. Keep bookkeeping paths out of your
+release globs (they already should be — a changelog edit is not a code
+change) and there is no loop. If your bookkeeping *must* touch a released
+path, add `[skip ci]` to the commit message instead.
+
+Failure is recoverable by construction: `post-release` is a separate job
+that runs *after* publish already succeeded, so if it fails the packages
+are still shipped and (in the fragments model) your fragments are still in
+the tree for the next release to pick up.
+
 ## Recipes
 
 ### Bundled-CLI npm family

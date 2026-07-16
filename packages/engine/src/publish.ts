@@ -27,6 +27,7 @@ import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { ensureTag } from './ensure-tag.js';
+import { formatTag } from './tag-template.js';
 import {
   requireAuth,
   requireCargoShape,
@@ -58,7 +59,18 @@ export interface PublishOptions {
 
 export interface PublishOutput {
   ok: boolean;
-  published: Array<{ package: string; version: string; result: PublishResult }>;
+  published: Array<{
+    package: string;
+    version: string;
+    result: PublishResult;
+    /**
+     * The git tag cut for this package — the canonical `formatTag`
+     * render of its `tag_format` template (#461). Surfaced so the CLI
+     * can emit release facts to `$GITHUB_OUTPUT` without reconstructing
+     * the tag caller-side.
+     */
+    tag: string;
+  }>;
 }
 
 export async function publish(opts: PublishOptions): Promise<PublishOutput> {
@@ -213,7 +225,12 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       }
       await handler.writeVersion(pkg, version, ctx);
       const result = await withRetry(() => handler.publish(pkg, version, ctx));
-      published.push({ package: name, version, result });
+      published.push({
+        package: name,
+        version,
+        result,
+        tag: formatTag(pkg.tag_format, { name, version }),
+      });
 
       if (result.status === 'published') {
         ensureTag(pkg.tag_format, name, version, head, { cwd }, log);

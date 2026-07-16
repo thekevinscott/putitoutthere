@@ -163,6 +163,23 @@ describe('publish: happy path', () => {
     expect(result.published.map((r) => r.package)).toEqual(['lib-js']);
   });
 
+  it('surfaces each published package tag from its tag_format (#461)', async () => {
+    // The CLI reads `published[].tag` to emit `released_packages` to
+    // $GITHUB_OUTPUT; publish() must render it via the package's
+    // `tag_format` so no caller reconstructs the tag. Custom template
+    // here proves it's the config's format, not a hard-coded shape.
+    const p = { ...npmPkg('lib-js', 'packages/ts'), tag_format: 'v{version}' };
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const result = await publish({ cwd: CWD, handlerFor: () => makeHandler() });
+
+    expect(result.published).toEqual([
+      expect.objectContaining({ package: 'lib-js', version: '0.1.0', tag: 'v0.1.0' }),
+    ]);
+  });
+
   it('short-circuits on already-published (auto-heals the tag, clean exit)', async () => {
     const p = npmPkg('lib-js', 'packages/ts');
     configWith(p);

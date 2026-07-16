@@ -553,6 +553,34 @@ export async function run(argv: readonly string[]): Promise<number> {
             );
           }
         }
+        // #461: surface what actually shipped so the reusable workflow
+        // can propagate `released` / `released_packages` outputs a
+        // consumer gates a post-release job on (changelog assembly,
+        // docs stamping, announcements). This is a publish-time signal
+        // ("did we ship?"), unlike the plan-time `has_pypi`: only
+        // packages the handler *newly* published this run count, so an
+        // idempotent re-run reports `released=false` with an empty list.
+        // The tag rides through from the publish path's canonical
+        // `formatTag` render — no caller-side reconstruction.
+        const publishGithubOutput = process.env.GITHUB_OUTPUT;
+        if (publishGithubOutput) {
+          const shipped = result.published.filter(
+            (p) => p.result.status === 'published',
+          );
+          const releasedPackages = shipped.map((p) => ({
+            name: p.package,
+            version: p.version,
+            tag: p.tag,
+          }));
+          await import('node:fs').then((fs) =>
+            fs.appendFileSync(
+              publishGithubOutput,
+              `released=${shipped.length > 0}\n` +
+                `released_packages=${JSON.stringify(releasedPackages)}\n`,
+              'utf8',
+            ),
+          );
+        }
         return 0;
       }
       /* v8 ignore next 3 -- exhaustive; 'version' handled above */
