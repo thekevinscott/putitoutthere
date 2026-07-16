@@ -8,11 +8,12 @@
  * package orchestration step before the main publish.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { normalizeTarget, TransientError, type Ctx, type Handler, type PublishResult, type TargetEntry, type TrustPosture } from '../types.js';
+import { execCapture } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
 import {
   looksLikePublishOverRace,
   looksLikeTlogDuplicate,
@@ -46,50 +47,50 @@ function npmNameFor(pkg: NpmPkg): string {
   return pkg.npm ?? pkg.name;
 }
 
-function isPublishedImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<boolean> {
+async function isPublishedImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<boolean> {
   const name = npmNameFor(pkg);
   try {
-    execFileSync('npm', ['view', `${name}@${version}`, 'version'], {
+    await execCapture('npm', ['view', `${name}@${version}`, 'version'], {
       cwd: ctx.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return Promise.resolve(true);
+    return true;
   } catch {
     // `npm view` exits non-zero when the version doesn't exist.
     // We treat every non-zero as "not published"; the subsequent
     // publish step will surface real auth/network errors there.
-    return Promise.resolve(false);
+    return false;
   }
 }
 
-function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<string[]> {
+async function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<string[]> {
   const p = join(pkg.path, 'package.json');
   let original: string;
   try {
-    original = readFileSync(p, 'utf8');
+    original = await readFile(p, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return Promise.reject(new Error(`package.json not found at ${p}`));
+      throw new Error(`package.json not found at ${p}`, { cause: err });
     }
     /* v8 ignore next -- non-ENOENT read errors surface as-is */
-    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    throw err instanceof Error ? err : new Error(String(err));
   }
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(original) as Record<string, unknown>;
   } catch (err) {
-    return Promise.reject(
-      new Error(`package.json JSON parse error: ${err instanceof Error ? err.message : String(err)}`),
+    throw new Error(
+      `package.json JSON parse error: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
-  if (parsed.version === version) {return Promise.resolve([]);}
+  if (parsed.version === version) {return [];}
   parsed.version = version;
   // Preserve the existing indentation shape (2-space default if we
   // can't detect) and the trailing newline when present.
   const indent = detectIndent(original);
   const trailing = original.endsWith('\n') ? '\n' : '';
-  writeFileSync(p, JSON.stringify(parsed, null, indent) + trailing, 'utf8');
-  return Promise.resolve([p]);
+  await writeFile(p, JSON.stringify(parsed, null, indent) + trailing, 'utf8');
+  return [p];
 }
 
 async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<PublishResult> {
@@ -141,7 +142,7 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   // defensive backstop for direct handler calls that bypass the
   // publish pipeline.
   if (hasOidc) {
-    assertRepositoryField(pkg.path);
+    await assertRepositoryField(pkg.path);
   }
 
   const access = pkg.access ?? 'public';
@@ -151,15 +152,14 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   if (registryOverride) {args.push(`--registry=${registryOverride}`);}
 
   try {
-    execFileSync('npm', args, {
+    await execCapture('npm', args, {
       cwd: pkg.path,
       // #138: minimal env. Avoid leaking the whole parent process.env
       // (and any unrelated step secrets) to npm.
       env: buildSubprocessEnv(ctx.env),
-      stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
-    const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    const stderr = err instanceof ExecError ? err.stderr.trim() : undefined;
     const base = err instanceof Error ? err.message : String(err);
     const name = npmNameFor(pkg);
     // npm CLI's retry-on-transient-network-error: a successful PUT that
@@ -225,9 +225,9 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
 
 /* ------------------------------ internals ------------------------------ */
 
-function assertRepositoryField(path: string): void {
+async function assertRepositoryField(path: string): Promise<void> {
   const pkgJsonPath = join(path, 'package.json');
-  const raw = readFileSync(pkgJsonPath, 'utf8');
+  const raw = await readFile(pkgJsonPath, 'utf8');
   const pkg = JSON.parse(raw) as { repository?: unknown };
   const repository = pkg.repository;
   // Accept either the canonical object form (`{ type, url, … }`) or

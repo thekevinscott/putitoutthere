@@ -17,7 +17,6 @@
  * Red before the fix: the skip path creates no tag.
  */
 
-import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,21 +24,28 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { publish } from '../../src/publish.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
 
-const real = vi.hoisted(() => ({ execFileSync: undefined as unknown as typeof execFileSync }));
+// Dual-mock window: the npm handler + plan()'s git reads both flow
+// through the process seam (`execCapture`). Intercept `npm` here and
+// delegate everything else — `git` in particular — to the real
+// `execCapture` so plan()'s git reads and the tag-write heal run against
+// the real fixture repo.
+type ExecCapture = typeof execCapture;
+const real = vi.hoisted(() => ({ execCapture: undefined as unknown as ExecCapture }));
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  real.execFileSync = actual.execFileSync;
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+vi.mock('../../src/utils/exec-capture.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
+  real.execCapture = actual.execCapture;
+  return { ...actual, execCapture: vi.fn(actual.execCapture) };
 });
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execCapture);
 
 let repo: string;
 
 function gitInRepo(args: string[]): string {
-  return real.execFileSync('git', args, { cwd: repo, encoding: 'utf8' }) as string;
+  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
 }
 
 function writeRepoFile(rel: string, body: string): void {
@@ -67,11 +73,11 @@ beforeEach(() => {
   execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) => {
     if (cmd === 'npm') {
       const a = args as string[];
-      if (a[0] === 'view') {return Buffer.from('0.1.0');}
-      if (a[0] === 'publish') {return Buffer.from('');}
+      if (a[0] === 'view') {return Promise.resolve({ stdout: '0.1.0', stderr: '' });}
+      if (a[0] === 'publish') {return Promise.resolve({ stdout: '', stderr: '' });}
     }
-    return real.execFileSync(cmd, args as readonly string[], opts as Parameters<typeof execFileSync>[2]);
-  }) as typeof execFileSync);
+    return real.execCapture(cmd, args, opts as Parameters<ExecCapture>[2]);
+  }) as ExecCapture);
 
   gitInRepo(['init', '-q', '-b', 'main']);
   gitInRepo(['config', 'user.email', 'test@example.com']);

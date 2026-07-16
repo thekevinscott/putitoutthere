@@ -1,32 +1,33 @@
 /**
  * npm integration test. Runs the npm handler's isPublished + publish
- * against a simulated registry implemented by mocking `execFileSync`.
+ * against a simulated registry implemented by mocking the process seam
+ * (`execCapture`).
  *
  * The npm handler shells out to the `npm` CLI (instead of hitting
  * REST endpoints directly), so msw can't intercept. A verdaccio
  * in-process process would be the purist form of this test, but the
- * execFileSync mock covers the same handler contract at a tenth of
- * the startup cost.
+ * seam mock covers the same handler contract at a tenth of the startup
+ * cost.
  *
  * Issue #27. Plan: §23.3.
  */
 
-import type * as ChildProcess from 'node:child_process';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { npm } from '../../src/handlers/npm.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
+import { ExecError } from '../../src/utils/exec-error.js';
 import type { Ctx } from '../../src/types.js';
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+vi.mock('../../src/utils/exec-capture.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
+  return { ...actual, execCapture: vi.fn(actual.execCapture) };
 });
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execCapture);
 
 interface FakeRegistry {
   published: Set<string>;
@@ -42,12 +43,14 @@ function wireRegistry(reg: FakeRegistry, dir: string): void {
     const a = args as string[];
     if (a[0] === 'view') {
       const [name, version] = String(a[1]).split('@');
-      if (reg.published.has(`${name!}@${version!}`)) return Buffer.from(`${version!}\n`);
-      throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404 not found') });
+      if (reg.published.has(`${name!}@${version!}`)) {
+        return Promise.resolve({ stdout: `${version!}\n`, stderr: '' });
+      }
+      return Promise.reject(new ExecError('E404', '', '404 not found', 1));
     }
     if (a[0] === 'publish') {
       const pkgJson = JSON.parse(
-        require('node:fs').readFileSync(join(dir, 'package.json'), 'utf8') as string
+        readFileSync(join(dir, 'package.json'), 'utf8'),
       ) as { name: string; version: string };
       reg.published.add(`${pkgJson.name}@${pkgJson.version}`);
       reg.publishedPayloads.push({
@@ -55,10 +58,10 @@ function wireRegistry(reg: FakeRegistry, dir: string): void {
         version: pkgJson.version,
         flags: a.filter((s) => s.startsWith('--')),
       });
-      return Buffer.from('');
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
     /* v8 ignore next -- only view + publish are called */
-    throw new Error(`unexpected npm subcommand: ${a[0]}`);
+    return Promise.reject(new Error(`unexpected npm subcommand: ${a[0]}`));
   });
 }
 

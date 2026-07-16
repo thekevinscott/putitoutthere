@@ -3,44 +3,41 @@
  *
  * Issue #18. Plan: §7.4, §12.2 (vanilla mode), §13.1, §14.5, §16.1.
  *
- * Unit-suite isolation: the subprocess boundary (`node:child_process`) and
- * the filesystem (`node:fs`) are both mocked. `node:fs` is backed by a small
- * in-memory tree (below) shared between test setup and the unit under test,
- * so package.json rewrites, artifact reads, and synthesized platform staging
- * dirs all observe the same state without a real temp tree. Real end-to-end
- * file behavior is covered by the npm integration tier
+ * Unit-suite isolation: the subprocess boundary (the process seam,
+ * `execCapture`) and the filesystem (`node:fs/promises`) are both mocked.
+ * `node:fs/promises` is backed by a small in-memory tree (below) shared
+ * between test setup and the unit under test, so package.json rewrites,
+ * artifact reads, and synthesized platform staging dirs all observe the
+ * same state without a real temp tree. Real end-to-end file behavior is
+ * covered by the npm integration tier
  * (tests/integration/npm.integration.test.ts).
  */
 
-import { execFileSync } from 'node:child_process';
-import type { Stats } from 'node:fs';
-import {
-  chmodSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { execCapture, type ExecResult } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
 import { isBootstrapPublish, npm } from './npm.js';
 import type { Ctx } from '../types.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../utils/exec-capture.js');
+vi.mock('node:fs/promises');
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execCapture);
+
+/** A resolved `execCapture` result carrying `stdout`. */
+function ok(stdout: string): ExecResult {
+  return { stdout, stderr: '' };
+}
 
 /* -------------------------- in-memory filesystem -------------------------- */
-// A minimal `node:fs` substitute keyed by normalized (forward-slash) path, so
-// the source's real-`node:path` joins (back-slashed on Windows) resolve to the
-// same entries the test seeds. Covers exactly the calls crossing the mocked
-// boundary: mkdir/write/read/readdir/exists/stat/chmod/cp/mkdtemp/rm.
+// A minimal `node:fs/promises` substitute keyed by normalized (forward-slash)
+// path, so the source's real-`node:path` joins (back-slashed on Windows)
+// resolve to the same entries the test seeds. Covers exactly the calls
+// crossing the mocked boundary: write/read/readdir/chmod/cp/mkdtemp/rm. The
+// `*Sync` names below are module-local store helpers used to seed the tree
+// and assert on it in test bodies — they are not the source's I/O.
 
 type FsFile = { type: 'file'; content: Buffer; mode: number };
 type FsDir = { type: 'dir'; mode: number };
@@ -73,71 +70,75 @@ function resetFs(): void {
   store.set('/', { type: 'dir', mode: 0o755 });
 }
 
-function installFs(): void {
-  vi.mocked(mkdirSync).mockImplementation(((p: string) => {
-    ensureDir(norm(p));
-    return undefined;
-  }) as typeof mkdirSync);
-
-  vi.mocked(writeFileSync).mockImplementation(((p: string, data: string | Buffer) => {
-    const np = norm(p);
-    ensureDir(parentOf(np));
-    const content = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data));
-    store.set(np, { type: 'file', content, mode: 0o644 });
-  }) as typeof writeFileSync);
-
-  vi.mocked(readFileSync).mockImplementation(((p: string, enc?: unknown) => {
-    const np = norm(p);
-    const node = store.get(np);
-    if (!node || node.type !== 'file') {throw enoent(np);}
-    const encoding = typeof enc === 'string' ? enc : (enc as { encoding?: string } | undefined)?.encoding;
-    return encoding ? node.content.toString(encoding as BufferEncoding) : Buffer.from(node.content);
-  }) as typeof readFileSync);
-
-  vi.mocked(readdirSync).mockImplementation(((p: string): string[] => {
-    const np = norm(p);
-    const node = store.get(np);
-    if (!node || node.type !== 'dir') {throw enoent(np);}
-    const prefix = np === '/' ? '/' : `${np}/`;
-    const names: string[] = [];
-    for (const key of store.keys()) {
-      if (key === np) {continue;}
-      if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
-        names.push(key.slice(prefix.length));
-      }
+/* --------- sync store helpers for test-body seeding + assertions --------- */
+function mkdirSync(p: string, _opts?: unknown): void {
+  ensureDir(norm(p));
+}
+function writeFileSync(p: string, data: string | Buffer, _enc?: unknown): void {
+  const np = norm(p);
+  ensureDir(parentOf(np));
+  const content = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data));
+  store.set(np, { type: 'file', content, mode: 0o644 });
+}
+function readFileSync(p: string, enc: BufferEncoding): string;
+function readFileSync(p: string, enc?: unknown): string | Buffer;
+function readFileSync(p: string, enc?: unknown): string | Buffer {
+  const np = norm(p);
+  const node = store.get(np);
+  if (!node || node.type !== 'file') {throw enoent(np);}
+  const encoding = typeof enc === 'string' ? enc : (enc as { encoding?: string } | undefined)?.encoding;
+  return encoding ? node.content.toString(encoding as BufferEncoding) : Buffer.from(node.content);
+}
+function readdirStore(np: string): string[] {
+  const prefix = np === '/' ? '/' : `${np}/`;
+  const names: string[] = [];
+  for (const key of store.keys()) {
+    if (key === np) {continue;}
+    if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
+      names.push(key.slice(prefix.length));
     }
-    return names;
-  }) as unknown as typeof readdirSync);
+  }
+  return names;
+}
 
-  vi.mocked(existsSync).mockImplementation(((p: string) => store.has(norm(p))) as typeof existsSync);
+function installFs(): void {
+  vi.mocked(writeFile).mockImplementation(((p: string, data: string | Buffer) => {
+    writeFileSync(p, data);
+    return Promise.resolve();
+  }) as typeof writeFile);
 
-  vi.mocked(statSync).mockImplementation(((p: string) => {
+  vi.mocked(readFile).mockImplementation(((p: string, enc?: unknown) => {
+    try {
+      return Promise.resolve(readFileSync(p, enc));
+    } catch (err) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }) as typeof readFile);
+
+  vi.mocked(readdir).mockImplementation(((p: string) => {
     const np = norm(p);
     const node = store.get(np);
-    if (!node) {throw enoent(np);}
-    return {
-      mode: node.mode,
-      isFile: () => node.type === 'file',
-      isDirectory: () => node.type === 'dir',
-    } as unknown as Stats;
-  }) as typeof statSync);
+    if (!node || node.type !== 'dir') {return Promise.reject(enoent(np));}
+    return Promise.resolve(readdirStore(np));
+  }) as unknown as typeof readdir);
 
-  vi.mocked(chmodSync).mockImplementation(((p: string, mode: number) => {
+  vi.mocked(chmod).mockImplementation(((p: string, mode: number) => {
     const np = norm(p);
     const node = store.get(np);
-    if (!node) {throw enoent(np);}
+    if (!node) {return Promise.reject(enoent(np));}
     node.mode = typeof mode === 'string' ? parseInt(mode, 8) : mode;
-  }) as typeof chmodSync);
+    return Promise.resolve();
+  }) as typeof chmod);
 
-  vi.mocked(cpSync).mockImplementation(((src: string, dest: string) => {
+  vi.mocked(cp).mockImplementation(((src: string, dest: string) => {
     const from = norm(src);
     const to = norm(dest);
     const node = store.get(from);
-    if (!node) {throw enoent(from);}
+    if (!node) {return Promise.reject(enoent(from));}
     if (node.type === 'file') {
       ensureDir(parentOf(to));
       store.set(to, { type: 'file', content: Buffer.from(node.content), mode: node.mode });
-      return;
+      return Promise.resolve();
     }
     ensureDir(to);
     const prefix = `${from}/`;
@@ -153,23 +154,25 @@ function installFs(): void {
         );
       }
     }
-  }) as typeof cpSync);
+    return Promise.resolve();
+  }) as typeof cp);
 
-  vi.mocked(mkdtempSync).mockImplementation((prefix: string) => {
+  vi.mocked(mkdtemp).mockImplementation((prefix: string) => {
     mkdtempCounter += 1;
     const dir = `${norm(prefix)}${mkdtempCounter.toString().padStart(6, '0')}`;
     ensureDir(dir);
-    return dir;
+    return Promise.resolve(dir);
   });
 
-  vi.mocked(rmSync).mockImplementation(((p: string) => {
+  vi.mocked(rm).mockImplementation(((p: string) => {
     const np = norm(p);
     store.delete(np);
     const prefix = `${np}/`;
     for (const key of [...store.keys()]) {
       if (key.startsWith(prefix)) {store.delete(key);}
     }
-  }) as typeof rmSync);
+    return Promise.resolve();
+  }) as typeof rm);
 }
 
 installFs();
@@ -220,7 +223,7 @@ afterEach(() => {
 
 describe('npm.isPublished', () => {
   it('returns true when `npm view` exits 0 (version exists)', async () => {
-    execMock.mockReturnValueOnce(Buffer.from('0.1.0\n'));
+    execMock.mockResolvedValueOnce(ok('0.1.0\n'));
     expect(await npm.isPublished(basePkg(), '0.1.0', makeCtx())).toBe(true);
     expect(execMock).toHaveBeenCalledWith(
       'npm',
@@ -231,13 +234,13 @@ describe('npm.isPublished', () => {
 
   it('returns false when `npm view` exits non-zero (version missing)', async () => {
     execMock.mockImplementation(() => {
-      throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      return Promise.reject(new ExecError('E404', '', '404', 1));
     });
     expect(await npm.isPublished(basePkg(), '0.1.0', makeCtx())).toBe(false);
   });
 
   it('falls back to package.name when no npm field', async () => {
-    execMock.mockReturnValueOnce(Buffer.from('0.1.0\n'));
+    execMock.mockResolvedValueOnce(ok('0.1.0\n'));
     const pkg = basePkg();
     delete (pkg as { npm?: string }).npm;
     await npm.isPublished(pkg, '0.1.0', makeCtx());
@@ -367,7 +370,7 @@ describe('npm.publish', () => {
   });
 
   it('skips when already-published', async () => {
-    execMock.mockReturnValueOnce(Buffer.from('0.1.0')); // npm view → exists
+    execMock.mockResolvedValueOnce(ok('0.1.0')); // npm view → exists
     const result = await npm.publish(
       { ...basePkg(), path: dir },
       '0.1.0',
@@ -381,9 +384,9 @@ describe('npm.publish', () => {
     // First call: npm view → throws (404); second call: npm publish → ok.
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.NODE_AUTH_TOKEN = 'npm-tok';
 
     const result = await npm.publish(
@@ -411,10 +414,10 @@ describe('npm.publish', () => {
       const cwd = (opts as { cwd?: string } | undefined)?.cwd ?? '';
       if (a[0] === 'view') {
         viewCalls.push(String(a[1]));
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        return Promise.reject(new ExecError('E404', '', '404', 1));
       }
       if (a[0] === 'publish') {publishCwds.push(cwd);}
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     const result = await npm.publish(
@@ -445,9 +448,9 @@ describe('npm.publish', () => {
       const a = args as string[];
       if (a[0] === 'view') {
         viewCalls.push(String(a[1]));
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        return Promise.reject(new ExecError('E404', '', '404', 1));
       }
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     const result = await npm.publish(
@@ -481,9 +484,9 @@ describe('npm.publish', () => {
   it('uses --access public by default (explicit on config)', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.NODE_AUTH_TOKEN = 'tok';
     await npm.publish(
       { ...basePkg({ access: 'public' }), path: dir },
@@ -496,9 +499,9 @@ describe('npm.publish', () => {
   it('uses --access restricted when set', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.NODE_AUTH_TOKEN = 'tok';
     await npm.publish(
       { ...basePkg({ access: 'restricted' }), path: dir },
@@ -511,9 +514,9 @@ describe('npm.publish', () => {
   it('passes --tag when set', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.NODE_AUTH_TOKEN = 'tok';
     await npm.publish(
       { ...basePkg({ tag: 'next' }), path: dir },
@@ -526,9 +529,9 @@ describe('npm.publish', () => {
   it('enables --provenance when OIDC env is present', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.NODE_AUTH_TOKEN = 'tok';
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await npm.publish(
@@ -548,9 +551,9 @@ describe('npm.publish', () => {
   it('forwards --registry when PIOT_NPM_REGISTRY is set (#304)', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.PIOT_NPM_REGISTRY = 'http://verdaccio:4873';
     await npm.publish(
       { ...basePkg(), path: dir },
@@ -567,9 +570,9 @@ describe('npm.publish', () => {
     // as "not the public-npm flow" and suppresses provenance.
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.PIOT_NPM_REGISTRY = 'http://verdaccio:4873';
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await npm.publish(
@@ -595,7 +598,7 @@ describe('npm.publish', () => {
       'utf8',
     );
     execMock.mockImplementationOnce(() => {
-      throw Object.assign(new Error('404'), { status: 1 });
+      return Promise.reject(new ExecError('404', '', '', 1));
     });
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await expect(
@@ -626,7 +629,7 @@ describe('npm.publish', () => {
       'utf8',
     );
     execMock.mockImplementationOnce(() => {
-      throw Object.assign(new Error('404'), { status: 1 });
+      return Promise.reject(new ExecError('404', '', '', 1));
     });
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await expect(
@@ -646,7 +649,7 @@ describe('npm.publish', () => {
       'utf8',
     );
     execMock.mockImplementationOnce(() => {
-      throw Object.assign(new Error('404'), { status: 1 });
+      return Promise.reject(new ExecError('404', '', '', 1));
     });
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await expect(
@@ -666,7 +669,7 @@ describe('npm.publish', () => {
       'utf8',
     );
     execMock.mockImplementationOnce(() => {
-      throw Object.assign(new Error('404'), { status: 1 });
+      return Promise.reject(new ExecError('404', '', '', 1));
     });
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await expect(
@@ -686,7 +689,7 @@ describe('npm.publish', () => {
       'utf8',
     );
     execMock.mockImplementationOnce(() => {
-      throw Object.assign(new Error('404'), { status: 1 });
+      return Promise.reject(new ExecError('404', '', '', 1));
     });
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     let caught: Error | undefined;
@@ -710,10 +713,10 @@ describe('npm.publish', () => {
   it('surfaces publish failure stderr', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('exit 1'), { stderr: Buffer.from('EAUTH') });
+        return Promise.reject(new ExecError('exit 1', '', 'EAUTH', 1));
       });
     process.env.NODE_AUTH_TOKEN = 'tok';
     await expect(
@@ -728,9 +731,9 @@ describe('npm.publish', () => {
   it('treats empty ACTIONS_ID_TOKEN_REQUEST_TOKEN as unset (falls through to process.env)', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
-      .mockReturnValueOnce(Buffer.from(''));
+      .mockResolvedValueOnce(ok(''));
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-real';
     await npm.publish(
       { ...basePkg(), path: dir },
@@ -751,12 +754,12 @@ describe('npm.publish', () => {
   it('on auth-failure with OIDC + package-not-on-registry, surfaces the bootstrap-paradox hint', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('npm exit 1'), {
-          stderr: Buffer.from('npm error code E401\nnpm error need auth'),
-        });
+        return Promise.reject(
+          new ExecError('npm exit 1', '', 'npm error code E401\nnpm error need auth', 1),
+        );
       });
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
@@ -833,12 +836,12 @@ describe('npm.publish', () => {
   it('on auth-failure without OIDC, does not emit bootstrap hint (normal EAUTH path)', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('npm exit 1'), {
-          stderr: Buffer.from('npm error code E401\nnpm error need auth'),
-        });
+        return Promise.reject(
+          new ExecError('npm exit 1', '', 'npm error code E401\nnpm error need auth', 1),
+        );
       });
     process.env.NODE_AUTH_TOKEN = 'tok';
     await expect(
@@ -853,12 +856,12 @@ describe('npm.publish', () => {
   it('on non-auth publish failure with OIDC on, does not emit bootstrap hint (non-auth fall-through)', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('npm exit 1'), {
-          stderr: Buffer.from('ENETUNREACH: registry unreachable'),
-        });
+        return Promise.reject(
+          new ExecError('npm exit 1', '', 'ENETUNREACH: registry unreachable', 1),
+        );
       });
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await expect(
@@ -874,11 +877,11 @@ describe('npm.publish', () => {
   it('on publish failure with empty stderr, does not emit bootstrap hint', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
       .mockImplementationOnce(() => {
         // No stderr attached at all — looksLikeAuthFailure should bail early.
-        throw new Error('opaque exit');
+        return Promise.reject(new Error('opaque exit'));
       });
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
     await expect(
@@ -894,12 +897,10 @@ describe('npm.publish', () => {
   it('on auth-failure with OIDC but package already exists on registry, does not emit bootstrap hint', async () => {
     execMock
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('404'), { status: 1 });
+        return Promise.reject(new ExecError('404', '', '', 1));
       })
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('npm exit 1'), {
-          stderr: Buffer.from('npm error code E403'),
-        });
+        return Promise.reject(new ExecError('npm exit 1', '', 'npm error code E403', 1));
       });
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{"name":"demo-npm"}', { status: 200 }),
@@ -925,15 +926,17 @@ describe('npm.publish', () => {
     execMock
       .mockImplementationOnce(() => {
         // npm view: 404 → not yet published from our perspective
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        return Promise.reject(new ExecError('E404', '', '404', 1));
       })
       .mockImplementationOnce(() => {
-        throw Object.assign(new Error('publish failed'), {
-          status: 1,
-          stderr: Buffer.from(
+        return Promise.reject(
+          new ExecError(
+            'publish failed',
+            '',
             'npm error code E403\nnpm error 403 You cannot publish over the previously published versions: 0.1.0.',
+            1,
           ),
-        });
+        );
       });
     const result = await npm.publish(
       { ...basePkg(), path: dir },
@@ -962,18 +965,20 @@ describe('npm.publish', () => {
         // from our perspective. 2nd view: the catch-block re-probe — the
         // attestation's first submit landed the package, so it's present now.
         if (viewCount === 1) {
-          throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+          return Promise.reject(new ExecError('E404', '', '404', 1));
         }
-        return Buffer.from('0.1.0\n');
+        return Promise.resolve(ok('0.1.0\n'));
       }
       // publish: the Rekor duplicate 409.
-      throw Object.assign(new Error('publish failed'), {
-        status: 1,
-        stderr: Buffer.from(
+      return Promise.reject(
+        new ExecError(
+          'publish failed',
+          '',
           'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
             'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID 108e9186e8c5677a',
+          1,
         ),
-      });
+      );
     });
     const result = await npm.publish(
       { ...basePkg(), path: dir },
@@ -990,15 +995,17 @@ describe('npm.publish', () => {
       if (a[0] === 'view') {
         // Both the pre-publish probe and the catch-block re-probe miss: the
         // attestation was orphaned, the registry PUT never landed.
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        return Promise.reject(new ExecError('E404', '', '404', 1));
       }
-      throw Object.assign(new Error('publish failed'), {
-        status: 1,
-        stderr: Buffer.from(
+      return Promise.reject(
+        new ExecError(
+          'publish failed',
+          '',
           'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
             'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+          1,
         ),
-      });
+      );
     });
     await expect(
       npm.publish(

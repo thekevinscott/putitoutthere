@@ -15,7 +15,6 @@
  * Issue #280.
  */
 
-import type * as ChildProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,25 +22,30 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { publish } from '../../src/publish.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
+import { ExecError } from '../../src/utils/exec-error.js';
 
-// Capture the real execFileSync from the mock factory so we can
-// delegate to it for non-npm subprocesses (git, etc.). `vi.hoisted`
-// shares mutable state across `vi.mock` (hoisted to top of file) and
-// the rest of module setup.
-const real = vi.hoisted(() => ({ execFileSync: undefined as unknown as typeof execFileSync }));
+// Dual-mock window: the npm handler + plan()'s git reads both flow
+// through the process seam (`execCapture`). Intercept `npm` here (canned
+// registry responses) and delegate everything else — `git` in particular
+// — to the real `execCapture` so plan()'s `git log` / `git rev-parse`
+// work against the real fixture repo. `vi.hoisted` shares the captured
+// real impl across the hoisted `vi.mock` factory and module setup.
+type ExecCapture = typeof execCapture;
+const real = vi.hoisted(() => ({ execCapture: undefined as unknown as ExecCapture }));
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  real.execFileSync = actual.execFileSync;
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+vi.mock('../../src/utils/exec-capture.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
+  real.execCapture = actual.execCapture;
+  return { ...actual, execCapture: vi.fn(actual.execCapture) };
 });
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execCapture);
 
 let repo: string;
 
 function gitInRepo(args: string[]): void {
-  real.execFileSync('git', args, { cwd: repo });
+  execFileSync('git', args, { cwd: repo });
 }
 
 function writeRepoFile(rel: string, body: string): void {
@@ -71,15 +75,12 @@ beforeEach(() => {
     if (cmd === 'npm') {
       const a = args as string[];
       if (a[0] === 'view') {
-        throw Object.assign(new Error('E404'), {
-          status: 1,
-          stderr: Buffer.from('404 not found'),
-        });
+        return Promise.reject(new ExecError('E404', '', '404 not found', 1));
       }
-      if (a[0] === 'publish') return Buffer.from('');
+      if (a[0] === 'publish') {return Promise.resolve({ stdout: '', stderr: '' });}
     }
-    return real.execFileSync(cmd, args as readonly string[], opts as Parameters<typeof execFileSync>[2]);
-  }) as typeof execFileSync);
+    return real.execCapture(cmd, args, opts as Parameters<ExecCapture>[2]);
+  }) as ExecCapture);
 
   gitInRepo(['init', '-q', '-b', 'main']);
   gitInRepo(['config', 'user.email', 'test@example.com']);
