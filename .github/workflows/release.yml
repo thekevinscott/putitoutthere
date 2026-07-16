@@ -109,6 +109,27 @@ on:
           README → "Publishing to PyPI". Always a string ("true"/"false")
           per `workflow_call` output rules.
         value: ${{ jobs.build.outputs.has_pypi }}
+      released:
+        description: >-
+          `'true'` when this run newly published ≥ 1 package, else
+          `'false'`. Unlike `has_pypi` (plan-time: "we intend to build"),
+          this is publish-time: idempotent re-runs whose versions are
+          already live report `'false'`. Gate a caller-side post-release
+          job on it (`if: needs.release.outputs.released == 'true'`) — see
+          README → "Post-release bookkeeping" (#461). Empty string when
+          the publish job is skipped (empty plan); Always a string per
+          `workflow_call` output rules.
+        value: ${{ jobs.publish.outputs.released }}
+      released_packages:
+        description: >-
+          JSON array of what newly shipped this run —
+          `[{"name","version","tag"}, …]`, in publish (dependency) order.
+          Empty array `[]` when nothing newly published. A post-release
+          job reads it for a changelog section title, a docs version
+          stamp, or an announcement, instead of reverse-engineering the
+          set from pushed tags. See README → "Post-release bookkeeping"
+          (#461). Empty string when the publish job is skipped.
+        value: ${{ jobs.publish.outputs.released_packages }}
 
 concurrency:
   group: putitoutthere-release-${{ github.repository }}
@@ -130,6 +151,13 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      # #461: propagate the publish step's release facts up to the
+      # reusable workflow's outputs. Same two-hop wiring `has_pypi`
+      # uses (engine step → job → workflow_call.outputs). The engine
+      # writes these to $GITHUB_OUTPUT only when a package newly ships.
+      released: ${{ steps.publish.outputs.released }}
+      released_packages: ${{ steps.publish.outputs.released_packages }}
     env:
       # Promote the optional caller-provided crates.io token to a job-
       # level env var so step `if:` conditions can gate on it. The
@@ -275,7 +303,8 @@ jobs:
             echo "::endgroup::"
           done
 
-      - uses: thekevinscott/putitoutthere@v0
+      - id: publish
+        uses: thekevinscott/putitoutthere@v0
         env:
           # The repository-visibility preflight check calls the GitHub
           # API; an authenticated call gets 5000 req/hr instead of the
