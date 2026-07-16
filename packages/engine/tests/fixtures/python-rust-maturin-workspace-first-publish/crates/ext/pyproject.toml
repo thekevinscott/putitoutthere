@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1"]
+build-backend = "maturin"
+
+[project]
+name = "piot-fixture-zzz-maturin-ws-placeholder"
+dynamic = ["version"]
+description = "Put It Out There canary fixture. Safe to ignore."
+license = { text = "MIT" }
+
+[tool.maturin]
+module-name = "piot_fixture_zzz_maturin_ws"

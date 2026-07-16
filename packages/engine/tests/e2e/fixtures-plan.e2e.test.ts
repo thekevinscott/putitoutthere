@@ -120,6 +120,22 @@ describe('#30 rust-in-language fixtures', () => {
     expect(rows.filter((r) => r.target !== 'sdist')).toHaveLength(5);
   });
 
+  // #456: python-rust-maturin-workspace-first-publish is the maturin
+  // fixture over a Cargo workspace whose member inherits its version
+  // via `version.workspace = true` (the #431 resolver path). Same plan
+  // shape as the flat python-rust-maturin fixture — the workspace
+  // layout changes where the version *source* lives, not the planned
+  // matrix. Plan-shape assertion lives here so any drift in row count
+  // surfaces at the unit tier; the real maturin build + wheel METADATA
+  // check is e2e-tier (see e2e-fixture.yml).
+  it('python-rust-maturin-workspace-first-publish → 5 wheels + 1 sdist', async () => {
+    const cwd = prepareFixture('python-rust-maturin-workspace-first-publish');
+    const rows = await plan({ cwd });
+    expect(rows).toHaveLength(6);
+    expect(rows.filter((r) => r.target === 'sdist')).toHaveLength(1);
+    expect(rows.filter((r) => r.target !== 'sdist')).toHaveLength(5);
+  });
+
   it('js-napi → 5 platform rows + 1 main', async () => {
     const cwd = prepareFixture('js-napi');
     const rows = await plan({ cwd });
@@ -204,6 +220,45 @@ describe('#276 build-phase version bump bumps the manifest the build tool reads'
     // pyproject is the dispatch input only; its content must not change
     // on the dynamic-version path.
     expect(readFileSync(pyPath, 'utf8')).toBe(pyBefore);
+  });
+
+  // #456 / #431: the same #276 build-phase bump contract, but over a
+  // Cargo workspace where the member crate inherits its version via
+  // `version.workspace = true`. The bump must follow the inheritance
+  // and rewrite the *root* Cargo.toml's `[workspace.package].version`,
+  // leaving the member's `version.workspace = true` line and the
+  // pyproject dispatch input untouched. This is the unit-tier witness
+  // that write-version resolves the workspace source; the real maturin
+  // build shipping a wheel whose METADATA Version matches the plan is
+  // the e2e-tier witness (see e2e-fixture.yml).
+  it('python-rust-maturin-workspace-first-publish → root [workspace.package].version bumps, member Cargo.toml + pyproject unchanged', async () => {
+    const cwd = prepareFixture('python-rust-maturin-workspace-first-publish');
+    const memberDir = join(cwd, 'crates', 'ext');
+    const rootPath = join(cwd, 'Cargo.toml');
+    const memberCargoPath = join(memberDir, 'Cargo.toml');
+    const memberPyPath = join(memberDir, 'pyproject.toml');
+
+    const memberCargoBefore = readFileSync(memberCargoPath, 'utf8');
+    const memberPyBefore = readFileSync(memberPyPath, 'utf8');
+    expect(memberCargoBefore).toContain('version.workspace = true');
+    expect(memberPyBefore).toContain('dynamic = ["version"]');
+
+    const code = await runCli([
+      'node',
+      'putitoutthere',
+      'write-version',
+      '--path',
+      memberDir,
+      '--version',
+      '9.9.9',
+    ]);
+    expect(code).toBe(0);
+
+    // The root workspace table is the version source; it carries the bump.
+    expect(readFileSync(rootPath, 'utf8')).toContain('version = "9.9.9"');
+    // The member inherits — its Cargo.toml and pyproject stay byte-identical.
+    expect(readFileSync(memberCargoPath, 'utf8')).toBe(memberCargoBefore);
+    expect(readFileSync(memberPyPath, 'utf8')).toBe(memberPyBefore);
   });
 });
 
