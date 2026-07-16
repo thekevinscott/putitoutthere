@@ -1,31 +1,32 @@
 /**
  * Composition-root wiring test for the fixture-materialize harness (#447). Both
- * collaborators are mocked — the OS boundary (`node:fs`, `node:child_process`)
- * and `./decide.js` — so this isolates the plumbing: the argv/env guards, the
- * exact wipe + copy, the manifest walk + rewrite, the FIXTURE_VERSION export,
- * and the exact git command sequence. The per-phase decisions are covered in
- * `decide.test.ts`; the literal-replace itself in `apply-substitutions.test.ts`.
+ * collaborators are mocked — the OS boundary (`node:fs/promises`, the exec
+ * seam) and `./decide.js` — so this isolates the plumbing: the argv/env guards,
+ * the exact wipe + copy, the manifest walk + rewrite, the FIXTURE_VERSION
+ * export, and the exact git command sequence. The per-phase decisions are
+ * covered in `decide.test.ts`; the literal-replace itself in
+ * `apply-substitutions.test.ts`.
  */
 
-import { execFileSync } from 'node:child_process';
-import { appendFileSync, cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFile, cp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { execInherit } from '../utils/exec-inherit.js';
 import { decideFixtureMaterialize } from './decide.js';
 import { runFixtureMaterialize } from './run.js';
 
-type Dirents = ReturnType<typeof readdirSync>;
+type Dirents = Awaited<ReturnType<typeof readdir>>;
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../utils/exec-inherit.js');
+vi.mock('node:fs/promises');
 vi.mock('./decide.js');
 
-const exec = vi.mocked(execFileSync);
+const exec = vi.mocked(execInherit);
 const decide = vi.mocked(decideFixtureMaterialize);
-const readdir = vi.mocked(readdirSync);
-const readFile = vi.mocked(readFileSync);
-const writeFile = vi.mocked(writeFileSync);
-const appendFile = vi.mocked(appendFileSync);
+const readdirMock = vi.mocked(readdir);
+const readFileMock = vi.mocked(readFile);
+const writeFileMock = vi.mocked(writeFile);
+const appendFileMock = vi.mocked(appendFile);
 const out: string[] = [];
 
 function dirent(name: string, parentPath: string, file = true): { name: string; parentPath: string; isFile: () => boolean } {
@@ -46,8 +47,8 @@ beforeEach(() => {
   process.env.GITHUB_ENV = '/tmp/gh-env';
   delete process.env.FIXTURE_VERSION;
   decide.mockReturnValue({ substitutions: [], gitInit: false, writeFixtureVersion: false });
-  readdir.mockReturnValue([]);
-  readFile.mockReturnValue('');
+  readdirMock.mockResolvedValue([]);
+  readFileMock.mockResolvedValue('');
 });
 
 afterEach(() => {
@@ -62,70 +63,70 @@ afterEach(() => {
 const argv = (mode?: string) => ['node', 'piot-ci', 'fixture-materialize', ...(mode === undefined ? [] : [mode])];
 
 describe('runFixtureMaterialize: guards', () => {
-  it('rejects a missing mode without touching the OS', () => {
-    expect(runFixtureMaterialize(argv())).toBe(1);
+  it('rejects a missing mode without touching the OS', async () => {
+    await expect(runFixtureMaterialize(argv())).resolves.toBe(1);
     expect(out.join('')).toBe(
       '::error::fixture-materialize: mode must be one of plan|build|publish (got <none>).\n',
     );
-    expect(rmSync).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
   });
 
-  it('rejects an unknown mode, echoing the bad value', () => {
-    expect(runFixtureMaterialize(argv('deploy'))).toBe(1);
+  it('rejects an unknown mode, echoing the bad value', async () => {
+    await expect(runFixtureMaterialize(argv('deploy'))).resolves.toBe(1);
     expect(out.join('')).toBe(
       '::error::fixture-materialize: mode must be one of plan|build|publish (got deploy).\n',
     );
-    expect(rmSync).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it('rejects a missing FIXTURE', () => {
+  it('rejects a missing FIXTURE', async () => {
     delete process.env.FIXTURE;
-    expect(runFixtureMaterialize(argv('plan'))).toBe(1);
+    await expect(runFixtureMaterialize(argv('plan'))).resolves.toBe(1);
     expect(out.join('')).toBe('::error::fixture-materialize: FIXTURE must be set.\n');
-    expect(rmSync).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it('rejects an empty FIXTURE', () => {
+  it('rejects an empty FIXTURE', async () => {
     process.env.FIXTURE = '';
-    expect(runFixtureMaterialize(argv('plan'))).toBe(1);
-    expect(rmSync).not.toHaveBeenCalled();
+    await expect(runFixtureMaterialize(argv('plan'))).resolves.toBe(1);
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it('rejects the publish phase when FIXTURE_VERSION is unset', () => {
-    expect(runFixtureMaterialize(argv('publish'))).toBe(1);
+  it('rejects the publish phase when FIXTURE_VERSION is unset', async () => {
+    await expect(runFixtureMaterialize(argv('publish'))).resolves.toBe(1);
     expect(out.join('')).toBe(
       '::error::fixture-materialize: FIXTURE_VERSION must be set for the publish phase.\n',
     );
-    expect(rmSync).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it('rejects the publish phase when FIXTURE_VERSION is empty', () => {
+  it('rejects the publish phase when FIXTURE_VERSION is empty', async () => {
     process.env.FIXTURE_VERSION = '';
-    expect(runFixtureMaterialize(argv('publish'))).toBe(1);
-    expect(rmSync).not.toHaveBeenCalled();
+    await expect(runFixtureMaterialize(argv('publish'))).resolves.toBe(1);
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it('rejects the plan phase when GITHUB_ENV is unset (writeFixtureVersion true)', () => {
+  it('rejects the plan phase when GITHUB_ENV is unset (writeFixtureVersion true)', async () => {
     delete process.env.GITHUB_ENV;
     decide.mockReturnValue({ substitutions: [], gitInit: true, writeFixtureVersion: true });
-    expect(runFixtureMaterialize(argv('plan'))).toBe(1);
+    await expect(runFixtureMaterialize(argv('plan'))).resolves.toBe(1);
     expect(out.join('')).toBe('::error::fixture-materialize: GITHUB_ENV must be set for the plan phase.\n');
-    expect(rmSync).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it('rejects the plan phase when GITHUB_ENV is the empty string', () => {
+  it('rejects the plan phase when GITHUB_ENV is the empty string', async () => {
     process.env.GITHUB_ENV = '';
     decide.mockReturnValue({ substitutions: [], gitInit: true, writeFixtureVersion: true });
-    expect(runFixtureMaterialize(argv('plan'))).toBe(1);
+    await expect(runFixtureMaterialize(argv('plan'))).resolves.toBe(1);
     expect(out.join('')).toBe('::error::fixture-materialize: GITHUB_ENV must be set for the plan phase.\n');
-    expect(rmSync).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
   });
 });
 
 describe('runFixtureMaterialize: version resolution feeds decide', () => {
-  it('plan computes 0.0.<unix-seconds> from the clock', () => {
-    runFixtureMaterialize(argv('plan'));
+  it('plan computes 0.0.<unix-seconds> from the clock', async () => {
+    await runFixtureMaterialize(argv('plan'));
     expect(decide).toHaveBeenCalledWith({
       mode: 'plan',
       fixture: 'js-vanilla',
@@ -135,8 +136,8 @@ describe('runFixtureMaterialize: version resolution feeds decide', () => {
     });
   });
 
-  it('build uses the literal 0.0.1', () => {
-    runFixtureMaterialize(argv('build'));
+  it('build uses the literal 0.0.1', async () => {
+    await runFixtureMaterialize(argv('build'));
     expect(decide).toHaveBeenCalledWith({
       mode: 'build',
       fixture: 'js-vanilla',
@@ -146,9 +147,9 @@ describe('runFixtureMaterialize: version resolution feeds decide', () => {
     });
   });
 
-  it('publish uses FIXTURE_VERSION verbatim', () => {
+  it('publish uses FIXTURE_VERSION verbatim', async () => {
     process.env.FIXTURE_VERSION = '0.0.999';
-    runFixtureMaterialize(argv('publish'));
+    await runFixtureMaterialize(argv('publish'));
     expect(decide).toHaveBeenCalledWith({
       mode: 'publish',
       fixture: 'js-vanilla',
@@ -158,31 +159,31 @@ describe('runFixtureMaterialize: version resolution feeds decide', () => {
     });
   });
 
-  it('defaults RUN_ID / RUN_ATTEMPT to empty strings when unset', () => {
+  it('defaults RUN_ID / RUN_ATTEMPT to empty strings when unset', async () => {
     delete process.env.RUN_ID;
     delete process.env.RUN_ATTEMPT;
-    runFixtureMaterialize(argv('build'));
+    await runFixtureMaterialize(argv('build'));
     expect(decide).toHaveBeenCalledWith(expect.objectContaining({ runId: '', runAttempt: '' }));
   });
 });
 
 describe('runFixtureMaterialize: filesystem materialization', () => {
-  it('wipes then copies the fixture into fixture-tree', () => {
-    runFixtureMaterialize(argv('build'));
-    expect(rmSync).toHaveBeenCalledWith('fixture-tree', { recursive: true, force: true });
-    expect(cpSync).toHaveBeenCalledWith('packages/engine/tests/fixtures/js-vanilla', 'fixture-tree', {
+  it('wipes then copies the fixture into fixture-tree', async () => {
+    await runFixtureMaterialize(argv('build'));
+    expect(rm).toHaveBeenCalledWith('fixture-tree', { recursive: true, force: true });
+    expect(cp).toHaveBeenCalledWith('packages/engine/tests/fixtures/js-vanilla', 'fixture-tree', {
       recursive: true,
     });
   });
 
-  it('rewrites each of the four manifest basenames (and nothing else), reading recursively as UTF-8', () => {
+  it('rewrites each of the four manifest basenames (and nothing else), reading recursively as UTF-8', async () => {
     decide.mockReturnValue({
       substitutions: [{ from: '__VERSION__', to: '0.0.1' }],
       gitInit: false,
       writeFixtureVersion: false,
     });
-    readFile.mockReturnValue('version = "__VERSION__"');
-    readdir.mockReturnValue([
+    readFileMock.mockResolvedValue('version = "__VERSION__"');
+    readdirMock.mockResolvedValue([
       dirent('putitoutthere.toml', 'fixture-tree'),
       dirent('Cargo.toml', 'fixture-tree/crate'),
       dirent('README.md', 'fixture-tree'),
@@ -190,28 +191,28 @@ describe('runFixtureMaterialize: filesystem materialization', () => {
       dirent('pyproject.toml', 'fixture-tree/py'),
       dirent('pyproject.toml', 'fixture-tree/dir', false),
     ] as unknown as Dirents);
-    runFixtureMaterialize(argv('build'));
+    await runFixtureMaterialize(argv('build'));
 
-    expect(readdirSync).toHaveBeenCalledWith('fixture-tree', { recursive: true, withFileTypes: true });
-    expect(readFile).toHaveBeenCalledWith('fixture-tree/putitoutthere.toml', 'utf8');
-    expect(readFile).toHaveBeenCalledTimes(4);
-    expect(writeFile).toHaveBeenNthCalledWith(1, 'fixture-tree/putitoutthere.toml', 'version = "0.0.1"');
-    expect(writeFile).toHaveBeenNthCalledWith(2, 'fixture-tree/crate/Cargo.toml', 'version = "0.0.1"');
-    expect(writeFile).toHaveBeenNthCalledWith(3, 'fixture-tree/package.json', 'version = "0.0.1"');
-    expect(writeFile).toHaveBeenNthCalledWith(4, 'fixture-tree/py/pyproject.toml', 'version = "0.0.1"');
-    expect(writeFile).toHaveBeenCalledTimes(4);
+    expect(readdir).toHaveBeenCalledWith('fixture-tree', { recursive: true, withFileTypes: true });
+    expect(readFileMock).toHaveBeenCalledWith('fixture-tree/putitoutthere.toml', 'utf8');
+    expect(readFileMock).toHaveBeenCalledTimes(4);
+    expect(writeFileMock).toHaveBeenNthCalledWith(1, 'fixture-tree/putitoutthere.toml', 'version = "0.0.1"');
+    expect(writeFileMock).toHaveBeenNthCalledWith(2, 'fixture-tree/crate/Cargo.toml', 'version = "0.0.1"');
+    expect(writeFileMock).toHaveBeenNthCalledWith(3, 'fixture-tree/package.json', 'version = "0.0.1"');
+    expect(writeFileMock).toHaveBeenNthCalledWith(4, 'fixture-tree/py/pyproject.toml', 'version = "0.0.1"');
+    expect(writeFileMock).toHaveBeenCalledTimes(4);
   });
 
-  it('exports FIXTURE_VERSION to GITHUB_ENV only when decide says to', () => {
+  it('exports FIXTURE_VERSION to GITHUB_ENV only when decide says to', async () => {
     decide.mockReturnValue({ substitutions: [], gitInit: true, writeFixtureVersion: true });
-    runFixtureMaterialize(argv('plan'));
-    expect(appendFile).toHaveBeenCalledWith('/tmp/gh-env', 'FIXTURE_VERSION=0.0.1700000000\n');
+    await runFixtureMaterialize(argv('plan'));
+    expect(appendFileMock).toHaveBeenCalledWith('/tmp/gh-env', 'FIXTURE_VERSION=0.0.1700000000\n');
   });
 
-  it('does not touch GITHUB_ENV when decide says not to', () => {
+  it('does not touch GITHUB_ENV when decide says not to', async () => {
     decide.mockReturnValue({ substitutions: [], gitInit: false, writeFixtureVersion: false });
-    runFixtureMaterialize(argv('build'));
-    expect(appendFile).not.toHaveBeenCalled();
+    await runFixtureMaterialize(argv('build'));
+    expect(appendFileMock).not.toHaveBeenCalled();
   });
 });
 
@@ -226,19 +227,19 @@ describe('runFixtureMaterialize: git init', () => {
     ['commit', '-q', '-m', 'e2e: initial fixture'],
   ];
 
-  it('runs the exact git command sequence in fixture-tree when gitInit is true', () => {
+  it('runs the exact git command sequence in fixture-tree when gitInit is true', async () => {
     decide.mockReturnValue({ substitutions: [], gitInit: true, writeFixtureVersion: false });
     process.env.FIXTURE_VERSION = '0.0.5';
-    expect(runFixtureMaterialize(argv('publish'))).toBe(0);
+    await expect(runFixtureMaterialize(argv('publish'))).resolves.toBe(0);
     expect(exec).toHaveBeenCalledTimes(GIT_SEQUENCE.length);
     GIT_SEQUENCE.forEach((args, i) => {
-      expect(exec).toHaveBeenNthCalledWith(i + 1, 'git', args, { cwd: 'fixture-tree', stdio: 'inherit' });
+      expect(exec).toHaveBeenNthCalledWith(i + 1, 'git', args, { cwd: 'fixture-tree' });
     });
   });
 
-  it('runs no git commands when gitInit is false', () => {
+  it('runs no git commands when gitInit is false', async () => {
     decide.mockReturnValue({ substitutions: [], gitInit: false, writeFixtureVersion: false });
-    runFixtureMaterialize(argv('build'));
+    await runFixtureMaterialize(argv('build'));
     expect(exec).not.toHaveBeenCalled();
   });
 });

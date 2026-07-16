@@ -8,7 +8,7 @@
 import { runCargoRegistryDiagnose } from './run-diagnose.js';
 import { runCargoRegistryStart } from './run-start.js';
 
-export function runCargoRegistry(argv: readonly string[]): number {
+export async function runCargoRegistry(argv: readonly string[]): Promise<number> {
   const mode = argv[3];
   if (mode === 'start') {
     return runCargoRegistryStart();

@@ -6,18 +6,19 @@
  * fails (exit 0), matching the bash `set +e`.
  */
 
-import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { execCapture } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
 import { diagnoseOutput } from './diagnose-output.js';
 import { readRaw } from './read-raw.js';
 import { runCargoRegistryDiagnose } from './run-diagnose.js';
 
-vi.mock('node:child_process');
+vi.mock('../utils/exec-capture.js');
 vi.mock('./read-raw.js');
 vi.mock('./diagnose-output.js');
 
-const exec = vi.mocked(execFileSync);
+const exec = vi.mocked(execCapture);
 const readRawMock = vi.mocked(readRaw);
 const diagnose = vi.mocked(diagnoseOutput);
 const out: string[] = [];
@@ -35,7 +36,7 @@ beforeEach(() => {
   process.env.RUNNER_TEMP = '/rt';
   process.env.HOME = '/home/piot';
   diagnose.mockReturnValue('DUMP');
-  readRawMock.mockReturnValue(null);
+  readRawMock.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -45,13 +46,13 @@ afterEach(() => {
 });
 
 describe('runCargoRegistryDiagnose', () => {
-  it('probes the endpoint, reads the log + config, and prints the assembled dump', () => {
-    exec.mockReturnValue('GET /git/info/refs?service=git-upload-pack -> 200\n');
-    readRawMock.mockImplementation((p) => (p === '/rt/cargo-http-registry.log' ? 'LOG' : 'CONFIG'));
-    const code = runCargoRegistryDiagnose();
+  it('probes the endpoint, reads the log + config, and prints the assembled dump', async () => {
+    exec.mockResolvedValue({ stdout: 'GET /git/info/refs?service=git-upload-pack -> 200\n', stderr: '' });
+    readRawMock.mockImplementation((p) => Promise.resolve(p === '/rt/cargo-http-registry.log' ? 'LOG' : 'CONFIG'));
+    const code = await runCargoRegistryDiagnose();
 
     expect(code).toBe(0);
-    expect(exec).toHaveBeenCalledWith('curl', PROBE_ARGS, { encoding: 'utf8' });
+    expect(exec).toHaveBeenCalledWith('curl', PROBE_ARGS);
     expect(readRawMock).toHaveBeenNthCalledWith(1, '/rt/cargo-http-registry.log');
     expect(readRawMock).toHaveBeenNthCalledWith(2, '/home/piot/.cargo/config.toml');
     expect(diagnose).toHaveBeenCalledWith({
@@ -62,27 +63,23 @@ describe('runCargoRegistryDiagnose', () => {
     expect(out.join('')).toBe('DUMP');
   });
 
-  it('falls back to curl’s partial stdout when the probe throws', () => {
-    exec.mockImplementation(() => {
-      throw Object.assign(new Error('curl 7'), { stdout: '' });
-    });
-    runCargoRegistryDiagnose();
+  it('falls back to curl’s partial stdout when the probe throws', async () => {
+    exec.mockRejectedValue(new ExecError('curl 7', '', '', 7));
+    await runCargoRegistryDiagnose();
     expect(diagnose).toHaveBeenCalledWith(expect.objectContaining({ probeRaw: '' }));
   });
 
-  it('uses empty string when the thrown error has no stdout', () => {
-    exec.mockImplementation(() => {
-      throw new Error('curl 7');
-    });
-    runCargoRegistryDiagnose();
+  it('uses empty string when the thrown error has no stdout', async () => {
+    exec.mockRejectedValue(new Error('curl 7'));
+    await runCargoRegistryDiagnose();
     expect(diagnose).toHaveBeenCalledWith(expect.objectContaining({ probeRaw: '' }));
   });
 
-  it('reads relative to an empty base when RUNNER_TEMP / HOME are unset', () => {
+  it('reads relative to an empty base when RUNNER_TEMP / HOME are unset', async () => {
     delete process.env.RUNNER_TEMP;
     delete process.env.HOME;
-    exec.mockReturnValue('');
-    runCargoRegistryDiagnose();
+    exec.mockResolvedValue({ stdout: '', stderr: '' });
+    await runCargoRegistryDiagnose();
     expect(readRawMock).toHaveBeenNthCalledWith(1, '/cargo-http-registry.log');
     expect(readRawMock).toHaveBeenNthCalledWith(2, '/.cargo/config.toml');
   });

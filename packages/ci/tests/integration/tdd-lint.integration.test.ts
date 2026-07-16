@@ -44,18 +44,18 @@ function git({ log = '', changed = '' }: { log?: string; changed?: string }): vo
   });
 }
 
-const tddLint = (): number => run(['node', 'piot-ci', 'tdd-lint']);
+const tddLint = (): Promise<number> => run(['node', 'piot-ci', 'tdd-lint']);
 
-describe('piot-ci tdd-lint (integration)', () => {
-  it('passes when a src change ships a matching *.test.ts', () => {
+describe('piot-ci tdd-lint (integration)', async () => {
+  it('passes when a src change ships a matching *.test.ts', async () => {
     git({ changed: 'packages/engine/src/plan.ts\npackages/engine/src/plan.test.ts\n' });
-    expect(tddLint()).toBe(0);
+    await expect(tddLint()).resolves.toBe(0);
     expect(out.join('')).toBe('OK: src/ changes include *.test.ts updates.\n');
   });
 
-  it('fails, listing the offending files, when a src change ships no test', () => {
+  it('fails, listing the offending files, when a src change ships no test', async () => {
     git({ changed: 'packages/engine/src/plan.ts\npackages/engine/src/config.ts\n' });
-    expect(tddLint()).toBe(1);
+    await expect(tddLint()).resolves.toBe(1);
     expect(out.join('')).toBe(
       [
         '::error::src/ changes detected without matching *.test.ts changes.',
@@ -70,15 +70,15 @@ describe('piot-ci tdd-lint (integration)', () => {
     );
   });
 
-  it('is bypassed with a ::notice when a commit carries a Skip-Gates trailer', () => {
+  it('is bypassed with a ::notice when a commit carries a Skip-Gates trailer', async () => {
     git({ log: 'feat: risky\n\nSkip-Gates: emergency hotfix\n', changed: 'packages/engine/src/plan.ts\n' });
-    expect(tddLint()).toBe(0);
+    await expect(tddLint()).resolves.toBe(0);
     expect(out.join('')).toBe('::notice title=TDD lint bypassed::Skip-Gates: emergency hotfix\n');
   });
 
-  it('skips (exit 0) when the PR touches no engine src', () => {
+  it('skips (exit 0) when the PR touches no engine src', async () => {
     git({ changed: '' });
-    expect(tddLint()).toBe(0);
+    await expect(tddLint()).resolves.toBe(0);
     expect(out.join('')).toBe('No src/ changes in this PR -- skipping TDD lint.\n');
   });
 });

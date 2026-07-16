@@ -6,10 +6,10 @@
  * listing/read → PKG-INFO version check → `ok:`; plus each failure branch.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { execCapture } from '../utils/exec-capture.js';
 import { metadataVersion } from './metadata-version.js';
 import { parseRequirement } from './parse-requirement.js';
 import { selectDownloadedSdist } from './select-downloaded-sdist.js';
@@ -19,8 +19,8 @@ import { selectPkgInfoMember } from './select-pkginfo-member.js';
 import { verifyArtifacts } from './verify-artifacts.js';
 import { versionMatch } from './version-match.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../utils/exec-capture.js');
+vi.mock('node:fs/promises');
 vi.mock('./metadata-version.js');
 vi.mock('./parse-requirement.js');
 vi.mock('./select-downloaded-sdist.js');
@@ -29,8 +29,8 @@ vi.mock('./select-metadata-member.js');
 vi.mock('./select-pkginfo-member.js');
 vi.mock('./version-match.js');
 
-const exec = vi.mocked(execFileSync);
-const readdir = vi.mocked(readdirSync);
+const exec = vi.mocked(execCapture);
+const readdirMock = vi.mocked(readdir);
 const out: string[] = [];
 const err: string[] = [];
 
@@ -46,9 +46,9 @@ beforeEach(() => {
     err.push(typeof c === 'string' ? c : c.toString());
     return true;
   });
-  readdir.mockImplementation(
+  readdirMock.mockImplementation(
     ((dir: string) =>
-      (dir === 'downloaded-wheels' ? ['w.whl'] : ['s.tar.gz'])) as unknown as typeof readdirSync,
+      Promise.resolve(dir === 'downloaded-wheels' ? ['w.whl'] : ['s.tar.gz'])) as unknown as typeof readdir,
   );
   vi.mocked(parseRequirement).mockReturnValue({ package: 'pkg', version: '1.0', stem: 'pkg' });
   vi.mocked(selectDownloadedWheel).mockReturnValue('pkg-1.0-py3.whl');
@@ -59,15 +59,15 @@ beforeEach(() => {
   vi.mocked(versionMatch).mockImplementation(({ name, label }) => ({ okLine: `ok: ${name} ${label} v` }));
   exec.mockImplementation((cmd: string, args?: readonly string[]) => {
     if (cmd === 'unzip' && args?.[0] === '-Z1') {
-      return 'pkg-1.0.dist-info/METADATA\npkg-1.0.dist-info/RECORD\n';
+      return Promise.resolve({ stdout: 'pkg-1.0.dist-info/METADATA\npkg-1.0.dist-info/RECORD\n', stderr: '' });
     }
     if (cmd === 'unzip' && args?.[0] === '-p') {
-      return 'META_TEXT';
+      return Promise.resolve({ stdout: 'META_TEXT', stderr: '' });
     }
     if (cmd === 'tar' && args?.[0] === '-tzf') {
-      return 'pkg-1.0/PKG-INFO\npkg-1.0/setup.py\n';
+      return Promise.resolve({ stdout: 'pkg-1.0/PKG-INFO\npkg-1.0/setup.py\n', stderr: '' });
     }
-    return 'PKG_TEXT';
+    return Promise.resolve({ stdout: 'PKG_TEXT', stderr: '' });
   });
 });
 
@@ -76,15 +76,15 @@ afterEach(() => {
 });
 
 describe('verifyArtifacts', () => {
-  it('verifies the wheel then the sdist and prints both ok lines', () => {
-    expect(verifyArtifacts(['pkg==1.0'])).toBe(0);
+  it('verifies the wheel then the sdist and prints both ok lines', async () => {
+    await expect(verifyArtifacts(['pkg==1.0'])).resolves.toBe(0);
 
-    expect(readdir).toHaveBeenCalledWith('downloaded-wheels');
-    expect(readdir).toHaveBeenCalledWith('downloaded-sdists');
+    expect(readdirMock).toHaveBeenCalledWith('downloaded-wheels');
+    expect(readdirMock).toHaveBeenCalledWith('downloaded-sdists');
     expect(parseRequirement).toHaveBeenCalledWith('pkg==1.0');
 
     expect(selectDownloadedWheel).toHaveBeenCalledWith(['w.whl'], 'pkg', '1.0');
-    expect(exec).toHaveBeenCalledWith('unzip', ['-Z1', 'downloaded-wheels/pkg-1.0-py3.whl'], { encoding: 'utf8' });
+    expect(exec).toHaveBeenCalledWith('unzip', ['-Z1', 'downloaded-wheels/pkg-1.0-py3.whl']);
     expect(selectMetadataMember).toHaveBeenCalledWith(
       ['pkg-1.0.dist-info/METADATA', 'pkg-1.0.dist-info/RECORD'],
       'pkg-1.0-py3.whl',
@@ -92,7 +92,6 @@ describe('verifyArtifacts', () => {
     expect(exec).toHaveBeenCalledWith(
       'unzip',
       ['-p', 'downloaded-wheels/pkg-1.0-py3.whl', 'pkg-1.0.dist-info/METADATA'],
-      { encoding: 'utf8' },
     );
     expect(metadataVersion).toHaveBeenCalledWith('META_TEXT');
     expect(versionMatch).toHaveBeenCalledWith({
@@ -103,12 +102,11 @@ describe('verifyArtifacts', () => {
     });
 
     expect(selectDownloadedSdist).toHaveBeenCalledWith(['s.tar.gz'], 'pkg', '1.0');
-    expect(exec).toHaveBeenCalledWith('tar', ['-tzf', 'downloaded-sdists/pkg-1.0.tar.gz'], { encoding: 'utf8' });
+    expect(exec).toHaveBeenCalledWith('tar', ['-tzf', 'downloaded-sdists/pkg-1.0.tar.gz']);
     expect(selectPkgInfoMember).toHaveBeenCalledWith(['pkg-1.0/PKG-INFO', 'pkg-1.0/setup.py'], 'pkg-1.0.tar.gz');
     expect(exec).toHaveBeenCalledWith(
       'tar',
       ['-xzOf', 'downloaded-sdists/pkg-1.0.tar.gz', 'pkg-1.0/PKG-INFO'],
-      { encoding: 'utf8' },
     );
     expect(metadataVersion).toHaveBeenCalledWith('PKG_TEXT');
     expect(versionMatch).toHaveBeenCalledWith({
@@ -121,46 +119,46 @@ describe('verifyArtifacts', () => {
     expect(out.join('')).toBe('ok: pkg-1.0-py3.whl METADATA v\nok: pkg-1.0.tar.gz PKG-INFO v\n');
   });
 
-  it('fails when no wheel was downloaded', () => {
+  it('fails when no wheel was downloaded', async () => {
     vi.mocked(selectDownloadedWheel).mockReturnValue(null);
-    expect(verifyArtifacts(['pkg==1.0'])).toBe(1);
+    await expect(verifyArtifacts(['pkg==1.0'])).resolves.toBe(1);
     expect(err.join('')).toBe('no downloaded wheel for pkg==1.0\n');
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('fails on the METADATA selection error', () => {
+  it('fails on the METADATA selection error', async () => {
     vi.mocked(selectMetadataMember).mockReturnValue({ errorLine: 'expected one METADATA file in pkg-1.0-py3.whl, found []' });
-    expect(verifyArtifacts(['pkg==1.0'])).toBe(1);
+    await expect(verifyArtifacts(['pkg==1.0'])).resolves.toBe(1);
     expect(err.join('')).toBe('expected one METADATA file in pkg-1.0-py3.whl, found []\n');
     expect(selectDownloadedSdist).not.toHaveBeenCalled();
   });
 
-  it('fails on a wheel version mismatch before touching the sdist', () => {
+  it('fails on a wheel version mismatch before touching the sdist', async () => {
     vi.mocked(versionMatch).mockImplementation(({ label }) =>
       label === 'METADATA' ? { errorLine: 'wheel mismatch' } : { okLine: 'unused' },
     );
-    expect(verifyArtifacts(['pkg==1.0'])).toBe(1);
+    await expect(verifyArtifacts(['pkg==1.0'])).resolves.toBe(1);
     expect(err.join('')).toBe('wheel mismatch\n');
     expect(selectDownloadedSdist).not.toHaveBeenCalled();
   });
 
-  it('fails when no sdist was downloaded', () => {
+  it('fails when no sdist was downloaded', async () => {
     vi.mocked(selectDownloadedSdist).mockReturnValue(null);
-    expect(verifyArtifacts(['pkg==1.0'])).toBe(1);
+    await expect(verifyArtifacts(['pkg==1.0'])).resolves.toBe(1);
     expect(err.join('')).toBe('no downloaded sdist for pkg==1.0\n');
   });
 
-  it('fails on the PKG-INFO selection error', () => {
+  it('fails on the PKG-INFO selection error', async () => {
     vi.mocked(selectPkgInfoMember).mockReturnValue({ errorLine: 'no PKG-INFO file in pkg-1.0.tar.gz' });
-    expect(verifyArtifacts(['pkg==1.0'])).toBe(1);
+    await expect(verifyArtifacts(['pkg==1.0'])).resolves.toBe(1);
     expect(err.join('')).toBe('no PKG-INFO file in pkg-1.0.tar.gz\n');
   });
 
-  it('fails on an sdist version mismatch', () => {
+  it('fails on an sdist version mismatch', async () => {
     vi.mocked(versionMatch).mockImplementation(({ label }) =>
       label === 'PKG-INFO' ? { errorLine: 'sdist mismatch' } : { okLine: 'ok: wheel' },
     );
-    expect(verifyArtifacts(['pkg==1.0'])).toBe(1);
+    await expect(verifyArtifacts(['pkg==1.0'])).resolves.toBe(1);
     expect(err.join('')).toBe('sdist mismatch\n');
   });
 });

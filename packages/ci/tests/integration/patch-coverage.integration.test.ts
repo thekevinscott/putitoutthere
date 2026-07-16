@@ -57,20 +57,20 @@ afterEach(() => {
   delete process.env.HEAD_SHA;
 });
 
-const patchCoverage = (): number => run(['node', 'piot-ci', 'patch-coverage']);
+const patchCoverage = (): Promise<number> => run(['node', 'piot-ci', 'patch-coverage']);
 
 const diffAdding = (rel: string, startLine: number, text: string): string =>
   [`+++ ${rel}`, `@@ -0,0 +${startLine},1 @@`, `+${text}`, ''].join('\n');
 
-describe('piot-ci patch-coverage (integration)', () => {
-  it('passes without reading coverage when the diff adds no src lines', () => {
+describe('piot-ci patch-coverage (integration)', async () => {
+  it('passes without reading coverage when the diff adds no src lines', async () => {
     git(['+++ README.md', '@@ -0,0 +1,1 @@', '+hello', ''].join('\n'));
-    expect(patchCoverage()).toBe(0);
+    await expect(patchCoverage()).resolves.toBe(0);
     expect(out.join('')).toBe('patch-coverage: no src/**/*.ts additions in this PR; passing.\n');
     expect(readFile).not.toHaveBeenCalled();
   });
 
-  it('passes when every added engine src line is covered', () => {
+  it('passes when every added engine src line is covered', async () => {
     git(diffAdding('packages/engine/src/foo.ts', 5, 'const x = 1;'));
     readFile.mockReturnValue(
       JSON.stringify({
@@ -80,11 +80,11 @@ describe('piot-ci patch-coverage (integration)', () => {
         },
       }),
     );
-    expect(patchCoverage()).toBe(0);
+    await expect(patchCoverage()).resolves.toBe(0);
     expect(out.join('')).toBe('patch-coverage: every added src/ line is covered, no escape hatches. ✓\n');
   });
 
-  it('fails, naming the uncovered added line, when coverage shows it never ran', () => {
+  it('fails, naming the uncovered added line, when coverage shows it never ran', async () => {
     git(diffAdding('packages/engine/src/foo.ts', 5, 'const x = 1;'));
     readFile.mockReturnValue(
       JSON.stringify({
@@ -94,7 +94,7 @@ describe('piot-ci patch-coverage (integration)', () => {
         },
       }),
     );
-    expect(patchCoverage()).toBe(1);
+    await expect(patchCoverage()).resolves.toBe(1);
     expect(err.join('')).toBe(
       [
         'patch-coverage: violations found.',
@@ -111,7 +111,7 @@ describe('piot-ci patch-coverage (integration)', () => {
     );
   });
 
-  it('fails when the added line introduces a v8 ignore escape hatch, even if covered', () => {
+  it('fails when the added line introduces a v8 ignore escape hatch, even if covered', async () => {
     git(diffAdding('packages/engine/src/foo.ts', 5, '/* v8 ignore next */'));
     readFile.mockReturnValue(
       JSON.stringify({
@@ -121,24 +121,24 @@ describe('piot-ci patch-coverage (integration)', () => {
         },
       }),
     );
-    expect(patchCoverage()).toBe(1);
+    await expect(patchCoverage()).resolves.toBe(1);
     expect(err.join('')).toContain(
       '::error file=packages/engine/src/foo.ts,line=5::patch-coverage [escape-hatch] new ignore marker introduced: /* v8 ignore next */',
     );
   });
 
-  it('fails with exit 2 when BASE_SHA / HEAD_SHA are unset', () => {
+  it('fails with exit 2 when BASE_SHA / HEAD_SHA are unset', async () => {
     delete process.env.BASE_SHA;
     delete process.env.HEAD_SHA;
-    expect(patchCoverage()).toBe(2);
+    await expect(patchCoverage()).resolves.toBe(2);
     expect(err.join('')).toBe('::error::patch-coverage: BASE_SHA and HEAD_SHA must be set\n');
   });
 
-  it('fails with exit 2 when a SHA is unreachable in the clone', () => {
+  it('fails with exit 2 when a SHA is unreachable in the clone', async () => {
     exec.mockImplementation(() => {
       throw new Error('bad object');
     });
-    expect(patchCoverage()).toBe(2);
+    await expect(patchCoverage()).resolves.toBe(2);
     expect(err.join('')).toBe('::error::patch-coverage: base or head not reachable in this clone\n');
   });
 });

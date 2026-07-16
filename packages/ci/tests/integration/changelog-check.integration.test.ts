@@ -49,15 +49,15 @@ function git({ log = '', surface = '', changed = '' }: { log?: string; surface?:
   });
 }
 
-const changelogCheck = (): number => run(['node', 'piot-ci', 'changelog-check']);
+const changelogCheck = (): Promise<number> => run(['node', 'piot-ci', 'changelog-check']);
 
-describe('piot-ci changelog-check (integration)', () => {
-  it('passes when a public-surface change updates CHANGELOG.md and MIGRATIONS.md', () => {
+describe('piot-ci changelog-check (integration)', async () => {
+  it('passes when a public-surface change updates CHANGELOG.md and MIGRATIONS.md', async () => {
     git({
       surface: 'packages/engine/src/plan.ts\n',
       changed: 'packages/engine/src/plan.ts\nCHANGELOG.md\nMIGRATIONS.md\n',
     });
-    expect(changelogCheck()).toBe(0);
+    await expect(changelogCheck()).resolves.toBe(0);
     expect(out.join('')).toBe(
       ['Public-surface files changed:', '  - packages/engine/src/plan.ts', '', 'CHANGELOG.md and MIGRATIONS.md both updated. OK.', ''].join(
         '\n',
@@ -65,9 +65,9 @@ describe('piot-ci changelog-check (integration)', () => {
     );
   });
 
-  it('fails, naming the missing files, when a surface change omits the changelog', () => {
+  it('fails, naming the missing files, when a surface change omits the changelog', async () => {
     git({ surface: 'action.yml\n', changed: 'action.yml\n' });
-    expect(changelogCheck()).toBe(1);
+    await expect(changelogCheck()).resolves.toBe(1);
     expect(out.join('')).toBe(
       [
         'Public-surface files changed:',
@@ -81,15 +81,15 @@ describe('piot-ci changelog-check (integration)', () => {
     );
   });
 
-  it('is bypassed by a skip-changelog: trailer', () => {
+  it('is bypassed by a skip-changelog: trailer', async () => {
     git({ log: 'refactor: internal\n\nskip-changelog: pure refactor\n', surface: 'action.yml\n', changed: 'action.yml\n' });
-    expect(changelogCheck()).toBe(0);
+    await expect(changelogCheck()).resolves.toBe(0);
     expect(out.join('')).toBe("Found 'skip-changelog:' trailer; bypassing check.\n");
   });
 
-  it('skips (exit 0) when no public-surface files changed', () => {
+  it('skips (exit 0) when no public-surface files changed', async () => {
     git({ surface: '', changed: 'notes/internal.md\n' });
-    expect(changelogCheck()).toBe(0);
+    await expect(changelogCheck()).resolves.toBe(0);
     expect(out.join('')).toBe('No public-surface files changed; skipping.\n');
   });
 });

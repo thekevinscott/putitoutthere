@@ -5,14 +5,10 @@ import tseslint from 'typescript-eslint';
 // #469 async-migration ratchet: files still using sync I/O. Entries may
 // only be DELETED (by the sub-issue that migrates them), never added.
 const SYNC_EXEMPT = [
-  'src/actionlint-idtoken/run.ts', 'src/cargo-registry/read-raw.ts',
-  'src/cargo-registry/run-diagnose.ts', 'src/cargo-registry/run-start.ts',
+  'src/actionlint-idtoken/run.ts',
   'src/changelog-check/run.ts', 'src/evidence-check/run.ts',
-  'src/fixture-materialize/run.ts', 'src/patch-coverage/run.ts',
-  'src/tdd-lint/run.ts', 'src/testpypi-verify/download-sdists.ts',
-  'src/testpypi-verify/download-wheels.ts', 'src/testpypi-verify/run-assert.ts',
-  'src/testpypi-verify/run-metadata.ts', 'src/testpypi-verify/verify-artifacts.ts',
-  'src/verdaccio-auth/run.ts',
+  'src/patch-coverage/run.ts',
+  'src/tdd-lint/run.ts',
 ];
 
 export default tseslint.config(

@@ -33,29 +33,29 @@ afterEach(() => {
 const argv = (mode?: string) => ['node', 'piot-ci', 'testpypi-verify', ...(mode === undefined ? [] : [mode])];
 
 describe('runTestpypiVerify dispatch', () => {
-  it('routes assert and returns its exit code', () => {
-    assertGate.mockReturnValue(7);
-    expect(runTestpypiVerify(argv('assert'))).toBe(7);
+  it('routes assert and returns its exit code', async () => {
+    assertGate.mockResolvedValue(7);
+    await expect(runTestpypiVerify(argv('assert'))).resolves.toBe(7);
     expect(assertGate).toHaveBeenCalledOnce();
     expect(metadataGate).not.toHaveBeenCalled();
   });
 
-  it('routes metadata and returns its exit code', () => {
-    metadataGate.mockReturnValue(9);
-    expect(runTestpypiVerify(argv('metadata'))).toBe(9);
+  it('routes metadata and returns its exit code', async () => {
+    metadataGate.mockResolvedValue(9);
+    await expect(runTestpypiVerify(argv('metadata'))).resolves.toBe(9);
     expect(metadataGate).toHaveBeenCalledOnce();
     expect(assertGate).not.toHaveBeenCalled();
   });
 
-  it('rejects a missing mode', () => {
-    expect(runTestpypiVerify(argv())).toBe(1);
+  it('rejects a missing mode', async () => {
+    await expect(runTestpypiVerify(argv())).resolves.toBe(1);
     expect(out.join('')).toBe('::error::testpypi-verify: mode must be one of assert|metadata (got <none>).\n');
     expect(assertGate).not.toHaveBeenCalled();
     expect(metadataGate).not.toHaveBeenCalled();
   });
 
-  it('rejects an unknown mode, echoing the bad value', () => {
-    expect(runTestpypiVerify(argv('verify'))).toBe(1);
+  it('rejects an unknown mode, echoing the bad value', async () => {
+    await expect(runTestpypiVerify(argv('verify'))).resolves.toBe(1);
     expect(out.join('')).toBe('::error::testpypi-verify: mode must be one of assert|metadata (got verify).\n');
   });
 });

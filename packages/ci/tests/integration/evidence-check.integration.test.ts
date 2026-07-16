@@ -56,23 +56,23 @@ function repo({ diff, changelog }: { diff: string; changelog: string }): void {
   read.mockReturnValue(changelog);
 }
 
-const evidenceCheck = (): number => run(['node', 'piot-ci', 'evidence-check']);
+const evidenceCheck = (): Promise<number> => run(['node', 'piot-ci', 'evidence-check']);
 
-describe('piot-ci evidence-check (integration)', () => {
-  it('passes with the success line when no Unreleased bullets were added', () => {
+describe('piot-ci evidence-check (integration)', async () => {
+  it('passes with the success line when no Unreleased bullets were added', async () => {
     repo({ diff: '@@ -1,0 +2,1 @@\n+- new', changelog: '# Changelog\n## v1.0.0\n- old' });
-    expect(evidenceCheck()).toBe(0);
+    await expect(evidenceCheck()).resolves.toBe(0);
     expect(out.join('')).toBe('Evidence check passed for CHANGELOG.md additions between base and head.\n');
   });
 
-  it('fails, flagging each added Unreleased bullet that lacks a verified-by clause', () => {
+  it('fails, flagging each added Unreleased bullet that lacks a verified-by clause', async () => {
     // Fixture mirrors added-bullets: bullets `- a` (line 2) and `- b` (line 3)
     // fall inside the Unreleased range; `- c` (line 5) is in a later section.
     repo({
       diff: '@@ -1,0 +2,2 @@\n+- a\n+- b\n@@ -3,0 +5,1 @@\n+- c',
       changelog: '## Unreleased\n- a\n- b\n## v1\n- c',
     });
-    expect(evidenceCheck()).toBe(1);
+    await expect(evidenceCheck()).resolves.toBe(1);
     expect(out.join('')).toBe(
       [
         "::error::CHANGELOG.md:2: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause",
@@ -82,9 +82,9 @@ describe('piot-ci evidence-check (integration)', () => {
     );
   });
 
-  it('fails clearly and never shells out when BASE_SHA is unset', () => {
+  it('fails clearly and never shells out when BASE_SHA is unset', async () => {
     delete process.env.BASE_SHA;
-    expect(evidenceCheck()).toBe(1);
+    await expect(evidenceCheck()).resolves.toBe(1);
     expect(out.join('')).toBe('::error::evidence-check: BASE_SHA and HEAD_SHA must be set.\n');
     expect(exec).not.toHaveBeenCalled();
   });
