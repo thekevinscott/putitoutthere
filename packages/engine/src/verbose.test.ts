@@ -330,6 +330,28 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     expect(annotations).toEqual([]);
   });
 
+  it('emits an annotation even when the message has no non-empty line', () => {
+    // A message that is only blank lines makes `.find` return undefined,
+    // exercising the `?? ''` fallback for the first-line selection.
+    const log = makeLog();
+    dumpFailure(new Error('\n   \n\t\n'), baseCtx(), { log });
+    const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
+    expect(annotations).toHaveLength(1);
+    // Header (handler/package) is still present; body first-line is empty.
+    expect(annotations[0]).toContain('crates/demo');
+  });
+
+  it('truncates an over-length annotation with an ellipsis', () => {
+    // A message far longer than the 500-char cap forces the slice branch of
+    // the length guard, appending the single-char ellipsis.
+    const log = makeLog();
+    dumpFailure(new Error('x'.repeat(2000)), baseCtx(), { log });
+    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
+    const body = line.slice('::error::'.length, -1); // strip prefix + terminator
+    expect(body.length).toBe(500);
+    expect(body.endsWith('…')).toBe(true);
+  });
+
   it('keeps the annotation to a single line (encodes embedded newlines)', () => {
     // GitHub annotations are line-oriented; an embedded newline would
     // truncate the annotation at the break point. The dumpFailure

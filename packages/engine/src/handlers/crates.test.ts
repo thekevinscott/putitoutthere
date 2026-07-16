@@ -15,7 +15,12 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { crates, looksLikeFirstPublishTpRejection, scanDirtyOutsideManifest } from './crates.js';
+import {
+  crates,
+  looksLikeFirstPublishTpRejection,
+  relativeOrSelf,
+  scanDirtyOutsideManifest,
+} from './crates.js';
 import type { Ctx } from '../types.js';
 
 vi.mock('node:child_process');
@@ -122,6 +127,19 @@ describe('crates.isPublished', () => {
     await expect(crates.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toThrow(/transient|503/i);
     fetchSpy.mockRestore();
   });
+
+  it('throws a plain Error on an unexpected 4xx (defensive fallthrough)', async () => {
+    // crates.io returns 200/404 for this endpoint; a bare 4xx (not 404, not
+    // 5xx) is not retriable, so it surfaces as a plain Error rather than a
+    // TransientError. Exercises the else-path of the `>= 500` guard.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('', { status: 400 }),
+    );
+    await expect(crates.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toThrow(
+      /returned 400/,
+    );
+    fetchSpy.mockRestore();
+  });
 });
 
 describe('crates.latestVersion', () => {
@@ -158,6 +176,47 @@ describe('crates.latestVersion', () => {
       new Response('', { status: 503 }),
     );
     await expect(crates.latestVersion(basePkg(), makeCtx())).rejects.toThrow(/503/);
+    fetchSpy.mockRestore();
+  });
+});
+
+describe('crates.trustPosture (#414)', () => {
+  it('returns "oidc" when the version carries trustpub_data', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ version: { trustpub_data: { provider: 'github', repository: 'acme/demo' } } }),
+        { status: 200 },
+      ),
+    );
+    expect(await crates.trustPosture(basePkg(), '0.1.0', makeCtx())).toBe('oidc');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://crates.io/api/v1/crates/demo-crate/0.1.0',
+      expect.objectContaining({ method: 'GET' }) as object,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('returns "token" when the version has no trustpub_data', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ version: {} }), { status: 200 }),
+    );
+    expect(await crates.trustPosture(basePkg(), '0.1.0', makeCtx())).toBe('token');
+    fetchSpy.mockRestore();
+  });
+
+  it('returns "token" when the body carries no version object (optional chain)', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    expect(await crates.trustPosture(basePkg(), '0.1.0', makeCtx())).toBe('token');
+    fetchSpy.mockRestore();
+  });
+
+  it('throws TransientError on any non-200', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('', { status: 503 }),
+    );
+    await expect(crates.trustPosture(basePkg(), '0.1.0', makeCtx())).rejects.toThrow(/503/);
     fetchSpy.mockRestore();
   });
 });
@@ -201,6 +260,30 @@ describe('crates.writeVersion', () => {
     await expect(
       crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
     ).rejects.toThrow(/Cargo\.toml/);
+  });
+
+  it('surfaces a non-ENOENT read error as-is (perms/io)', async () => {
+    // A read failure that is NOT "file missing" (e.g. EACCES) exercises the
+    // else-path of the ENOENT check: the original error is re-surfaced
+    // rather than remapped to the "Cargo.toml not found" message.
+    readMock.mockImplementation(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+    await expect(
+      crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
+    ).rejects.toThrow(/EACCES: permission denied/);
+  });
+
+  it('wraps a non-Error read failure in an Error (String(err) fallback)', async () => {
+    // A thrown non-Error value (no `.code`, not an `instanceof Error`) skips
+    // the ENOENT remap and hits the `new Error(String(err))` branch.
+    readMock.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
+      throw 'disk gremlins';
+    });
+    await expect(
+      crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
+    ).rejects.toThrow(/disk gremlins/);
   });
 
   it('throws when the [package] version line is missing', async () => {
@@ -682,6 +765,120 @@ describe('crates.publish', () => {
       expect(cargoInvocations).toHaveLength(1);
       fetchSpy.mockRestore();
     });
+
+    it('surfaces the fallback failure (with stderr) when the retry against the fallback also fails', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {throw new Error('not a git repo');}
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          // Primary crates.io 429 → engages the fallback.
+          throw Object.assign(new Error('exit 1'), {
+            stderr: Buffer.from('status 429 Too Many Requests'),
+          });
+        }
+        // The fallback registry also errors — an Error carrying stderr.
+        throw Object.assign(new Error('exit 7'), {
+          stderr: Buffer.from('fallback registry down'),
+        });
+      });
+      const stdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation((): boolean => true);
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        ),
+      ).rejects.toThrow(/fallback http:\/\/localhost:8000.*fallback registry down/s);
+      stdoutSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it('surfaces the fallback failure using String(err) when the retry throws a non-Error with no stderr', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {throw new Error('not a git repo');}
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          throw Object.assign(new Error('exit 1'), {
+            stderr: Buffer.from('status 429 Too Many Requests'),
+          });
+        }
+        // Non-Error, no stderr — exercises the String(retryErr) fallback and
+        // the "no retry stderr" message branch.
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
+        throw 'catastrophic fallback failure';
+      });
+      const stdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation((): boolean => true);
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        ),
+      ).rejects.toThrow(/fallback http:\/\/localhost:8000\) failed: catastrophic fallback failure/);
+      stdoutSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it('reports a non-Error cargo failure with no stderr via String(err) (fallback provisioned, not rate-limited)', async () => {
+      // Primary cargo throws a non-Error with no stderr. With a fallback
+      // provisioned, isRateLimited(undefined) is exercised (returns false via
+      // its empty-stderr guard), the TP-rejection detector declines, and the
+      // generic failure message falls back to String(err).
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {throw new Error('not a git repo');}
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
+        throw 'plain string failure';
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+
+      await expect(
+        crates.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        ),
+      ).rejects.toThrow(/cargo publish failed: plain string failure/);
+      const cargoInvocations = execMock.mock.calls.filter((c) => c[0] === 'cargo');
+      expect(cargoInvocations).toHaveLength(1);
+      fetchSpy.mockRestore();
+    });
   });
 
   it('reports cargo publish failure', async () => {
@@ -942,6 +1139,40 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     expect(scanDirtyOutsideManifest('/plain', '/plain')).toBeNull();
   });
 
+  it('returns null when git reports an empty toplevel', () => {
+    // rev-parse succeeds but prints only whitespace — treat as "can't
+    // verify" and fall through to cargo's own --allow-dirty behavior.
+    mockGit({ toplevel: '' });
+    expect(scanDirtyOutsideManifest('/repo', '/repo')).toBeNull();
+  });
+
+  it('handles artifactsRoot equal to cwd (empty relative path)', () => {
+    // relative(cwd, artifactsRoot) === '' when they are the same dir; the
+    // artifacts-skip is then disabled (empty prefix), so stray files still
+    // surface.
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n M README.md\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo');
+    expect(result).toContain('README.md');
+  });
+
+  it('skips sibling paths that equal cwd or resolve outside the worktree', () => {
+    // A sibling equal to cwd (relative === '') and a sibling outside cwd
+    // (relative starts with '..') are both skipped by the guard, leaving
+    // only genuine strays flagged.
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n M README.md\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', undefined, [
+      '/repo',
+      '/outside',
+    ]);
+    expect(result).toContain('README.md');
+  });
+
   it('skips files inside sibling package paths — workflow-managed install state', () => {
     // Polyglot setup: rust crate at packages/rust/, npm package at
     // packages/ts/. The reusable workflow's `Build npm packages` step
@@ -988,6 +1219,30 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     expect(result?.some((p) => p.startsWith('packages/ts'))).toBe(false);
   });
 
+  it('reads the destination path from a porcelain rename row (XY old -> new)', () => {
+    // git renders renames as `R  old -> new`; the scan must flag the
+    // destination path, not the arrow-joined raw row.
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\nR  old-name.rs -> crate/src/new-name.rs\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
+    expect(result).toContain('crate/src/new-name.rs');
+    expect(result).not.toContain('old-name.rs -> crate/src/new-name.rs');
+  });
+
+  it('strips git quoting from a quoted porcelain path', () => {
+    // git quotes paths containing spaces/unusual bytes as `"a b.rs"`; the
+    // scan must compare/report the unquoted form.
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n?? "crate/a file.rs"\n',
+    });
+    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
+    expect(result).toContain('crate/a file.rs');
+    expect(result).not.toContain('"crate/a file.rs"');
+  });
+
   it('crates.publish rejects with a clear error when an unrelated file is dirty', async () => {
     mockGit({
       managedRel: 'crate/Cargo.toml',
@@ -1005,5 +1260,17 @@ describe('scanDirtyOutsideManifest (#135)', () => {
       ),
     ).rejects.toThrow(/unexpected dirty|README\.md/);
     fetchSpy.mockRestore();
+  });
+});
+
+describe('relativeOrSelf', () => {
+  it('returns the relative path when base and target differ', () => {
+    expect(relativeOrSelf('/repo', '/repo/crate/Cargo.toml')).toBe('crate/Cargo.toml');
+  });
+
+  it('returns the target verbatim when base equals target (relative is empty)', () => {
+    expect(relativeOrSelf('/repo/crate/Cargo.toml', '/repo/crate/Cargo.toml')).toBe(
+      '/repo/crate/Cargo.toml',
+    );
   });
 });

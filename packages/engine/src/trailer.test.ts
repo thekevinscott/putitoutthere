@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseTrailer } from './trailer.js';
+import { parsePackageList, parseTrailer } from './trailer.js';
 
 describe('parseTrailer: happy paths', () => {
   it('returns null for an empty message', () => {
@@ -169,5 +169,19 @@ release: minor
     release: patch
 `;
     expect(parseTrailer(body)).toEqual({ bump: 'patch', packages: [] });
+  });
+});
+
+describe('parsePackageList (internal): defensive open-bracket guard', () => {
+  // `parsePayload` only calls `parsePackageList` on a substring that begins
+  // at the `[`, so the leading-`[` guard never fires through the public
+  // `parseTrailer` entry point. Exercised directly to pin the defensive
+  // early-return contract.
+  it('returns null for a string that does not open with `[`', () => {
+    expect(parsePackageList('minor')).toBeNull();
+  });
+
+  it('still parses a well-formed list when called directly', () => {
+    expect(parsePackageList('[a, b]')).toEqual(['a', 'b']);
   });
 });

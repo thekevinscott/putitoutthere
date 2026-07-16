@@ -194,6 +194,18 @@ describe('computeCascade: edge cases', () => {
     const cascade = computeCascade(pkgs, everyPkgSees(pkgs, ['a/x']));
     expect(cascade.map((p) => p.name).sort()).toEqual(['a', 'b']);
   });
+
+  it('treats a package whose `depends_on` is absent at runtime as having no deps', () => {
+    // The Zod schema always defaults `depends_on` to []; a hand-built
+    // package object without the field bypasses that default and exercises
+    // the `depends_on ?? []` fallback in both the transitive pass and the
+    // cycle check.
+    const noDeps = { name: 'b', kind: 'crates', path: 'b', globs: ['b/**'], first_version: '0.1.0' } as unknown as Package;
+    const pkgs = [pkg('a', ['a/**']), noDeps];
+    const cascade = computeCascade(pkgs, perPkg({ a: ['a/x'], b: ['unrelated/y'] }));
+    // `a` matches directly; `b` (no deps, no direct match) is not pulled in.
+    expect(cascade.map((p) => p.name)).toEqual(['a']);
+  });
 });
 
 describe('computeCascade: depends_on validation', () => {

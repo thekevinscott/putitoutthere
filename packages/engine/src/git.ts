@@ -244,10 +244,11 @@ export function lastTag(
     let parsed: Semver;
     try {
       parsed = parseSemver(versionPart);
-      /* v8 ignore next 3 -- parseTagVersion already validated semver; defensive */
+    /* v8 ignore start -- parseTagVersion already validated semver; the re-parse can't throw */
     } catch {
       continue;
     }
+    /* v8 ignore stop */
     if (!best || greater(parsed, best.version)) {
       best = { tag, version: parsed };
     }

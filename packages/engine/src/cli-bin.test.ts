@@ -61,4 +61,21 @@ describe('cli-bin', () => {
     expect(exit).toHaveBeenCalledWith(4);
     expect(stderr.join('')).toMatch(/fatal: boom/);
   });
+
+  it('stringifies a non-Error rejection in the fatal message', async () => {
+    runMock.mockRejectedValue('plain string boom');
+    process.argv = ['node', 'putitoutthere', 'plan'];
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((c) => {
+      stderr.push(typeof c === 'string' ? c : c.toString());
+      return true;
+    });
+
+    await import('./cli-bin.js');
+    await flush();
+
+    expect(exit).toHaveBeenCalledWith(4);
+    expect(stderr.join('')).toMatch(/fatal: plain string boom/);
+  });
 });

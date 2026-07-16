@@ -1,54 +1,29 @@
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig } from 'vitest/config';
 
+// Minimal, gate-compatible config for the testing-conventions unit-coverage
+// gate (#476). The gate runs vitest rooted at the scan path
+// (packages/engine/src) and supplies its own test-discovery include and 100%
+// thresholds. So this file must NOT hardcode `include` / `thresholds` /
+// `coverage.include` — those are package-root-relative and would resolve wrong
+// under the gate's root (finding zero tests → 0% → fail). It names only the
+// provider, the reporters the gate reads, and the env-isolation setup file —
+// the last via an ABSOLUTE path so it resolves regardless of the vitest root.
+// The engine's own runs pass the test dirs positionally (see test:unit /
+// test:unit:coverage in package.json). Mirrors packages/ci's minimal config.
+//
+// `clearMocks` (vitest 4): vi.restoreAllMocks() no longer resets automocks, so
+// clearMocks runs vi.clearAllMocks() before each test to clear vi.mock()'d call
+// history between tests regardless of how the mock was created.
 export default defineConfig({
   test: {
-    include: [
-      'src/**/*.test.ts',
-      // Workflow-contract tests assert static YAML invariants (AGENTS.md
-      // "Workflow-contract tests are earned"). They aren't a unit/
-      // integration/e2e suite, so they stay in the singular `test/` tree
-      // (not `tests/`), which the testing-conventions tool does not scan —
-      // no `unknown-tier` waiver needed. Their final disposition is #442/#448.
-      'test/workflows/**/*.test.ts',
-    ],
-    setupFiles: ['./tests/setup.ts'],
-    environment: 'node',
+    setupFiles: [fileURLToPath(new URL('./tests/setup.ts', import.meta.url))],
     testTimeout: 10_000,
-    // Vitest 4: vi.restoreAllMocks() no longer resets automocks (only
-    // vi.spyOn spies), so per-file afterEach(() => vi.restoreAllMocks())
-    // no longer clears vi.mock()'d module call/result history between
-    // tests. clearMocks runs vi.clearAllMocks() before each test, which
-    // still clears that history regardless of how the mock was created.
     clearMocks: true,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],
-      include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts', 'src/**/*.d.ts'],
-      thresholds: {
-        lines: 95,
-        statements: 95,
-        // Removing `src/init.ts` (which had ~100% branch coverage on file-
-        // write logic) shifted the weighted branch average down to ~94.9%.
-        // The remaining src/ has harder-to-cover defensive branches in
-        // handlers and auth paths; pinning at 93 keeps a small buffer
-        // without chasing token-bucket branches in `auth.ts` / `cli.ts`.
-        // The patch-coverage gate (.github/workflows/patch-coverage.yml)
-        // is the strict 100%-on-new-lines enforcement; the aggregate
-        // threshold here is the floor for grandfathered defensive code.
-        //
-        // @vitest/coverage-v8 2 -> 4: the v4 provider classifies branches
-        // by AST node (`if` / `cond-expr` / `binary-expr`) instead of
-        // collapsing them into one generic `branch` entry, so it now
-        // counts short-circuit (`&&`/`??`) and ternary operands as
-        // separate branches the v2 provider never tracked. No src/ line
-        // changed; measured branch coverage dropped from ~94.9% to
-        // ~91.7% purely from the more precise count. Re-floored at 91
-        // (small buffer under the new measured baseline) rather than
-        // chasing coverage on newly-visible operands in defensive code.
-        branches: 91,
-        functions: 95,
-      },
     },
   },
 });

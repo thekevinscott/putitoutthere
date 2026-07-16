@@ -77,7 +77,7 @@ function isValidValue(s: string): s is Value {
   return VALID_VALUES.has(s as Value);
 }
 
-function parsePackageList(s: string): string[] | null {
+export function parsePackageList(s: string): string[] | null {
   // Must open with `[` and close with `]`; nothing after the close.
   /* v8 ignore next -- only called when bracketIdx is defined; defensive */
   if (!s.startsWith('[')) {return null;}

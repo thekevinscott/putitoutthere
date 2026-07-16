@@ -31,9 +31,9 @@
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
-    "test:unit:watch": "vitest",
-    "test:unit:coverage": "vitest run --coverage",
+    "test:unit": "vitest run src test/workflows",
+    "test:unit:watch": "vitest src test/workflows",
+    "test:unit:coverage": "vitest run --coverage src test/workflows",
     "test:integration": "vitest run --config tests/integration/vitest.integration.config.ts",
     "test:e2e": "pnpm build && vitest run --config tests/e2e/vitest.e2e.config.ts",
     "prepare": "tsc -p tsconfig.build.json"

@@ -437,7 +437,7 @@ export function loadConfig(path: string): Config {
 // recover from without re-reading the schema. Each detection names both
 // the mistake and the fix so the failing CI log is self-explanatory.
 // Triggered by the integration failure in #integration-2026-05.
-function detectCommonMistakes(raw: unknown): string[] {
+export function detectCommonMistakes(raw: unknown): string[] {
   const hints: string[] = [];
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {return hints;}
   const root = raw as Record<string, unknown>;
@@ -480,7 +480,7 @@ function assertUniqueNames(packages: readonly Package[]): void {
   }
 }
 
-function formatZodError(error: ZodError): string {
+export function formatZodError(error: ZodError): string {
   return error.issues
     .map((issue) => {
       /* v8 ignore next -- TOML always parses to an object root; '<root>' label can't fire */

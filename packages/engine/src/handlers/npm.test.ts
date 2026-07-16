@@ -334,6 +334,17 @@ describe('npm.writeVersion', () => {
     ).rejects.toThrow(/JSON|parse/i);
   });
 
+  it('surfaces a non-ENOENT read error as-is (e.g. EACCES)', async () => {
+    // A permission error is not the "missing file" case; the ENOENT
+    // branch must not fire, and the original error bubbles unchanged.
+    vi.mocked(readFileSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+    await expect(
+      npm.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
+    ).rejects.toThrow(/EACCES/);
+  });
+
   it('preserves 2-space indentation', async () => {
     const p = `${dir}/package.json`;
     writeFileSync(
@@ -341,6 +352,52 @@ describe('npm.writeVersion', () => {
       JSON.stringify({ name: 'demo', version: '0.1.0' }, null, 2),
       'utf8',
     );
+    await npm.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ cwd: dir }),
+    );
+    expect(readFileSync(p, 'utf8')).toContain('  "version": "0.2.0"');
+  });
+
+  it('preserves a trailing newline when the original package.json has one', async () => {
+    // writeVersion appends `\n` only when the original file ended with one.
+    // The no-trailing-newline path is covered by the JSON.stringify-seeded
+    // tests above (no trailing newline); this pins the with-newline branch.
+    const p = `${dir}/package.json`;
+    writeFileSync(
+      p,
+      JSON.stringify({ name: 'demo', version: '0.1.0' }, null, 2) + '\n',
+      'utf8',
+    );
+    await npm.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ cwd: dir }),
+    );
+    expect(readFileSync(p, 'utf8').endsWith('\n')).toBe(true);
+  });
+
+  it('preserves tab indentation (detectIndent tab branch)', async () => {
+    // A tab-indented package.json must round-trip as tab-indented: detectIndent
+    // returns '\t' rather than a space count.
+    const p = `${dir}/package.json`;
+    writeFileSync(p, '{\n\t"name": "demo",\n\t"version": "0.1.0"\n}', 'utf8');
+    await npm.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ cwd: dir }),
+    );
+    const out = readFileSync(p, 'utf8');
+    expect(out).toContain('\t"version": "0.2.0"');
+    expect(out).not.toContain('  "version"');
+  });
+
+  it('defaults to 2-space indent for a minified package.json (no detectable indent)', async () => {
+    // A single-line, un-indented package.json has no indent for detectIndent to
+    // find, so it falls back to 2 spaces (the `!m?.groups?.indent` branch).
+    const p = `${dir}/package.json`;
+    writeFileSync(p, '{"name":"demo","version":"0.1.0"}', 'utf8');
     await npm.writeVersion(
       { ...basePkg(), path: dir },
       '0.2.0',
@@ -723,6 +780,27 @@ describe('npm.publish', () => {
         makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
       ),
     ).rejects.toThrow(/EAUTH|npm publish/i);
+  });
+
+  it('surfaces a non-Error publish rejection via String(err) (no OIDC, no stderr)', async () => {
+    // execFileSync normally throws an Error, but the failure renderer must
+    // not assume that: a non-Error rejection has to stringify cleanly into
+    // the `npm publish failed: <err>` message rather than throw again.
+    execMock
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('404'), { status: 1 });
+      })
+      .mockImplementationOnce(() => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw 'raw-string-publish-failure';
+      });
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
+      ),
+    ).rejects.toThrow(/raw-string-publish-failure/);
   });
 
   it('treats empty ACTIONS_ID_TOKEN_REQUEST_TOKEN as unset (falls through to process.env)', async () => {

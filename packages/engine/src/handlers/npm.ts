@@ -71,15 +71,26 @@ function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<stri
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return Promise.reject(new Error(`package.json not found at ${p}`));
     }
-    /* v8 ignore next -- non-ENOENT read errors surface as-is */
-    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    return Promise.reject(
+      err instanceof Error
+        ? err
+        : /* v8 ignore next -- readFileSync only throws ErrnoException Errors, so this String(err) fallback is unreachable */
+          new Error(String(err)),
+    );
   }
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(original) as Record<string, unknown>;
   } catch (err) {
     return Promise.reject(
-      new Error(`package.json JSON parse error: ${err instanceof Error ? err.message : String(err)}`),
+      new Error(
+        `package.json JSON parse error: ${
+          err instanceof Error
+            ? err.message
+            : /* v8 ignore next -- JSON.parse only throws SyntaxError; the String(err) fallback is unreachable */
+              String(err)
+        }`,
+      ),
     );
   }
   if (parsed.version === version) {return Promise.resolve([]);}
@@ -191,7 +202,12 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
           `(TLOG_CREATE_ENTRY_ERROR) and ${name}@${version} is not on the ` +
           `registry — npm's provenance retry re-submitted an identical ` +
           `attestation. Re-run the release to mint a fresh attestation.` +
-          `${stderr ? `\n${stderr}` : ''}`,
+          `${
+            stderr
+              ? `\n${stderr}`
+              : /* v8 ignore next -- looksLikeTlogDuplicate only matches a non-empty stderr, so this '' fallback is unreachable */
+                ''
+          }`,
         { cause: err },
       );
     }

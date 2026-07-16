@@ -99,9 +99,10 @@ describe('piot-ci patch-coverage (integration)', () => {
       [
         'patch-coverage: violations found.',
         '',
-        'Strict 100% on new src/ code; no `/* v8 ignore */` escape hatches.',
-        'Add a unit test that exercises each new line listed below, or restructure',
-        'the new code so it sits on an already-tested path.',
+        'Strict 100% on new src/ code; bare `/* v8 ignore */` escape hatches are rejected.',
+        'Add a unit test that exercises each new line listed below, restructure the new',
+        'code so it sits on an already-tested path, or — for a genuinely-unreachable',
+        'branch — document the marker with a reason: `/* v8 ignore next -- why */`.',
         '',
         '::error file=packages/engine/src/foo.ts,line=5::patch-coverage [uncovered] added line not exercised by unit tests: const x = 1;',
         '',
@@ -125,6 +126,34 @@ describe('piot-ci patch-coverage (integration)', () => {
     expect(err.join('')).toContain(
       '::error file=packages/engine/src/foo.ts,line=5::patch-coverage [escape-hatch] new ignore marker introduced: /* v8 ignore next */',
     );
+  });
+
+  it('passes when the added v8 ignore marker is documented with a -- reason', () => {
+    git(diffAdding('packages/engine/src/foo.ts', 5, '/* v8 ignore next -- unreachable: Zod defaults this to [] */'));
+    readFile.mockReturnValue(
+      JSON.stringify({
+        [covKey('packages/engine/src/foo.ts')]: {
+          s: { '0': 1 },
+          statementMap: { '0': { start: { line: 5 }, end: { line: 5 } } },
+        },
+      }),
+    );
+    expect(patchCoverage()).toBe(0);
+    expect(out.join('')).toBe('patch-coverage: every added src/ line is covered, no escape hatches. ✓\n');
+  });
+
+  it('passes when the added line is a bare v8 ignore stop closer (no reason needed)', () => {
+    git(diffAdding('packages/engine/src/foo.ts', 5, '/* v8 ignore stop */'));
+    readFile.mockReturnValue(
+      JSON.stringify({
+        [covKey('packages/engine/src/foo.ts')]: {
+          s: { '0': 1 },
+          statementMap: { '0': { start: { line: 5 }, end: { line: 5 } } },
+        },
+      }),
+    );
+    expect(patchCoverage()).toBe(0);
+    expect(out.join('')).toBe('patch-coverage: every added src/ line is covered, no escape hatches. ✓\n');
   });
 
   it('fails with exit 2 when BASE_SHA / HEAD_SHA are unset', () => {

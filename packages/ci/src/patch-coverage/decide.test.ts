@@ -89,9 +89,10 @@ describe('decidePatchCoverage: uncovered violation', () => {
     expect(r.err).toEqual([
       'patch-coverage: violations found.',
       '',
-      'Strict 100% on new src/ code; no `/* v8 ignore */` escape hatches.',
-      'Add a unit test that exercises each new line listed below, or restructure',
-      'the new code so it sits on an already-tested path.',
+      'Strict 100% on new src/ code; bare `/* v8 ignore */` escape hatches are rejected.',
+      'Add a unit test that exercises each new line listed below, restructure the new',
+      'code so it sits on an already-tested path, or — for a genuinely-unreachable',
+      'branch — document the marker with a reason: `/* v8 ignore next -- why */`.',
       '',
       '::error file=packages/engine/src/foo.ts,line=12::patch-coverage [uncovered] added line not exercised by unit tests: const x = 1;',
       '',
@@ -108,9 +109,10 @@ describe('decidePatchCoverage: uncovered violation', () => {
     expect(r.err).toEqual([
       'patch-coverage: violations found.',
       '',
-      'Strict 100% on new src/ code; no `/* v8 ignore */` escape hatches.',
-      'Add a unit test that exercises each new line listed below, or restructure',
-      'the new code so it sits on an already-tested path.',
+      'Strict 100% on new src/ code; bare `/* v8 ignore */` escape hatches are rejected.',
+      'Add a unit test that exercises each new line listed below, restructure the new',
+      'code so it sits on an already-tested path, or — for a genuinely-unreachable',
+      'branch — document the marker with a reason: `/* v8 ignore next -- why */`.',
       '',
       '::error file=packages/engine/src/foo.ts,line=3::patch-coverage [uncovered] file has no coverage data (no test ever loaded it)',
       '',
@@ -138,9 +140,10 @@ describe('decidePatchCoverage: escape-hatch violation', () => {
     expect(r.err).toEqual([
       'patch-coverage: violations found.',
       '',
-      'Strict 100% on new src/ code; no `/* v8 ignore */` escape hatches.',
-      'Add a unit test that exercises each new line listed below, or restructure',
-      'the new code so it sits on an already-tested path.',
+      'Strict 100% on new src/ code; bare `/* v8 ignore */` escape hatches are rejected.',
+      'Add a unit test that exercises each new line listed below, restructure the new',
+      'code so it sits on an already-tested path, or — for a genuinely-unreachable',
+      'branch — document the marker with a reason: `/* v8 ignore next -- why */`.',
       '',
       '::error file=packages/engine/src/foo.ts,line=20::patch-coverage [escape-hatch] new ignore marker introduced: /* v8 ignore next */',
       '',
@@ -175,14 +178,63 @@ describe('decidePatchCoverage: multiple violations', () => {
     expect(r.err).toEqual([
       'patch-coverage: violations found.',
       '',
-      'Strict 100% on new src/ code; no `/* v8 ignore */` escape hatches.',
-      'Add a unit test that exercises each new line listed below, or restructure',
-      'the new code so it sits on an already-tested path.',
+      'Strict 100% on new src/ code; bare `/* v8 ignore */` escape hatches are rejected.',
+      'Add a unit test that exercises each new line listed below, restructure the new',
+      'code so it sits on an already-tested path, or — for a genuinely-unreachable',
+      'branch — document the marker with a reason: `/* v8 ignore next -- why */`.',
       '',
       '::error file=packages/engine/src/a.ts,line=1::patch-coverage [uncovered] added line not exercised by unit tests: const a = 1;',
       '::error file=packages/engine/src/b.ts,line=2::patch-coverage [escape-hatch] new ignore marker introduced: /* c8 ignore next */',
       '',
       '2 violation(s).',
     ]);
+  });
+});
+
+describe('decidePatchCoverage: reasoned ignore markers are permitted', () => {
+  // Gate-4 (epic #474) needs to mark genuinely-unreachable engine branches to
+  // reach the unit-coverage 100% floor, but the strict-100% patch-coverage gate
+  // used to reject *every* newly-introduced ignore marker. The policy now
+  // distinguishes a documented marker (`/* v8 ignore next -- <reason> */`) —
+  // permitted — from a bare escape hatch — still rejected. The required reason
+  // keeps the "no lazy escape hatches" intent: a marker must justify itself.
+
+  it('does NOT flag a newly introduced v8 ignore marker that carries a `-- reason`', () => {
+    const r = decide({
+      addedByFile: [
+        {
+          file: 'packages/engine/src/foo.ts',
+          added: [
+            { line: 25, text: '  /* v8 ignore next -- unreachable: Zod defaults depends_on to [] */' },
+          ],
+        },
+      ],
+      coverageFor: () => cov([25], []),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.out).toEqual(['patch-coverage: every added src/ line is covered, no escape hatches. ✓']);
+  });
+
+  it('still rejects a bare marker with no reason', () => {
+    const r = decide({
+      addedByFile: [{ file: 'packages/engine/src/foo.ts', added: [{ line: 26, text: '  /* v8 ignore next */' }] }],
+      coverageFor: () => cov([26], []),
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.err).toContain(
+      '::error file=packages/engine/src/foo.ts,line=26::patch-coverage [escape-hatch] new ignore marker introduced: /* v8 ignore next */',
+    );
+  });
+
+  it('permits a bare `stop` closer without a reason (it ends a justified block)', () => {
+    // A `/* v8 ignore stop */` introduces no exclusion — it closes a reasoned
+    // `start` — so it needs no reason of its own even though it matches the
+    // escape-hatch shape.
+    const r = decide({
+      addedByFile: [{ file: 'packages/engine/src/foo.ts', added: [{ line: 27, text: '  /* v8 ignore stop */' }] }],
+      coverageFor: () => cov([27], []),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.out).toEqual(['patch-coverage: every added src/ line is covered, no escape hatches. ✓']);
   });
 });

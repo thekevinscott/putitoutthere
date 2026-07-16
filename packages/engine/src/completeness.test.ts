@@ -22,6 +22,7 @@ import {
   checkCompleteness,
   expectedLayout,
   requireCompleteness,
+  verifyShape,
   type MatrixRow,
 } from './completeness.js';
 
@@ -363,6 +364,29 @@ describe('expectedLayout', () => {
         row({ name: 'foo', kind: 'npm', target: 'linux-x64-gnu', artifact_name: 'foo-linux-x64' }),
       ),
     ).toBe('artifacts/foo-linux-x64/<binary-or-bundle>');
+  });
+});
+
+// `verifyShape`'s `crates` arm is unreachable through `checkCompleteness`:
+// `verifyRow` returns null for crates rows before `verifyShape` is ever
+// called (the pipeline never uploads a `.crate` artifact). Exercise the
+// arm directly so its shape check — and both ternary branches — stay
+// covered.
+describe('verifyShape: crates arm (exercised directly)', () => {
+  it('returns null when a .crate file is present', () => {
+    expect(
+      verifyShape(row({ kind: 'crates', artifact_name: 'demo-crate' }), [
+        'artifacts/demo-crate/demo-0.1.0.crate',
+      ]),
+    ).toBeNull();
+  });
+
+  it('returns a reason when no .crate file is present', () => {
+    expect(
+      verifyShape(row({ kind: 'crates', artifact_name: 'demo-crate' }), [
+        'artifacts/demo-crate/notes.txt',
+      ]),
+    ).toMatch(/no \.crate file in demo-crate\//);
   });
 });
 

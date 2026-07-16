@@ -101,6 +101,14 @@ describe('isVersionIndependentWheel (#401)', () => {
     expect(detect()).toBe(false);
   });
 
+  it('returns false when a walked table path bottoms out on a non-table value', () => {
+    // `[tool]` exists but `tool.maturin` is a bare string, so the dotted
+    // `['tool','maturin']` walk reaches a final non-table value and returns
+    // null via the closing `isTable(cur) ? cur : null` fallback.
+    withManifests({ pyproject: '[tool]\nmaturin = "not-a-table"\n' });
+    expect(detect()).toBe(false);
+  });
+
   it('does not mistake a non-abi3 feature whose name merely contains "abi3"', () => {
     // `abi3-compat` is not a real pyo3 feature, but the anchored regex
     // must not match feature names that only embed the token.

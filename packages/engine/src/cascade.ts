@@ -102,8 +102,9 @@ export function assertNoCycles(packages: readonly Package[]): void {
     // `byName.get` is only undefined here when `visit` was entered with
     // a name we iterated over packages for — that list IS the keys of
     // byName, so this branch is unreachable under normal use. Defensive.
-    /* v8 ignore next */
+    /* v8 ignore start -- byName always contains every visited name; unreachable */
     if (!node) {return;}
+    /* v8 ignore stop */
     /* v8 ignore next -- depends_on default is always [] from the Zod schema */
     for (const dep of node.depends_on ?? []) {
       if (!byName.has(dep)) {
