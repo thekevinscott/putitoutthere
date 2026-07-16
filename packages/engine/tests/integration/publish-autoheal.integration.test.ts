@@ -17,30 +17,38 @@
  * Red before the fix: the skip path creates no tag.
  */
 
-import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import type * as ChildProcess from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { publish } from '../../src/publish.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
 
-// Dual-mock window: the npm handler + plan()'s git reads both flow
-// through the process seam (`execCapture`). Intercept `npm` here and
-// delegate everything else — `git` in particular — to the real
-// `execCapture` so plan()'s git reads and the tag-write heal run against
-// the real fixture repo.
-type ExecCapture = typeof execCapture;
-const real = vi.hoisted(() => ({ execCapture: undefined as unknown as ExecCapture }));
-
-vi.mock('../../src/utils/exec-capture.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
-  real.execCapture = actual.execCapture;
-  return { ...actual, execCapture: vi.fn(actual.execCapture) };
+// Dual-mock window: the npm handler + plan()'s git reads both flow through
+// the first-party process seam (`execCapture`). Integration tests run that
+// seam for real and mock only the Node built-in underneath it — `execFile`
+// (what `execCapture` uses); mocking the seam module itself would trip the
+// testing-conventions `no-first-party-mock` gate. Intercept `npm` here and
+// delegate everything else — `git` in particular — to the real `execFile`
+// so plan()'s git reads and the tag-write heal run against the real fixture
+// repo.
+const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
 });
 
-const execMock = vi.mocked(execCapture);
+const execMock = vi.mocked(execFile);
+
+/** A minimal execFile-child stand-in that emits `close` with `code`. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
 
 let repo: string;
 
@@ -70,14 +78,20 @@ beforeEach(() => {
 
   // npm `view` SUCCEEDS -> the version looks already-published, so the
   // package takes the skip path; `npm publish` should never be invoked.
-  execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) => {
+  execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     if (cmd === 'npm') {
       const a = args as string[];
-      if (a[0] === 'view') {return Promise.resolve({ stdout: '0.1.0', stderr: '' });}
-      if (a[0] === 'publish') {return Promise.resolve({ stdout: '', stderr: '' });}
+      if (a[0] === 'view') {
+        cb(null, '0.1.0', '');
+        return fakeChild(0);
+      }
+      if (a[0] === 'publish') {
+        cb(null, '', '');
+        return fakeChild(0);
+      }
     }
-    return real.execCapture(cmd, args, opts as Parameters<ExecCapture>[2]);
-  }) as ExecCapture);
+    return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
+  }) as unknown as typeof execFile);
 
   gitInRepo(['init', '-q', '-b', 'main']);
   gitInRepo(['config', 'user.email', 'test@example.com']);

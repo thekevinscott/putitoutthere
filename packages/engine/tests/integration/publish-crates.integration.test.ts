@@ -24,7 +24,9 @@
  * Issue #290.
  */
 
-import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import type * as ChildProcess from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,24 +42,30 @@ import {
 } from 'vitest';
 
 import { publish } from '../../src/publish.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
 import { makeServer, makeState, type RegistryState } from './mock-registries.js';
 
-// Dual-mock window: cargo + git both flow through the process seam
-// (`execCapture`) now. Intercept `cargo` here (record-only, never invoke
-// the real binary) and delegate everything else — `git` in particular —
-// to the real `execCapture` so plan()'s git reads and the handler's
-// dirty-tree scan run against the real fixture repo.
-type ExecCapture = typeof execCapture;
-const real = vi.hoisted(() => ({ execCapture: undefined as unknown as ExecCapture }));
-
-vi.mock('../../src/utils/exec-capture.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
-  real.execCapture = actual.execCapture;
-  return { ...actual, execCapture: vi.fn(actual.execCapture) };
+// Dual-mock window: cargo + git both flow through the first-party process
+// seam (`execCapture`) now. Integration tests run that seam for real and
+// mock only the Node built-in underneath it — `execFile` (what
+// `execCapture` uses); mocking the seam module itself would trip the
+// testing-conventions `no-first-party-mock` gate. Intercept `cargo` here
+// (record-only, never invoke the real binary) and delegate everything else
+// — `git` in particular — to the real `execFile` so plan()'s git reads and
+// the handler's dirty-tree scan run against the real fixture repo.
+const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
 });
 
-const execMock = vi.mocked(execCapture);
+const execMock = vi.mocked(execFile);
+
+/** A minimal execFile-child stand-in that emits `close` with `code`. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
 
 let state: RegistryState;
 const server = (() => {
@@ -118,20 +126,22 @@ beforeEach(() => {
   // effect; intercept and never invoke the real cargo. Everything else
   // (git in particular) hits the real binary so plan()'s `git log` /
   // `git rev-parse` work against the real repo.
-  execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) => {
+  execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     if (cmd === 'cargo') {
       // Record-only; if the test asserts cargo was *not* invoked, this
       // body never executes. If it does run (sanity-check test),
       // pretend the publish succeeded so the handler's downstream path
       // doesn't crash the test on an unexpected stderr shape.
-      return Promise.resolve({ stdout: '', stderr: '' });
+      cb(null, '', '');
+      return fakeChild(0);
     }
-    return real.execCapture(
+    return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(
       cmd,
       args,
-      opts as Parameters<ExecCapture>[2],
+      opts,
+      cb,
     );
-  }) as ExecCapture);
+  }) as unknown as typeof execFile);
 
   gitInRepo(['init', '-q', '-b', 'main']);
   gitInRepo(['config', 'user.email', 'test@example.com']);

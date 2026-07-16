@@ -1,7 +1,7 @@
 /**
  * npm integration test. Runs the npm handler's isPublished + publish
- * against a simulated registry implemented by mocking the process seam
- * (`execCapture`).
+ * against a simulated registry implemented by mocking the Node built-in
+ * `execFile` underneath the real process seam (`execCapture`).
  *
  * The npm handler shells out to the `npm` CLI (instead of hitting
  * REST endpoints directly), so msw can't intercept. A verdaccio
@@ -12,22 +12,34 @@
  * Issue #27. Plan: §23.3.
  */
 
+import { EventEmitter } from 'node:events';
+import type * as ChildProcess from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { npm } from '../../src/handlers/npm.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
-import { ExecError } from '../../src/utils/exec-error.js';
 import type { Ctx } from '../../src/types.js';
 
-vi.mock('../../src/utils/exec-capture.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
-  return { ...actual, execCapture: vi.fn(actual.execCapture) };
+// Integration tests run the first-party exec seam for real and mock only the
+// Node built-in underneath it — `execFile` (what `execCapture` uses). Mocking
+// the seam module itself would trip the testing-conventions
+// `no-first-party-mock` gate.
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
 });
 
-const execMock = vi.mocked(execCapture);
+const execMock = vi.mocked(execFile);
+
+/** A minimal execFile-child stand-in that emits `close` with `code`. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
 
 interface FakeRegistry {
   published: Set<string>;
@@ -39,14 +51,16 @@ function fakeRegistry(): FakeRegistry {
 }
 
 function wireRegistry(reg: FakeRegistry, dir: string): void {
-  execMock.mockImplementation((_cmd, args) => {
-    const a = args as string[];
+  execMock.mockImplementation(((_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    const a = [...(args ?? [])] as string[];
     if (a[0] === 'view') {
       const [name, version] = String(a[1]).split('@');
       if (reg.published.has(`${name!}@${version!}`)) {
-        return Promise.resolve({ stdout: `${version!}\n`, stderr: '' });
+        cb(null, `${version!}\n`, '');
+        return fakeChild(0);
       }
-      return Promise.reject(new ExecError('E404', '', '404 not found', 1));
+      cb(Object.assign(new Error('E404'), { code: 1 }), '', '404 not found');
+      return fakeChild(1);
     }
     if (a[0] === 'publish') {
       const pkgJson = JSON.parse(
@@ -58,11 +72,13 @@ function wireRegistry(reg: FakeRegistry, dir: string): void {
         version: pkgJson.version,
         flags: a.filter((s) => s.startsWith('--')),
       });
-      return Promise.resolve({ stdout: '', stderr: '' });
+      cb(null, '', '');
+      return fakeChild(0);
     }
     /* v8 ignore next -- only view + publish are called */
-    return Promise.reject(new Error(`unexpected npm subcommand: ${a[0]}`));
-  });
+    cb(Object.assign(new Error(`unexpected npm subcommand: ${a[0]}`), { code: 1 }), '', '');
+    return fakeChild(1);
+  }) as unknown as typeof execFile);
 }
 
 let dir: string;

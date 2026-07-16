@@ -15,7 +15,9 @@
  * Issue #296. Parent: #292.
  */
 
-import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import type * as ChildProcess from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,8 +27,6 @@ import { crates } from '../../src/handlers/crates.js';
 import { npm } from '../../src/handlers/npm.js';
 import { pypi } from '../../src/handlers/pypi.js';
 import { ErrorCodes } from '../../src/error-codes.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
-import { ExecError } from '../../src/utils/exec-error.js';
 import type { Ctx } from '../../src/types.js';
 
 // Literal pinned here rather than imported from ErrorCodes so the test
@@ -38,19 +38,27 @@ import { loadFixture } from './fixtures/load.js';
 import { makeServer, makeState, type RegistryState } from './mock-registries.js';
 
 // Dual-mock window: crates + npm handlers drive cargo/npm through the
-// process seam (`execCapture`), and the crates dirty-tree scan drives git
-// through it too. Intercept cargo/npm per test; delegate git to the real
-// `execCapture` so the scan runs against the real fixture repo.
-type ExecCapture = typeof execCapture;
-const real = vi.hoisted(() => ({ execCapture: undefined as unknown as ExecCapture }));
-
-vi.mock('../../src/utils/exec-capture.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/utils/exec-capture.js')>();
-  real.execCapture = actual.execCapture;
-  return { ...actual, execCapture: vi.fn(actual.execCapture) };
+// first-party process seam (`execCapture`), and the crates dirty-tree scan
+// drives git through it too. Integration tests run that seam for real and
+// mock only the Node built-in underneath it — `execFile` (what
+// `execCapture` uses); mocking the seam module itself would trip the
+// testing-conventions `no-first-party-mock` gate. Intercept cargo/npm per
+// test; delegate git to the real `execFile` so the scan runs against the
+// real fixture repo.
+const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
 });
 
-const execMock = vi.mocked(execCapture);
+const execMock = vi.mocked(execFile);
+
+/** A minimal execFile-child stand-in that emits `close` with `code`. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
 
 let state: RegistryState;
 const server = (() => {
@@ -134,16 +142,17 @@ describe('crates.io: OIDC TP first-publish rejection (#284)', () => {
   }
 
   function wireCargo(stderrFixture: string): void {
-    execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) => {
+    execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
       if (cmd === 'cargo') {
         // Simulate cargo's non-zero exit with the captured stderr. The
-        // shape (an ExecError carrying `stderr`/`status`) matches the
-        // process seam's rejection surface the handler reads in its
-        // catch block.
-        return Promise.reject(new ExecError('cargo publish exit 101', '', stderrFixture, 101));
+        // seam maps a numeric-`code` callback error to an ExecError
+        // carrying `stderr`/`status` — the rejection surface the handler
+        // reads in its catch block.
+        cb(Object.assign(new Error('cargo publish exit 101'), { code: 101 }), '', stderrFixture);
+        return fakeChild(101);
       }
-      return real.execCapture(cmd, args, opts as Parameters<ExecCapture>[2]);
-    }) as ExecCapture);
+      return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
+    }) as unknown as typeof execFile);
   }
 
   it('replays the cargo stderr fixture and surfaces a bootstrap hint pointing at CARGO_REGISTRY_TOKEN', async () => {
@@ -196,20 +205,23 @@ describe('npm: E403 over-publish race (#281)', () => {
   // pins the exact stderr shape we depend on.
 
   function wireNpm(stderrFixture: string): void {
-    execMock.mockImplementation(((cmd: string, args: readonly string[]) => {
+    execMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
       const a = args as string[];
       if (cmd === 'npm' && a[0] === 'view') {
         // isPublished probe: reject E404 ("not yet on registry") so the
         // handler proceeds to publish.
-        return Promise.reject(new ExecError('E404', '', '404', 1));
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', '404');
+        return fakeChild(1);
       }
       if (cmd === 'npm' && a[0] === 'publish') {
         // The publish itself: reject with the over-publish-race stderr.
-        return Promise.reject(new ExecError('E403', '', stderrFixture, 1));
+        cb(Object.assign(new Error('E403'), { code: 1 }), '', stderrFixture);
+        return fakeChild(1);
       }
       /* v8 ignore next */
-      return Promise.reject(new Error(`unexpected subprocess: ${cmd} ${a.join(' ')}`));
-    }) as ExecCapture);
+      cb(Object.assign(new Error(`unexpected subprocess: ${cmd} ${a.join(' ')}`), { code: 1 }), '', '');
+      return fakeChild(1);
+    }) as unknown as typeof execFile);
   }
 
   it('replays the npm stderr fixture and short-circuits to already-published', async () => {
@@ -244,14 +256,16 @@ describe('npm: provenance requires non-empty `repository` (#281)', () => {
       // No `repository` field — the bug shape.
     }));
     // npm `view` for isPublished returns 404 so we get to the assertion.
-    execMock.mockImplementation(((cmd: string, args: readonly string[]) => {
+    execMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
       const a = args as string[];
       if (cmd === 'npm' && a[0] === 'view') {
-        return Promise.reject(new ExecError('E404', '', '404', 1));
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', '404');
+        return fakeChild(1);
       }
       /* v8 ignore next */
-      return Promise.reject(new Error(`unexpected subprocess: ${cmd} ${a.join(' ')}`));
-    }) as ExecCapture);
+      cb(Object.assign(new Error(`unexpected subprocess: ${cmd} ${a.join(' ')}`), { code: 1 }), '', '');
+      return fakeChild(1);
+    }) as unknown as typeof execFile);
 
     const pkg = { name: 'demo-pkg', path: workdir };
     await expect(
