@@ -46,6 +46,38 @@ authorization per the git-safety protocol.
   - `notes/handoff/YYYY-MM-DD-<topic>.md` — handoff briefs.
   - `notes/migrations-pre-rewrite/` — stale per-library adoption plans drafted against the prior hand-written-`release.yml` model. Do not extend.
 
+## Session handoff doc
+
+Maintain one ongoing handoff doc per working session and deliver it to the
+user as a downloadable markdown file at every **stopping point**: after each
+major unit of work lands (a push, an observed red or green CI run, a merged
+PR, a finished investigation) or when blocked on user input. A stopping
+point marks a checkpoint, not the end — send the doc, then keep working.
+
+This is distinct from `notes/handoff/` briefs, which are committed internal
+docs. The session handoff doc is conversation-scoped: keep it in the session
+scratchpad or `/tmp` (e.g. `<scratchpad>/handoff.md`) and never commit it,
+stage it, or place it anywhere in the repo tree.
+
+Update the same doc in place and re-send it at each checkpoint (in hosted
+sessions, attach it via the file-delivery tool; locally, print its path), so
+the freshest copy sits near the bottom of the conversation. Write it
+standalone, so a brand-new session with zero context can resume from it
+alone:
+
+- Task and current status (done / in progress / next)
+- Branches, PRs, and issues with numbers and CI state — including where the
+  red/green cadence stands (test pushed? red observed? implementation up?)
+- Key decisions and discovered constraints, with one-line reasons
+- Exact next steps, including commands to run
+- Anything waiting on the user
+
+Purpose: the prompt cache survives at most an hour of inactivity, so
+resuming a long conversation after hours away reprocesses the entire history
+at full cost. A current handoff doc near the end of the transcript lets the
+user scroll up, grab it, and start a cheap fresh session from the doc
+instead of resuming the stale one.
+
 ## Engine code conventions
 
 The engine (`src/`) is **synchronous throughout**. File I/O uses the
