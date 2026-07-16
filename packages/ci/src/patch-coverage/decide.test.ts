@@ -186,3 +186,39 @@ describe('decidePatchCoverage: multiple violations', () => {
     ]);
   });
 });
+
+describe('decidePatchCoverage: reasoned ignore markers are permitted', () => {
+  // Gate-4 (epic #474) needs to mark genuinely-unreachable engine branches to
+  // reach the unit-coverage 100% floor, but the strict-100% patch-coverage gate
+  // used to reject *every* newly-introduced ignore marker. The policy now
+  // distinguishes a documented marker (`/* v8 ignore next -- <reason> */`) —
+  // permitted — from a bare escape hatch — still rejected. The required reason
+  // keeps the "no lazy escape hatches" intent: a marker must justify itself.
+
+  it('does NOT flag a newly introduced v8 ignore marker that carries a `-- reason`', () => {
+    const r = decide({
+      addedByFile: [
+        {
+          file: 'packages/engine/src/foo.ts',
+          added: [
+            { line: 25, text: '  /* v8 ignore next -- unreachable: Zod defaults depends_on to [] */' },
+          ],
+        },
+      ],
+      coverageFor: () => cov([25], []),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.out).toEqual(['patch-coverage: every added src/ line is covered, no escape hatches. ✓']);
+  });
+
+  it('still rejects a bare marker with no reason', () => {
+    const r = decide({
+      addedByFile: [{ file: 'packages/engine/src/foo.ts', added: [{ line: 26, text: '  /* v8 ignore next */' }] }],
+      coverageFor: () => cov([26], []),
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.err).toContain(
+      '::error file=packages/engine/src/foo.ts,line=26::patch-coverage [escape-hatch] new ignore marker introduced: /* v8 ignore next */',
+    );
+  });
+});
