@@ -17,11 +17,11 @@ jobs:
     with:
       source: packages/ci/src
 
-  # packages/engine is adopted gate-by-gate (epic #474) to keep each PR
-  # reviewable. Gates are turned on one at a time and the flag is removed
-  # once the engine meets the full standard.
+  # packages/engine now meets the full testing-conventions standard: every
+  # gate runs with no `gates:` filter and no config/exemptions (epic #474 /
+  # #476, adopted gate-by-gate — colocated-test, unit-lint, integration-lint,
+  # unit-coverage, mutation, packaging — then flipped to the full standard).
   engine:
     uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
     with:
       source: packages/engine/src
-      gates: '["colocated-test","unit-lint","integration-lint","unit-coverage","mutation"]'
