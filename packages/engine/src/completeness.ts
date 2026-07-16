@@ -14,8 +14,9 @@
  * Issue #13. Plan: §13.2.
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathExists } from './utils/path-exists.js';
 import type { Kind } from './types.js';
 
 export interface MatrixRow {
@@ -59,15 +60,15 @@ export interface PackageCompleteness {
   missing: MissingArtifact[];
 }
 
-export function checkCompleteness(
+export async function checkCompleteness(
   matrix: readonly MatrixRow[],
   artifactsRoot: string,
-): Map<string, PackageCompleteness> {
+): Promise<Map<string, PackageCompleteness>> {
   const byPackage = new Map<string, PackageCompleteness>();
 
   for (const row of matrix) {
     const entry = byPackage.get(row.name) ?? { ok: true, missing: [] };
-    const reason = verifyRow(row, artifactsRoot);
+    const reason = await verifyRow(row, artifactsRoot);
     if (reason !== null) {
       entry.ok = false;
       entry.missing.push({ row, reason });
@@ -78,11 +79,11 @@ export function checkCompleteness(
   return byPackage;
 }
 
-export function requireCompleteness(
+export async function requireCompleteness(
   matrix: readonly MatrixRow[],
   artifactsRoot: string,
-): void {
-  const results = checkCompleteness(matrix, artifactsRoot);
+): Promise<void> {
+  const results = await checkCompleteness(matrix, artifactsRoot);
   const failed = [...results.entries()].filter(([, r]) => !r.ok);
   if (failed.length === 0) {return;}
 
@@ -106,7 +107,7 @@ export function requireCompleteness(
  * Returns null when the row's artifact is present and shaped correctly;
  * otherwise a human-readable reason.
  */
-function verifyRow(row: MatrixRow, artifactsRoot: string): string | null {
+async function verifyRow(row: MatrixRow, artifactsRoot: string): Promise<string | null> {
   // crates: `cargo publish` packages and uploads from the source tree
   // directly — the reusable workflow never uploads a `.crate` artifact
   // (release.yml's upload step is `if: matrix.kind != 'crates'`), so
@@ -120,12 +121,12 @@ function verifyRow(row: MatrixRow, artifactsRoot: string): string | null {
   if (row.kind === 'npm' && row.target === 'noarch') {return null;}
 
   const dir = join(artifactsRoot, row.artifact_name);
-  if (!existsSync(dir)) {
+  if (!(await pathExists(dir))) {
     return `missing artifact directory ${row.artifact_name}/`;
   }
   let files: string[];
   try {
-    files = listFiles(dir);
+    files = await listFiles(dir);
     /* v8 ignore start -- defensive; existsSync passed and we own the temp dir */
   } catch (err) {
     return `cannot read ${row.artifact_name}/: ${err instanceof Error ? err.message : String(err)}`;
@@ -141,14 +142,14 @@ function verifyRow(row: MatrixRow, artifactsRoot: string): string | null {
  * Recursive file listing. Wheels and sdists may sit one level deep in
  * a `dist/` subdir depending on how the user's build writes them.
  */
-function listFiles(dir: string): string[] {
+async function listFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
+  for (const entry of await readdir(dir)) {
     const full = join(dir, entry);
-    const st = statSync(full);
+    const st = await stat(full);
     /* v8 ignore start -- both arms exercised across runs but coverage is per-platform */
     if (st.isDirectory()) {
-      out.push(...listFiles(full));
+      out.push(...(await listFiles(full)));
     } else if (st.isFile() && st.size > 0) {
       out.push(full);
     }

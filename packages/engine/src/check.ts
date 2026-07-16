@@ -104,31 +104,31 @@ export async function runChecks(opts: CheckOptions): Promise<CheckFinding[]> {
   await checkGlobsMatchTrackedFiles(packages, cwd, findings);
   checkDependsOn(packages, findings);
   checkTagTemplateCollisions(packages, findings);
-  checkNpmRepository(packages, findings);
-  checkCratesPackageMetadata(packages, findings);
+  await checkNpmRepository(packages, findings);
+  await checkCratesPackageMetadata(packages, findings);
   findings.push(...(await checkCratesPackageSize(packages)));
   await checkPyprojectAndBundleCli(packages, cwd, findings);
-  checkPypiVersion(packages, findings);
-  checkPyprojectShapeFindings(packages, findings);
+  await checkPypiVersion(packages, findings);
+  await checkPyprojectShapeFindings(packages, findings);
   await checkCargoShapeFindings(packages, cwd, findings);
-  checkPackageJsonShapeFindings(packages, findings);
+  await checkPackageJsonShapeFindings(packages, findings);
   checkNpmTargetTriples(packages, findings);
-  checkRepoUrlMatchFindings(packages, findings);
+  await checkRepoUrlMatchFindings(packages, findings);
 
   return findings;
 }
 
-function checkRepoUrlMatchFindings(
+async function checkRepoUrlMatchFindings(
   packages: readonly Package[],
   findings: CheckFinding[],
-): void {
+): Promise<void> {
   // Sourced from GHA's process env at PR time when this runs inside the
   // reusable workflow. Locally invoked `putitoutthere check` outside any
   // GHA context will skip the check (the preflight returns no findings
   // when GITHUB_REPOSITORY is unset), which is the right behaviour:
   // there is no workflow source to disagree with.
   const githubRepository = process.env.GITHUB_REPOSITORY;
-  for (const f of checkRepoUrlMatch(packages, { githubRepository })) {
+  for (const f of await checkRepoUrlMatch(packages, { githubRepository })) {
     findings.push({
       package: f.package,
       message: `[${ErrorCodes.REPO_URL_MISMATCH}] ${f.manifestPath}: declared repository "${f.declaredOwnerRepo}" does not match GITHUB_REPOSITORY "${f.expectedOwnerRepo}". npm rejects \`--provenance\` publishes whose package.json#repository.url disagrees with the OIDC source claim (422); crates.io / PyPI trusted-publisher paths carry the same risk.`,
@@ -136,11 +136,11 @@ function checkRepoUrlMatchFindings(
   }
 }
 
-function checkPyprojectShapeFindings(
+async function checkPyprojectShapeFindings(
   packages: readonly Package[],
   findings: CheckFinding[],
-): void {
-  for (const f of checkPyprojectShape(packages)) {
+): Promise<void> {
+  for (const f of await checkPyprojectShape(packages)) {
     findings.push({
       package: f.package,
       message: `[${f.code}] ${f.pyprojectPath}: ${f.detail}`,
@@ -161,11 +161,11 @@ async function checkCargoShapeFindings(
   }
 }
 
-function checkPackageJsonShapeFindings(
+async function checkPackageJsonShapeFindings(
   packages: readonly Package[],
   findings: CheckFinding[],
-): void {
-  for (const f of checkPackageJsonShape(packages)) {
+): Promise<void> {
+  for (const f of await checkPackageJsonShape(packages)) {
     findings.push({
       package: f.package,
       message: `[${f.code}] ${f.packageJsonPath}: ${f.detail}`,
@@ -237,8 +237,8 @@ function checkTagTemplateCollisions(
   }
 }
 
-function checkNpmRepository(packages: readonly Package[], findings: CheckFinding[]): void {
-  for (const f of checkProvenanceMetadata(packages)) {
+async function checkNpmRepository(packages: readonly Package[], findings: CheckFinding[]): Promise<void> {
+  for (const f of await checkProvenanceMetadata(packages)) {
     const reason =
       f.reason === 'missing'
         ? `${f.packageJsonPath} not found`
@@ -250,11 +250,11 @@ function checkNpmRepository(packages: readonly Package[], findings: CheckFinding
   }
 }
 
-function checkCratesPackageMetadata(
+async function checkCratesPackageMetadata(
   packages: readonly Package[],
   findings: CheckFinding[],
-): void {
-  for (const f of checkCratesMetadata(packages)) {
+): Promise<void> {
+  for (const f of await checkCratesMetadata(packages)) {
     findings.push({
       package: f.package,
       message: `[${ErrorCodes.CRATES_MISSING_METADATA}] ${f.cargoTomlPath} missing required Cargo.toml [package] field(s): ${f.missing.join(', ')}. crates.io rejects the publish after cargo's verification build.`,
@@ -310,11 +310,11 @@ async function checkPyprojectAndBundleCli(
   }
 }
 
-function checkPypiVersion(
+async function checkPypiVersion(
   packages: readonly Package[],
   findings: CheckFinding[],
-): void {
-  for (const f of checkPypiVersionSource(packages)) {
+): Promise<void> {
+  for (const f of await checkPypiVersionSource(packages)) {
     findings.push({
       package: f.package,
       message: `[${ErrorCodes.PYPI_STATIC_VERSION}] ${f.pyprojectPath} declares a static \`[project].version\` literal. Use \`[project].dynamic = ["version"]\` with hatch-vcs (recommended), setuptools-scm, or the maturin Cargo.toml-driven path — putitoutthere does not edit pyproject.toml at release time, so a literal silently ships the previous release.`,

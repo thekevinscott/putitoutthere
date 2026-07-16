@@ -100,7 +100,7 @@ function row(pkg: Package): MatrixRow {
 
 /** A completeness map where every package is complete. */
 function allComplete(...packages: Package[]): void {
-  vi.mocked(checkCompleteness).mockReturnValue(
+  vi.mocked(checkCompleteness).mockResolvedValue(
     new Map(packages.map((p) => [p.name, { ok: true, missing: [] }])),
   );
 }
@@ -120,23 +120,24 @@ function makeHandler(over: Partial<Handler> = {}): Handler {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(headCommit).mockResolvedValue('HEAD-SHA');
-  vi.mocked(normalizeArtifactLayout).mockReturnValue(undefined);
+  vi.mocked(normalizeArtifactLayout).mockResolvedValue(undefined);
   vi.mocked(readHandlerMeta).mockReturnValue(undefined);
   // Preflight gates pass by default; individual tests override one to abort.
+  // requireAuth is the only synchronous preflight gate.
+  vi.mocked(requireAuth).mockReturnValue(undefined);
+  // Async gates.
   for (const gate of [
-    requireAuth,
     requireProvenanceMetadata,
     requireCratesMetadata,
     requirePypiVersionSource,
     requirePyprojectShape,
     requirePackageJsonShape,
     requireRepoUrlMatch,
+    requireCargoShape,
+    requireRepoPublic,
   ]) {
-    vi.mocked(gate).mockReturnValue(undefined);
+    vi.mocked(gate).mockResolvedValue(undefined);
   }
-  // Async gates.
-  vi.mocked(requireCargoShape).mockResolvedValue(undefined);
-  vi.mocked(requireRepoPublic).mockResolvedValue(undefined);
 });
 
 describe('publish: happy path', () => {
@@ -250,7 +251,7 @@ describe('publish: pre-flight and completeness', () => {
     const r = row(p);
     vi.mocked(plan).mockResolvedValue([r]);
     // Completeness reports a missing artifact for the package.
-    vi.mocked(checkCompleteness).mockReturnValue(
+    vi.mocked(checkCompleteness).mockResolvedValue(
       new Map([['lib-py', { ok: false, missing: [{ row: r, reason: 'missing sdist' }] }]]),
     );
 

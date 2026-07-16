@@ -112,21 +112,21 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     package.json must carry a non-empty `repository` field. Without
   //     it, `npm publish --provenance` fails deep inside the npm CLI
   //     after the runner has spun up — checkable in milliseconds. #280.
-  requireProvenanceMetadata(selectedPackages);
+  await requireProvenanceMetadata(selectedPackages);
 
   // 2c. Pre-flight crates metadata: every selected crates package's
   //     Cargo.toml must declare `description` and either `license` or
   //     `license-file`. crates.io's 400 lands after `cargo publish`'s
   //     verification build has compiled the crate and every transitive
   //     dep — same wasted-work argument as 2b. #290.
-  requireCratesMetadata(selectedPackages);
+  await requireCratesMetadata(selectedPackages);
 
   // 2d. Pre-flight pypi version source: every selected pypi package's
   //     pyproject.toml must declare `[project].dynamic = ["version"]`
   //     instead of a static literal. The engine does not rewrite the
   //     literal at release time (design-commitment #1), so a literal
   //     would silently ship the previous release's wheel/sdist.
-  requirePypiVersionSource(selectedPackages);
+  await requirePypiVersionSource(selectedPackages);
 
   // 2e. Pre-flight pyproject.toml + Cargo.toml + package.json shape: catch
   //     the {pypi/crates/npm}-manifest name (and related) mismatches that
@@ -135,16 +135,16 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     or, for npm, publish under an unexpected name with broken
   //     idempotency (`npm publish` packs the manifest name while the engine
   //     tracks the configured name). #301.
-  requirePyprojectShape(selectedPackages);
+  await requirePyprojectShape(selectedPackages);
   await requireCargoShape(selectedPackages, { cwd });
-  requirePackageJsonShape(selectedPackages);
+  await requirePackageJsonShape(selectedPackages);
 
   // 2f. Pre-flight manifest repository URL vs GITHUB_REPOSITORY: catches
   //     the npm-provenance 422 ("repository.url is X, expected to match Y
   //     from provenance") and the analogous mismatch on crates.io / PyPI
   //     trusted-publisher paths. Pure local string compare against the
   //     GHA-provided env var.
-  requireRepoUrlMatch(selectedPackages, {
+  await requireRepoUrlMatch(selectedPackages, {
     githubRepository: process.env.GITHUB_REPOSITORY,
   });
 
@@ -161,8 +161,8 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   // First normalize the layout in case actions/download-artifact@v8
   // dumped a single artifact directly into `artifacts/` rather than
   // creating `artifacts/<name>/`. #311.
-  normalizeArtifactLayout(matrix, artifactsRoot(cwd));
-  const completeness = checkCompleteness(matrix, artifactsRoot(cwd));
+  await normalizeArtifactLayout(matrix, artifactsRoot(cwd));
+  const completeness = await checkCompleteness(matrix, artifactsRoot(cwd));
   const incomplete = [...completeness.entries()].filter(([, r]) => !r.ok);
   if (incomplete.length > 0) {
     const lines = ['Artifact completeness check failed:'];
