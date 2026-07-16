@@ -23,8 +23,7 @@
  * Issue #319.
  */
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -34,6 +33,8 @@ import { checkCratesPackageSize } from './check-crate-size.js';
 import { loadConfig, type Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { expandDirGlob, matchesAny } from './glob.js';
+import { execCapture } from './utils/exec-capture.js';
+import { pathExists } from './utils/path-exists.js';
 import { assertTripleSupported } from './handlers/npm-platform.js';
 import {
   checkCargoShape,
@@ -72,12 +73,12 @@ export interface CheckOptions {
  * check assumes a parsed `Config`, and a missing or malformed file
  * would otherwise cascade into a noisy stack trace per package.
  */
-export function runChecks(opts: CheckOptions): CheckFinding[] {
+export async function runChecks(opts: CheckOptions): Promise<CheckFinding[]> {
   const findings: CheckFinding[] = [];
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
 
-  if (!existsSync(cfgPath)) {
+  if (!(await pathExists(cfgPath))) {
     findings.push({
       message: `putitoutthere.toml not found at ${cfgPath}. Drop one at the repo root; see https://github.com/thekevinscott/putitoutthere#2-drop-in-putitoutthere-toml`,
     });
@@ -86,7 +87,7 @@ export function runChecks(opts: CheckOptions): CheckFinding[] {
 
   let packages: Package[];
   try {
-    const config = loadConfig(cfgPath);
+    const config = await loadConfig(cfgPath);
     // Anchor pkg.path to opts.cwd up front so per-kind fs ops point at
     // the right tree even when the CLI is invoked with --cwd from
     // outside the repo (mirrors publish.ts's loop).
@@ -99,17 +100,17 @@ export function runChecks(opts: CheckOptions): CheckFinding[] {
     return findings;
   }
 
-  checkPaths(packages, findings);
-  checkGlobsMatchTrackedFiles(packages, cwd, findings);
+  await checkPaths(packages, findings);
+  await checkGlobsMatchTrackedFiles(packages, cwd, findings);
   checkDependsOn(packages, findings);
   checkTagTemplateCollisions(packages, findings);
   checkNpmRepository(packages, findings);
   checkCratesPackageMetadata(packages, findings);
-  findings.push(...checkCratesPackageSize(packages));
-  checkPyprojectAndBundleCli(packages, cwd, findings);
+  findings.push(...(await checkCratesPackageSize(packages)));
+  await checkPyprojectAndBundleCli(packages, cwd, findings);
   checkPypiVersion(packages, findings);
   checkPyprojectShapeFindings(packages, findings);
-  checkCargoShapeFindings(packages, cwd, findings);
+  await checkCargoShapeFindings(packages, cwd, findings);
   checkPackageJsonShapeFindings(packages, findings);
   checkNpmTargetTriples(packages, findings);
   checkRepoUrlMatchFindings(packages, findings);
@@ -147,12 +148,12 @@ function checkPyprojectShapeFindings(
   }
 }
 
-function checkCargoShapeFindings(
+async function checkCargoShapeFindings(
   packages: readonly Package[],
   cwd: string,
   findings: CheckFinding[],
-): void {
-  for (const f of checkCargoShape(packages, { cwd })) {
+): Promise<void> {
+  for (const f of await checkCargoShape(packages, { cwd })) {
     findings.push({
       package: f.package,
       message: `[${f.code}] ${f.cargoTomlPath}: ${f.detail}`,
@@ -174,9 +175,9 @@ function checkPackageJsonShapeFindings(
 
 /* ----------------------------- internals ----------------------------- */
 
-function checkPaths(packages: readonly Package[], findings: CheckFinding[]): void {
+async function checkPaths(packages: readonly Package[], findings: CheckFinding[]): Promise<void> {
   for (const p of packages) {
-    if (!existsSync(p.path) || !statSync(p.path).isDirectory()) {
+    if (!(await pathExists(p.path)) || !(await stat(p.path)).isDirectory()) {
       findings.push({
         package: p.name,
         message: `path "${p.path}" does not exist or is not a directory in the worktree`,
@@ -185,12 +186,12 @@ function checkPaths(packages: readonly Package[], findings: CheckFinding[]): voi
   }
 }
 
-function checkGlobsMatchTrackedFiles(
+async function checkGlobsMatchTrackedFiles(
   packages: readonly Package[],
   cwd: string,
   findings: CheckFinding[],
-): void {
-  const tracked = listTrackedFiles(cwd);
+): Promise<void> {
+  const tracked = await listTrackedFiles(cwd);
   /* v8 ignore next -- tests always seed a git repo; defensive against
      callers outside one */
   if (tracked === null) {return;}
@@ -261,15 +262,15 @@ function checkCratesPackageMetadata(
   }
 }
 
-function checkPyprojectAndBundleCli(
+async function checkPyprojectAndBundleCli(
   packages: readonly Package[],
   cwd: string,
   findings: CheckFinding[],
-): void {
+): Promise<void> {
   for (const p of packages) {
     if (p.kind !== 'pypi') {continue;}
     const pyprojectPath = join(p.path, 'pyproject.toml');
-    if (!existsSync(pyprojectPath)) {
+    if (!(await pathExists(pyprojectPath))) {
       findings.push({
         package: p.name,
         message: `pyproject.toml not found at ${pyprojectPath}`,
@@ -285,21 +286,21 @@ function checkPyprojectAndBundleCli(
       ? bundleCli.crate_path
       : resolve(cwd, bundleCli.crate_path);
     const cargoTomlPath = join(cratePathAbs, 'Cargo.toml');
-    if (!existsSync(cratePathAbs) || !statSync(cratePathAbs).isDirectory()) {
+    if (!(await pathExists(cratePathAbs)) || !(await stat(cratePathAbs)).isDirectory()) {
       findings.push({
         package: p.name,
         message: `bundle_cli.crate_path "${bundleCli.crate_path}" does not exist or is not a directory`,
       });
       continue;
     }
-    if (!existsSync(cargoTomlPath)) {
+    if (!(await pathExists(cargoTomlPath))) {
       findings.push({
         package: p.name,
         message: `bundle_cli.crate_path "${bundleCli.crate_path}" has no Cargo.toml`,
       });
       continue;
     }
-    const declaredBins = readDeclaredBins(cargoTomlPath);
+    const declaredBins = await readDeclaredBins(cargoTomlPath);
     if (!declaredBins.includes(bundleCli.bin)) {
       findings.push({
         package: p.name,
@@ -343,23 +344,17 @@ function checkNpmTargetTriples(
   }
 }
 
-function listTrackedFiles(cwd: string): string[] | null {
+async function listTrackedFiles(cwd: string): Promise<string[] | null> {
   try {
-    const out = execFileSync('git', ['ls-files'], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return out.split('\n').filter((l) => l.length > 0);
-    /* v8 ignore start -- defensive against callers outside a git repo */
+    const { stdout } = await execCapture('git', ['ls-files'], { cwd });
+    return stdout.split('\n').filter((l) => l.length > 0);
   } catch {
     return null;
   }
-  /* v8 ignore stop */
 }
 
-function readDeclaredBins(cargoTomlPath: string): string[] {
-  const parsed = parseCargoToml(cargoTomlPath);
+async function readDeclaredBins(cargoTomlPath: string): Promise<string[]> {
+  const parsed = await parseCargoToml(cargoTomlPath);
   if (parsed === null) {return [];}
   const result = collectBinsFromManifest(parsed);
   // Workspace manifests delegate [[bin]] declarations to member crates
@@ -372,8 +367,8 @@ function readDeclaredBins(cargoTomlPath: string): string[] {
   // cargo resolves them. parseCargoToml returns null for missing /
   // malformed manifests, so stray entries silently drop out — cargo's
   // own diagnostics own surfacing those.
-  for (const memberManifest of workspaceMemberManifests(parsed, cargoTomlPath)) {
-    const memberParsed = parseCargoToml(memberManifest);
+  for (const memberManifest of await workspaceMemberManifests(parsed, cargoTomlPath)) {
+    const memberParsed = await parseCargoToml(memberManifest);
     if (memberParsed === null) {continue;}
     for (const b of collectBinsFromManifest(memberParsed)) {
       if (!result.includes(b)) {result.push(b);}
@@ -382,10 +377,10 @@ function readDeclaredBins(cargoTomlPath: string): string[] {
   return result;
 }
 
-function workspaceMemberManifests(
+async function workspaceMemberManifests(
   parsed: Record<string, unknown>,
   cargoTomlPath: string,
-): string[] {
+): Promise<string[]> {
   const workspace = parsed.workspace;
   if (typeof workspace !== 'object' || workspace === null) {return [];}
   const members = (workspace as { members?: unknown }).members;
@@ -394,7 +389,7 @@ function workspaceMemberManifests(
   const out: string[] = [];
   for (const m of members) {
     if (typeof m === 'string') {
-      for (const memberDir of expandDirGlob(workspaceDir, m)) {
+      for (const memberDir of await expandDirGlob(workspaceDir, m)) {
         out.push(join(memberDir, 'Cargo.toml'));
       }
     }
@@ -402,10 +397,10 @@ function workspaceMemberManifests(
   return out;
 }
 
-function parseCargoToml(path: string): Record<string, unknown> | null {
+async function parseCargoToml(path: string): Promise<Record<string, unknown> | null> {
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = await readFile(path, 'utf8');
   } catch {
     return null;
   }

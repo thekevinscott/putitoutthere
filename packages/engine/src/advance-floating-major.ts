@@ -26,7 +26,7 @@ import { parseTagVersion } from './tag-template.js';
 
 export async function advanceFloatingMajor(opts: { cwd: string }): Promise<number> {
   const gitOpts = { cwd: opts.cwd };
-  const config = loadConfig(join(opts.cwd, 'putitoutthere.toml'));
+  const config = await loadConfig(join(opts.cwd, 'putitoutthere.toml'));
   const pkg = config.packages[0]!;
 
   // Refresh remote tags (force, so a tag moved on the remote since checkout

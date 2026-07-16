@@ -73,7 +73,7 @@ function stubHandler(): void {
 
 describe('computeVerify', () => {
   it('classifies every posture', async () => {
-    loadConfigMock.mockReturnValue(
+    loadConfigMock.mockResolvedValue(
       configWith(['pkg-oidc', 'pkg-token', 'pkg-unpub', 'pkg-latestflaky', 'pkg-trustflaky']),
     );
     stubHandler();
@@ -92,7 +92,7 @@ describe('computeVerify', () => {
   });
 
   it('does not read trust for an unpublished package', async () => {
-    loadConfigMock.mockReturnValue(configWith(['pkg-unpub']));
+    loadConfigMock.mockResolvedValue(configWith(['pkg-unpub']));
     stubHandler();
 
     const rows = await computeVerify({ cwd: '/repo' });

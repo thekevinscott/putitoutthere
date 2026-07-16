@@ -17,26 +17,36 @@
  * files) stays real.
  */
 
-import type * as ChildProcess from 'node:child_process';
-import { execFileSync, spawnSync } from 'node:child_process';
+import type * as ExecCaptureModule from '../../src/utils/exec-capture.js';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof ChildProcess>();
-  // git stays real (`runChecks` walks `git ls-files`); only the cargo
-  // subprocess this check shells out to is faked.
-  return { ...actual, spawnSync: vi.fn(actual.spawnSync) };
+// git stays real (`runChecks` walks `git ls-files` through the seam); only
+// the `cargo package` call this check shells out to is faked. The seam is
+// partially mocked so the git ls-files path keeps the real implementation.
+vi.mock('../../src/utils/exec-capture.js', async (orig) => {
+  const actual = await orig<typeof ExecCaptureModule>();
+  return {
+    ...actual,
+    execCapture: vi.fn((cmd: string, args: readonly string[], opts?: unknown) => {
+      if (cmd === 'cargo') {return cargoImpl();}
+      return actual.execCapture(cmd, args, opts as never);
+    }),
+  };
 });
 
 import { runChecks } from '../../src/check.js';
+import type { ExecResult } from '../../src/utils/exec-capture.js';
+import { ExecError } from '../../src/utils/exec-error.js';
 
-const spawnMock = vi.mocked(spawnSync);
+/** The faked `cargo package` outcome for the current test. */
+let cargoImpl: () => Promise<ExecResult>;
 
 /** A cargo-package run that succeeded and reported `compressed` size. */
-function cargoPackaged(compressed: string): ReturnType<typeof spawnSync> {
+function cargoPackaged(compressed: string): () => Promise<ExecResult> {
   const stderr = [
     '   Packaging rust-lib v0.1.0 (/tmp/repo/packages/rs)',
     '   Archiving Cargo.toml',
@@ -44,14 +54,7 @@ function cargoPackaged(compressed: string): ReturnType<typeof spawnSync> {
     `    Packaged 7 files, 24.0KiB (${compressed} compressed)`,
     '',
   ].join('\n');
-  return {
-    pid: 1234,
-    output: ['', stderr],
-    stdout: '',
-    stderr,
-    status: 0,
-    signal: null,
-  } as unknown as ReturnType<typeof spawnSync>;
+  return () => Promise.resolve({ stdout: '', stderr });
 }
 
 let repo: string;
@@ -107,20 +110,19 @@ beforeEach(() => {
   gitInRepo(['config', 'user.name', 'Test']);
   gitInRepo(['config', 'commit.gpgsign', 'false']);
   // Benign default: a tiny crate. Tests that care override it.
-  spawnMock.mockReturnValue(cargoPackaged('8.9KiB'));
+  cargoImpl = cargoPackaged('8.9KiB');
 });
 
 afterEach(() => {
-  spawnMock.mockReset();
   rmSync(repo, { recursive: true, force: true });
 });
 
 describe('runChecks: crate-size pre-merge check (#362)', () => {
-  it("flags a crates package whose packaged .crate exceeds crates.io's 10 MiB limit", () => {
+  it("flags a crates package whose packaged .crate exceeds crates.io's 10 MiB limit", async () => {
     seedCratesRepo();
     // cargo packaged a 133.6 MiB `.crate` — the dirsql incident shape.
-    spawnMock.mockReturnValue(cargoPackaged('133.6MiB'));
-    const findings = runChecks({ cwd: repo });
+    cargoImpl = cargoPackaged('133.6MiB');
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -131,54 +133,38 @@ describe('runChecks: crate-size pre-merge check (#362)', () => {
     ).toBe(true);
   });
 
-  it('does not flag a crates package whose packaged .crate is within the limit', () => {
+  it('does not flag a crates package whose packaged .crate is within the limit', async () => {
     // Pins the other half of the contract: an always-fires regression
     // would also satisfy the red test above. cargo reports a small
     // `.crate`, so the size check must stay silent.
     seedCratesRepo();
-    spawnMock.mockReturnValue(cargoPackaged('2.1MiB'));
-    const findings = runChecks({ cwd: repo });
+    cargoImpl = cargoPackaged('2.1MiB');
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /PIOT_CRATES_PACKAGE_TOO_LARGE/.test(f.message))).toBe(
       false,
     );
   });
 
-  it('does not flag when cargo cannot be run (no Rust toolchain)', () => {
+  it('does not flag when cargo cannot be run (no Rust toolchain)', async () => {
     // The check degrades to "can't verify" rather than false-positive
     // when `cargo` is absent — the same null-means-skip shape the
     // tracked-files walk uses when there is no git repo.
     seedCratesRepo();
-    spawnMock.mockReturnValue({
-      pid: 0,
-      output: [],
-      stdout: '',
-      stderr: '',
-      status: null,
-      signal: null,
-      error: Object.assign(new Error('spawnSync cargo ENOENT'), {
-        code: 'ENOENT',
-      }),
-    } as unknown as ReturnType<typeof spawnSync>);
-    const findings = runChecks({ cwd: repo });
+    cargoImpl = () => Promise.reject(new ExecError('spawn cargo ENOENT', '', '', null));
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /PIOT_CRATES_PACKAGE_TOO_LARGE/.test(f.message))).toBe(
       false,
     );
   });
 
-  it('does not flag when cargo package exits non-zero', () => {
+  it('does not flag when cargo package exits non-zero', async () => {
     // A manifest cargo itself rejects is a different failure mode that
     // other checks / the publish path own; the size check must not
     // invent a size finding from a failed run.
     seedCratesRepo();
-    spawnMock.mockReturnValue({
-      pid: 1,
-      output: ['', 'error: failed to parse manifest\n'],
-      stdout: '',
-      stderr: 'error: failed to parse manifest\n',
-      status: 101,
-      signal: null,
-    } as unknown as ReturnType<typeof spawnSync>);
-    const findings = runChecks({ cwd: repo });
+    cargoImpl = () =>
+      Promise.reject(new ExecError('cargo failed', '', 'error: failed to parse manifest\n', 101));
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /PIOT_CRATES_PACKAGE_TOO_LARGE/.test(f.message))).toBe(
       false,
     );

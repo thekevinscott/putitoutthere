@@ -11,8 +11,10 @@
  * Issue #10.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+
+import { pathExists } from './utils/path-exists.js';
 
 import { minimatch } from 'minimatch';
 
@@ -43,7 +45,7 @@ const GLOB_META = /[*?[\]{}]/;
  * directory — while a glob entry is matched one path segment at a time
  * against the real directory tree, so only existing directories come back.
  */
-export function expandDirGlob(baseDir: string, pattern: string): string[] {
+export async function expandDirGlob(baseDir: string, pattern: string): Promise<string[]> {
   const segments = pattern.split('/').filter((s) => s.length > 0);
   let dirs = [baseDir];
   for (const segment of segments) {
@@ -51,13 +53,18 @@ export function expandDirGlob(baseDir: string, pattern: string): string[] {
       dirs = dirs.map((d) => join(d, segment));
       continue;
     }
-    dirs = dirs
-      .filter((d) => existsSync(d))
-      .flatMap((d) =>
-        readdirSync(d, { withFileTypes: true })
-          .filter((e) => e.isDirectory() && matchesGlob(segment, e.name))
-          .map((e) => join(d, e.name)),
-      );
+    // Sequential expansion (no Promise.all): matches the prior flatMap
+    // order — readdir order within each dir, dirs in their existing order.
+    const next: string[] = [];
+    for (const d of dirs) {
+      if (!(await pathExists(d))) {continue;}
+      for (const e of await readdir(d, { withFileTypes: true })) {
+        if (e.isDirectory() && matchesGlob(segment, e.name)) {
+          next.push(join(d, e.name));
+        }
+      }
+    }
+    dirs = next;
   }
   return dirs;
 }

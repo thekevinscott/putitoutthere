@@ -5,8 +5,8 @@ import tseslint from 'typescript-eslint';
 // #469 async-migration ratchet: files still using sync I/O. Entries may
 // only be DELETED (by the sub-issue that migrates them), never added.
 const SYNC_EXEMPT = [
-  'src/check-crate-size.ts', 'src/check.ts', 'src/cli.ts', 'src/completeness.ts',
-  'src/config.ts', 'src/find-workspace-root.ts', 'src/glob.ts',
+  'src/cli.ts', 'src/completeness.ts',
+  'src/find-workspace-root.ts',
   'src/handlers/crates.ts', 'src/handlers/npm-platform.ts', 'src/handlers/npm.ts',
   'src/handlers/pypi.ts', 'src/normalize-artifacts.ts', 'src/preflight.ts',
   'src/python-versions.ts', 'src/utils/list-files-recursive.ts',

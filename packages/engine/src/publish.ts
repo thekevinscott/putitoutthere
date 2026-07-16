@@ -65,7 +65,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   const cwd = opts.cwd;
   /* v8 ignore next -- tests always set explicit paths */
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
-  const config = loadConfig(cfgPath);
+  const config = await loadConfig(cfgPath);
   // Handlers do `readFileSync(join(pkg.path, 'Cargo.toml'))` etc, which
   // resolves against process.cwd(). For self-publish that matches the
   // repo root, but tools that invoke the CLI with `--cwd` (e2e harness,
@@ -136,7 +136,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   //     idempotency (`npm publish` packs the manifest name while the engine
   //     tracks the configured name). #301.
   requirePyprojectShape(selectedPackages);
-  requireCargoShape(selectedPackages, { cwd });
+  await requireCargoShape(selectedPackages, { cwd });
   requirePackageJsonShape(selectedPackages);
 
   // 2f. Pre-flight manifest repository URL vs GITHUB_REPOSITORY: catches

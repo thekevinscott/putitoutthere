@@ -92,7 +92,7 @@ export interface PlanOptions {
 export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
-  const config = loadConfig(cfgPath);
+  const config = await loadConfig(cfgPath);
 
   // Manual release: an explicit package list short-circuits change
   // detection. `release_packages` is the override for re-releasing

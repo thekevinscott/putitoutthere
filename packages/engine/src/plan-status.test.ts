@@ -42,7 +42,7 @@ function pkg(name: string, depends_on: string[] = []): Package {
 }
 
 function configWith(...packages: Package[]): void {
-  vi.mocked(loadConfig).mockReturnValue({
+  vi.mocked(loadConfig).mockResolvedValue({
     putitoutthere: { version: 1 },
     packages,
   });

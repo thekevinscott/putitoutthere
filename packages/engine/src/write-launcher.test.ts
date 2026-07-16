@@ -200,11 +200,11 @@ describe('writeLauncherFromConfig (#299)', () => {
   // mocked so no real putitoutthere.toml is parsed (config parsing is covered
   // by config.test.ts + the integration tier).
   function withConfig(pkgs: CfgPkg[]): void {
-    loadConfigMock.mockReturnValue({ packages: pkgs } as unknown as ReturnType<typeof loadConfig>);
+    loadConfigMock.mockResolvedValue({ packages: pkgs } as unknown as Awaited<ReturnType<typeof loadConfig>>);
     readFileMock.mockReturnValue(JSON.stringify({ name: 'my-cli', version: '0.0.0' }, null, 2));
   }
 
-  it('writes a launcher for a bundled-cli package using the configured triples + template', () => {
+  it('writes a launcher for a bundled-cli package using the configured triples + template', async () => {
     withConfig([
       {
         name: 'my-cli',
@@ -216,7 +216,7 @@ describe('writeLauncherFromConfig (#299)', () => {
       },
     ]);
 
-    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
+    const written = await writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     expect(written.length).toBeGreaterThan(0);
     const launcher = writtenTo('my-cli.js')!;
     expect(launcher).toContain("'linux-x64': 'x86_64-unknown-linux-gnu'");
@@ -224,7 +224,7 @@ describe('writeLauncherFromConfig (#299)', () => {
     expect(launcher).toContain('`my-cli-${triple}`');
   });
 
-  it('uses the bundled-cli entry from a multi-mode build array (ignores napi entries)', () => {
+  it('uses the bundled-cli entry from a multi-mode build array (ignores napi entries)', async () => {
     withConfig([
       {
         name: 'my-cli',
@@ -239,7 +239,7 @@ describe('writeLauncherFromConfig (#299)', () => {
       },
     ]);
 
-    writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
+    await writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     const launcher = writtenTo('my-cli.js')!;
     // The launcher must use the bundled-cli family's template, not the napi
     // family's (napi carries .node addons, not binaries).
@@ -247,7 +247,7 @@ describe('writeLauncherFromConfig (#299)', () => {
     expect(launcher).not.toContain('@my-cli/lib-');
   });
 
-  it('accepts an absolute packagePath', () => {
+  it('accepts an absolute packagePath', async () => {
     // `process.cwd()` is a native absolute path on every OS, so this
     // exercises the isAbsolute branch without a hardcoded (OS-specific)
     // path literal. pkg.path equals it, so resolve() matches on any OS.
@@ -262,26 +262,26 @@ describe('writeLauncherFromConfig (#299)', () => {
         bundle_cli: { bin: 'my-cli', crate_path: '.' },
       },
     ]);
-    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: abs });
+    const written = await writeLauncherFromConfig({ cwd: 'repo', packagePath: abs });
     expect(written.length).toBeGreaterThan(0);
   });
 
-  it('is a no-op for non-npm packages', () => {
+  it('is a no-op for non-npm packages', async () => {
     withConfig([{ name: 'demo', kind: 'crates', path: '.' }]);
-    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: '.' });
+    const written = await writeLauncherFromConfig({ cwd: 'repo', packagePath: '.' });
     expect(written).toEqual([]);
     // Nothing is written to disk.
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('is a no-op when the package is npm but not bundled-cli', () => {
+  it('is a no-op when the package is npm but not bundled-cli', async () => {
     withConfig([{ name: 'demo', kind: 'npm', path: 'packages/ts' }]);
-    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
+    const written = await writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     expect(written).toEqual([]);
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('is a no-op for a bundled-cli npm package that omits [package.bundle_cli] (legacy bring-your-own-launcher path)', () => {
+  it('is a no-op for a bundled-cli npm package that omits [package.bundle_cli] (legacy bring-your-own-launcher path)', async () => {
     // #298 kept the legacy bundled-cli path opt-in: a package may omit
     // [package.bundle_cli] and ship its own bin/<bin>.js. Without the table
     // the engine has no binary name to author a launcher from, so it must
@@ -295,15 +295,15 @@ describe('writeLauncherFromConfig (#299)', () => {
         targets: ['x86_64-unknown-linux-gnu'],
       },
     ]);
-    const written = writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
+    const written = await writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     expect(written).toEqual([]);
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('handles a single-line (un-indented) package.json without losing the bin field', () => {
+  it('handles a single-line (un-indented) package.json without losing the bin field', async () => {
     // detectIndent's fallback returns 2 when no indented quote matches;
     // a minified package.json still produces a parseable file with `bin`.
-    loadConfigMock.mockReturnValue({
+    loadConfigMock.mockResolvedValue({
       packages: [
         {
           name: 'demo-cli',
@@ -314,18 +314,18 @@ describe('writeLauncherFromConfig (#299)', () => {
           bundle_cli: { bin: 'demo-cli', crate_path: '.' },
         },
       ],
-    } as unknown as ReturnType<typeof loadConfig>);
+    } as unknown as Awaited<ReturnType<typeof loadConfig>>);
     readFileMock.mockReturnValue(JSON.stringify({ name: 'demo-cli', version: '0.0.0' }));
 
-    writeLauncherFromConfig({ cwd: 'repo', packagePath: 'pkg' });
+    await writeLauncherFromConfig({ cwd: 'repo', packagePath: 'pkg' });
     const parsed = JSON.parse(writtenTo('package.json')!) as { bin?: Record<string, string> };
     expect(parsed.bin).toEqual({ 'demo-cli': 'bin/demo-cli.js' });
   });
 
-  it('errors when no package in the config has the given path', () => {
+  it('errors when no package in the config has the given path', async () => {
     withConfig([{ name: 'demo', kind: 'npm', path: 'packages/ts' }]);
-    expect(() =>
+    await expect(
       writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/other' }),
-    ).toThrow(/no \[\[package\]\] entry/);
+    ).rejects.toThrow(/no \[\[package\]\] entry/);
   });
 });

@@ -307,7 +307,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // consumer fixes the whole config in one push. Exits non-zero
         // when any finding lands; CI surfaces the same vocabulary the
         // publish-phase `require*` helpers use.
-        const findings = runChecks({
+        const findings = await runChecks({
           cwd: flags.cwd,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
         });
@@ -489,7 +489,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // packages and for npm packages without a bundled-cli build
         // entry, so the build job can invoke this on every main row.
         if (!flags.path) {throw new Error('write-launcher: --path <pkg-dir> is required');}
-        const written = writeLauncherFromConfig({
+        const written = await writeLauncherFromConfig({
           cwd: flags.cwd,
           packagePath: flags.path,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),

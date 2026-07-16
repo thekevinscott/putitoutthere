@@ -79,7 +79,7 @@ function pypiPkg(name: string, path: string): Package {
 }
 
 function configWith(...packages: Package[]): void {
-  vi.mocked(loadConfig).mockReturnValue({
+  vi.mocked(loadConfig).mockResolvedValue({
     putitoutthere: { version: 1 },
     packages,
   });
@@ -129,12 +129,13 @@ beforeEach(() => {
     requireCratesMetadata,
     requirePypiVersionSource,
     requirePyprojectShape,
-    requireCargoShape,
     requirePackageJsonShape,
     requireRepoUrlMatch,
   ]) {
     vi.mocked(gate).mockReturnValue(undefined);
   }
+  // Async gates.
+  vi.mocked(requireCargoShape).mockResolvedValue(undefined);
   vi.mocked(requireRepoPublic).mockResolvedValue(undefined);
 });
 

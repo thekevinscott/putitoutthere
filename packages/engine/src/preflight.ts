@@ -729,17 +729,17 @@ export function requirePyprojectShape(packages: readonly Package[]): void {
   throw new Error(lines.join('\n'));
 }
 
-export function checkCargoShape(
+export async function checkCargoShape(
   packages: readonly Package[],
   options: CargoShapeOptions = {},
-): CargoShapeFinding[] {
+): Promise<CargoShapeFinding[]> {
   const findings: CargoShapeFinding[] = [];
   const cwd = options.cwd ?? process.cwd();
   for (const p of packages) {
     if (p.kind === 'crates') {
       collectCratesPackageFindings(p, cwd, findings);
     } else if (p.kind === 'pypi' && p.bundle_cli !== undefined) {
-      collectBundleCliCrateFindings(p, p.bundle_cli, cwd, findings);
+      await collectBundleCliCrateFindings(p, p.bundle_cli, cwd, findings);
     }
   }
   return findings;
@@ -795,12 +795,12 @@ function collectCratesPackageFindings(
   }
 }
 
-function collectBundleCliCrateFindings(
+async function collectBundleCliCrateFindings(
   p: Package & { kind: 'pypi' },
   bundleCli: NonNullable<(Package & { kind: 'pypi' })['bundle_cli']>,
   cwd: string,
   findings: CargoShapeFinding[],
-): void {
+): Promise<void> {
   const cratePathAbs = isAbsolute(bundleCli.crate_path)
     ? bundleCli.crate_path
     : resolve(cwd, bundleCli.crate_path);
@@ -809,7 +809,7 @@ function collectBundleCliCrateFindings(
   if (parsed === null) {return;}
 
   // CRATES_MISSING_BIN
-  const declaredBins = readDeclaredBinNames(parsed, cargoTomlPath);
+  const declaredBins = await readDeclaredBinNames(parsed, cargoTomlPath);
   if (!declaredBins.includes(bundleCli.bin)) {
     findings.push({
       package: p.name,
@@ -853,17 +853,17 @@ function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
   return new Set(Object.keys(features));
 }
 
-function readDeclaredBinNames(
+async function readDeclaredBinNames(
   cargoToml: Record<string, unknown>,
   cargoTomlPath: string,
-): string[] {
+): Promise<string[]> {
   const result = collectBinsFromManifest(cargoToml);
   // Workspace manifests delegate [[bin]] declarations to member crates
   // (#337). `cargo build --bin X` from anywhere in the workspace
   // resolves X transparently, so a check that only reads the
   // workspace-root manifest reports bins as missing even when they
   // exist in a member.
-  for (const memberManifest of workspaceMemberManifests(cargoToml, cargoTomlPath)) {
+  for (const memberManifest of await workspaceMemberManifests(cargoToml, cargoTomlPath)) {
     const memberParsed = readToml(memberManifest);
     if (memberParsed === null) {continue;}
     for (const b of collectBinsFromManifest(memberParsed)) {
@@ -873,10 +873,10 @@ function readDeclaredBinNames(
   return result;
 }
 
-function workspaceMemberManifests(
+async function workspaceMemberManifests(
   cargoToml: Record<string, unknown>,
   cargoTomlPath: string,
-): string[] {
+): Promise<string[]> {
   const workspace = cargoToml.workspace;
   if (typeof workspace !== 'object' || workspace === null) {return [];}
   const members = (workspace as { members?: unknown }).members;
@@ -888,7 +888,7 @@ function workspaceMemberManifests(
       // `members` entries are globs (`packages/*`); expand them against
       // the filesystem the way cargo does so a member crate's [[bin]] is
       // found even when the workspace declares its members with a pattern.
-      for (const memberDir of expandDirGlob(workspaceDir, m)) {
+      for (const memberDir of await expandDirGlob(workspaceDir, m)) {
         out.push(join(memberDir, 'Cargo.toml'));
       }
     }
@@ -1283,11 +1283,11 @@ export async function requireRepoPublic(
   throw new Error(lines.join('\n'));
 }
 
-export function requireCargoShape(
+export async function requireCargoShape(
   packages: readonly Package[],
   options: CargoShapeOptions = {},
-): void {
-  const findings = checkCargoShape(packages, options);
+): Promise<void> {
+  const findings = await checkCargoShape(packages, options);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     'Pre-flight Cargo.toml shape check failed:',

@@ -67,14 +67,14 @@ afterEach(() => {
 /* ------------------------------ config-sanity ------------------------------ */
 
 describe('runChecks: config sanity (#319)', () => {
-  it('flags a missing putitoutthere.toml', () => {
+  it('flags a missing putitoutthere.toml', async () => {
     // No config file written at all. Most common adopter mistake.
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings.length).toBeGreaterThan(0);
     expect(findings.some((f) => /putitoutthere\.toml.*not found/i.test(f.message))).toBe(true);
   });
 
-  it('surfaces zod / friendly-hint errors from parseConfig', () => {
+  it('surfaces zod / friendly-hint errors from parseConfig', async () => {
     // `[[packages]]` (plural) — detectCommonMistakes catches this.
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
@@ -87,14 +87,14 @@ path  = "pkg"
 globs = ["pkg/**"]
 `);
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings.length).toBeGreaterThan(0);
     expect(
       findings.some((f) => /\[\[package\]\]/.test(f.message) && /\[\[packages\]\]/.test(f.message)),
     ).toBe(true);
   });
 
-  it("flags packages whose `path` directory does not exist in the worktree", () => {
+  it("flags packages whose `path` directory does not exist in the worktree", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -107,7 +107,7 @@ globs = ["packages/missing/**"]
 `);
     // No packages/missing/ directory created.
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) => f.package === 'lib' && /path/i.test(f.message) && /packages\/missing/.test(f.message),
@@ -115,7 +115,7 @@ globs = ["packages/missing/**"]
     ).toBe(true);
   });
 
-  it("flags packages whose globs match no tracked files", () => {
+  it("flags packages whose globs match no tracked files", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -133,7 +133,7 @@ globs = ["packages/ts/never-matches/**"]
     }));
     writeRepoFile('packages/ts/index.ts', 'x');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -144,7 +144,7 @@ globs = ["packages/ts/never-matches/**"]
     ).toBe(true);
   });
 
-  it("flags cyclic depends_on", () => {
+  it("flags cyclic depends_on", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -172,11 +172,11 @@ depends_on = ["a"]
       writeRepoFile(`packages/${n}/index.ts`, 'x');
     }
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /cycle/i.test(f.message))).toBe(true);
   });
 
-  it("flags dangling depends_on names", () => {
+  it("flags dangling depends_on names", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -195,11 +195,11 @@ depends_on = ["does-not-exist"]
     }));
     writeRepoFile('packages/a/index.ts', 'x');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /unknown depends_on|does-not-exist/i.test(f.message))).toBe(true);
   });
 
-  it("flags packages whose tag_format resolves to the same tag", () => {
+  it("flags packages whose tag_format resolves to the same tag", async () => {
     // Two packages with `tag_format = "v{version}"` would race for one
     // `v0.0.0` tag at the same version. Detectable from templates alone.
     writeRepoFile('putitoutthere.toml', `
@@ -229,7 +229,7 @@ tag_format = "v{version}"
       writeRepoFile(`packages/${n}/index.ts`, 'x');
     }
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /tag.*collision|collide/i.test(f.message))).toBe(true);
   });
 });
@@ -237,7 +237,7 @@ tag_format = "v{version}"
 /* ------------------------------ per-kind manifest ------------------------------ */
 
 describe('runChecks: per-kind manifest checks (#319)', () => {
-  it("flags npm packages whose package.json has no repository field", () => {
+  it("flags npm packages whose package.json has no repository field", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -251,7 +251,7 @@ globs = ["packages/ts/**"]
     writeRepoFile('packages/ts/package.json', JSON.stringify({ name: 'lib', version: '0.0.0' }));
     writeRepoFile('packages/ts/index.ts', 'x');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) => f.package === 'lib' && /PIOT_NPM_MISSING_REPOSITORY|repository/i.test(f.message),
@@ -259,7 +259,7 @@ globs = ["packages/ts/**"]
     ).toBe(true);
   });
 
-  it("flags crates packages whose Cargo.toml is missing description / license", () => {
+  it("flags crates packages whose Cargo.toml is missing description / license", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -277,7 +277,7 @@ version = "0.0.0"
 `);
     writeRepoFile('packages/rs/src/lib.rs', '');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -287,7 +287,7 @@ version = "0.0.0"
     ).toBe(true);
   });
 
-  it("flags pypi packages missing pyproject.toml at pkg.path", () => {
+  it("flags pypi packages missing pyproject.toml at pkg.path", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -300,7 +300,7 @@ globs = ["packages/py/**"]
 `);
     writeRepoFile('packages/py/README.md', 'no pyproject');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) => f.package === 'py-lib' && /pyproject\.toml/.test(f.message),
@@ -308,7 +308,7 @@ globs = ["packages/py/**"]
     ).toBe(true);
   });
 
-  it("flags pypi packages whose pyproject.toml declares a static [project].version literal", () => {
+  it("flags pypi packages whose pyproject.toml declares a static [project].version literal", async () => {
     // "No release surprises" applied to PyPI: any non-maturin release path
     // reads [project].version from pyproject.toml at build time. If that's
     // a literal, someone — a human or a release-bot — has to rewrite the
@@ -341,7 +341,7 @@ version = "0.0.0"
 `);
     writeRepoFile('packages/py/py_lib/__init__.py', '');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -352,7 +352,7 @@ version = "0.0.0"
     ).toBe(true);
   });
 
-  it("does not flag pypi packages that already use [project].dynamic = [\"version\"]", () => {
+  it("does not flag pypi packages that already use [project].dynamic = [\"version\"]", async () => {
     // Pins the other half of the static-literal rule: the fix the error
     // message points at must actually clear the check. Without this pin,
     // an enforcement that fires on every pypi package would also satisfy
@@ -382,11 +382,11 @@ source = "vcs"
 `);
     writeRepoFile('packages/py/py_lib/__init__.py', '');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /PIOT_PYPI_STATIC_VERSION/.test(f.message))).toBe(false);
   });
 
-  it("flags maturin+bundle_cli when crate_path's Cargo.toml has no matching [[bin]]", () => {
+  it("flags maturin+bundle_cli when crate_path's Cargo.toml has no matching [[bin]]", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -421,7 +421,7 @@ path = "src/main.rs"
 `);
     writeRepoFile('crates/cli/src/main.rs', 'fn main(){}');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -432,7 +432,7 @@ path = "src/main.rs"
     ).toBe(true);
   });
 
-  it("flags npm `targets` triples that are not in the runner-mapping table", () => {
+  it("flags npm `targets` triples that are not in the runner-mapping table", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -452,7 +452,7 @@ targets = ["totally-made-up-triple"]
     }));
     writeRepoFile('packages/ts/index.ts', 'x');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -467,7 +467,7 @@ targets = ["totally-made-up-triple"]
 /* ------------------------------ happy path ------------------------------ */
 
 describe('runChecks: well-formed config passes', () => {
-  it("returns zero findings for a fully-correct polyglot config", () => {
+  it("returns zero findings for a fully-correct polyglot config", async () => {
     // Pins the other half of the contract: an always-throws regression
     // would also satisfy every red test above. This makes the green
     // state observable.
@@ -522,7 +522,7 @@ source = "vcs"
 `);
     writeRepoFile('packages/py/lib_py/__init__.py', '');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings).toEqual([]);
   });
 });
@@ -530,7 +530,7 @@ source = "vcs"
 /* ------------------------------ pyproject + cargo shape (#301) ------------------------------ */
 
 describe('runChecks: pyproject + cargo shape (#301)', () => {
-  it("flags PIOT_PYPI_NAME_MISMATCH when [project].name disagrees with configured name", () => {
+  it("flags PIOT_PYPI_NAME_MISMATCH when [project].name disagrees with configured name", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -551,7 +551,7 @@ name = "not-the-same"
 version = "0.0.0"
 `);
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -561,7 +561,7 @@ version = "0.0.0"
     ).toBe(true);
   });
 
-  it("flags PIOT_PYPI_BUILD_BACKEND_MISMATCH when build = \"maturin\" but pyproject declares hatchling", () => {
+  it("flags PIOT_PYPI_BUILD_BACKEND_MISMATCH when build = \"maturin\" but pyproject declares hatchling", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -584,7 +584,7 @@ name = "py-lib"
 version = "0.0.0"
 `);
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -594,7 +594,7 @@ version = "0.0.0"
     ).toBe(true);
   });
 
-  it("flags PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND when dynamic = [\"version\"] has no version source block", () => {
+  it("flags PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND when dynamic = [\"version\"] has no version source block", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -616,7 +616,7 @@ name = "py-lib"
 dynamic = ["version"]
 `);
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -626,7 +626,7 @@ dynamic = ["version"]
     ).toBe(true);
   });
 
-  it("flags PIOT_PYPI_MATURIN_INCLUDE_MISSING when bundle_cli.stage_to is not covered by [tool.maturin].include", () => {
+  it("flags PIOT_PYPI_MATURIN_INCLUDE_MISSING when bundle_cli.stage_to is not covered by [tool.maturin].include", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -663,7 +663,7 @@ version = "0.0.0"
 `);
     writeRepoFile('crates/cli/src/main.rs', 'fn main(){}');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -673,7 +673,7 @@ version = "0.0.0"
     ).toBe(true);
   });
 
-  it("flags PIOT_NPM_NAME_MISMATCH when package.json name disagrees with configured name", () => {
+  it("flags PIOT_NPM_NAME_MISMATCH when package.json name disagrees with configured name", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -691,7 +691,7 @@ globs = ["packages/ts/**"]
     }, null, 2));
     writeRepoFile('packages/ts/index.ts', 'x');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -701,7 +701,7 @@ globs = ["packages/ts/**"]
     ).toBe(true);
   });
 
-  it("accepts an npm package whose `npm` override matches package.json name", () => {
+  it("accepts an npm package whose `npm` override matches package.json name", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -720,11 +720,11 @@ globs = ["packages/ts/**"]
     }, null, 2));
     writeRepoFile('packages/ts/index.ts', 'x');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(findings.some((f) => /PIOT_NPM_NAME_MISMATCH/.test(f.message))).toBe(false);
   });
 
-  it("flags PIOT_CRATES_NAME_MISMATCH when [package].name differs from configured name", () => {
+  it("flags PIOT_CRATES_NAME_MISMATCH when [package].name differs from configured name", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -744,7 +744,7 @@ license = "MIT"
 `);
     writeRepoFile('packages/rs/src/lib.rs', '');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -754,7 +754,7 @@ license = "MIT"
     ).toBe(true);
   });
 
-  it("flags PIOT_CRATES_FEATURE_NOT_DECLARED when a configured feature is missing from [features]", () => {
+  it("flags PIOT_CRATES_FEATURE_NOT_DECLARED when a configured feature is missing from [features]", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -778,7 +778,7 @@ default = []
 `);
     writeRepoFile('packages/rs/src/lib.rs', '');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>
@@ -789,7 +789,7 @@ default = []
     ).toBe(true);
   });
 
-  it("flags PIOT_CRATES_WORKSPACE_VERSION_MISMATCH when version.workspace = true has no ancestor [workspace.package].version", () => {
+  it("flags PIOT_CRATES_WORKSPACE_VERSION_MISMATCH when version.workspace = true has no ancestor [workspace.package].version", async () => {
     writeRepoFile('putitoutthere.toml', `
 [putitoutthere]
 version = 1
@@ -809,7 +809,7 @@ license = "MIT"
 `);
     writeRepoFile('packages/rs/src/lib.rs', '');
     commitAll();
-    const findings = runChecks({ cwd: repo });
+    const findings = await runChecks({ cwd: repo });
     expect(
       findings.some(
         (f) =>

@@ -143,10 +143,10 @@ export interface WriteLauncherFromConfigOptions {
  * job invokes this on every main row and only bundled-cli rows need
  * the launcher.
  */
-export function writeLauncherFromConfig(
+export async function writeLauncherFromConfig(
   opts: WriteLauncherFromConfigOptions,
-): string[] {
-  const cfg = loadConfig(opts.configPath ?? join(opts.cwd, 'putitoutthere.toml'));
+): Promise<string[]> {
+  const cfg = await loadConfig(opts.configPath ?? join(opts.cwd, 'putitoutthere.toml'));
   const absPkg = isAbsolute(opts.packagePath)
     ? opts.packagePath
     : resolve(opts.cwd, opts.packagePath);

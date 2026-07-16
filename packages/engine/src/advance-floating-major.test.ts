@@ -32,15 +32,15 @@ const out: string[] = [];
 
 // The single package the floating-major mover tracks. Only the fields the
 // resolver reads are supplied.
-function config(): ReturnType<typeof loadConfig> {
+function config(): Awaited<ReturnType<typeof loadConfig>> {
   return {
     packages: [{ name: 'putitoutthere', tag_format: '{name}-v{version}' }],
-  } as unknown as ReturnType<typeof loadConfig>;
+  } as unknown as Awaited<ReturnType<typeof loadConfig>>;
 }
 
 beforeEach(() => {
   vi.resetAllMocks();
-  loadConfigMock.mockReturnValue(config());
+  loadConfigMock.mockResolvedValue(config());
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());

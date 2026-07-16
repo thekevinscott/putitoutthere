@@ -24,14 +24,20 @@
  * literal) so the suite holds on Windows, macOS, and Linux CI alike.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runChecks } from './check.js';
+import { execCapture } from './utils/exec-capture.js';
+import { ExecError } from './utils/exec-error.js';
 
+// check.ts + glob.ts are async (node:fs/promises + the exec seam); preflight
+// (called for the manifest-shape checks) is not yet migrated and still reads
+// via node:fs readFileSync — hence the dual fs mock over one in-memory tree.
 vi.mock('node:fs');
-vi.mock('node:child_process');
+vi.mock('node:fs/promises');
+vi.mock('./utils/exec-capture.js');
 
 /**
  * Distinctive absolute-root token. `check.ts` resolves every
@@ -83,17 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   build({});
 
-  vi.mocked(existsSync).mockImplementation((p) => {
-    const key = rel(p);
-    return files.has(key) || dirs.has(key);
-  });
-
-  vi.mocked(statSync).mockImplementation((p) => {
-    const key = rel(p);
-    const isDir = dirs.has(key) && !files.has(key);
-    return { isDirectory: () => isDir } as unknown as ReturnType<typeof statSync>;
-  });
-
+  // preflight (unmigrated) reads manifests via node:fs readFileSync.
   vi.mocked(readFileSync).mockImplementation((p) => {
     const key = rel(p);
     const content = files.get(key);
@@ -101,9 +97,25 @@ beforeEach(() => {
     return content;
   });
 
-  // Only the workspace-member glob walk reaches this; it wants the
-  // directory children of `p`, one segment deep, as Dirent-likes.
-  vi.mocked(readdirSync).mockImplementation((p) => {
+  // check.ts reads via node:fs/promises readFile; parseCargoToml + friends.
+  vi.mocked(readFile).mockImplementation((p) => {
+    const key = rel(p);
+    const content = files.get(key);
+    if (content === undefined) {return Promise.reject(enoent(key));}
+    return Promise.resolve(content);
+  });
+
+  // check.ts + glob.ts stat (and pathExists, which is `await stat` under the
+  // hood). Rejects for missing paths so pathExists returns false.
+  vi.mocked(stat).mockImplementation((p) => {
+    const key = rel(p);
+    if (!files.has(key) && !dirs.has(key)) {return Promise.reject(enoent(key));}
+    const isDir = dirs.has(key) && !files.has(key);
+    return Promise.resolve({ isDirectory: () => isDir } as unknown as Awaited<ReturnType<typeof stat>>);
+  });
+
+  // glob.ts (expandDirGlob) reads directory children one segment deep.
+  vi.mocked(readdir).mockImplementation((p) => {
     const key = rel(p);
     const prefix = key === '' ? '' : `${key}/`;
     const children = new Set<string>();
@@ -112,36 +124,30 @@ beforeEach(() => {
       const tail = d.slice(prefix.length);
       if (tail.length > 0 && !tail.includes('/')) {children.add(tail);}
     }
-    return [...children].map((name) => ({
-      name,
-      isDirectory: () => true,
-    })) as unknown as ReturnType<typeof readdirSync>;
+    return Promise.resolve(
+      [...children].map((name) => ({
+        name,
+        isDirectory: () => true,
+      })) as unknown as Awaited<ReturnType<typeof readdir>>,
+    );
   });
 
-  // `checkGlobsMatchTrackedFiles` shells out to `git ls-files`; the
-  // tree's file list is the tracked set.
-  vi.mocked(execFileSync).mockImplementation(
-    () => [...files.keys()].join('\n'),
-  );
-
-  // `checkCratesPackageSize` runs `cargo package`; a non-zero status
-  // means "can't verify", so the size check skips — the same effect the
-  // old cases relied on (no real publishable crate to measure).
-  vi.mocked(spawnSync).mockReturnValue({
-    status: 1,
-    stdout: '',
-    stderr: '',
-    pid: 0,
-    output: [],
-    signal: null,
+  // `checkGlobsMatchTrackedFiles` shells out to `git ls-files`; the tree's
+  // file list is the tracked set. `checkCratesPackageSize` runs `cargo
+  // package`; a non-zero exit means "can't verify", so the size check skips.
+  vi.mocked(execCapture).mockImplementation((cmd) => {
+    if (cmd === 'git') {
+      return Promise.resolve({ stdout: [...files.keys()].join('\n'), stderr: '' });
+    }
+    return Promise.reject(new ExecError('cargo package failed', '', '', 1));
   });
 });
 
 /* ------------------------------ short-circuits ------------------------------ */
 
 describe('runChecks: short-circuit branches', () => {
-  it('returns one finding pointing at the resolved config path when the file is missing', () => {
-    const findings = runChecks({ cwd: ROOT });
+  it('returns one finding pointing at the resolved config path when the file is missing', async () => {
+    const findings = await runChecks({ cwd: ROOT });
     expect(findings).toHaveLength(1);
     expect(findings[0]!.message).toMatch(/putitoutthere\.toml not found/);
     // Points at the cwd-resolved config path (separator-agnostic).
@@ -149,15 +155,15 @@ describe('runChecks: short-circuit branches', () => {
     expect(findings[0]!.package).toBeUndefined();
   });
 
-  it('surfaces parseConfig errors and stops before downstream checks', () => {
+  it('surfaces parseConfig errors and stops before downstream checks', async () => {
     build({ 'putitoutthere.toml': 'this is not toml' });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(findings).toHaveLength(1);
     expect(findings[0]!.package).toBeUndefined();
   });
 
-  it('honors --config override', () => {
-    const findings = runChecks({ cwd: ROOT, configPath: `${ROOT}/alt.toml` });
+  it('honors --config override', async () => {
+    const findings = await runChecks({ cwd: ROOT, configPath: `${ROOT}/alt.toml` });
     expect(findings).toHaveLength(1);
     expect(findings[0]!.message).toContain('alt.toml');
   });
@@ -166,7 +172,7 @@ describe('runChecks: short-circuit branches', () => {
 /* ------------------------------ per-package checks ------------------------------ */
 
 describe('runChecks: per-package checks', () => {
-  it("flags a [[package]].path directory missing from the worktree", () => {
+  it("flags a [[package]].path directory missing from the worktree", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -179,13 +185,13 @@ path  = "packages/missing"
 globs = ["packages/missing/**"]
 `,
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some((f) => f.package === 'lib' && /path/.test(f.message)),
     ).toBe(true);
   });
 
-  it("flags globs that match no tracked files", () => {
+  it("flags globs that match no tracked files", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -204,13 +210,42 @@ globs = ["packages/ts/never-matches/**"]
       }),
       'packages/ts/index.ts': 'x',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some((f) => f.package === 'lib' && /glob/i.test(f.message)),
     ).toBe(true);
   });
 
-  it("flags cyclic depends_on", () => {
+  it("skips the glob-vs-tracked check when git ls-files fails (outside a repo)", async () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "lib"
+kind  = "npm"
+path  = "packages/ts"
+globs = ["packages/ts/never-matches/**"]
+`,
+      'packages/ts/package.json': JSON.stringify({
+        name: 'lib',
+        version: '0.0.0',
+        repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
+      }),
+    });
+    // `git ls-files` rejects (e.g. run outside a git repo) → listTrackedFiles
+    // returns null and the check short-circuits: no glob finding despite the
+    // deliberately non-matching glob.
+    vi.mocked(execCapture).mockImplementation((cmd) => {
+      if (cmd === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', 128));}
+      return Promise.reject(new ExecError('cargo package failed', '', '', 1));
+    });
+    const findings = await runChecks({ cwd: ROOT });
+    expect(findings.some((f) => /glob/i.test(f.message))).toBe(false);
+  });
+
+  it("flags cyclic depends_on", async () => {
     const entries: Record<string, string> = {
       'putitoutthere.toml': `
 [putitoutthere]
@@ -240,11 +275,11 @@ depends_on = ["a"]
       entries[`packages/${n}/index.ts`] = 'x';
     }
     build(entries);
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(findings.some((f) => /cycle/i.test(f.message))).toBe(true);
   });
 
-  it("flags two tag_format templates that collide at the same version", () => {
+  it("flags two tag_format templates that collide at the same version", async () => {
     const entries: Record<string, string> = {
       'putitoutthere.toml': `
 [putitoutthere]
@@ -274,11 +309,11 @@ tag_format = "v{version}"
       entries[`packages/${n}/index.ts`] = 'x';
     }
     build(entries);
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(findings.some((f) => /tag.*collision|collide/i.test(f.message))).toBe(true);
   });
 
-  it("flags npm packages whose package.json is missing or has empty repository", () => {
+  it("flags npm packages whose package.json is missing or has empty repository", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -293,7 +328,7 @@ globs = ["packages/ts/**"]
       'packages/ts/package.json': JSON.stringify({ name: 'lib', version: '0.0.0' }),
       'packages/ts/index.ts': 'x',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) =>
@@ -304,7 +339,7 @@ globs = ["packages/ts/**"]
     ).toBe(true);
   });
 
-  it("flags PIOT_NPM_NAME_MISMATCH when package.json name disagrees with configured name", () => {
+  it("flags PIOT_NPM_NAME_MISMATCH when package.json name disagrees with configured name", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -323,7 +358,7 @@ globs = ["packages/ts/**"]
       }),
       'packages/ts/index.ts': 'x',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) =>
@@ -333,7 +368,7 @@ globs = ["packages/ts/**"]
     ).toBe(true);
   });
 
-  it("clears PIOT_NPM_NAME_MISMATCH when the `npm` override matches package.json", () => {
+  it("clears PIOT_NPM_NAME_MISMATCH when the `npm` override matches package.json", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -353,11 +388,11 @@ globs = ["packages/ts/**"]
       }),
       'packages/ts/index.ts': 'x',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(findings.some((f) => /PIOT_NPM_NAME_MISMATCH/.test(f.message))).toBe(false);
   });
 
-  it("flags crates packages whose Cargo.toml is missing description/license", () => {
+  it("flags crates packages whose Cargo.toml is missing description/license", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -376,7 +411,7 @@ version = "0.0.0"
 `,
       'packages/rs/src/lib.rs': '',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) =>
@@ -386,7 +421,7 @@ version = "0.0.0"
     ).toBe(true);
   });
 
-  it("flags pypi packages with no pyproject.toml at pkg.path", () => {
+  it("flags pypi packages with no pyproject.toml at pkg.path", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -400,7 +435,7 @@ globs = ["packages/py/**"]
 `,
       'packages/py/README.md': 'no pyproject',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) => f.package === 'py-lib' && /pyproject\.toml/.test(f.message),
@@ -408,7 +443,7 @@ globs = ["packages/py/**"]
     ).toBe(true);
   });
 
-  it("flags maturin+bundle_cli when the crate_path directory is missing", () => {
+  it("flags maturin+bundle_cli when the crate_path directory is missing", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -433,7 +468,7 @@ name = "py-lib"
 dynamic = ["version"]
 `,
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) => f.package === 'py-lib' && /crate_path.*does not exist/.test(f.message),
@@ -441,7 +476,7 @@ dynamic = ["version"]
     ).toBe(true);
   });
 
-  it("flags maturin+bundle_cli when crate_path has no Cargo.toml", () => {
+  it("flags maturin+bundle_cli when crate_path has no Cargo.toml", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -468,7 +503,7 @@ dynamic = ["version"]
       // Directory exists but no Cargo.toml.
       'crates/cli/src/main.rs': 'fn main(){}',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) => f.package === 'py-lib' && /no Cargo\.toml/.test(f.message),
@@ -476,7 +511,7 @@ dynamic = ["version"]
     ).toBe(true);
   });
 
-  it("flags maturin+bundle_cli when declared bin is not a [[bin]]", () => {
+  it("flags maturin+bundle_cli when declared bin is not a [[bin]]", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -511,7 +546,7 @@ path = "src/main.rs"
 `,
       'crates/cli/src/main.rs': 'fn main(){}',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) => f.package === 'py-lib' && /my-cli/.test(f.message) && /\[\[bin\]\]/.test(f.message),
@@ -519,7 +554,7 @@ path = "src/main.rs"
     ).toBe(true);
   });
 
-  it("accepts an implicit-binary crate (no [[bin]] table, bin == package name)", () => {
+  it("accepts an implicit-binary crate (no [[bin]] table, bin == package name)", async () => {
     // Cargo's implicit-binary rule: a crate without an explicit
     // [[bin]] table ships a binary named after [package].name. The
     // common single-binary shape (one crate, one bin, no [[bin]]
@@ -563,13 +598,13 @@ license = "MIT"
 `,
       'crates/cli/src/main.rs': 'fn main(){}',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.filter((f) => f.package === 'py-lib' && /bin/.test(f.message)),
     ).toEqual([]);
   });
 
-  it("accepts maturin+bundle_cli when crate_path has a malformed Cargo.toml (parse error)", () => {
+  it("accepts maturin+bundle_cli when crate_path has a malformed Cargo.toml (parse error)", async () => {
     // Malformed TOML — the Cargo build itself will surface the parse
     // error with a real diagnostic. This check only owns the
     // [[bin]] / [package].name pair; bailing out on a parse error
@@ -604,7 +639,7 @@ dynamic = ["version"]
       'crates/cli/Cargo.toml': 'not = "valid toml" [[[',
       'crates/cli/src/main.rs': 'fn main(){}',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) =>
@@ -615,7 +650,7 @@ dynamic = ["version"]
     ).toBe(true);
   });
 
-  it("accepts maturin+bundle_cli when the bin lives in a workspace member crate (crate_path is the workspace root)", () => {
+  it("accepts maturin+bundle_cli when the bin lives in a workspace member crate (crate_path is the workspace root)", async () => {
     // Cargo-workspace layout (this is `thekevinscott/dirsql`'s shape):
     // - `/Cargo.toml`      = `[workspace]` table, no `[[bin]]`
     // - `/crates/cli/Cargo.toml` = `[package]` with `[[bin]] my-cli`
@@ -671,7 +706,7 @@ path = "src/main.rs"
 `,
       'crates/cli/src/main.rs': 'fn main(){}',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.filter(
         (f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message),
@@ -679,7 +714,7 @@ path = "src/main.rs"
     ).toEqual([]);
   });
 
-  it("walks past a workspace member entry whose Cargo.toml is missing", () => {
+  it("walks past a workspace member entry whose Cargo.toml is missing", async () => {
     // Defensive path in the workspace walk: cargo's `members` array can
     // point at glob patterns or stale entries that don't resolve to a
     // real manifest. The check silently skips those (cargo's own
@@ -728,7 +763,7 @@ path = "src/main.rs"
 `,
       'crates/cli/src/main.rs': 'fn main(){}',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.filter(
         (f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message),
@@ -736,7 +771,7 @@ path = "src/main.rs"
     ).toEqual([]);
   });
 
-  it("accepts maturin+bundle_cli when [workspace].members is a glob and the bin lives in a matched member crate", () => {
+  it("accepts maturin+bundle_cli when [workspace].members is a glob and the bin lives in a matched member crate", async () => {
     // #361: cargo `[workspace].members` entries are globs, and
     // `members = ["packages/*"]` is the standard polyglot-repo shape —
     // a Rust core crate under `packages/rust`, wrapped by sibling
@@ -790,7 +825,7 @@ path = "src/main.rs"
 `,
       'packages/rust/src/main.rs': 'fn main(){}',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.filter(
         (f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message),
@@ -798,7 +833,7 @@ path = "src/main.rs"
     ).toEqual([]);
   });
 
-  it("flags npm targets containing a triple that's not in TRIPLE_MAP", () => {
+  it("flags npm targets containing a triple that's not in TRIPLE_MAP", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -819,7 +854,7 @@ targets = ["totally-made-up-triple"]
       }),
       'packages/ts/index.ts': 'x',
     });
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) => f.package === 'lib' && /totally-made-up-triple/.test(f.message),
@@ -831,7 +866,7 @@ targets = ["totally-made-up-triple"]
 /* ------------------------------ happy path ------------------------------ */
 
 describe('runChecks: well-formed config', () => {
-  it("returns zero findings when every check passes", () => {
+  it("returns zero findings when every check passes", async () => {
     build({
       'putitoutthere.toml': `
 [putitoutthere]
@@ -882,7 +917,7 @@ dynamic = ["version"]
 `,
       'packages/py/lib_py/__init__.py': '',
     });
-    expect(runChecks({ cwd: ROOT })).toEqual([]);
+    expect(await runChecks({ cwd: ROOT })).toEqual([]);
   });
 });
 
@@ -908,16 +943,16 @@ globs = ["packages/ts/**"]
     });
   }
 
-  it('passes when GITHUB_REPOSITORY matches the manifest URL', () => {
+  it('passes when GITHUB_REPOSITORY matches the manifest URL', async () => {
     buildOneNpmPkg('git+https://github.com/acme/widget.git');
     process.env.GITHUB_REPOSITORY = 'acme/widget';
-    expect(runChecks({ cwd: ROOT })).toEqual([]);
+    expect(await runChecks({ cwd: ROOT })).toEqual([]);
   });
 
-  it('flags PIOT_REPO_URL_MISMATCH when GITHUB_REPOSITORY disagrees with the manifest URL', () => {
+  it('flags PIOT_REPO_URL_MISMATCH when GITHUB_REPOSITORY disagrees with the manifest URL', async () => {
     buildOneNpmPkg('git+https://github.com/wrong/repo.git');
     process.env.GITHUB_REPOSITORY = 'acme/widget';
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
         (f) => f.package === 'lib-js' && f.message.includes('PIOT_REPO_URL_MISMATCH'),
@@ -925,10 +960,10 @@ globs = ["packages/ts/**"]
     ).toBe(true);
   });
 
-  it('skips the URL-match check when GITHUB_REPOSITORY is unset (local CLI run)', () => {
+  it('skips the URL-match check when GITHUB_REPOSITORY is unset (local CLI run)', async () => {
     buildOneNpmPkg('git+https://github.com/wrong/repo.git');
     // setup.ts already deletes GITHUB_REPOSITORY; assert no PIOT_REPO_URL_MISMATCH.
-    const findings = runChecks({ cwd: ROOT });
+    const findings = await runChecks({ cwd: ROOT });
     expect(findings.some((f) => f.message.includes('PIOT_REPO_URL_MISMATCH'))).toBe(false);
   });
 });

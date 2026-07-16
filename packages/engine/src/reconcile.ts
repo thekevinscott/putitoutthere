@@ -33,7 +33,7 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
   const dryRun = opts.dryRun ?? false;
   const log = createLogger();
 
-  const config = loadConfig(cfgPath);
+  const config = await loadConfig(cfgPath);
   const byName = new Map<string, Package>(config.packages.map((p) => [p.name, p]));
   const rows = await computeStatus({ cwd, configPath: cfgPath });
 

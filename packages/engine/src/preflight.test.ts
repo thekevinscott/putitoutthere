@@ -13,6 +13,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkAuth,
@@ -36,6 +37,9 @@ import {
 import type { Package } from './config.js';
 
 vi.mock('node:fs');
+// glob.ts (reached via checkCargoShape's workspace-member walk) is async and
+// reads through node:fs/promises; preflight itself still reads via node:fs.
+vi.mock('node:fs/promises');
 
 /* --------------------------- fs harness --------------------------- */
 
@@ -136,6 +140,19 @@ beforeEach(() => {
 
   vi.mocked(readdirSync).mockImplementation(((path: unknown) =>
     childDirents(norm(path))) as unknown as typeof readdirSync);
+
+  // node:fs/promises for glob.ts's expandDirGlob (readdir) + pathExists (stat).
+  vi.mocked(readdir).mockImplementation(((path: unknown) =>
+    Promise.resolve(childDirents(norm(path)))) as unknown as typeof readdir);
+  vi.mocked(stat).mockImplementation(((path: unknown) => {
+    const key = norm(path);
+    if (knownDirs.has(key) || vfs.has(key)) {
+      return Promise.resolve({ isDirectory: () => knownDirs.has(key) });
+    }
+    const err = new Error(`ENOENT: ${String(path)}`) as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    return Promise.reject(err);
+  }) as unknown as typeof stat);
 
   for (const k of AUTH_VARS) {delete process.env[k];}
 });
@@ -1123,7 +1140,7 @@ describe('checkCargoShape / requireCargoShape (#301)', () => {
     setFile(j(path, 'Cargo.toml'), body);
   }
 
-  it('passes for a well-formed Cargo.toml whose [package].name matches the configured name', () => {
+  it('passes for a well-formed Cargo.toml whose [package].name matches the configured name', async () => {
     const p = j(dir, 'a');
     writeCargoToml(
       p,
@@ -1132,11 +1149,11 @@ name = "a"
 version = "0.0.0"
 `,
     );
-    expect(checkCargoShape([cratesPkg('a', p)])).toEqual([]);
-    expect(() => requireCargoShape([cratesPkg('a', p)])).not.toThrow();
+    expect(await checkCargoShape([cratesPkg('a', p)])).toEqual([]);
+    await expect(requireCargoShape([cratesPkg('a', p)])).resolves.toBeUndefined();
   });
 
-  it('flags PIOT_CRATES_NAME_MISMATCH when [package].name differs from configured name', () => {
+  it('flags PIOT_CRATES_NAME_MISMATCH when [package].name differs from configured name', async () => {
     const p = j(dir, 'a');
     writeCargoToml(
       p,
@@ -1145,14 +1162,14 @@ name = "wrong"
 version = "0.0.0"
 `,
     );
-    const findings = checkCargoShape([cratesPkg('a', p)]);
+    const findings = await checkCargoShape([cratesPkg('a', p)]);
     expect(findings).toHaveLength(1);
     expect(findings[0]!.code).toBe('PIOT_CRATES_NAME_MISMATCH');
     expect(findings[0]!.detail).toContain('wrong');
     expect(findings[0]!.detail).toContain('"a"');
   });
 
-  it('honors the `crate` override when checking [package].name', () => {
+  it('honors the `crate` override when checking [package].name', async () => {
     const p = j(dir, 'a');
     writeCargoToml(
       p,
@@ -1162,10 +1179,10 @@ version = "0.0.0"
 `,
     );
     const pkgs = [cratesPkg('internal-name', p, { crate: 'my-crate-name' })];
-    expect(checkCargoShape(pkgs)).toEqual([]);
+    expect(await checkCargoShape(pkgs)).toEqual([]);
   });
 
-  it('flags PIOT_CRATES_FEATURE_NOT_DECLARED when a configured feature is not in [features]', () => {
+  it('flags PIOT_CRATES_FEATURE_NOT_DECLARED when a configured feature is not in [features]', async () => {
     const p = j(dir, 'a');
     writeCargoToml(
       p,
@@ -1179,11 +1196,11 @@ foo = []
 `,
     );
     const pkgs = [cratesPkg('a', p, { features: ['foo', 'missing'] })];
-    const findings = checkCargoShape(pkgs);
+    const findings = await checkCargoShape(pkgs);
     expect(findings.some((f) => f.code === 'PIOT_CRATES_FEATURE_NOT_DECLARED' && /missing/.test(f.detail))).toBe(true);
   });
 
-  it('flags PIOT_CRATES_WORKSPACE_VERSION_MISMATCH when `version.workspace = true` but no workspace ancestor declares [workspace.package].version', () => {
+  it('flags PIOT_CRATES_WORKSPACE_VERSION_MISMATCH when `version.workspace = true` but no workspace ancestor declares [workspace.package].version', async () => {
     // Crate sits at <root>/crates/a; no workspace Cargo.toml above it.
     const p = j(dir, 'crates', 'a');
     writeCargoToml(
@@ -1193,11 +1210,11 @@ name = "a"
 version.workspace = true
 `,
     );
-    const findings = checkCargoShape([cratesPkg('a', p)], { cwd: dir });
+    const findings = await checkCargoShape([cratesPkg('a', p)], { cwd: dir });
     expect(findings.some((f) => f.code === 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH')).toBe(true);
   });
 
-  it('accepts `version.workspace = true` when a workspace Cargo.toml above declares [workspace.package].version', () => {
+  it('accepts `version.workspace = true` when a workspace Cargo.toml above declares [workspace.package].version', async () => {
     const root = dir;
     const p = j(root, 'crates', 'a');
     writeCargoToml(
@@ -1216,11 +1233,11 @@ members = ["crates/a"]
 version = "0.1.0"
 `,
     );
-    const findings = checkCargoShape([cratesPkg('a', p)], { cwd: root });
+    const findings = await checkCargoShape([cratesPkg('a', p)], { cwd: root });
     expect(findings.filter((f) => f.code === 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH')).toEqual([]);
   });
 
-  it('also validates the Cargo.toml at bundle_cli.crate_path on a pypi package (PIOT_CRATES_MISSING_BIN)', () => {
+  it('also validates the Cargo.toml at bundle_cli.crate_path on a pypi package (PIOT_CRATES_MISSING_BIN)', async () => {
     const root = dir;
     const cratePath = j(root, 'crates', 'cli');
     writeCargoToml(
@@ -1243,11 +1260,11 @@ path = "src/main.rs"
       targets: ['x86_64-unknown-linux-gnu'],
       bundle_cli: { bin: 'my-cli', stage_to: 'py_lib/bin', crate_path: 'crates/cli', features: [], no_default_features: false },
     });
-    const findings = checkCargoShape([pyPkg], { cwd: root });
+    const findings = await checkCargoShape([pyPkg], { cwd: root });
     expect(findings.some((f) => f.code === 'PIOT_CRATES_MISSING_BIN' && /my-cli/.test(f.detail))).toBe(true);
   });
 
-  it('walks glob `[workspace].members` entries so crate_path = "." resolves a member crate bin (#361)', () => {
+  it('walks glob `[workspace].members` entries so crate_path = "." resolves a member crate bin (#361)', async () => {
     // #361: cargo `[workspace].members` entries are globs. #337 taught
     // the preflight `PIOT_CRATES_MISSING_BIN` walk to read *literal*
     // member entries, but a glob entry (`members = ["packages/*"]`,
@@ -1283,11 +1300,11 @@ path = "src/main.rs"
       bundle_cli: { bin: 'my-cli', stage_to: 'py_lib/bin', crate_path: '.', features: [], no_default_features: false },
     });
     expect(
-      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
+      (await checkCargoShape([pyPkg], { cwd: root })).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
     ).toEqual([]);
   });
 
-  it('honors an absolute bundle_cli.crate_path (skips resolve against cwd)', () => {
+  it('honors an absolute bundle_cli.crate_path (skips resolve against cwd)', async () => {
     // Exercises the absolute-path branch of cratePathAbs (preflight.ts:606).
     // Pass an already-absolute crate_path and pass a deliberately-wrong cwd;
     // if the absolute path is honored the Cargo.toml is found and the
@@ -1314,11 +1331,11 @@ version = "0.0.0"
     // Deliberately wrong cwd. If the absolute branch is bypassed, the
     // resolve() would point at a non-existent file and the bin check
     // would skip silently — covered by checking we get zero findings.
-    const findings = checkCargoShape([pyPkg], { cwd: j(root, 'does-not-exist') });
+    const findings = await checkCargoShape([pyPkg], { cwd: j(root, 'does-not-exist') });
     expect(findings).toEqual([]);
   });
 
-  it('accepts bundle_cli.bin matching either an explicit [[bin]] or the implicit `[package].name`', () => {
+  it('accepts bundle_cli.bin matching either an explicit [[bin]] or the implicit `[package].name`', async () => {
     const root = dir;
     const cratePath = j(root, 'crates', 'cli');
     writeCargoToml(
@@ -1337,10 +1354,10 @@ version = "0.0.0"
       targets: ['x86_64-unknown-linux-gnu'],
       bundle_cli: { bin: 'my-cli', stage_to: 'py_lib/bin', crate_path: 'crates/cli', features: [], no_default_features: false },
     });
-    expect(checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN')).toEqual([]);
+    expect((await checkCargoShape([pyPkg], { cwd: root })).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN')).toEqual([]);
   });
 
-  it('flags PIOT_CRATES_FEATURE_NOT_DECLARED when bundle_cli.features mentions a feature the crate does not declare', () => {
+  it('flags PIOT_CRATES_FEATURE_NOT_DECLARED when bundle_cli.features mentions a feature the crate does not declare', async () => {
     const root = dir;
     const cratePath = j(root, 'crates', 'cli');
     writeCargoToml(
@@ -1363,31 +1380,31 @@ cli = []
       targets: ['x86_64-unknown-linux-gnu'],
       bundle_cli: { bin: 'my-cli', stage_to: 'py_lib/bin', crate_path: 'crates/cli', features: ['cli', 'undeclared'], no_default_features: false },
     });
-    const findings = checkCargoShape([pyPkg], { cwd: root });
+    const findings = await checkCargoShape([pyPkg], { cwd: root });
     expect(findings.some((f) => f.code === 'PIOT_CRATES_FEATURE_NOT_DECLARED' && /undeclared/.test(f.detail))).toBe(true);
   });
 
-  it('skips a missing or malformed Cargo.toml (cargo surfaces those diagnostics)', () => {
-    expect(checkCargoShape([cratesPkg('a', j(dir, 'nope'))])).toEqual([]);
+  it('skips a missing or malformed Cargo.toml (cargo surfaces those diagnostics)', async () => {
+    expect(await checkCargoShape([cratesPkg('a', j(dir, 'nope'))])).toEqual([]);
     const m = j(dir, 'malformed');
     writeCargoToml(m, '[[broken\nthis = is not valid toml');
-    expect(checkCargoShape([cratesPkg('a', m)])).toEqual([]);
+    expect(await checkCargoShape([cratesPkg('a', m)])).toEqual([]);
   });
 
-  it('skips npm packages entirely; only crates + pypi-with-bundle_cli get inspected', () => {
-    expect(checkCargoShape([pkg('npm')])).toEqual([]);
+  it('skips npm packages entirely; only crates + pypi-with-bundle_cli get inspected', async () => {
+    expect(await checkCargoShape([pkg('npm')])).toEqual([]);
   });
 
-  it('aggregates findings across every crates package, not just the first', () => {
+  it('aggregates findings across every crates package, not just the first', async () => {
     const a = j(dir, 'a');
     const b = j(dir, 'b');
     writeCargoToml(a, `[package]\nname = "wrong-a"\nversion = "0.0.0"\n`);
     writeCargoToml(b, `[package]\nname = "wrong-b"\nversion = "0.0.0"\n`);
-    const findings = checkCargoShape([cratesPkg('a', a), cratesPkg('b', b)]);
+    const findings = await checkCargoShape([cratesPkg('a', a), cratesPkg('b', b)]);
     expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
   });
 
-  it('requireCargoShape throws naming every failing package + every error code', () => {
+  it('requireCargoShape throws naming every failing package + every error code', async () => {
     const a = j(dir, 'a');
     const b = j(dir, 'b');
     writeCargoToml(a, `[package]\nname = "wrong-a"\nversion = "0.0.0"\n`);
@@ -1401,7 +1418,7 @@ default = []
 `,
     );
     try {
-      requireCargoShape([
+      await requireCargoShape([
         cratesPkg('a', a),
         cratesPkg('b', b, { features: ['unknown-feature'] }),
       ]);
@@ -1415,8 +1432,8 @@ default = []
     }
   });
 
-  it('requireCargoShape returns silently when there are no crates / bundle_cli packages', () => {
-    expect(() => requireCargoShape([pkg('npm')])).not.toThrow();
+  it('requireCargoShape returns silently when there are no crates / bundle_cli packages', async () => {
+    await expect(requireCargoShape([pkg('npm')])).resolves.toBeUndefined();
   });
 });
 

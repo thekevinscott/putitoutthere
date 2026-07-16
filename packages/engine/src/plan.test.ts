@@ -17,7 +17,7 @@
  * planner's genuine output.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
@@ -25,12 +25,12 @@ import { plan } from './plan.js';
 import { resolvePythonVersions } from './python-versions.js';
 import { isVersionIndependentWheel } from './wheel-abi.js';
 
-// Mock only the I/O boundary. `readFileSync` is driven so `loadConfig`'s
+// Mock only the I/O boundary. `readFile` is driven so `loadConfig`'s
 // real `parseConfig` runs on each test's TOML; the `git.js` observers are
 // driven to describe the repo state the planner would otherwise read from
 // a real temp git repo; the pypi helpers are driven so the planner's
 // version-fan logic is exercised without touching the filesystem.
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./git.js');
 vi.mock('./python-versions.js');
 vi.mock('./wheel-abi.js');
@@ -42,7 +42,7 @@ const HEAD = 'HEADSHA';
 
 /** Drive `loadConfig` to see `toml` as the `putitoutthere.toml` contents. */
 function useToml(toml: string): void {
-  vi.mocked(readFileSync).mockReturnValue(toml);
+  vi.mocked(readFile).mockResolvedValue(toml);
 }
 
 /** The commit message the planner reads the `release:` trailer from. */

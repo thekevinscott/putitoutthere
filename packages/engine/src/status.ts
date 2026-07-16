@@ -39,7 +39,7 @@ export async function computeStatus(opts: StatusOptions): Promise<StatusRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
   const handlerFor = opts.handlerFor ?? defaultHandlerFor;
-  const config = loadConfig(cfgPath);
+  const config = await loadConfig(cfgPath);
   const ctx: Ctx = {
     cwd,
     log: createLogger(),

@@ -47,7 +47,7 @@ function pkg(name: string): Package {
 
 /** Drive `loadConfig` to return exactly these packages. */
 function configWith(...packages: Package[]): void {
-  vi.mocked(loadConfig).mockReturnValue({
+  vi.mocked(loadConfig).mockResolvedValue({
     putitoutthere: { version: 1 },
     packages,
   });

@@ -105,12 +105,12 @@ beforeEach(() => {
     return true;
   });
   computePlanStatusMock.mockResolvedValue(planStatus([]));
-  runChecksMock.mockReturnValue([]);
+  runChecksMock.mockResolvedValue([]);
   computeStatusMock.mockResolvedValue([]);
   publishMock.mockResolvedValue({ ok: true, published: [] });
   writeVersionMock.mockReturnValue(['pyproject.toml']);
   writeCrateVersionMock.mockReturnValue(['Cargo.toml']);
-  writeLauncherMock.mockReturnValue([]);
+  writeLauncherMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -203,7 +203,7 @@ describe('cli: check dispatch', () => {
     const findings: CheckFinding[] = [
       { message: 'putitoutthere.toml not found at /x/putitoutthere.toml' },
     ];
-    runChecksMock.mockReturnValue(findings);
+    runChecksMock.mockResolvedValue(findings);
     const code = await run(argv('check', '--cwd', '/x'));
     expect(code).toBe(1);
     expect(stderr.join('')).toMatch(/check: 1 finding/);
@@ -211,14 +211,14 @@ describe('cli: check dispatch', () => {
   });
 
   it('exits 0 with a "no findings" line when checks pass', async () => {
-    runChecksMock.mockReturnValue([]);
+    runChecksMock.mockResolvedValue([]);
     const code = await run(argv('check', '--cwd', '/x'));
     expect(code).toBe(0);
     expect(stdout.join('')).toMatch(/no findings/);
   });
 
   it('emits the findings array on stdout under --json', async () => {
-    runChecksMock.mockReturnValue([{ message: 'putitoutthere.toml missing' }]);
+    runChecksMock.mockResolvedValue([{ message: 'putitoutthere.toml missing' }]);
     const code = await run(argv('check', '--cwd', '/x', '--json'));
     expect(code).toBe(1);
     const parsed = JSON.parse(stdout.join('').trim()) as {
@@ -379,7 +379,7 @@ describe('cli: write-crate-version dispatch', () => {
 
 describe('cli: write-launcher dispatch', () => {
   it('reports the authored files when the engine writes a launcher (#299)', async () => {
-    writeLauncherMock.mockReturnValue(['bin/demo-cli.js', 'package.json']);
+    writeLauncherMock.mockResolvedValue(['bin/demo-cli.js', 'package.json']);
     const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts'));
     expect(code).toBe(0);
     expect(writeLauncherMock).toHaveBeenCalledWith(
@@ -389,7 +389,7 @@ describe('cli: write-launcher dispatch', () => {
   });
 
   it('prints a no-op line when the engine authors nothing (#299)', async () => {
-    writeLauncherMock.mockReturnValue([]);
+    writeLauncherMock.mockResolvedValue([]);
     const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts'));
     expect(code).toBe(0);
     expect(stdout.join('')).toMatch(/no-op/);

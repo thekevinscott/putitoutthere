@@ -6,15 +6,15 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { loadConfig, parseConfig, sanitizeArtifactName } from './config.js';
 
-// `loadConfig`'s only collaborator is `node:fs`; mock it so the loader/parser
+// `loadConfig`'s only collaborator is `node:fs/promises`; mock it so the loader/parser
 // is isolated from disk. The real read is covered at the integration + e2e
 // tiers.
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 
-const readFileSyncMock = vi.mocked(readFileSync);
+const readFileMock = vi.mocked(readFile);
 
 const MINIMAL = `
 [putitoutthere]
@@ -724,20 +724,20 @@ describe('parseConfig: TOML errors', () => {
 
 describe('loadConfig: filesystem', () => {
   beforeEach(() => {
-    readFileSyncMock.mockReset();
+    readFileMock.mockReset();
   });
 
-  it('reads a valid config from disk', () => {
-    readFileSyncMock.mockReturnValue(MINIMAL);
-    const cfg = loadConfig('putitoutthere.toml');
+  it('reads a valid config from disk', async () => {
+    readFileMock.mockResolvedValue(MINIMAL);
+    const cfg = await loadConfig('putitoutthere.toml');
     expect(cfg.packages[0]!.name).toBe('app');
   });
 
-  it('throws a clear error when the file does not exist', () => {
-    readFileSyncMock.mockImplementation(() => {
-      throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
-    });
-    expect(() => loadConfig('does-not-exist.toml')).toThrow(/cannot read/);
+  it('throws a clear error when the file does not exist', async () => {
+    readFileMock.mockRejectedValue(
+      Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }),
+    );
+    await expect(loadConfig('does-not-exist.toml')).rejects.toThrow(/cannot read/);
   });
 });
 

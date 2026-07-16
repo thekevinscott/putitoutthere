@@ -32,7 +32,7 @@ import type { PlanStatus, PlanStatusOptions, PlanVerdict, Verdict } from './plan
 export async function computePlanStatus(opts: PlanStatusOptions): Promise<PlanStatus> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
-  const config = loadConfig(cfgPath);
+  const config = await loadConfig(cfgPath);
   const ctx: Ctx = {
     cwd,
     log: createLogger(),
