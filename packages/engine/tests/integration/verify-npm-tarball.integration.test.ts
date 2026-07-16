@@ -8,8 +8,8 @@
  * tested engine subcommand (epic #442, sub-issue #443).
  *
  * The subcommand shells out to `npm view` (tarball URL), `curl`
- * (download) and `tar` (extract); this tier mocks only that subprocess
- * boundary — the async process seam `execCapture`. `npm view` + `curl` are
+ * (download) and `tar` (extract); this tier mocks only the Node built-in
+ * `execFile` under the real exec seam. `npm view` + `curl` are
  * faked (registry state); `tar` is the REAL binary, so extraction is
  * exercised for real. The e2e twin
  * (`tests/e2e/verify-npm-tarball.e2e.test.ts`) shells out to the built CLI
@@ -19,20 +19,27 @@
  * `::error::` strings, same stdout, same exit code.
  */
 
-import { execFileSync } from 'node:child_process';
+import type * as ChildProcess from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
 
-// Mock only the process seam. Real `tar` (delegated below) and real fs keep
-// extraction and file I/O genuine; `npm view` + `curl` are faked.
-vi.mock('../../src/utils/exec-capture.js');
+// Mock only the Node built-in (`execFile`) under the first-party exec seam,
+// so the real seam runs (testing-conventions forbids mocking first-party
+// modules in integration tests). Real `tar` (delegated to the un-mocked
+// execFile) and real fs keep extraction and file I/O genuine; `npm view` +
+// `curl` are faked.
+const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
+});
 
-const execMock = vi.mocked(execCapture);
+const execMock = vi.mocked(execFile);
 
 // Prebuilt npm-style tarballs (top-level `package/` dir), built once with
 // the REAL tar so the mocked `curl` can serve their bytes and the REAL
@@ -85,27 +92,28 @@ function wire(
   viewUrls: Record<string, string | string[]>,
   urlToTgz: Record<string, string>,
 ): void {
-  execMock.mockImplementation((cmd, args) => {
-    const a = (args ?? []) as string[];
+  execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    const a = [...(args ?? [])];
     if (a[0] === 'view') {
       // `npm view <spec> dist.tarball [--registry …]` — the spec sits
       // right before `dist.tarball`. The seam captures stdout as a string.
       const key = a[a.indexOf('dist.tarball') - 1]!;
       const entry = viewUrls[key];
       const url = Array.isArray(entry) ? (entry.shift() ?? '') : (entry ?? '');
-      return Promise.resolve({ stdout: `${url}\n`, stderr: '' });
+      cb(null, `${url}\n`, '');
+      return undefined as unknown as ChildProcess.ChildProcess;
     }
     if (cmd === 'curl') {
       const url = a[a.length - 1]!;
       const outIdx = a.indexOf('-o');
       const dest = a[outIdx + 1]!;
       cpSync(urlToTgz[url]!, dest);
-      return Promise.resolve({ stdout: '', stderr: '' });
+      cb(null, '', '');
+      return undefined as unknown as ChildProcess.ChildProcess;
     }
-    // Real tar for extraction — the whole point of this tier.
-    execFileSync(cmd, a);
-    return Promise.resolve({ stdout: '', stderr: '' });
-  });
+    // Real tar for extraction — delegate to the un-mocked execFile.
+    return (realExecFile as unknown as (...x: unknown[]) => ChildProcess.ChildProcess)(cmd, a, opts, cb);
+  }) as unknown as typeof execFile);
 }
 
 /**
