@@ -421,7 +421,11 @@ export function scanDirtyOutsideManifest(
 
 export function relativeOrSelf(base: string, target: string): string {
   const r = relative(base, target);
-  return r === '' ? target : r;
+  // Normalise to forward slashes: `node:path`'s relative() yields backslashes
+  // on Windows, but this feeds a human-readable error message that should read
+  // consistently across platforms (and matches the repo's forward-slash path
+  // convention).
+  return (r === '' ? target : r).replaceAll('\\', '/');
 }
 
 /**

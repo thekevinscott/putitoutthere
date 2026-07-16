@@ -7,7 +7,6 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { z } from 'zod';
 
 import {
   detectCommonMistakes,
@@ -1467,17 +1466,21 @@ describe('detectCommonMistakes (internal): non-object / non-object-entry guards'
 });
 
 describe('formatZodError (internal): root-path label', () => {
+  // formatZodError only reads `error.issues[].path` / `.message`, so pass a
+  // ZodError-shaped stub rather than importing `zod` — an unmocked collaborator
+  // the unit-lint isolation gate forbids in a unit test.
+  type ZodErrorLike = Parameters<typeof formatZodError>[0];
+  const zodErrorLike = (
+    issues: { path: (string | number)[]; message: string }[],
+  ): ZodErrorLike => ({ issues }) as unknown as ZodErrorLike;
+
   it('labels an empty issue path as <root>', () => {
-    const err = new z.ZodError([
-      { code: 'custom', message: 'whole-document problem', path: [], input: undefined },
-    ]);
+    const err = zodErrorLike([{ path: [], message: 'whole-document problem' }]);
     expect(formatZodError(err)).toBe('<root>: whole-document problem');
   });
 
   it('joins a non-empty issue path with dots', () => {
-    const err = new z.ZodError([
-      { code: 'custom', message: 'bad field', path: ['package', 0, 'name'], input: undefined },
-    ]);
+    const err = zodErrorLike([{ path: ['package', 0, 'name'], message: 'bad field' }]);
     expect(formatZodError(err)).toBe('package.0.name: bad field');
   });
 });
