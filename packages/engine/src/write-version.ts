@@ -17,7 +17,7 @@
  * actionable error rather than building an under-versioned artifact.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -43,11 +43,11 @@ const DYNAMIC_VERSION_DOC_POINTER =
  * (`pull/277` advisories #13, #14), and `pypi.writeVersion` already
  * uses the same try/catch shape we mirror here.
  */
-export function writeVersionForBuild(pkgDir: string, version: string): string[] {
+export async function writeVersionForBuild(pkgDir: string, version: string): Promise<string[]> {
   const pyProjectPath = join(pkgDir, 'pyproject.toml');
   let pyOriginal: string;
   try {
-    pyOriginal = readFileSync(pyProjectPath, 'utf8');
+    pyOriginal = await readFile(pyProjectPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(`write-version: pyproject.toml not found at ${pyProjectPath}`, {
@@ -84,7 +84,7 @@ export function writeVersionForBuild(pkgDir: string, version: string): string[] 
   const cargoPath = join(pkgDir, 'Cargo.toml');
   let cargoOriginal: string;
   try {
-    cargoOriginal = readFileSync(cargoPath, 'utf8');
+    cargoOriginal = await readFile(cargoPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(
@@ -95,7 +95,7 @@ export function writeVersionForBuild(pkgDir: string, version: string): string[] 
     /* v8 ignore next -- non-ENOENT read errors surface as-is */
     throw err;
   }
-  return writeResolvedCargoVersion(pkgDir, cargoOriginal, version);
+  return await writeResolvedCargoVersion(pkgDir, cargoOriginal, version);
 }
 
 function isDynamicVersion(project: { dynamic?: unknown }): boolean {

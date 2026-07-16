@@ -13,7 +13,7 @@
  * imported here) so the human-readable render is asserted end to end.
  */
 
-import { appendFileSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,7 +30,7 @@ import type { MatrixRow } from './plan.js';
 import type { PlanStatus } from './plan-status-types.js';
 import type { StatusRow } from './status-types.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./check.js');
 vi.mock('./plan-status.js');
 vi.mock('./publish.js');
@@ -46,7 +46,7 @@ const computeStatusMock = vi.mocked(computeStatus);
 const writeCrateVersionMock = vi.mocked(writeCrateVersionForBuild);
 const writeLauncherMock = vi.mocked(writeLauncherFromConfig);
 const writeVersionMock = vi.mocked(writeVersionForBuild);
-const appendFileSyncMock = vi.mocked(appendFileSync);
+const appendFileMock = vi.mocked(appendFile);
 
 function matrixRow(name: string, version = '1.0.0'): MatrixRow {
   return {
@@ -108,8 +108,8 @@ beforeEach(() => {
   runChecksMock.mockResolvedValue([]);
   computeStatusMock.mockResolvedValue([]);
   publishMock.mockResolvedValue({ ok: true, published: [] });
-  writeVersionMock.mockReturnValue(['pyproject.toml']);
-  writeCrateVersionMock.mockReturnValue(['Cargo.toml']);
+  writeVersionMock.mockResolvedValue(['pyproject.toml']);
+  writeCrateVersionMock.mockResolvedValue(['Cargo.toml']);
   writeLauncherMock.mockResolvedValue([]);
 });
 
@@ -300,9 +300,9 @@ describe('cli: plan dispatch', () => {
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
     const code = await run(argv('plan', '--cwd', '/x', '--json'));
     expect(code).toBe(0);
-    expect(appendFileSyncMock).toHaveBeenCalledOnce();
-    expect(appendFileSyncMock.mock.calls[0]![0]).toBe('/gha/output.txt');
-    expect(String(appendFileSyncMock.mock.calls[0]![1])).toMatch(/^matrix=/);
+    expect(appendFileMock).toHaveBeenCalledOnce();
+    expect(appendFileMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+    expect(String(appendFileMock.mock.calls[0]![1] as string)).toMatch(/^matrix=/);
   });
 
   it('does NOT write matrix= to $GITHUB_OUTPUT when the plan is empty (#146)', async () => {
@@ -310,7 +310,7 @@ describe('cli: plan dispatch', () => {
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
     const code = await run(argv('plan', '--cwd', '/x', '--json'));
     expect(code).toBe(0);
-    expect(appendFileSyncMock).not.toHaveBeenCalled();
+    expect(appendFileMock).not.toHaveBeenCalled();
   });
 
   it('prints "no packages to release" when the plan is empty', async () => {

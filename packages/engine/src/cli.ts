@@ -40,6 +40,7 @@
  * so a preview-only mode is meaningful there and is supported (#403).
  */
 
+import { appendFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import { advanceFloatingMajor } from './advance-floating-major.js';
@@ -291,12 +292,10 @@ export async function run(argv: readonly string[]): Promise<number> {
         // races against the "output not set" branch the workflow expects.
         const githubOutput = process.env.GITHUB_OUTPUT;
         if (githubOutput && matrix.length > 0) {
-          await import('node:fs').then((fs) =>
-            fs.appendFileSync(
-              githubOutput,
-              `matrix=${JSON.stringify(matrix)}\n`,
-              'utf8',
-            ),
+          await appendFile(
+            githubOutput,
+            `matrix=${JSON.stringify(matrix)}\n`,
+            'utf8',
           );
         }
         return 0;
@@ -512,7 +511,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         if (!flags.path) {throw new Error('write-version: --path <pkg-dir> is required');}
         if (!flags.version) {throw new Error('write-version: --version <v> is required');}
         const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
-        const written = writeVersionForBuild(target, flags.version);
+        const written = await writeVersionForBuild(target, flags.version);
         process.stdout.write(
           `write-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
         );
@@ -528,7 +527,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         if (!flags.path) {throw new Error('write-crate-version: --path <crate-dir> is required');}
         if (!flags.version) {throw new Error('write-crate-version: --version <v> is required');}
         const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
-        const written = writeCrateVersionForBuild(target, flags.version);
+        const written = await writeCrateVersionForBuild(target, flags.version);
         process.stdout.write(
           `write-crate-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
         );
