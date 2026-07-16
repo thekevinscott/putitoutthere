@@ -3,9 +3,9 @@ name: Coverage Diagnostic (temporary)
 # TEMPORARY diagnostic (#476 gate-4). The unit-coverage gate reports a
 # deterministic 99.94% branches / 99.96% statements in CI only; the engine is
 # 100% by every local reproduction (exact Node, deps, command, env, scan path,
-# shuffle). This workflow captures CI-side coverage so the exact uncovered
-# branch can be identified, then it is deleted. Every step is pure wiring — a
-# command invocation plus artifact upload, no inline logic.
+# shuffle). This workflow prints CI-side coverage with the `text` reporter so
+# the exact uncovered branch shows in the job log, then it is deleted. Every
+# step is pure wiring — a command invocation, no inline logic.
 
 on:
   pull_request:
@@ -27,44 +27,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # (a) vitest's own mapper, gate-matching scope (src tests only, coverage
-      # over src/**/*.ts, only *.d.ts excluded), with reporters that list the
-      # uncovered lines. No thresholds in the base config, so this always exits
-      # 0 and writes the report even at <100%.
-      - name: vitest coverage — gate-matching scope
+      # vitest's mapper, gate-matching scope (src tests only, coverage over
+      # src/**/*.ts, only *.d.ts excluded), `text` reporter so the coverage
+      # table — including the "Uncovered Line #s" column for any file below
+      # 100% — is printed to the job log. No thresholds in the base config, so
+      # this always exits 0 and prints even at <100%.
+      - name: vitest coverage — gate scope, text report to log
         continue-on-error: true
         working-directory: packages/engine
         run: >-
           pnpm exec vitest run --coverage
           --coverage.include='src/**/*.ts'
           --coverage.exclude='src/**/*.d.ts'
-          --coverage.reporter=json
-          --coverage.reporter=json-summary
-          --coverage.reporter=html
-          --coverage.reportsDirectory=coverage-gate-diag
+          --coverage.reporter=text
+          --coverage.reporter=text-summary
+          --coverage.skipFull=false
           src
-
-      # (b) the gate itself, with raw V8 coverage captured so its own
-      # ast-v8-to-istanbul mapping can be reproduced locally against the exact
-      # CI-collected profiles.
-      - name: gate raw V8 coverage
-        continue-on-error: true
-        env:
-          NODE_V8_COVERAGE: ${{ github.workspace }}/gate-v8cov
-        run: npx -y testing-conventions unit coverage --language typescript --config testing-conventions.toml packages/engine/src
-
-      - name: Upload vitest gate-diag coverage
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-gate-diag
-          path: packages/engine/coverage-gate-diag/
-          retention-days: 3
-
-      - name: Upload gate raw V8 coverage
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: gate-v8cov
-          path: gate-v8cov/
-          retention-days: 3
