@@ -2,9 +2,11 @@ import { execFile } from 'node:child_process';
 import { ExecError } from './exec-error.js';
 
 export interface ExecCaptureOptions {
-  cwd?: string;
-  env?: NodeJS.ProcessEnv;
-  maxBuffer?: number;
+  // `| undefined` is explicit so call sites can forward an optional field
+  // directly (`{ cwd: opts.cwd }`) under exactOptionalPropertyTypes.
+  cwd?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  maxBuffer?: number | undefined;
 }
 
 export interface ExecResult {

@@ -25,10 +25,9 @@
  * - **idempotent-create** — the `gh release view` guard skips a Release
  *   that already exists instead of erroring on a re-run.
  *
- * Synchronous throughout, per the engine convention. Returns the process
- * exit code (always 0 on the happy path; a git/gh failure throws out of
- * the loop and the CLI's top-level catch surfaces it as exit 1, matching
- * the bash `set -euo pipefail`).
+ * Returns the process exit code (always 0 on the happy path; a git/gh
+ * failure throws out of the loop and the CLI's top-level catch surfaces it
+ * as exit 1, matching the bash `set -euo pipefail`).
  */
 
 import { pushTagRef, tagsPointingAtHead } from '../git.js';
@@ -36,7 +35,7 @@ import { ghReleaseCreate } from './gh-release-create.js';
 import { ghReleaseExists } from './gh-release-exists.js';
 import type { ReleaseGithubOptions } from './types.js';
 
-export function releaseGithub(opts: ReleaseGithubOptions): number {
+export async function releaseGithub(opts: ReleaseGithubOptions): Promise<number> {
   const gitOpts = { cwd: opts.cwd };
   const tags = tagsPointingAtHead(gitOpts);
   if (tags.length === 0) {
@@ -45,11 +44,11 @@ export function releaseGithub(opts: ReleaseGithubOptions): number {
   }
   for (const tag of tags) {
     pushTagRef(tag, gitOpts);
-    if (ghReleaseExists(tag, gitOpts)) {
+    if (await ghReleaseExists(tag, gitOpts)) {
       process.stdout.write(`GitHub Release ${tag} already exists; skipping.\n`);
       continue;
     }
-    ghReleaseCreate(tag, gitOpts);
+    await ghReleaseCreate(tag, gitOpts);
     process.stdout.write(`Created GitHub Release for ${tag}\n`);
   }
   return 0;

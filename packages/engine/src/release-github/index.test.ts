@@ -9,22 +9,31 @@
  * - **idempotent-create** — the `gh release view` guard skips an existing
  *   Release.
  *
- * The subprocess boundary (`execFileSync`, git + gh) is mocked; every call
- * is recorded for ordering / absence assertions.
+ * The subprocess boundary is mocked. During the #469 async migration this
+ * flow is dual-mocked: git.ts still uses `execFileSync` (converted in a
+ * later sub-issue), while the gh calls already go through the async seam
+ * (`execCapture` for the view guard, `execInherit` for the create). All
+ * three mocks record into one ordered `calls` list for ordering / absence
+ * assertions.
  */
 
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { releaseGithub } from './index.js';
+import { execCapture } from '../utils/exec-capture.js';
+import { execInherit } from '../utils/exec-inherit.js';
 
 // Bare automock (no factory): vitest generates the double from the real
-// module, so it can't drift from the source — satisfying the unit-suite
-// isolation lint without a hand-written (untyped) factory. Every call is
-// driven per-test via `execMock`.
+// module, so it can't drift from the source. git.ts still uses execFileSync
+// until its own #469 sub-issue; the gh calls use the async seam.
 vi.mock('node:child_process');
+vi.mock('../utils/exec-capture.js');
+vi.mock('../utils/exec-inherit.js');
 
 const execMock = vi.mocked(execFileSync);
+const captureMock = vi.mocked(execCapture);
+const inheritMock = vi.mocked(execInherit);
 
 interface Call {
   cmd: string;
@@ -44,11 +53,19 @@ function wire(tags: string[], existing: Set<string> = new Set()): Call[] {
       if (a[0] === 'tag' && a.includes('--points-at')) {return `${tags.join('\n')}\n`;}
       return '';
     }
-    if (cmd === 'gh' && a[0] === 'release' && a[1] === 'view') {
-      if (existing.has(a[2]!)) {return Buffer.from('');}
-      throw new Error(`release not found: ${a[2]}`);
-    }
     return Buffer.from('');
+  });
+  // gh release view — the idempotency guard (execCapture; reject === absent).
+  captureMock.mockImplementation((cmd, args) => {
+    const a = [...(args ?? [])];
+    calls.push({ cmd, args: a });
+    if (existing.has(a[2]!)) {return Promise.resolve({ stdout: '', stderr: '' });}
+    return Promise.reject(new Error(`release not found: ${a[2]}`));
+  });
+  // gh release create (execInherit).
+  inheritMock.mockImplementation((cmd, args) => {
+    calls.push({ cmd, args: [...(args ?? [])] });
+    return Promise.resolve();
   });
   return calls;
 }
@@ -57,6 +74,8 @@ const out: string[] = [];
 
 beforeEach(() => {
   execMock.mockReset();
+  captureMock.mockReset();
+  inheritMock.mockReset();
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
@@ -75,9 +94,9 @@ const isGh = (sub: string, tag: string) => (c: Call) =>
   c.cmd === 'gh' && c.args[0] === 'release' && c.args[1] === sub && c.args[2] === tag;
 
 describe('releaseGithub: no tags on HEAD', () => {
-  it('prints the skip line, returns 0, and touches neither push nor gh', () => {
+  it('prints the skip line, returns 0, and touches neither push nor gh', async () => {
     const calls = wire([]);
-    const code = releaseGithub({ cwd: '/repo' });
+    const code = await releaseGithub({ cwd: '/repo' });
     expect(code).toBe(0);
     expect(out.join('')).toContain('No tags on HEAD; nothing to release on GitHub.');
     expect(calls.some((c) => c.cmd === 'gh')).toBe(false);
@@ -86,9 +105,9 @@ describe('releaseGithub: no tags on HEAD', () => {
 });
 
 describe('releaseGithub: a new tag', () => {
-  it('pushes ref-scoped, then views, then creates — in order', () => {
+  it('pushes ref-scoped, then views, then creates — in order', async () => {
     const calls = wire(['pkg-v1.0.0']);
-    const code = releaseGithub({ cwd: '/repo' });
+    const code = await releaseGithub({ cwd: '/repo' });
 
     const push = idx(calls, isPush('pkg-v1.0.0'));
     const view = idx(calls, isGh('view', 'pkg-v1.0.0'));
@@ -109,9 +128,9 @@ describe('releaseGithub: a new tag', () => {
     expect(code).toBe(0);
   });
 
-  it('handles multiple tags, each pushed ref-scoped and created', () => {
+  it('handles multiple tags, each pushed ref-scoped and created', async () => {
     const calls = wire(['a-v1.0.0', 'b-v2.0.0']);
-    releaseGithub({ cwd: '/repo' });
+    await releaseGithub({ cwd: '/repo' });
     for (const tag of ['a-v1.0.0', 'b-v2.0.0']) {
       expect(idx(calls, isPush(tag))).toBeGreaterThanOrEqual(0);
       expect(idx(calls, isGh('create', tag))).toBeGreaterThanOrEqual(0);
@@ -123,9 +142,9 @@ describe('releaseGithub: a new tag', () => {
 });
 
 describe('releaseGithub: existing Release', () => {
-  it('still pushes ref-scoped but skips create', () => {
+  it('still pushes ref-scoped but skips create', async () => {
     const calls = wire(['pkg-v1.0.0'], new Set(['pkg-v1.0.0']));
-    const code = releaseGithub({ cwd: '/repo' });
+    const code = await releaseGithub({ cwd: '/repo' });
     expect(idx(calls, isPush('pkg-v1.0.0'))).toBeGreaterThanOrEqual(0);
     expect(idx(calls, isGh('view', 'pkg-v1.0.0'))).toBeGreaterThanOrEqual(0);
     expect(idx(calls, isGh('create', 'pkg-v1.0.0'))).toBe(-1);
@@ -135,10 +154,10 @@ describe('releaseGithub: existing Release', () => {
 });
 
 describe('releaseGithub: no-fetch contract (#436)', () => {
-  it('never runs git fetch in any path', () => {
+  it('never runs git fetch in any path', async () => {
     for (const tags of [[], ['pkg-v1.0.0'], ['a-v1.0.0', 'b-v2.0.0']]) {
       const calls = wire(tags, new Set(['b-v2.0.0']));
-      releaseGithub({ cwd: '/repo' });
+      await releaseGithub({ cwd: '/repo' });
       expect(calls.some((c) => c.cmd === 'git' && c.args[0] === 'fetch')).toBe(false);
     }
   });

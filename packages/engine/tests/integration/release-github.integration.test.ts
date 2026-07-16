@@ -20,13 +20,12 @@
  *   skip already-created Releases instead of erroring.
  *
  * This tier drives the CLI in-process (`run([...])`) and mocks only the
- * subprocess boundary (`execFileSync`, for both `git` and `gh`). The e2e
+ * subprocess boundary. During the #469 async migration the boundary is
+ * dual-mocked: git.ts still shells out via `execFileSync` (converted in a
+ * later sub-issue), while the gh calls already go through the async seam
+ * (`execCapture` for the view guard, `execInherit` for the create). The e2e
  * twin (`tests/e2e/release-github.e2e.test.ts`) shells out to the built CLI
  * against a real git repo + bare remote with a stubbed `gh`.
- *
- * Red before the command exists: `release-github` is an unrecognized
- * command, so `run` prints "unknown command" and exits 1 — no ref-scoped
- * push, no "Created GitHub Release" line.
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -34,13 +33,19 @@ import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
+import { execCapture } from '../../src/utils/exec-capture.js';
+import { execInherit } from '../../src/utils/exec-inherit.js';
 
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
   return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
 });
+vi.mock('../../src/utils/exec-capture.js');
+vi.mock('../../src/utils/exec-inherit.js');
 
 const execMock = vi.mocked(execFileSync);
+const captureMock = vi.mocked(execCapture);
+const inheritMock = vi.mocked(execInherit);
 
 interface Call {
   cmd: string;
@@ -65,18 +70,24 @@ function wire(tags: string[], existing: Set<string> = new Set()): Call[] {
       // push / anything else: succeed silently.
       return '';
     }
-    if (cmd === 'gh') {
-      if (a[0] === 'release' && a[1] === 'view') {
-        const tag = a[2]!;
-        if (existing.has(tag)) return Buffer.from('');
-        // gh exits non-zero when the Release does not exist — model the
-        // real thrown error so the idempotency guard treats it as absent.
-        throw new Error(`release not found: ${tag}`);
-      }
-      // release create: succeed.
-      return Buffer.from('');
-    }
     return '';
+  });
+  // gh release view — the idempotency guard (execCapture; reject === absent).
+  captureMock.mockImplementation((cmd, args) => {
+    const a = [...(args ?? [])];
+    calls.push({ cmd, args: a });
+    const tag = a[2]!;
+    if (existing.has(tag)) {
+      return Promise.resolve({ stdout: '', stderr: '' });
+    }
+    // gh exits non-zero when the Release does not exist — model the real
+    // rejection so the idempotency guard treats it as absent.
+    return Promise.reject(new Error(`release not found: ${tag}`));
+  });
+  // gh release create (execInherit).
+  inheritMock.mockImplementation((cmd, args) => {
+    calls.push({ cmd, args: [...(args ?? [])] });
+    return Promise.resolve();
   });
   return calls;
 }
@@ -85,6 +96,8 @@ const out: string[] = [];
 
 beforeEach(() => {
   execMock.mockReset();
+  captureMock.mockReset();
+  inheritMock.mockReset();
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());

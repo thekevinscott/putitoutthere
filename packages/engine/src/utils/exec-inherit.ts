@@ -2,8 +2,10 @@ import { spawn } from 'node:child_process';
 import { ExecError } from './exec-error.js';
 
 export interface ExecInheritOptions {
-  cwd?: string;
-  env?: NodeJS.ProcessEnv;
+  // `| undefined` is explicit so call sites can forward an optional field
+  // directly (`{ cwd: opts.cwd }`) under exactOptionalPropertyTypes.
+  cwd?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
 }
 
 /**

@@ -458,7 +458,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // idempotent-create per #436/#437, now ordinary engine code rather
         // than inline bash. Reads GH_TOKEN from the environment for `gh`
         // auth and operates on `--cwd` (the checked-out repo).
-        return releaseGithub({ cwd: flags.cwd });
+        return await releaseGithub({ cwd: flags.cwd });
       }
       case 'advance-v0': {
         // #446: force-move the floating `v0` tag to HEAD. Invoked by
