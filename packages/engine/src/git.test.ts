@@ -28,6 +28,7 @@ import {
   pushTag,
   pushTagRef,
   pushTagRefForce,
+  tagCommit,
   tagList,
   tagsPointingAtHead,
 } from './git.js';
@@ -179,6 +180,31 @@ describe('lastTag', () => {
     expect(lastTag('pkg', 'v{version}', OPTS)).toBe('v0.2.11');
     // The `v*.*.*` glob won't match a default-shaped `pkg-v...` tag.
     expectArgv(['tag', '-l', 'v*.*.*']);
+  });
+
+  it('compares by major first (higher major wins across differing majors)', () => {
+    // Differing majors exercise the `a.major !== b.major` comparison arm
+    // that same-major fixtures never reach.
+    execMock.mockReturnValue('pkg-v1.9.9\npkg-v2.0.0');
+    expect(lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v2.0.0');
+  });
+});
+
+describe('tagCommit', () => {
+  it('dereferences a tag to its commit sha (trimmed)', () => {
+    execMock.mockReturnValue('deadbeef\n');
+    expect(tagCommit('lib-v1.0.0', OPTS)).toBe('deadbeef');
+    expectArgv(['rev-list', '-n', '1', 'lib-v1.0.0']);
+  });
+
+  it('defaults its options bag when called without one', () => {
+    execMock.mockReturnValue('cafef00d\n');
+    expect(tagCommit('lib-v1.0.0')).toBe('cafef00d');
+    expect(execMock).toHaveBeenCalledWith(
+      'git',
+      ['rev-list', '-n', '1', 'lib-v1.0.0'],
+      expect.any(Object),
+    );
   });
 });
 

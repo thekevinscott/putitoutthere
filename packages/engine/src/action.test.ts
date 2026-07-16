@@ -112,6 +112,20 @@ describe('action', () => {
     ]);
   });
 
+  it('write-version: omits --path / --version when neither input is set', async () => {
+    // With no working_directory or version, both guarded pushes are skipped
+    // (the empty-input else branches), leaving a bare argv.
+    process.env.INPUT_COMMAND = 'write-version';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith(['node', 'putitoutthere', 'write-version']);
+  });
+
+  it('write-launcher: omits --path when working_directory is unset', async () => {
+    process.env.INPUT_COMMAND = 'write-launcher';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith(['node', 'putitoutthere', 'write-launcher']);
+  });
+
   it('plan: forwards release_packages as --release-packages', async () => {
     // The reusable workflow's `_matrix.yml` invokes the action with
     // command: plan, working_directory, release_packages:

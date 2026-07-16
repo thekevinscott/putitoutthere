@@ -157,7 +157,7 @@ function listFiles(dir: string): string[] {
   return out;
 }
 
-function verifyShape(row: MatrixRow, files: string[]): string | null {
+export function verifyShape(row: MatrixRow, files: string[]): string | null {
   switch (row.kind) {
     case 'crates':
       return hasSuffix(files, '.crate')

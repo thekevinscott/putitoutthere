@@ -932,3 +932,328 @@ globs = ["packages/ts/**"]
     expect(findings.some((f) => f.message.includes('PIOT_REPO_URL_MISMATCH'))).toBe(false);
   });
 });
+
+/* ------------------------------ additional branch coverage ------------------------------ */
+
+describe('runChecks: additional branch coverage', () => {
+  it('flags a pypi package that pins a static [project].version literal', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+`,
+      'packages/py/pyproject.toml': `
+[project]
+name = "py-lib"
+version = "1.0.0"
+`,
+      'packages/py/lib.py': 'x',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    expect(
+      findings.some(
+        (f) => f.package === 'py-lib' && /PIOT_PYPI_STATIC_VERSION/.test(f.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('accepts a [[package]].path given as an absolute path (isAbsolute branch)', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "lib"
+kind  = "npm"
+path  = "/piotroot/packages/ts"
+globs = ["packages/ts/**"]
+`,
+      'packages/ts/package.json': JSON.stringify({
+        name: 'lib',
+        version: '0.0.0',
+        repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
+      }),
+      'packages/ts/index.ts': 'x',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    // Absolute path is used verbatim; the directory resolves, so no
+    // "does not exist" finding.
+    expect(
+      findings.some((f) => f.package === 'lib' && /does not exist/.test(f.message)),
+    ).toBe(false);
+  });
+
+  it('accepts an absolute bundle_cli.crate_path (isAbsolute branch)', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin        = "my-cli"
+stage_to   = "py_lib/bin"
+crate_path = "/piotroot/crates/cli"
+`,
+      'packages/py/pyproject.toml': `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`,
+      'crates/cli/Cargo.toml': `
+[package]
+name = "my-cli"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+`,
+      'crates/cli/src/main.rs': 'fn main(){}',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    expect(
+      findings.filter((f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message)),
+    ).toEqual([]);
+  });
+
+  it('accepts a workspace root whose [workspace] table declares no members array', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+`,
+      'packages/py/pyproject.toml': `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`,
+      // Root manifest is both a package and a workspace, but the
+      // [workspace] table carries no `members` key at all.
+      'Cargo.toml': `
+[package]
+name = "my-cli"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[workspace]
+resolver = "2"
+`,
+      'src/main.rs': 'fn main(){}',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    expect(
+      findings.filter((f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message)),
+    ).toEqual([]);
+  });
+
+  it('does not double-count a bin a workspace member repeats from the root manifest', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+`,
+      'packages/py/pyproject.toml': `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`,
+      // Root's implicit bin ([package].name) is "my-cli"; the member
+      // crate re-declares the same bin, exercising the de-dupe branch.
+      'Cargo.toml': `
+[package]
+name = "my-cli"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[workspace]
+members = ["crates/cli"]
+resolver = "2"
+`,
+      'src/main.rs': 'fn main(){}',
+      'crates/cli/Cargo.toml': `
+[package]
+name = "cli-crate"
+version = "0.0.0"
+
+[[bin]]
+name = "my-cli"
+path = "src/main.rs"
+`,
+      'crates/cli/src/main.rs': 'fn main(){}',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    expect(
+      findings.filter((f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message)),
+    ).toEqual([]);
+  });
+
+  it('skips a non-string [workspace].members entry', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin       = "my-cli"
+stage_to  = "py_lib/bin"
+`,
+      'packages/py/pyproject.toml': `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`,
+      // members carries a non-string entry; the walk must skip it.
+      'Cargo.toml': `
+[package]
+name = "my-cli"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[workspace]
+members = [42]
+resolver = "2"
+`,
+      'src/main.rs': 'fn main(){}',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    expect(
+      findings.filter((f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message)),
+    ).toEqual([]);
+  });
+
+  it('ignores non-object entries in a Cargo.toml `bin` array', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin        = "my-cli"
+stage_to   = "py_lib/bin"
+crate_path = "crates/cli"
+`,
+      'packages/py/pyproject.toml': `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`,
+      // `bin` is a top-level array of non-table entries (declared before
+      // [package] so it does not fold into it). Each entry is ignored, so
+      // the implicit [package].name bin ("my-cli") satisfies the check.
+      'crates/cli/Cargo.toml': `
+bin = ["stringentry"]
+
+[package]
+name = "my-cli"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+`,
+      'crates/cli/src/main.rs': 'fn main(){}',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    expect(
+      findings.filter((f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message)),
+    ).toEqual([]);
+  });
+
+  it('ignores a [[bin]] entry that declares no name', () => {
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-lib"
+kind  = "pypi"
+path  = "packages/py"
+globs = ["packages/py/**"]
+build = "maturin"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[package.bundle_cli]
+bin        = "my-cli"
+stage_to   = "py_lib/bin"
+crate_path = "crates/cli"
+`,
+      'packages/py/pyproject.toml': `
+[project]
+name = "py-lib"
+dynamic = ["version"]
+`,
+      // The [[bin]] table omits `name`; it is skipped, and the implicit
+      // [package].name bin ("my-cli") satisfies the check.
+      'crates/cli/Cargo.toml': `
+[package]
+name = "my-cli"
+version = "0.0.0"
+description = "thing"
+license = "MIT"
+
+[[bin]]
+path = "src/main.rs"
+`,
+      'crates/cli/src/main.rs': 'fn main(){}',
+    });
+    const findings = runChecks({ cwd: ROOT });
+    expect(
+      findings.filter((f) => f.package === 'py-lib' && /\[\[bin\]\]/.test(f.message)),
+    ).toEqual([]);
+  });
+});

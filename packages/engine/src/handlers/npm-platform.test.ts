@@ -964,10 +964,14 @@ describe('artifact path resolution: artifactsRoot unset', () => {
       }
       return Buffer.from('');
     });
+    // artifactsRoot absent (not undefined-valued) so the source's
+    // `ctx.artifactsRoot ?? join(ctx.cwd, 'artifacts')` fallback fires.
+    const ctx = makeCtx();
+    delete (ctx as { artifactsRoot?: string }).artifactsRoot;
     const r = await publishPlatforms(
       basePkg({ targets: ['linux-x64-gnu'] }),
       '0.2.0',
-      makeCtx({ artifactsRoot: undefined }),
+      ctx,
     );
     expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
   });
@@ -985,6 +989,7 @@ describe('publishPlatforms: generic platform publish failure', () => {
       if (a[0] === 'view') {
         throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
       }
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
       throw 'catastrophic npm failure';
     });
 

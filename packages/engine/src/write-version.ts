@@ -61,7 +61,9 @@ export function writeVersionForBuild(pkgDir: string, version: string): string[] 
   try {
     parsed = parseToml(pyOriginal);
   } catch (err) {
+    /* v8 ignore start -- smol-toml always throws an Error; the String(err) fallback is unreachable */
     const msg = err instanceof Error ? err.message : String(err);
+    /* v8 ignore stop */
     throw new Error(`write-version: failed to parse ${pyProjectPath}: ${msg}`, { cause: err });
   }
   const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } })?.project;

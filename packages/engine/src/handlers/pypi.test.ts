@@ -122,6 +122,18 @@ describe('pypi.isPublished', () => {
     ).rejects.toThrow(/503/);
     fetchSpy.mockRestore();
   });
+
+  it('throws a non-transient error on an unexpected 4xx (not 404)', async () => {
+    // The endpoint contract is 200/404, but a 4xx like 403 must surface a
+    // hard (non-retryable) error rather than be misread as "not published".
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('forbidden', { status: 403 }),
+    );
+    await expect(
+      pypi.isPublished(basePkg(), '0.1.0', makeCtx()),
+    ).rejects.toThrow(/403/);
+    fetchSpy.mockRestore();
+  });
 });
 
 describe('pypi.latestVersion', () => {
@@ -188,6 +200,17 @@ describe('pypi.writeVersion', () => {
     await expect(
       pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
     ).rejects.toThrow(/pyproject\.toml not found/);
+  });
+
+  it('surfaces a non-ENOENT read error as-is (e.g. EACCES)', async () => {
+    // A permission error is not the "missing file" case; it must not be
+    // reported as `pyproject.toml not found` — the original error bubbles.
+    readMock.mockImplementation(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+    await expect(
+      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
+    ).rejects.toThrow(/EACCES/);
   });
 
   it('throws when [project] is present but declares no version source', async () => {

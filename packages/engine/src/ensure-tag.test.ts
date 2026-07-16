@@ -48,6 +48,22 @@ describe('ensureTag', () => {
     expect(log.warn).toHaveBeenCalledOnce();
   });
 
+  it('warns with String(err) when the push throws a non-Error', () => {
+    tagListMock.mockReturnValue([]); // tag absent
+    pushTagMock.mockImplementation(() => {
+      // A non-Error rejection (a bare string) exercises the `: String(err)`
+      // arm of the warning's message interpolation.
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
+      throw 'push exploded';
+    });
+    const log = makeLog();
+
+    ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
+
+    expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('push exploded'));
+  });
+
   it('is a no-op when the tag already exists', () => {
     tagListMock.mockReturnValue(['lib-v1.0.0']); // tag present
     const log = makeLog();

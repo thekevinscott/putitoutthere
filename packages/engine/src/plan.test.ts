@@ -299,6 +299,59 @@ describe('plan: subsequent release with last_tag', () => {
     expect(matrix.find((r) => r.name === 'lib-python')!.version).toBe('1.2.1');
   });
 
+  it('falls back to first_version when the resolved last tag is unparseable', async () => {
+    // A tag that matches the package glob but whose version part fails strict
+    // semver: production `lastTag` never surfaces such a tag, but a direct
+    // mock does, exercising the `?? firstVersion(pkg)` defensive fallback.
+    useToml(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/lib"
+globs = ["packages/lib/**"]
+`);
+    setTags({ lib: 'lib-vNONSENSE' });
+    setDiff({ 'lib-vNONSENSE': ['packages/lib/src.rs'] });
+    setHeadBody('fix: x');
+
+    const matrix = await plan({ cwd: CWD });
+    // first_version defaults to 0.1.0; no trailer → patch bump → 0.1.1.
+    expect(matrix.find((r) => r.name === 'lib')!.version).toBe('0.1.1');
+  });
+
+  it('reuses a memoized diff when two packages resolve to the same last tag (#140)', async () => {
+    // Both packages share a tag_format and land on the SAME tag string, so
+    // the second seed-detection pass hits the diff cache — the
+    // `diff === undefined` guard is false on that pass.
+    useToml(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name       = "a"
+kind       = "crates"
+path       = "packages/a"
+globs      = ["packages/a/**"]
+tag_format = "shared-v{version}"
+
+[[package]]
+name       = "b"
+kind       = "crates"
+path       = "packages/b"
+globs      = ["packages/b/**"]
+tag_format = "shared-v{version}"
+`);
+    setTags({ a: 'shared-v1.0.0', b: 'shared-v1.0.0' });
+    setDiff({ 'shared-v1.0.0': ['packages/a/x.rs', 'packages/b/y.rs'] });
+    setHeadBody('fix: x');
+
+    const matrix = await plan({ cwd: CWD });
+    expect(matrix.map((r) => r.name).sort()).toEqual(['a', 'b']);
+  });
+
   it('release: minor trailer bumps minor for cascaded packages', async () => {
     useToml(PUTITOUTTHERE_TOML);
     setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
@@ -482,6 +535,27 @@ targets = [
     expect(mac.runs_on).toBe('macos-14');
     // artifact_name and path still key off the triple, not the runner.
     expect(arm.artifact_name).toBe('lib-napi-aarch64-unknown-linux-gnu');
+  });
+
+  it('defaults a bare aarch64-linux maturin target to the native arm runner (#354)', async () => {
+    // A bare-string aarch64-linux target (no `{ triple, runner }` override)
+    // falls to defaultRunsOn, which maps aarch64-linux → ubuntu-24.04-arm.
+    useToml(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "lib-py"
+kind    = "pypi"
+path    = "packages/py"
+globs   = ["packages/py/**"]
+build   = "maturin"
+targets = ["aarch64-unknown-linux-gnu"]
+`);
+
+    const matrix = await plan({ cwd: CWD });
+    const arm = matrix.find((r) => r.target === 'aarch64-unknown-linux-gnu')!;
+    expect(arm.runs_on).toBe('ubuntu-24.04-arm');
   });
 
   it('honors per-target runner override on maturin pypi (#159)', async () => {

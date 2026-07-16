@@ -18,7 +18,7 @@ import { handlerFor } from './handlers/index.js';
 import type { MatrixRow } from './plan.js';
 import { plan } from './plan.js';
 import { computePlanStatus } from './plan-status.js';
-import type { Handler } from './types.js';
+import type { Ctx, Handler } from './types.js';
 
 vi.mock('./config.js');
 vi.mock('./plan.js');
@@ -115,5 +115,35 @@ describe('computePlanStatus', () => {
     });
     // The dependent publishing ahead of its skipped dependency is the skew.
     expect(out.skew).toEqual([{ dependent: 'wrap', dependency: 'core' }]);
+  });
+
+  it('emits one verdict per package even when the matrix fans a package across rows, threading an inert-artifacts ctx', async () => {
+    configWith(pkg('a'));
+    // Two matrix rows for the same package (e.g. a multi-target fan): the
+    // second must hit the `seen.has(row.name)` dedup `continue`.
+    vi.mocked(plan).mockResolvedValue([row('a'), row('a')]);
+    const probe: { got?: string; had?: boolean } = {};
+    const handler: Handler = {
+      kind: 'crates',
+      isPublished: vi.fn((_p: { name: string }, _v: string, ctx: Ctx) => {
+        // The verdict loop builds a Ctx with stub artifact accessors.
+        probe.got = ctx.artifacts.get('anything');
+        probe.had = ctx.artifacts.has('anything');
+        return Promise.resolve(false);
+      }),
+      latestVersion: vi.fn().mockResolvedValue(null),
+      trustPosture: vi.fn().mockResolvedValue('token'),
+      writeVersion: vi.fn().mockResolvedValue([]),
+      publish: vi.fn().mockResolvedValue({ status: 'published', url: 'x' }),
+    };
+    vi.mocked(handlerFor).mockReturnValue(handler);
+
+    const out = await computePlanStatus({ cwd: '/repo' });
+
+    expect(out.verdicts).toHaveLength(1);
+    expect(out.verdicts[0]!.package).toBe('a');
+    expect(handler.isPublished).toHaveBeenCalledTimes(1);
+    expect(probe.got).toBe('');
+    expect(probe.had).toBe(false);
   });
 });

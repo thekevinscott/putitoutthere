@@ -312,6 +312,15 @@ describe('createLogger: pretty mode', () => {
     expect(dest.text).toContain('bare');
   });
 
+  it('stringifies number / boolean / null scalar fields', () => {
+    const dest = makeStream();
+    const log = createLogger({ stream: dest, pretty: true });
+    log.info('scalars', { count: 3, ok: true, nada: null });
+    expect(dest.text).toContain('count=3');
+    expect(dest.text).toContain('ok=true');
+    expect(dest.text).toContain('nada=null');
+  });
+
   it('auto-detects TTY when no `pretty` is passed', () => {
     // Simulate a TTY stream by tagging it.
     const dest = makeStream();

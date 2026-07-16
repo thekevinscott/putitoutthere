@@ -278,6 +278,7 @@ describe('crates.writeVersion', () => {
     // A thrown non-Error value (no `.code`, not an `instanceof Error`) skips
     // the ENOENT remap and hits the `new Error(String(err))` branch.
     readMock.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
       throw 'disk gremlins';
     });
     await expect(
@@ -821,6 +822,7 @@ describe('crates.publish', () => {
         }
         // Non-Error, no stderr — exercises the String(retryErr) fallback and
         // the "no retry stderr" message branch.
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
         throw 'catastrophic fallback failure';
       });
       const stdoutSpy = vi
@@ -855,6 +857,7 @@ describe('crates.publish', () => {
       );
       execMock.mockImplementation((file: string) => {
         if (file === 'git') {throw new Error('not a git repo');}
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
         throw 'plain string failure';
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
