@@ -48,6 +48,20 @@ describe('ensureTag', () => {
     expect(log.warn).toHaveBeenCalledOnce();
   });
 
+  it('stringifies a non-Error push rejection in the warning', async () => {
+    tagListMock.mockResolvedValue([]); // tag absent
+    // A rejection that is not an Error (a bare string) has no `.message`;
+    // ensureTag folds it via `String(err)` into the warning text.
+    pushTagMock.mockRejectedValue('push blew up: bare string reason');
+    const log = makeLog();
+
+    await ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('push blew up: bare string reason'),
+    );
+  });
+
   it('is a no-op when the tag already exists', async () => {
     tagListMock.mockResolvedValue(['lib-v1.0.0']); // tag present
     const log = makeLog();

@@ -34,6 +34,8 @@ import {
 import { execCapture } from './utils/exec-capture.js';
 import { ExecError } from './utils/exec-error.js';
 
+vi.mock('./utils/exec-error.js', async () => await vi.importActual<typeof import('./utils/exec-error.js')>('./utils/exec-error.js'));
+
 vi.mock('./utils/exec-capture.js');
 
 const execMock = vi.mocked(execCapture);
@@ -309,10 +311,32 @@ describe('error surfacing', () => {
     await expect(headCommit(OPTS)).rejects.toThrow();
   });
 
+  it('trims surrounding whitespace off the folded git stderr', async () => {
+    // The stderr is `.trim()`-ed before folding, so padding around git's
+    // output never leaks into the message. Pins the trim: the folded line
+    // ends exactly at `boom`, with no trailing newline or spaces.
+    execMock.mockRejectedValue(gitError('\n   fatal: boom   \n'));
+    let caught: unknown;
+    try {
+      await headCommit(OPTS);
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as Error).message).toMatch(/\nfatal: boom$/);
+  });
+
   it('surfaces the bare error message when the rejection carries no ExecError stderr', async () => {
     // A non-ExecError rejection (no `.stderr`) folds to just the base message.
     execMock.mockRejectedValue(new Error('spawn git ENOMEM'));
     await expect(headCommit(OPTS)).rejects.toThrow('spawn git ENOMEM');
+  });
+
+  it('stringifies a non-Error rejection into the thrown message', async () => {
+    // A rejection that is neither an ExecError nor an Error (a bare
+    // string) has no `.message`; `run` folds it via `String(err)` so the
+    // thrown message still carries the root cause.
+    execMock.mockRejectedValue('git blew up: bare string reason');
+    await expect(headCommit(OPTS)).rejects.toThrow('git blew up: bare string reason');
   });
 
   it('gives an actionable hint when no committer identity is configured (#206)', async () => {

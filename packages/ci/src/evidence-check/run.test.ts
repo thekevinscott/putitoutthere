@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+
+vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import { sleep } from '../utils/sleep.js';
 import { addedUnreleasedBullets } from './added-bullets.js';
 import { citedRunNeedles } from './cited-needles.js';
@@ -172,12 +174,19 @@ describe('runEvidenceCheck: orchestration', () => {
 
 describe('runEvidenceCheck: gh api failure diagnostics', () => {
   it('surfaces the captured gh stderr when a query fails', async () => {
+    const ghErr = new ExecError('gh failed', '', 'HTTP 404: not found', 1);
     exec.mockImplementation((cmd) =>
-      cmd === 'git'
-        ? Promise.resolve({ stdout: '', stderr: '' })
-        : Promise.reject(new ExecError('gh failed', '', 'HTTP 404: not found', 1)),
+      cmd === 'git' ? Promise.resolve({ stdout: '', stderr: '' }) : Promise.reject(ghErr),
     );
-    await expect(runEvidenceCheck()).rejects.toThrow(/failed: HTTP 404: not found/);
+    let caught: unknown;
+    try {
+      await runEvidenceCheck();
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as Error).message).toMatch(/failed: HTTP 404: not found/);
+    // The original gh failure is chained as `cause` for diagnosability.
+    expect((caught as Error).cause).toBe(ghErr);
   });
 
   it('surfaces an empty stderr when the gh failure is not an ExecError', async () => {

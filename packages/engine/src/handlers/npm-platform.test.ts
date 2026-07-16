@@ -21,6 +21,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture, type ExecResult } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+
+vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import {
   assertTripleSupported,
   DEFAULT_NAME_TEMPLATE,

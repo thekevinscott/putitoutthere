@@ -41,6 +41,7 @@ async function run(args: string[], opts: GitOptions = {}): Promise<string> {
     if (needsIdentity) {
       throw new Error(
         [
+          /* v8 ignore next -- args[0] is always defined: every git wrapper passes a non-empty argv, so the `?? ''` fallback is unreachable via the public API */
           `git ${args[0] ?? ''}: no committer identity configured.`,
           'piot cuts annotated tags which require `user.name` + `user.email`.',
           'Configure them in the publish job before invoking piot:',

@@ -1,9 +1,14 @@
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execCapture } from './exec-capture.js';
 import { ExecError } from './exec-error.js';
+
+vi.mock('node:fs/promises', async () => await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises'));
+vi.mock('node:os', async () => await vi.importActual<typeof import('node:os')>('node:os'));
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
+vi.mock('./exec-error.js', async () => await vi.importActual<typeof import('./exec-error.js')>('./exec-error.js'));
 
 describe('execCapture', () => {
   it('captures stdout and stderr as strings', async () => {

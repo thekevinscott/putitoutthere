@@ -1,8 +1,12 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pathExists } from './path-exists.js';
+
+vi.mock('node:fs/promises', async () => await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises'));
+vi.mock('node:os', async () => await vi.importActual<typeof import('node:os')>('node:os'));
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 
 describe('pathExists', () => {
   let dir: string;

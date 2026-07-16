@@ -4,6 +4,8 @@ import { resolveNpmTarballUrl } from './resolve-url.js';
 import { execCapture } from '../../utils/exec-capture.js';
 import { ExecError } from '../../utils/exec-error.js';
 
+vi.mock('../../utils/exec-error.js', async () => await vi.importActual<typeof import('../../utils/exec-error.js')>('../../utils/exec-error.js'));
+
 // Bare automock (no factory): the double is derived from the real seam
 // module, so it can't drift and needs no hand-written factory. Real `npm view`
 // behaviour is covered by the integration and e2e tiers.

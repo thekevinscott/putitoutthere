@@ -54,6 +54,13 @@ export default tseslint.config(
       // them; the `this`-binding concern this rule guards against
       // doesn't apply to vitest mocks.
       '@typescript-eslint/unbound-method': 'off',
+      // The testing-conventions unit-lint gate requires typed pass-through
+      // mocks of the exact form `vi.importActual<typeof import('X')>('X')`
+      // (an untyped factory trips its untyped-mock check). That inline
+      // `import()` type is the one thing `consistent-type-imports` forbids by
+      // default, so allow inline type annotations in tests only — `prefer:
+      // top-level` still applies, and src/ stays strict.
+      '@typescript-eslint/consistent-type-imports': ['error', { disallowTypeAnnotations: false }],
     },
   },
 );

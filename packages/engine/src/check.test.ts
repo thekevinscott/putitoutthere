@@ -32,6 +32,8 @@ import { runChecks } from './check.js';
 import { execCapture } from './utils/exec-capture.js';
 import { ExecError } from './utils/exec-error.js';
 
+vi.mock('./utils/exec-error.js', async () => await vi.importActual<typeof import('./utils/exec-error.js')>('./utils/exec-error.js'));
+
 // check.ts + glob.ts are async (node:fs/promises + the exec seam); preflight
 // (called for the manifest-shape checks) is not yet migrated and still reads
 // via node:fs readFileSync — hence the dual fs mock over one in-memory tree.
