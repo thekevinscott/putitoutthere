@@ -20,6 +20,7 @@ import {
   checkCratesMetadata,
   checkPackageJsonShape,
   checkProvenanceMetadata,
+  checkPypiVersionSource,
   checkPyprojectShape,
   checkRepoPublic,
   checkRepoUrlMatch,
@@ -28,6 +29,7 @@ import {
   requireCratesMetadata,
   requirePackageJsonShape,
   requireProvenanceMetadata,
+  requirePypiVersionSource,
   requirePyprojectShape,
   requireRepoPublic,
   requireRepoUrlMatch,
@@ -2139,5 +2141,501 @@ describe('checkRepoPublic / requireRepoPublic — repo must not be private', () 
         fetchImpl: fetchImpl as unknown as typeof fetch,
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+/* ----------------------- pypi dynamic version source ----------------------- */
+
+describe('checkPypiVersionSource / requirePypiVersionSource', () => {
+  const dir = '/vfs/pypi-version';
+
+  function pypiPkg(name: string, path: string): Package {
+    return pkg('pypi', { name, path });
+  }
+  function writePyproject(path: string, body: string): void {
+    setFile(j(path, 'pyproject.toml'), body);
+  }
+
+  it('flags a static [project].version literal', () => {
+    const p = j(dir, 'a');
+    writePyproject(p, `[project]\nname = "a"\nversion = "1.2.3"\n`);
+    const findings = checkPypiVersionSource([pypiPkg('a', p)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ package: 'a' });
+    expect(findings[0]!.pyprojectPath).toMatch(/[/\\]a[/\\]pyproject\.toml/);
+  });
+
+  it('passes when [project].dynamic includes "version"', () => {
+    const p = j(dir, 'a');
+    writePyproject(p, `[project]\nname = "a"\ndynamic = ["version"]\n`);
+    expect(checkPypiVersionSource([pypiPkg('a', p)])).toEqual([]);
+  });
+
+  it('flags a static version even when dynamic lists other fields (not version)', () => {
+    // declaresDynamicVersion: dynamic is an array but does not include
+    // "version", so the static literal is still flagged.
+    const p = j(dir, 'a');
+    writePyproject(
+      p,
+      `[project]\nname = "a"\nversion = "1.0.0"\ndynamic = ["classifiers"]\n`,
+    );
+    expect(checkPypiVersionSource([pypiPkg('a', p)])).toHaveLength(1);
+  });
+
+  it('passes when [project] declares neither a static version nor dynamic', () => {
+    // No `version` string at all — "missing version entirely" is a
+    // different check's concern, so this one stays silent.
+    const p = j(dir, 'a');
+    writePyproject(p, `[project]\nname = "a"\n`);
+    expect(checkPypiVersionSource([pypiPkg('a', p)])).toEqual([]);
+  });
+
+  it('skips a pyproject with no [project] table', () => {
+    const p = j(dir, 'a');
+    writePyproject(p, `[build-system]\nbuild-backend = "setuptools.build_meta"\n`);
+    expect(checkPypiVersionSource([pypiPkg('a', p)])).toEqual([]);
+  });
+
+  it('skips non-pypi packages entirely', () => {
+    expect(checkPypiVersionSource([pkg('crates'), pkg('npm')])).toEqual([]);
+  });
+
+  it('skips a missing or malformed pyproject.toml', () => {
+    const missing = j(dir, 'missing');
+    expect(checkPypiVersionSource([pypiPkg('a', missing)])).toEqual([]);
+    const m = j(dir, 'malformed');
+    writePyproject(m, '[[broken\nnot toml');
+    expect(checkPypiVersionSource([pypiPkg('a', m)])).toEqual([]);
+  });
+
+  it('reports every failing pypi package, not just the first', () => {
+    const a = j(dir, 'a');
+    const b = j(dir, 'b');
+    writePyproject(a, `[project]\nname = "a"\nversion = "1.0.0"\n`);
+    writePyproject(b, `[project]\nname = "b"\nversion = "2.0.0"\n`);
+    const findings = checkPypiVersionSource([pypiPkg('a', a), pypiPkg('b', b)]);
+    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
+  });
+
+  it('requirePypiVersionSource throws with PIOT_PYPI_STATIC_VERSION naming the failing package', () => {
+    const p = j(dir, 'a');
+    writePyproject(p, `[project]\nname = "a"\nversion = "1.2.3"\n`);
+    try {
+      requirePypiVersionSource([pypiPkg('a', p)]);
+      throw new Error('expected requirePypiVersionSource to throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('PIOT_PYPI_STATIC_VERSION');
+      expect(msg).toContain('a');
+      expect(msg).toMatch(/[/\\]a[/\\]pyproject\.toml/);
+      expect(msg).toContain('dynamic-versions');
+    }
+  });
+
+  it('requirePypiVersionSource returns silently when every pypi package is dynamic', () => {
+    const p = j(dir, 'a');
+    writePyproject(p, `[project]\nname = "a"\ndynamic = ["version"]\n`);
+    expect(() => requirePypiVersionSource([pypiPkg('a', p)])).not.toThrow();
+  });
+});
+
+/* ----------------------- edge-branch coverage ----------------------- */
+
+describe('preflight edge branches (full coverage)', () => {
+  const dir = '/vfs/edge';
+
+  function writeCargoToml(path: string, body: string): void {
+    setFile(j(path, 'Cargo.toml'), body);
+  }
+  function writePyproject(path: string, body: string): void {
+    setFile(j(path, 'pyproject.toml'), body);
+  }
+
+  it('checkProvenanceMetadata skips a malformed package.json (parse-error arm)', () => {
+    const p = j(dir, 'prov-malformed');
+    setFile(j(p, 'package.json'), '{ not json');
+    expect(checkProvenanceMetadata([pkg('npm', { name: 'a', path: p })])).toEqual([]);
+  });
+
+  it('checkCratesMetadata reports both fields when Cargo.toml has no [package] table', () => {
+    // Exercises the `(parsed.package ?? {})` fallback when the manifest
+    // parses but declares no [package] table.
+    const p = j(dir, 'crates-nopkg');
+    writeCargoToml(p, '[lib]\nname = "x"\n');
+    const findings = checkCratesMetadata([pkg('crates', { name: 'a', path: p })]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.missing).toEqual(['description', 'license']);
+  });
+
+  it('checkCratesMetadata resolves a relative crate path with no workspace ancestor', () => {
+    // Exercises readWorkspacePackageTable's dirname-fixpoint break, which
+    // only fires for relative crate paths (dirname settles on `.`).
+    const rel = 'rel-crate';
+    writeCargoToml(
+      rel,
+      '[package]\nname = "a"\nversion = "0.0.0"\ndescription = "x"\nlicense = "MIT"\n',
+    );
+    expect(checkCratesMetadata([pkg('crates', { name: 'a', path: rel })])).toEqual([]);
+  });
+
+  it('checkPyprojectShape: maturin include covering a parent dir of stage_to passes', () => {
+    // maturinIncludeCovers: `stage_to.startsWith(normalized + "/")` arm.
+    const p = j(dir, 'mat-parent');
+    writePyproject(
+      p,
+      `[build-system]\nbuild-backend = "maturin"\n[project]\nname = "a"\nversion = "0.0.0"\n[tool.maturin]\ninclude = ["pkg"]\n`,
+    );
+    const pkgs = [
+      pkg('pypi', {
+        name: 'a',
+        path: p,
+        build: 'maturin',
+        targets: ['x86_64-unknown-linux-gnu'],
+        bundle_cli: { bin: 'a', stage_to: 'pkg/bin', crate_path: '.', features: [], no_default_features: false },
+      }),
+    ];
+    expect(
+      checkPyprojectShape(pkgs).filter((f) => f.code === 'PIOT_PYPI_MATURIN_INCLUDE_MISSING'),
+    ).toEqual([]);
+  });
+
+  it('checkPyprojectShape: maturin include listing a child path of stage_to passes', () => {
+    // maturinIncludeCovers: the final `path.startsWith(stage_to + "/")` arm.
+    const p = j(dir, 'mat-child');
+    writePyproject(
+      p,
+      `[build-system]\nbuild-backend = "maturin"\n[project]\nname = "a"\nversion = "0.0.0"\n[tool.maturin]\ninclude = ["pkg/bin/inner"]\n`,
+    );
+    const pkgs = [
+      pkg('pypi', {
+        name: 'a',
+        path: p,
+        build: 'maturin',
+        targets: ['x86_64-unknown-linux-gnu'],
+        bundle_cli: { bin: 'a', stage_to: 'pkg/bin', crate_path: '.', features: [], no_default_features: false },
+      }),
+    ];
+    expect(
+      checkPyprojectShape(pkgs).filter((f) => f.code === 'PIOT_PYPI_MATURIN_INCLUDE_MISSING'),
+    ).toEqual([]);
+  });
+
+  it('checkPyprojectShape yields no findings for a pyproject with neither [project] nor [build-system]', () => {
+    // Exercises both `(parsed.project ?? {})` and
+    // `(parsed['build-system'] ?? {})` fallbacks.
+    const p = j(dir, 'py-bare');
+    writePyproject(p, '[tool.black]\nline-length = 88\n');
+    expect(checkPyprojectShape([pkg('pypi', { name: 'a', path: p, build: 'setuptools' })])).toEqual([]);
+  });
+
+  it('checkCargoShape skips a bundle_cli crate whose Cargo.toml is missing', () => {
+    // collectBundleCliCrateFindings: `readToml(...) === null` early return.
+    const root = dir;
+    const pypiPath = j(root, 'py-nobin');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'x', stage_to: 'py/bin', crate_path: 'crates/nope', features: [], no_default_features: false },
+    });
+    expect(checkCargoShape([pyPkg], { cwd: root })).toEqual([]);
+  });
+
+  it('checkCargoShape flags MISSING_BIN with "(none)" when the crate manifest declares no bins', () => {
+    // collectBinsFromManifest returns [] (no [[bin]], no [package].name) and
+    // workspaceMemberManifests hits the `!Array.isArray(members)` return, so
+    // declaredBins is empty and the detail uses the "(none)" cond-expr arm.
+    const root = dir;
+    const cratePath = j(root, 'crates', 'ws-only');
+    writeCargoToml(cratePath, '[workspace]\n');
+    const pypiPath = j(root, 'py-wsonly');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'x', stage_to: 'py/bin', crate_path: 'crates/ws-only', features: [], no_default_features: false },
+    });
+    const findings = checkCargoShape([pyPkg], { cwd: root });
+    const bin = findings.find((f) => f.code === 'PIOT_CRATES_MISSING_BIN');
+    expect(bin).toBeDefined();
+    expect(bin!.detail).toContain('(none)');
+  });
+
+  it('checkCargoShape skips a glob workspace member that has no Cargo.toml while resolving bins', () => {
+    // readDeclaredBinNames member loop: a glob-matched member dir with no
+    // Cargo.toml hits the `memberParsed === null` continue.
+    const root = dir;
+    const cratePath = j(root, 'ws-root');
+    writeCargoToml(cratePath, '[workspace]\nmembers = ["members/*"]\n');
+    writeCargoToml(
+      j(cratePath, 'members', 'good'),
+      '[package]\nname = "good"\nversion = "0.0.0"\n[[bin]]\nname = "the-bin"\npath = "src/main.rs"\n',
+    );
+    // sibling dir matched by the glob but carrying no Cargo.toml
+    setFile(j(cratePath, 'members', 'empty', '.keep'), '');
+    const pypiPath = j(root, 'py-glob');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'the-bin', stage_to: 'py/bin', crate_path: 'ws-root', features: [], no_default_features: false },
+    });
+    expect(
+      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
+    ).toEqual([]);
+  });
+
+  it('checkCargoShape yields no findings for a crates manifest with no [package] table', () => {
+    // collectCratesPackageFindings: `(parsed.package ?? {})` fallback.
+    const p = j(dir, 'cargo-nopkg');
+    writeCargoToml(p, '[workspace]\nmembers = ["a"]\n');
+    expect(checkCargoShape([pkg('crates', { name: 'a', path: p })])).toEqual([]);
+  });
+
+  it('checkCargoShape flags FEATURE_NOT_DECLARED when the crate declares no [features] table at all', () => {
+    // declaredFeatures: `(cargoToml.features ?? {})` fallback.
+    const p = j(dir, 'cargo-nofeat');
+    writeCargoToml(p, '[package]\nname = "a"\nversion = "0.0.0"\n');
+    const findings = checkCargoShape([pkg('crates', { name: 'a', path: p, features: ['x'] })]);
+    expect(
+      findings.some((f) => f.code === 'PIOT_CRATES_FEATURE_NOT_DECLARED' && /x/.test(f.detail)),
+    ).toBe(true);
+  });
+
+  it('checkCargoShape flags WORKSPACE_VERSION_MISMATCH when the workspace root omits [workspace.package].version', () => {
+    // workspaceVersionDeclared: `(workspace.package ?? {})` fallback when the
+    // [workspace] table declares no `package` sub-table.
+    const root = dir;
+    const p = j(root, 'crates', 'a');
+    writeCargoToml(p, '[package]\nname = "a"\nversion.workspace = true\n');
+    writeCargoToml(root, '[workspace]\nmembers = ["crates/a"]\n');
+    const findings = checkCargoShape([pkg('crates', { name: 'a', path: p })], { cwd: root });
+    expect(findings.some((f) => f.code === 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH')).toBe(true);
+  });
+
+  it('checkCargoShape walks past a non-workspace ancestor Cargo.toml to find the workspace root', () => {
+    // workspaceVersionDeclared: `(parsed.workspace ?? null)` fallback when an
+    // intermediate ancestor Cargo.toml parses but declares no [workspace].
+    const root = dir;
+    const p = j(root, 'crates', 'a');
+    writeCargoToml(p, '[package]\nname = "a"\nversion.workspace = true\n');
+    writeCargoToml(j(root, 'crates'), '[package]\nname = "intermediate"\nversion = "0.0.0"\n');
+    writeCargoToml(
+      root,
+      '[workspace]\nmembers = ["crates/a"]\n[workspace.package]\nversion = "1.0.0"\n',
+    );
+    const findings = checkCargoShape([pkg('crates', { name: 'a', path: p })], { cwd: root });
+    expect(findings.filter((f) => f.code === 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH')).toEqual([]);
+  });
+
+  it('checkRepoUrlMatch skips a crates manifest with no [package] table', () => {
+    // readDeclaredRepoUrl (crates): `(parsed.package ?? {})` fallback.
+    const p = j(dir, 'repo-crates-nopkg');
+    writeCargoToml(p, '[workspace]\nmembers = ["a"]\n');
+    expect(
+      checkRepoUrlMatch([pkg('crates', { name: 'a', path: p })], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('checkRepoUrlMatch skips a pypi manifest with no [project] table', () => {
+    // readDeclaredRepoUrl (pypi): `(parsed.project ?? {})` fallback.
+    const p = j(dir, 'repo-pypi-noproject');
+    writePyproject(p, '[build-system]\nbuild-backend = "setuptools.build_meta"\n');
+    expect(
+      checkRepoUrlMatch([pkg('pypi', { name: 'a', path: p })], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('checkRepoUrlMatch skips an npm manifest whose object repository has no usable url', () => {
+    // readDeclaredRepoUrl (npm): the object-form branch where `url` is not a
+    // non-empty string, so the else path returns null and the package is
+    // skipped.
+    const p = j(dir, 'repo-npm-noobjurl');
+    setFile(j(p, 'package.json'), JSON.stringify({ name: 'a', repository: { type: 'git' } }));
+    expect(
+      checkRepoUrlMatch([pkg('npm', { name: 'a', path: p })], { githubRepository: 'acme/widget' }),
+    ).toEqual([]);
+  });
+
+  it('checkPyprojectShape: a non-string maturin include entry does not cover stage_to', () => {
+    // extractIncludePath: an include entry that is neither a string nor an
+    // object (a bare number) yields no path, so it cannot cover stage_to and
+    // MATURIN_INCLUDE_MISSING fires.
+    const p = j(dir, 'mat-numentry');
+    writePyproject(
+      p,
+      `[build-system]\nbuild-backend = "maturin"\n[project]\nname = "a"\nversion = "0.0.0"\n[tool.maturin]\ninclude = [42]\n`,
+    );
+    const pkgs = [
+      pkg('pypi', {
+        name: 'a',
+        path: p,
+        build: 'maturin',
+        targets: ['x86_64-unknown-linux-gnu'],
+        bundle_cli: { bin: 'a', stage_to: 'pkg/bin', crate_path: '.', features: [], no_default_features: false },
+      }),
+    ];
+    expect(
+      checkPyprojectShape(pkgs).some((f) => f.code === 'PIOT_PYPI_MATURIN_INCLUDE_MISSING'),
+    ).toBe(true);
+  });
+
+  it('checkCargoShape: no FEATURE_NOT_DECLARED when every configured crates feature is declared', () => {
+    // collectCratesPackageFindings feature path: `missing.length > 0` else.
+    const p = j(dir, 'cargo-featok');
+    writeCargoToml(p, '[package]\nname = "a"\nversion = "0.0.0"\n[features]\nfoo = []\n');
+    expect(
+      checkCargoShape([pkg('crates', { name: 'a', path: p, features: ['foo'] })]).filter(
+        (f) => f.code === 'PIOT_CRATES_FEATURE_NOT_DECLARED',
+      ),
+    ).toEqual([]);
+  });
+
+  it('checkCargoShape: no FEATURE_NOT_DECLARED when every bundle_cli feature is declared', () => {
+    // collectBundleCliCrateFindings feature path: `missing.length > 0` else.
+    const root = dir;
+    const cratePath = j(root, 'crates', 'featok-cli');
+    writeCargoToml(
+      cratePath,
+      '[package]\nname = "my-cli"\nversion = "0.0.0"\n[features]\ncli = []\n',
+    );
+    const pypiPath = j(root, 'py-featok');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'my-cli', stage_to: 'py/bin', crate_path: 'crates/featok-cli', features: ['cli'], no_default_features: false },
+    });
+    expect(
+      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_FEATURE_NOT_DECLARED'),
+    ).toEqual([]);
+  });
+
+  it('checkCargoShape: dedupes a bin name declared by more than one workspace member', () => {
+    // readDeclaredBinNames member loop: `!result.includes(b)` else — the same
+    // bin name declared by a second member is not pushed twice.
+    const root = dir;
+    const cratePath = j(root, 'ws-dup');
+    writeCargoToml(cratePath, '[workspace]\nmembers = ["members/*"]\n');
+    writeCargoToml(
+      j(cratePath, 'members', 'one'),
+      '[package]\nname = "one"\nversion = "0.0.0"\n[[bin]]\nname = "dup-bin"\npath = "src/main.rs"\n',
+    );
+    writeCargoToml(
+      j(cratePath, 'members', 'two'),
+      '[package]\nname = "two"\nversion = "0.0.0"\n[[bin]]\nname = "dup-bin"\npath = "src/main.rs"\n',
+    );
+    const pypiPath = j(root, 'py-dup');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'dup-bin', stage_to: 'py/bin', crate_path: 'ws-dup', features: [], no_default_features: false },
+    });
+    expect(
+      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
+    ).toEqual([]);
+  });
+
+  it('checkCargoShape: ignores a non-string entry in [workspace].members', () => {
+    // workspaceMemberManifests: `typeof m === 'string'` else — a non-string
+    // members entry (an inline table) is skipped while the string glob still
+    // resolves the member crate bin.
+    const root = dir;
+    const cratePath = j(root, 'ws-mixed');
+    writeCargoToml(cratePath, '[workspace]\nmembers = ["members/*", { skip = true }]\n');
+    writeCargoToml(
+      j(cratePath, 'members', 'good'),
+      '[package]\nname = "good"\nversion = "0.0.0"\n[[bin]]\nname = "the-bin"\npath = "src/main.rs"\n',
+    );
+    const pypiPath = j(root, 'py-mixed');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'the-bin', stage_to: 'py/bin', crate_path: 'ws-mixed', features: [], no_default_features: false },
+    });
+    expect(
+      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
+    ).toEqual([]);
+  });
+
+  it('checkCargoShape: a top-level `bin` array of strings contributes no bin names', () => {
+    // collectBinsFromManifest: `typeof entry === 'object' && entry !== null`
+    // else — a string entry in the `bin` array is ignored, so the crate falls
+    // back to the implicit `[package].name` bin.
+    const root = dir;
+    const cratePath = j(root, 'crates', 'strbin');
+    writeCargoToml(cratePath, 'bin = ["ignored"]\n\n[package]\nname = "my-cli"\nversion = "0.0.0"\n');
+    const pypiPath = j(root, 'py-strbin');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'my-cli', stage_to: 'py/bin', crate_path: 'crates/strbin', features: [], no_default_features: false },
+    });
+    expect(
+      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
+    ).toEqual([]);
+  });
+
+  it('checkCargoShape: a [[bin]] table without a name contributes no bin names', () => {
+    // collectBinsFromManifest: `typeof name === 'string'` else — a [[bin]]
+    // entry with no `name` field is ignored, so the crate falls back to the
+    // implicit `[package].name` bin.
+    const root = dir;
+    const cratePath = j(root, 'crates', 'noname-bin');
+    writeCargoToml(
+      cratePath,
+      '[package]\nname = "my-cli"\nversion = "0.0.0"\n\n[[bin]]\npath = "src/main.rs"\n',
+    );
+    const pypiPath = j(root, 'py-noname');
+    setFile(j(pypiPath, '.keep'), '');
+    const pyPkg = pkg('pypi', {
+      name: 'py',
+      path: pypiPath,
+      build: 'maturin',
+      targets: ['x86_64-unknown-linux-gnu'],
+      bundle_cli: { bin: 'my-cli', stage_to: 'py/bin', crate_path: 'crates/noname-bin', features: [], no_default_features: false },
+    });
+    expect(
+      checkCargoShape([pyPkg], { cwd: root }).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
+    ).toEqual([]);
+  });
+
+  it('checkRepoPublic falls back to the global fetch when no fetchImpl is injected', async () => {
+    // `options.fetchImpl ?? fetch` — the default-global-fetch arm. The network
+    // boundary is mocked via vi.spyOn(global, 'fetch') per the unit-lint
+    // isolation convention.
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ private: false }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    try {
+      const finding = await checkRepoPublic({ githubRepository: 'acme/widget' });
+      expect(finding).toBeNull();
+      expect(spy).toHaveBeenCalledWith(
+        'https://api.github.com/repos/acme/widget',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -185,7 +185,9 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    /* v8 ignore next -- ?? fallback is for malformed argv; tests always pass the value */
+    // The `?? out.cwd` fallback guards a trailing `--cwd` with no value
+    // (`argv[++i]` is then undefined); it keeps the default cwd rather
+    // than overwriting it with undefined.
     if (a === '--cwd') {out.cwd = argv[++i] ?? out.cwd;}
     else if (a === '--config') {out.config = argv[++i];}
     else if (a === '--json') {out.json = true;}
@@ -537,7 +539,6 @@ export async function run(argv: readonly string[]): Promise<number> {
       case 'publish': {
         const result = await publish({
           cwd: flags.cwd,
-          /* v8 ignore next -- --config test covered in plan arm; publish shares the same plumbing */
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
           releasePackages: flags.releasePackages,
         });
@@ -545,7 +546,6 @@ export async function run(argv: readonly string[]): Promise<number> {
           process.stdout.write(JSON.stringify(result) + '\n');
         } else if (result.published.length === 0) {
           process.stdout.write('published: (nothing)\n');
-          /* v8 ignore start -- non-empty publish path requires real registry access; covered by e2e */
         } else {
           for (const p of result.published) {
             process.stdout.write(
@@ -553,7 +553,6 @@ export async function run(argv: readonly string[]): Promise<number> {
             );
           }
         }
-        /* v8 ignore stop */
         return 0;
       }
       /* v8 ignore next 3 -- exhaustive; 'version' handled above */

@@ -222,7 +222,6 @@ function synthesizePlatformPackage(
   // planner emitted (slash-containing names like `js/foo` land at
   // `artifacts/js__foo-<triple>/`, not `artifacts/js/foo-<triple>/`).
   const artifactName = platformArtifactName(pkg.name, entry.mode, target, isMulti);
-  /* v8 ignore next -- tests inject artifactsRoot explicitly; publish.ts always sets it */
   const artifactsRoot = ctx.artifactsRoot ?? join(ctx.cwd, 'artifacts');
   const artifactDir = join(artifactsRoot, artifactName);
 
@@ -343,7 +342,12 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
           `(TLOG_CREATE_ENTRY_ERROR) and ${staged.name}@${staged.version} is not ` +
           `on the registry — npm's provenance retry re-submitted an identical ` +
           `attestation. Re-run the release to mint a fresh attestation.` +
-          `${stderr ? `\n${stderr}` : ''}`,
+          `${
+            stderr
+              ? `\n${stderr}`
+              : /* v8 ignore next -- looksLikeTlogDuplicate only matches a non-empty stderr, so this '' fallback is unreachable */
+                ''
+          }`,
         { cause: err },
       );
     }
@@ -583,14 +587,12 @@ export function toRustTriple(target: string): string {
   );
 }
 
-function pickMainFile(files: readonly string[], mode: NpmBuildMode): string {
+export function pickMainFile(files: readonly string[], mode: NpmBuildMode): string {
   if (mode === 'napi') {
     const node = files.find((f) => f.endsWith('.node'));
-    /* v8 ignore next -- completeness check for napi ensures a .node file is present */
     return node ?? files[0]!;
   }
   // bundled-cli: first non-package.json file.
   const first = files.find((f) => f !== 'package.json');
-  /* v8 ignore next -- artifact always has a payload file */
   return first ?? files[0]!;
 }

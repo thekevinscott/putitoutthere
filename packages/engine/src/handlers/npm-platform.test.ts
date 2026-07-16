@@ -32,10 +32,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  assertTripleSupported,
   DEFAULT_NAME_TEMPLATE,
   looksLikePublishOverRace,
   looksLikeTlogDuplicate,
   normalizeBuild,
+  pickMainFile,
   platformArtifactName,
   publishPlatforms,
   resolvePlatformName,
@@ -399,6 +401,22 @@ describe('targetToOsCpu', () => {
   it('throws a descriptive error for unknown triples (#170)', () => {
     expect(() => targetToOsCpu('riscv64-unknown-linux-gnu')).toThrow(
       /riscv64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
+    );
+  });
+});
+
+describe('assertTripleSupported (#170)', () => {
+  it('does not throw for a triple that is mapped in TRIPLE_MAP', () => {
+    expect(() => assertTripleSupported('linux-x64-gnu', 'demo-cli')).not.toThrow();
+  });
+
+  it('is case-insensitive, mirroring targetToOsCpu', () => {
+    expect(() => assertTripleSupported('LINUX-X64-GNU', 'demo-cli')).not.toThrow();
+  });
+
+  it('throws naming the offending package and TRIPLE_MAP for an unmapped triple', () => {
+    expect(() => assertTripleSupported('riscv64-unknown-linux-gnu', 'demo-cli')).toThrow(
+      /demo-cli.*riscv64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
     );
   });
 });
@@ -908,6 +926,75 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
       makeCtx(),
     );
     expect(r.published).toEqual(['@dirsql/core-lib-linux-x64-gnu']);
+  });
+});
+
+describe('pickMainFile', () => {
+  it('napi: picks the .node file when present', () => {
+    expect(pickMainFile(['README.md', 'demo.linux-x64-gnu.node'], 'napi')).toBe(
+      'demo.linux-x64-gnu.node',
+    );
+  });
+
+  it('napi: falls back to the first file when no .node is present', () => {
+    // Defensive fallback for a napi artifact missing its .node payload.
+    expect(pickMainFile(['only-file.txt'], 'napi')).toBe('only-file.txt');
+  });
+
+  it('bundled-cli: picks the first non-package.json file', () => {
+    expect(pickMainFile(['package.json', 'demo-cli'], 'bundled-cli')).toBe('demo-cli');
+  });
+
+  it('bundled-cli: falls back to the first file when only package.json is present', () => {
+    // Defensive fallback for a bundled-cli artifact with no payload file.
+    expect(pickMainFile(['package.json'], 'bundled-cli')).toBe('package.json');
+  });
+});
+
+describe('artifact path resolution: artifactsRoot unset', () => {
+  it('resolves the artifact dir under ctx.cwd/artifacts when artifactsRoot is undefined', async () => {
+    // Exercises the `ctx.artifactsRoot ?? join(ctx.cwd, "artifacts")` fallback:
+    // the default artifacts tree lives at `${repo}/artifacts`, which is exactly
+    // `join(cwd, "artifacts")`.
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      }
+      return Buffer.from('');
+    });
+    const r = await publishPlatforms(
+      basePkg({ targets: ['linux-x64-gnu'] }),
+      '0.2.0',
+      makeCtx({ artifactsRoot: undefined }),
+    );
+    expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
+  });
+});
+
+describe('publishPlatforms: generic platform publish failure', () => {
+  it('reports the failure via String(err) when npm throws a non-Error with no stderr', async () => {
+    // Neither the publish-over race nor the tlog-dedupe shape matches, and
+    // the thrown value is a bare string (no `.stderr`, not an Error). The
+    // generic message must fall back to String(err) and omit the stderr
+    // block.
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      }
+      throw 'catastrophic npm failure';
+    });
+
+    await expect(
+      publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx()),
+    ).rejects.toThrow(/npm publish \(platform\) failed: catastrophic npm failure/);
+
+    // Failed before the rewrite: main package.json must NOT carry optionalDependencies.
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as Record<string, unknown>;
+    expect(pkgJson.optionalDependencies).toBeUndefined();
   });
 });
 
