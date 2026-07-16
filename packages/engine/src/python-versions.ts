@@ -14,7 +14,7 @@
  * complete wheel coverage with zero configuration. Issue #369.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -115,10 +115,10 @@ function compareVersionStrings(a: string, b: string): number {
 }
 
 /** Read `[project].requires-python` from a `pyproject.toml`, or `null`. */
-function readRequiresPython(pyprojectPath: string): string | null {
+async function readRequiresPython(pyprojectPath: string): Promise<string | null> {
   let raw: string;
   try {
-    raw = readFileSync(pyprojectPath, 'utf8');
+    raw = await readFile(pyprojectPath, 'utf8');
   } catch {
     return null;
   }
@@ -139,14 +139,14 @@ function readRequiresPython(pyprojectPath: string): string | null {
  * wheels should be built for. Config override wins; otherwise
  * `requires-python` is inferred; otherwise a single default.
  */
-export function resolvePythonVersions(
+export async function resolvePythonVersions(
   pkg: { path: string; python_versions?: readonly string[] | undefined },
   cwd: string,
-): string[] {
+): Promise<string[]> {
   if (pkg.python_versions !== undefined) {
     return [...pkg.python_versions].sort(compareVersionStrings);
   }
-  const requiresPython = readRequiresPython(join(cwd, pkg.path, 'pyproject.toml'));
+  const requiresPython = await readRequiresPython(join(cwd, pkg.path, 'pyproject.toml'));
   if (requiresPython !== null) {
     const expanded = expandRequiresPython(requiresPython);
     if (expanded.length > 0) {return expanded;}

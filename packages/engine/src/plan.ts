@@ -133,7 +133,7 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   for (const p of config.packages) {
     if (!cascaded.has(p.name)) {continue;}
     const version = await nextVersion(p, trailer?.bump, cwd, forced);
-    const pkgRows = rowsForPackage(p, version, cwd);
+    const pkgRows = await rowsForPackage(p, version, cwd);
     rows.push(...pkgRows);
   }
   return rows;
@@ -167,7 +167,7 @@ async function planManual(
   for (const p of packages) {
     const entry = manual.get(p.name);
     if (entry === undefined) {continue;}
-    rows.push(...rowsForPackage(p, await manualVersion(p, entry, cwd), cwd));
+    rows.push(...(await rowsForPackage(p, await manualVersion(p, entry, cwd), cwd)));
   }
   return rows;
 }
@@ -249,7 +249,7 @@ async function nextVersion(
   return bumpVersion(lastVersion, bumpType);
 }
 
-function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[] {
+async function rowsForPackage(pkg: Package, version: string, cwd: string): Promise<MatrixRow[]> {
   // #230: actions/upload-artifact@v4 forbids `/` in artifact names, so
   // any package name containing a slash (the polyglot-monorepo
   // grouping shape, e.g. `py/foo`, `js/bar`) needs to be encoded
@@ -289,7 +289,7 @@ function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[]
       // Resolve the set — config `python_versions` override, else
       // `requires-python` inference, else a single default — and fan
       // the maturin per-target wheel rows across it.
-      const pyVersions = resolvePythonVersions(pkg, cwd);
+      const pyVersions = await resolvePythonVersions(pkg, cwd);
       // The sdist and pure-Python hatch wheel are version-agnostic but
       // still need an interpreter to run the build; use the newest
       // resolved version.
@@ -302,7 +302,7 @@ function rowsForPackage(pkg: Package, version: string, cwd: string): MatrixRow[]
       // `merge-multiple` download. Collapse the fan to a single wheel
       // built on the newest resolved interpreter.
       const wheelPyVersions =
-        build === 'maturin' && isVersionIndependentWheel(pkg.path, cwd)
+        build === 'maturin' && (await isVersionIndependentWheel(pkg.path, cwd))
           ? [buildPython]
           : pyVersions;
       const multiPy = wheelPyVersions.length > 1;

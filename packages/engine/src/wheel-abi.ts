@@ -26,10 +26,10 @@
  * table), falls through to `false` and the planner keeps fanning — the
  * pre-#401 behavior, never worse.
  *
- * Engine convention: synchronous `readFileSync` throughout (AGENTS.md).
+ * Engine convention: async `readFile` throughout (AGENTS.md, #469).
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -44,19 +44,19 @@ const ABI3_FEATURE_RE = /(?:^|\/)abi3(?:-py\d+)?$/;
  * Python-version-independent and so should be built once rather than
  * fanned across the resolved CPython set.
  */
-export function isVersionIndependentWheel(pkgPath: string, cwd: string): boolean {
+export async function isVersionIndependentWheel(pkgPath: string, cwd: string): Promise<boolean> {
   const pkgDir = join(cwd, pkgPath);
-  const pyproject = readTomlOrNull(join(pkgDir, 'pyproject.toml'));
+  const pyproject = await readTomlOrNull(join(pkgDir, 'pyproject.toml'));
   if (pyprojectMarksVersionIndependent(pyproject)) {return true;}
-  return cargoEnablesAbi3(readTomlOrNull(join(pkgDir, 'Cargo.toml')));
+  return cargoEnablesAbi3(await readTomlOrNull(join(pkgDir, 'Cargo.toml')));
 }
 
 /* ------------------------------ internals ------------------------------ */
 
-function readTomlOrNull(path: string): Record<string, unknown> | null {
+async function readTomlOrNull(path: string): Promise<Record<string, unknown> | null> {
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = await readFile(path, 'utf8');
   } catch {
     return null;
   }

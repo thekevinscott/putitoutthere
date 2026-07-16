@@ -69,14 +69,15 @@ beforeEach(() => {
   vi.mocked(commitParents).mockResolvedValue(['parent']);
   vi.mocked(lastTag).mockResolvedValue(null);
   vi.mocked(diffNames).mockResolvedValue([]);
-  vi.mocked(isVersionIndependentWheel).mockReturnValue(false);
+  vi.mocked(isVersionIndependentWheel).mockResolvedValue(false);
   // Restore the real resolution shape the prior factory encoded: an
   // explicit `python_versions` is sorted numerically, else a single
   // default. The resolution logic itself is covered by
   // python-versions.test.ts and the integration suite.
   vi.mocked(resolvePythonVersions).mockImplementation((pkg) => {
     if (pkg.python_versions !== undefined) {
-      return [...pkg.python_versions].sort((a, b) => {
+      return Promise.resolve(
+        [...pkg.python_versions].sort((a, b) => {
         const av = a.split('.').map(Number);
         const bv = b.split('.').map(Number);
         for (let i = 0; i < Math.max(av.length, bv.length); i++) {
@@ -84,9 +85,10 @@ beforeEach(() => {
           if (d !== 0) {return d;}
         }
         return 0;
-      });
+        }),
+      );
     }
-    return ['3.12'];
+    return Promise.resolve(['3.12']);
   });
 });
 
@@ -1223,7 +1225,7 @@ python_versions = ["3.11", "3.12", "3.13"]
 
   it('collapses a `bindings = "bin"` wheel to one unsuffixed row despite a 3-version fan', async () => {
     useToml(TOML);
-    vi.mocked(isVersionIndependentWheel).mockReturnValue(true);
+    vi.mocked(isVersionIndependentWheel).mockResolvedValue(true);
     const wheels = wheelRows(await plan({ cwd: CWD }));
     expect(wheels).toHaveLength(1);
     expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
@@ -1232,7 +1234,7 @@ python_versions = ["3.11", "3.12", "3.13"]
 
   it('collapses a pyo3 abi3 Cargo wheel to one unsuffixed row despite a 3-version fan', async () => {
     useToml(TOML);
-    vi.mocked(isVersionIndependentWheel).mockReturnValue(true);
+    vi.mocked(isVersionIndependentWheel).mockResolvedValue(true);
     const wheels = wheelRows(await plan({ cwd: CWD }));
     expect(wheels).toHaveLength(1);
     expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
