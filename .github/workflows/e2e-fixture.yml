@@ -42,6 +42,7 @@ jobs:
           - python-pure-hatch
           - python-pure-sdist-only
           - python-rust-maturin
+          - python-rust-maturin-workspace-first-publish
           - polyglot-everything
           - polyglot-everything-first-publish
           - rust-vanilla-first-publish
