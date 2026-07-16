@@ -28,25 +28,6 @@ jobs:
       - name: Run unit tests with coverage
         run: pnpm run test:unit:coverage
 
-      - name: DEBUG gate-scope uncovered lines (TEMPORARY — remove after diagnosis)
-        if: always()
-        run: |
-          find packages/engine -name coverage-final.json -delete 2>/dev/null || true
-          echo "::group::run the real unit-coverage gate"
-          npx -y testing-conventions unit coverage --language typescript --config testing-conventions.toml packages/engine/src 2>&1 | tail -5 || true
-          echo "::endgroup::"
-          echo "=== precise uncovered from the gate's coverage-final.json ==="
-          f=$(find packages/engine -name coverage-final.json 2>/dev/null | head -1)
-          echo "coverage file: ${f:-<none found>}"
-          if [ -n "$f" ]; then node -e '
-            const c=require(process.argv[1]);
-            for (const [file,d] of Object.entries(c)) {
-              const u=[];
-              for (const [k,v] of Object.entries(d.s||{})) if (v===0) u.push("stmt@"+d.statementMap[k].start.line);
-              for (const [k,b] of Object.entries(d.branchMap||{})) { const h=d.b[k]||[]; (b.locations||[]).forEach((l,i)=>{ if((h[i]||0)===0) u.push("branch@"+((l.start&&l.start.line)||(b.loc&&b.loc.start.line))); }); }
-              if (u.length) console.log(file.replace(/.*\/packages\/engine\//,""), u.join(" "));
-            }' "$f"; fi
-
       - name: Upload coverage summary
         if: always()
         uses: actions/upload-artifact@v7
