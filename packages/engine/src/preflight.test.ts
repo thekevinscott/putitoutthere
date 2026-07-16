@@ -21,6 +21,7 @@ import {
   checkCratesMetadata,
   checkPackageJsonShape,
   checkProvenanceMetadata,
+  checkPypiVersionSource,
   checkPyprojectShape,
   checkRepoPublic,
   checkRepoUrlMatch,
@@ -29,6 +30,7 @@ import {
   requireCratesMetadata,
   requirePackageJsonShape,
   requireProvenanceMetadata,
+  requirePypiVersionSource,
   requirePyprojectShape,
   requireRepoPublic,
   requireRepoUrlMatch,
@@ -1136,6 +1138,37 @@ include = [{ path = "a/bin/*", format = "wheel" }]
 
   it('requirePyprojectShape returns silently when there are no pypi packages', async () => {
     await expect(requirePyprojectShape([pkg('crates'), pkg('npm')])).resolves.toBeUndefined();
+  });
+});
+
+/* ----------------------- pypi version source (#333) ----------------------- */
+
+describe('checkPypiVersionSource / requirePypiVersionSource (#333)', () => {
+  const dir = '/vfs/pypi-version';
+
+  function pypiPkg(name: string, path: string): Package {
+    return pkg('pypi', { name, path });
+  }
+
+  function writePyproject(path: string, body: string): void {
+    setFile(j(path, 'pyproject.toml'), body);
+  }
+
+  it('accepts a dynamic-version pyproject (no finding, does not throw)', async () => {
+    const p = j(dir, 'a');
+    writePyproject(p, '[project]\nname = "a"\ndynamic = ["version"]\n');
+    expect(await checkPypiVersionSource([pypiPkg('a', p)])).toEqual([]);
+    await expect(requirePypiVersionSource([pypiPkg('a', p)])).resolves.toBeUndefined();
+  });
+
+  it('flags a static [project].version literal and requires throws on it', async () => {
+    const p = j(dir, 'b');
+    writePyproject(p, '[project]\nname = "b"\nversion = "1.0.0"\n');
+    const findings = await checkPypiVersionSource([pypiPkg('b', p)]);
+    expect(findings).toHaveLength(1);
+    await expect(requirePypiVersionSource([pypiPkg('b', p)])).rejects.toThrow(
+      /PIOT_PYPI_STATIC_VERSION|static/,
+    );
   });
 });
 

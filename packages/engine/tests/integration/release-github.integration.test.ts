@@ -20,71 +20,85 @@
  *   skip already-created Releases instead of erroring.
  *
  * This tier drives the CLI in-process (`run([...])`) and mocks only the
- * subprocess boundary at the async seam: git.ts and the gh view guard both
- * go through `execCapture`, and the gh create through `execInherit`. The
- * e2e twin (`tests/e2e/release-github.e2e.test.ts`) shells out to the built
- * CLI against a real git repo + bare remote with a stubbed `gh`.
+ * Node built-in subprocess boundary — `execFile` (under `execCapture`) and
+ * `spawn` (under `execInherit`) — so the first-party exec seam runs for real
+ * (testing-conventions forbids mocking first-party modules in integration
+ * tests). The e2e twin (`tests/e2e/release-github.e2e.test.ts`) shells out to
+ * the built CLI against a real git repo + bare remote with a stubbed `gh`.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { EventEmitter } from 'node:events';
+import type * as ChildProcess from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+
 import { run } from '../../src/cli.js';
-import { execCapture } from '../../src/utils/exec-capture.js';
-import { execInherit } from '../../src/utils/exec-inherit.js';
 
-vi.mock('../../src/utils/exec-capture.js');
-vi.mock('../../src/utils/exec-inherit.js');
+// Integration tests run first-party code (the exec seam) for real and mock
+// only the Node built-in underneath it: `execFile` (what `execCapture` uses)
+// and `spawn` (what `execInherit` uses). Mocking the seam module itself would
+// trip the testing-conventions `no-first-party-mock` gate.
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn(), spawn: vi.fn() };
+});
 
-const captureMock = vi.mocked(execCapture);
-const inheritMock = vi.mocked(execInherit);
+const execFileMock = vi.mocked(execFile);
+const spawnMock = vi.mocked(spawn);
 
 interface Call {
   cmd: string;
   args: string[];
 }
 
+/** A minimal spawn() stand-in that emits `close` with `code` on the next tick. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
+
 /**
- * Wire the subprocess boundary. `tags` is what `git tag --points-at HEAD`
- * returns; `existing` is the set of tags whose `gh release view` succeeds
- * (Release already exists). Every call is recorded in `calls` for ordering
- * / absence assertions.
+ * Wire the subprocess boundary at the `node:child_process` level. `tags` is
+ * what `git tag --points-at HEAD` returns; `existing` is the set of tags whose
+ * `gh release view` succeeds (Release already exists). Every call is recorded
+ * in `calls` for ordering / absence assertions.
  */
 function wire(tags: string[], existing: Set<string> = new Set()): Call[] {
   const calls: Call[] = [];
-  // git (tag --points-at, push) and the gh view guard both go through
-  // execCapture. A failed `gh release view` (reject) === Release absent.
-  captureMock.mockImplementation((cmd, args) => {
+  // execFile drives execCapture: git (tag --points-at, push) and the gh view
+  // guard. The 4th arg is the callback (err, stdout, stderr).
+  execFileMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     const a = [...(args ?? [])];
     calls.push({ cmd, args: a });
     if (cmd === 'git') {
-      if (a[0] === 'tag' && a.includes('--points-at')) {
-        return Promise.resolve({ stdout: `${tags.join('\n')}\n`, stderr: '' });
-      }
-      // push / anything else: succeed silently.
-      return Promise.resolve({ stdout: '', stderr: '' });
+      const stdout = a[0] === 'tag' && a.includes('--points-at') ? `${tags.join('\n')}\n` : '';
+      cb(null, stdout, '');
+      return fakeChild(0);
     }
-    // gh release view
+    // gh release view — non-zero (callback error) when the Release is absent.
     const tag = a[2]!;
     if (existing.has(tag)) {
-      return Promise.resolve({ stdout: '', stderr: '' });
+      cb(null, '', '');
+    } else {
+      cb(Object.assign(new Error(`release not found: ${tag}`), { code: 1 }), '', '');
     }
-    // gh exits non-zero when the Release does not exist — model the real
-    // rejection so the idempotency guard treats it as absent.
-    return Promise.reject(new Error(`release not found: ${tag}`));
-  });
-  // gh release create (execInherit).
-  inheritMock.mockImplementation((cmd, args) => {
+    return fakeChild(existing.has(tag) ? 0 : 1);
+  }) as unknown as typeof execFile);
+  // spawn drives execInherit: gh release create (stdio inherited, exits 0).
+  spawnMock.mockImplementation(((cmd: string, args: readonly string[]) => {
     calls.push({ cmd, args: [...(args ?? [])] });
-    return Promise.resolve();
-  });
+    return fakeChild(0);
+  }) as unknown as typeof spawn);
   return calls;
 }
 
 const out: string[] = [];
 
 beforeEach(() => {
-  captureMock.mockReset();
-  inheritMock.mockReset();
+  execFileMock.mockReset();
+  spawnMock.mockReset();
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
