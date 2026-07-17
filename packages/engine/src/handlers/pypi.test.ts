@@ -114,13 +114,21 @@ describe('pypi.isPublished', () => {
     fetchSpy.mockRestore();
   });
 
-  it('throws TransientError on 5xx', async () => {
+  it('throws TransientError on 5xx (500 boundary) so the check retries', async () => {
+    // Use the exact 500 boundary and assert the error TYPE (name), not just a
+    // status substring: a plain Error whose message merely contains "500"
+    // would pass a message regex, so it could not distinguish the `>= 500`
+    // transient branch from the plain-Error fallthrough (nor a `>= 500` →
+    // `> 500` off-by-one). `.name === 'TransientError'` pins the retryable
+    // contract at the boundary.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response('boom', { status: 503 }),
+      new Response('boom', { status: 500 }),
     );
-    await expect(
-      pypi.isPublished(basePkg(), '0.1.0', makeCtx()),
-    ).rejects.toThrow(/503/);
+    const err = await pypi
+      .isPublished(basePkg(), '0.1.0', makeCtx())
+      .then(() => null, (e: unknown) => e);
+    expect((err as Error).name).toBe('TransientError');
+    expect((err as Error).message).toMatch(/returned 500/);
     fetchSpy.mockRestore();
   });
 
