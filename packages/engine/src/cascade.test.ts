@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { computeCascade, assertNoCycles, type ChangedFilesByPackage } from './cascade.js';
-import type { Package } from './config.js';
+import { parseConfig, type Package } from './config.js';
 
 /**
  * Build a per-package changed-files map where every listed package
@@ -195,15 +195,32 @@ describe('computeCascade: edge cases', () => {
     expect(cascade.map((p) => p.name).sort()).toEqual(['a', 'b']);
   });
 
-  it('treats a package whose `depends_on` is absent at runtime as having no deps', () => {
-    // The Zod schema always defaults `depends_on` to []; a hand-built
-    // package object without the field bypasses that default and exercises
-    // the `depends_on ?? []` fallback in both the transitive pass and the
-    // cycle check.
-    const noDeps = { name: 'b', kind: 'crates', path: 'b', globs: ['b/**'], first_version: '0.1.0' } as unknown as Package;
-    const pkgs = [pkg('a', ['a/**']), noDeps];
-    const cascade = computeCascade(pkgs, perPkg({ a: ['a/x'], b: ['unrelated/y'] }));
-    // `a` matches directly; `b` (no deps, no direct match) is not pulled in.
+  it('parses a package without depends_on to [] and cascades it as no-deps', () => {
+    // The narrowing that removed the `depends_on ?? []` fallbacks (in both
+    // the transitive pass and the cycle check) rests on the Zod schema
+    // always defaulting `depends_on` to []. Prove that guarantee end to
+    // end: a config omitting the field parses to `[]` — never undefined —
+    // so cascade sees a real array and treats it as having no deps.
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name = "a"
+kind = "crates"
+path = "a"
+globs = ["a/**"]
+
+[[package]]
+name = "b"
+kind = "crates"
+path = "b"
+globs = ["b/**"]
+`);
+    expect(cfg.packages[1]!.depends_on).toEqual([]);
+    const cascade = computeCascade(cfg.packages, perPkg({ a: ['a/x'], b: ['unrelated/y'] }));
+    // `a` matches directly; `b` (defaulted-empty deps, no direct match) is
+    // not pulled in.
     expect(cascade.map((p) => p.name)).toEqual(['a']);
   });
 });

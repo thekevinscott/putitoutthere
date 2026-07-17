@@ -347,4 +347,16 @@ describe('error surfacing', () => {
       /no committer identity configured/,
     );
   });
+
+  it('names the failing git subcommand (args[0]) in the identity hint', async () => {
+    // The wrappers' argv is typed `readonly [string, ...string[]]`, so
+    // `args[0]` is always a `string` — the hint interpolates it directly
+    // with no `?? ''` fallback. `createTag` runs `git tag …`, so the
+    // message must lead with `git tag:`, proving the first arg flows
+    // through verbatim.
+    execMock.mockRejectedValue(
+      gitError('*** Please tell me who you are.\nunable to auto-detect email address'),
+    );
+    await expect(createTag('v0.1.0', 'sha', OPTS)).rejects.toThrow('git tag:');
+  });
 });

@@ -22,7 +22,7 @@ interface TagOptions extends GitOptions {
 
 /* ------------------------------ core ------------------------------ */
 
-async function run(args: string[], opts: GitOptions = {}): Promise<string> {
+async function run(args: readonly [string, ...string[]], opts: GitOptions = {}): Promise<string> {
   try {
     return (await execCapture('git', args, { cwd: opts.cwd })).stdout.trimEnd();
   } catch (err) {
@@ -41,8 +41,9 @@ async function run(args: string[], opts: GitOptions = {}): Promise<string> {
     if (needsIdentity) {
       throw new Error(
         [
-          /* v8 ignore next -- args[0] is always defined: every git wrapper passes a non-empty argv, so the `?? ''` fallback is unreachable via the public API */
-          `git ${args[0] ?? ''}: no committer identity configured.`,
+          // `args` is a non-empty tuple (`readonly [string, ...string[]]`),
+          // so `args[0]` is always a `string` — no `?? ''` fallback needed.
+          `git ${args[0]}: no committer identity configured.`,
           'piot cuts annotated tags which require `user.name` + `user.email`.',
           'Configure them in the publish job before invoking piot:',
           '  - run: |',
