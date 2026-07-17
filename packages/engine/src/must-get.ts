@@ -1,6 +1,6 @@
 /**
- * Read a key whose presence the caller's construction guarantees, throwing a
- * labelled error if it is absent.
+ * Read a key whose presence the caller's construction guarantees, throwing if
+ * it is absent.
  *
  * `Map.get` widens its result to `V | undefined` even for a map the caller
  * seeded with every key it will ever read. Left to each call site, that gap
@@ -12,12 +12,13 @@
  *
  * A present key returns its stored value by reference (an empty array is a
  * value, not an absence, so it comes back untouched); an absent key throws
- * `${label}: ${key}`.
+ * an error naming the offending key. The message is built here, so call
+ * sites pass no string literal whose absent-path-only mutation could survive.
  */
-export function mustGet<K, V>(map: ReadonlyMap<K, V>, key: K, label: string): V {
+export function mustGet<K, V>(map: ReadonlyMap<K, V>, key: K): V {
   const value = map.get(key);
   if (value === undefined) {
-    throw new Error(`${label}: ${String(key)}`);
+    throw new Error(`mustGet: no value seeded for key ${String(key)}`);
   }
   return value;
 }

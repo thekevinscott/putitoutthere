@@ -124,9 +124,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
 
   // 2. Pre-flight auth: every selected package must have a viable
   //    auth path (OIDC env or env-var token) before any side effects.
-  const selectedPackages = [...perPackage.keys()].map((name) =>
-    mustGet(byName, name, 'publish: unknown package'),
-  );
+  const selectedPackages = [...perPackage.keys()].map((name) => mustGet(byName, name));
   requireAuth(selectedPackages);
 
   // 2b. Pre-flight npm provenance metadata: every selected npm package's
@@ -201,7 +199,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   const order = publishOrder(config.packages, [...perPackage.keys()]);
 
   for (const name of order) {
-    const pkg = mustGet(byName, name, 'publish: unknown package');
+    const pkg = mustGet(byName, name);
     const rows = perPackage.get(name)!;
     const version = rows[0]!.version;
     const handler = handlerFor(pkg.kind);
@@ -317,7 +315,7 @@ function publishOrder(packages: readonly Package[], selected: readonly string[])
     // `deps` is seeded for every selected package above, and recursion only
     // reaches names already filtered into `inSet` (⊆ selected), so the
     // lookup is total — `mustGet` reflects that instead of a dead `?? []`.
-    const childDeps = mustGet(deps, name, 'publishOrder: unseeded package');
+    const childDeps = mustGet(deps, name);
     for (const d of childDeps) {visit(d);}
     order.push(name);
   };
