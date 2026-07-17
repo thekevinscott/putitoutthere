@@ -192,6 +192,15 @@ describe('lastTag', () => {
     execMock.mockResolvedValue({ stdout: 'pkg-v1.9.9\npkg-v2.0.0', stderr: '' });
     expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v2.0.0');
   });
+
+  it('compares by minor when majors match (higher minor wins)', async () => {
+    // Equal majors fall through the first `greater()` arm to the
+    // `a.minor !== b.minor` comparison. A two-tag fixture that differs only
+    // in minor pins that second early return in isolation — the higher minor
+    // wins even though the lower-minor tag has the larger patch.
+    execMock.mockResolvedValue({ stdout: 'pkg-v1.3.9\npkg-v1.4.0', stderr: '' });
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v1.4.0');
+  });
 });
 
 describe('tagCommit', () => {

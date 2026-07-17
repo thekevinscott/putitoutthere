@@ -114,25 +114,56 @@ describe('pypi.isPublished', () => {
     fetchSpy.mockRestore();
   });
 
-  it('throws TransientError on 5xx', async () => {
+  it('throws TransientError on 5xx (500 boundary) so the check retries', async () => {
+    // Use the exact 500 boundary and assert the error TYPE (name), not just a
+    // status substring: a plain Error whose message merely contains "500"
+    // would pass a message regex, so it could not distinguish the `>= 500`
+    // transient branch from the plain-Error fallthrough (nor a `>= 500` →
+    // `> 500` off-by-one). `.name === 'TransientError'` pins the retryable
+    // contract at the boundary.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response('boom', { status: 503 }),
+      new Response('boom', { status: 500 }),
     );
-    await expect(
-      pypi.isPublished(basePkg(), '0.1.0', makeCtx()),
-    ).rejects.toThrow(/503/);
+    const err = await pypi
+      .isPublished(basePkg(), '0.1.0', makeCtx())
+      .then(() => null, (e: unknown) => e);
+    expect((err as Error).name).toBe('TransientError');
+    expect((err as Error).message).toMatch(/returned 500/);
+    fetchSpy.mockRestore();
+  });
+
+  it('throws TransientError on 429 so the rate-limited GET retries (#580)', async () => {
+    // PyPI rate-limits routine reads. A 429 is not >= 500, so it used to hit
+    // the plain-Error fallthrough, which carries no `status` and is therefore
+    // NOT retried by withRetry — hard-failing the publish. It must surface as
+    // a TransientError (which withRetry keys on) so the check retries.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('rate limited', { status: 429 }),
+    );
+    // TransientError sets `name = 'TransientError'`; assert on the name rather
+    // than importing the class as a value (which would trip the unit-suite's
+    // unmocked-collaborator isolation gate). withRetry keys on the class via
+    // instanceof — the retry integration test proves the real retry path.
+    const err = await pypi
+      .isPublished(basePkg(), '0.1.0', makeCtx())
+      .then(() => null, (e: unknown) => e);
+    expect((err as Error).name).toBe('TransientError');
     fetchSpy.mockRestore();
   });
 
   it('throws a non-transient error on an unexpected 4xx (not 404)', async () => {
-    // The endpoint contract is 200/404, but a 4xx like 403 must surface a
-    // hard (non-retryable) error rather than be misread as "not published".
+    // The endpoint contract is 200/404, but a 4xx like 403 (not 429) must
+    // surface a hard (non-retryable) error (name 'Error', NOT 'TransientError')
+    // rather than be misread as "not published" or retried indefinitely.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('forbidden', { status: 403 }),
     );
-    await expect(
-      pypi.isPublished(basePkg(), '0.1.0', makeCtx()),
-    ).rejects.toThrow(/403/);
+    const err = await pypi
+      .isPublished(basePkg(), '0.1.0', makeCtx())
+      .then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).name).toBe('Error');
+    expect((err as Error).message).toMatch(/403/);
     fetchSpy.mockRestore();
   });
 });
