@@ -130,8 +130,23 @@ export async function publishPlatforms(
         await npmPublish(stagingDir, pkg, ctx);
         published.push(platformName);
       } finally {
-        /* v8 ignore next -- cleanup after publish; failure here is cosmetic */
-        await rm(stagingDir, { recursive: true, force: true });
+        // Cleanup is best-effort. The publish already happened, and the
+        // all-or-nothing-per-package guarantee is about the publish, not
+        // the staging tempdir. Awaiting `rm` in `finally` would let a
+        // cleanup rejection (EBUSY/EPERM on Windows runners even with
+        // force:true) REPLACE the block's outcome and mask a successful
+        // publish, misreporting `published`. Swallow the failure with a
+        // warning instead — a leaked tempdir on an ephemeral runner is
+        // genuinely cosmetic; the already-published artifact is what
+        // matters.
+        try {
+          await rm(stagingDir, { recursive: true, force: true });
+        } catch (err) {
+          ctx.log.warn(
+            `failed to clean up platform staging directory ${stagingDir}`,
+            { error: err },
+          );
+        }
       }
     }
   }
