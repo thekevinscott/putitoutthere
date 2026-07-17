@@ -55,8 +55,7 @@ export async function writeVersionForBuild(pkgDir: string, version: string): Pro
         cause: err,
       });
     }
-    /* v8 ignore next -- non-ENOENT read errors surface as-is */
-    throw err;
+    throw toError(err);
   }
   let parsed: unknown;
   try {
@@ -93,8 +92,7 @@ export async function writeVersionForBuild(pkgDir: string, version: string): Pro
         { cause: err },
       );
     }
-    /* v8 ignore next -- non-ENOENT read errors surface as-is */
-    throw err;
+    throw toError(err);
   }
   return await writeResolvedCargoVersion(pkgDir, cargoOriginal, version);
 }

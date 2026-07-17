@@ -364,6 +364,21 @@ describe('npm.writeVersion', () => {
     ).rejects.toThrow(/EACCES/);
   });
 
+  it('wraps a non-Error read failure in an Error (toError String fallback)', async () => {
+    // A thrown non-Error value (no `.code`, not an `instanceof Error`) skips
+    // the ENOENT remap and must surface wrapped via toError() — a proper
+    // Error carrying String(value) — never as a raw non-Error rejection.
+    vi.mocked(readFile).mockImplementationOnce(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the toError wrap
+      throw 'disk gremlins';
+    });
+    const err: unknown = await npm
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('disk gremlins');
+  });
+
   it('preserves 2-space indentation', async () => {
     const p = `${dir}/package.json`;
     writeFileSync(

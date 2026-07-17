@@ -164,6 +164,23 @@ describe('runChecks: short-circuit branches', () => {
     expect(findings[0]!.package).toBeUndefined();
   });
 
+  it('surfaces an unreadable config (present but read fails) as a single finding', async () => {
+    // The config exists (stat succeeds) but the read blows up — and with a
+    // non-Error value at that. loadConfig's toError() wrap must turn it into
+    // the `cannot read` message, and runChecks' catch must short-circuit to
+    // exactly one finding instead of leaking a raw non-Error rejection.
+    build({ 'putitoutthere.toml': '[putitoutthere]\nversion = 1\n' });
+    vi.mocked(readFile).mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the toError wrap
+      throw 'disk gremlins';
+    });
+    const findings = await runChecks({ cwd: ROOT });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.message).toMatch(/cannot read/);
+    expect(findings[0]!.message).toMatch(/disk gremlins/);
+    expect(findings[0]!.package).toBeUndefined();
+  });
+
   it('honors --config override', async () => {
     const findings = await runChecks({ cwd: ROOT, configPath: `${ROOT}/alt.toml` });
     expect(findings).toHaveLength(1);

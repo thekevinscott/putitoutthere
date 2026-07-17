@@ -74,8 +74,7 @@ async function writeVersionImpl(
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(`Cargo.toml not found at ${cargoPath}`, { cause: err });
     }
-    /* v8 ignore next -- non-ENOENT read errors are rare (perms/io); surface as-is */
-    throw err instanceof Error ? err : new Error(String(err));
+    throw toError(err);
   }
   let updated: string;
   try {

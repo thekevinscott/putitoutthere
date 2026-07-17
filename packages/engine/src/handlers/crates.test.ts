@@ -288,6 +288,21 @@ describe('crates.writeVersion', () => {
     ).rejects.toThrow(/EACCES: permission denied/);
   });
 
+  it('re-surfaces the original Error instance on a non-ENOENT read failure (toError passthrough identity)', async () => {
+    // toError()'s Error arm is a passthrough, not a re-wrap: the exact
+    // instance thrown by the read must reach the caller (stack, class, and
+    // any attached props intact). A wrapped copy with a matching message
+    // would satisfy the /EACCES/ test above but break this one.
+    const sentinel = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    readMock.mockImplementation(() => {
+      throw sentinel;
+    });
+    const err: unknown = await crates
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .catch((e: unknown) => e);
+    expect(err).toBe(sentinel);
+  });
+
   it('wraps a non-Error read failure in an Error (String(err) fallback)', async () => {
     // A thrown non-Error value (no `.code`, not an `instanceof Error`) skips
     // the ENOENT remap and hits the `new Error(String(err))` branch.
