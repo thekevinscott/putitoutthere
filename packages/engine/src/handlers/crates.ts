@@ -34,6 +34,7 @@ import type { Ctx, Handler, PublishResult, TrustPosture } from '../types.js';
 import { TransientError } from '../types.js';
 import { ErrorCodes } from '../error-codes.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
+import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
@@ -73,17 +74,13 @@ async function writeVersionImpl(
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(`Cargo.toml not found at ${cargoPath}`, { cause: err });
     }
-    /* v8 ignore next -- non-ENOENT read errors are rare (perms/io); surface as-is */
-    throw err instanceof Error ? err : new Error(String(err));
+    throw toError(err);
   }
   let updated: string;
   try {
     updated = replaceCargoVersion(original, version);
   } catch (err) {
-    throw err instanceof Error
-      ? err
-      : /* v8 ignore next -- replaceCargoVersion only ever throws Error, so this String(err) fallback is unreachable */
-        new Error(String(err));
+    throw toError(err);
   }
   if (updated === original) {return [];}
   await writeFile(cargoPath, updated, 'utf8');

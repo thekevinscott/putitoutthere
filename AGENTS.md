@@ -548,6 +548,48 @@ the regression it catches that a reviewer reading the diff would
 miss. If the answer is "someone might change the value," that is
 review's job, not a test's.
 
+## Satisfy CI gates in spirit — exemptions are a last resort
+
+The testing-conventions gates (`co-change`, `mutation`,
+`colocated-test`, coverage, lint, …) exist **to be prescriptive**.
+They are deliberately pedantic tripwires against exactly the corners
+agents tend to cut — behavior changed without a test strengthened,
+an assertion too weak to kill a mutant, a source file with no
+colocated test. When a gate fires on your PR, the default assumption
+is that the gate is right and your diff is missing something —
+almost always a test worth writing.
+
+- **First response: satisfy the gate honestly.** A `co-change`
+  finding means you changed a file without strengthening its
+  colocated test — so find the real contract your diff touched and
+  pin it. Even a "pure refactor" rewires something (an error path,
+  a helper boundary, a passthrough); that rewiring is a testable
+  claim. Precedent: the #552 `toError()` refactor tripped
+  `co-change` on five files, and the honest fix was five real
+  per-call-site tests (non-Error values arrive wrapped as `Error`s;
+  the Error arm preserves instance identity) — not five exemptions.
+  The gate was pointing at genuinely unpinned contracts.
+- **Never add fake churn.** A whitespace edit, a comment, or a
+  restated assertion added only to flip the gate green is worse
+  than an exemption — it defeats the gate *and* hides that it was
+  defeated. If you truly cannot find a real claim to pin, that is a
+  signal to stop and ask, not to manufacture a diff.
+- **Exemptions encode permanent policy, not per-diff facts.** A
+  `[[typescript.exempt]]` entry in a checked-in config applies to
+  every future diff of that path, forever — it is not a waiver for
+  *your* PR, it is a standing blind spot. It is justified only when
+  it records a property of the code that does not expire, stated in
+  its `reason` (e.g. a genuinely equivalent mutant, with the
+  equivalence argument). "This particular PR has nothing to assert"
+  is a per-diff claim; encoding it as permanent config is a
+  category error, and the claim itself is usually wrong anyway (see
+  above).
+- **Exemptions are rare and human-stamped by design.** The friction
+  is the feature: a checked-in exemption file preserves a reviewed
+  record of the decision. Do not add one on your own judgment —
+  propose it, give the reason that would go in the file, and wait
+  for the maintainer's go-ahead.
+
 ## Changelog and migration policy
 
 Every PR that changes public API **must** update both `CHANGELOG.md` and

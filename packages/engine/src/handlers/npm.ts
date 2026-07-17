@@ -24,6 +24,7 @@ import {
 } from './npm-platform.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { ErrorCodes } from '../error-codes.js';
+import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 
 type NpmPkg = {
@@ -71,22 +72,14 @@ async function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promis
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(`package.json not found at ${p}`, { cause: err });
     }
-    throw err instanceof Error
-      ? err
-      : /* v8 ignore next -- readFile only throws ErrnoException Errors, so this String(err) fallback is unreachable */
-        new Error(String(err));
+    throw toError(err);
   }
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(original) as Record<string, unknown>;
   } catch (err) {
     throw new Error(
-      `package.json JSON parse error: ${
-        err instanceof Error
-          ? err.message
-          : /* v8 ignore next -- JSON.parse only throws SyntaxError; the String(err) fallback is unreachable */
-            String(err)
-      }`,
+      `package.json JSON parse error: ${toError(err).message}`,
       { cause: err },
     );
   }

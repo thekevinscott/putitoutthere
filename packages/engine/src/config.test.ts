@@ -712,7 +712,13 @@ depends_on = ["a"]
 
 describe('parseConfig: TOML errors', () => {
   it('surfaces a clear error for malformed TOML', () => {
-    expect(() => parseConfig('not = valid = toml')).toThrow();
+    // Assert the `putitoutthere.toml: invalid TOML:` prefix, not just that it
+    // throws: the prefix is the contract that names the failing file before
+    // the raw parser message, and a bare `.toThrow()` lets a mutant blank the
+    // prefix out undetected (config.ts:396).
+    expect(() => parseConfig('not = valid = toml')).toThrow(
+      /^putitoutthere\.toml: invalid TOML: /,
+    );
   });
 
   it('preserves the underlying parse error as `cause`', () => {

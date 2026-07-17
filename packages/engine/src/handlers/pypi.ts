@@ -43,6 +43,7 @@ import { parse as parseToml } from 'smol-toml';
 import { ErrorCodes } from '../error-codes.js';
 import type { Ctx, Handler, PublishResult, TrustPosture } from '../types.js';
 import { TransientError } from '../types.js';
+import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 
 const REGISTRY = 'https://pypi.org';
@@ -82,21 +83,13 @@ async function writeVersionImpl(
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(`pyproject.toml not found at ${pyProjectPath}`, { cause: err });
     }
-    throw err instanceof Error
-      ? err
-      : /* v8 ignore next -- readFile only throws ErrnoException Errors, so this String(err) fallback is unreachable */
-        new Error(String(err));
+    throw toError(err);
   }
   let parsed: unknown;
   try {
     parsed = parseToml(original);
   } catch (err) {
-    const msg =
-      err instanceof Error
-        ? err.message
-        : /* v8 ignore next -- smol-toml only throws Error; the String(err) fallback is unreachable */
-          String(err);
-    throw new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${msg}`, { cause: err });
+    throw new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${toError(err).message}`, { cause: err });
   }
   const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } })?.project;
   if (!project) {

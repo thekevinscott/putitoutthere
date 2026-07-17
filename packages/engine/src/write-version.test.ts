@@ -193,4 +193,31 @@ describe('writeVersionForBuild (#276, #428)', () => {
     await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow(/EACCES/);
     await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.not.toThrow(/is missing/);
   });
+
+  it('wraps a non-Error failure from the pyproject read in an Error (toError)', async () => {
+    // A non-Error rejection (no `.code`, not `instanceof Error`) skips the
+    // ENOENT remap and must surface wrapped via toError() — a proper Error
+    // carrying String(value) — never escape as a raw non-Error rejection.
+    readFileMock.mockImplementation((p) => {
+      if ((p as string).endsWith('pyproject.toml')) {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- deliberately non-Error to hit the toError wrap
+        return Promise.reject('disk gremlins');
+      }
+      return Promise.resolve('');
+    });
+    const err: unknown = await writeVersionForBuild('pkg', '1.2.3').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('disk gremlins');
+  });
+
+  it('wraps a non-Error failure from the Cargo.toml read in an Error (toError)', async () => {
+    readFileMock.mockImplementation((p) => {
+      if ((p as string).endsWith('pyproject.toml')) {return Promise.resolve(dynamicPyproject);}
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- deliberately non-Error to hit the toError wrap
+      return Promise.reject('disk gremlins');
+    });
+    const err: unknown = await writeVersionForBuild('pkg', '1.2.3').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('disk gremlins');
+  });
 });

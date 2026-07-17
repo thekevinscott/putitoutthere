@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import { ErrorCodes } from './error-codes.js';
+import { toError } from './to-error.js';
 import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
 
 const DYNAMIC_VERSION_DOC_POINTER =
@@ -54,16 +55,13 @@ export async function writeVersionForBuild(pkgDir: string, version: string): Pro
         cause: err,
       });
     }
-    /* v8 ignore next -- non-ENOENT read errors surface as-is */
-    throw err;
+    throw toError(err);
   }
   let parsed: unknown;
   try {
     parsed = parseToml(pyOriginal);
   } catch (err) {
-    /* v8 ignore start -- smol-toml always throws an Error; the String(err) fallback is unreachable */
-    const msg = err instanceof Error ? err.message : String(err);
-    /* v8 ignore stop */
+    const msg = toError(err).message;
     throw new Error(`write-version: failed to parse ${pyProjectPath}: ${msg}`, { cause: err });
   }
   const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } })?.project;
@@ -94,8 +92,7 @@ export async function writeVersionForBuild(pkgDir: string, version: string): Pro
         { cause: err },
       );
     }
-    /* v8 ignore next -- non-ENOENT read errors surface as-is */
-    throw err;
+    throw toError(err);
   }
   return await writeResolvedCargoVersion(pkgDir, cargoOriginal, version);
 }
