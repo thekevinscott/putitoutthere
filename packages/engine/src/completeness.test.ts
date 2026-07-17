@@ -208,6 +208,40 @@ describe('checkCompleteness: single package, all present', () => {
     );
     expect(out.get('demo')?.ok).toBe(true);
   });
+
+  it('treats a directory holding only a zero-byte file and a non-file entry as empty', async () => {
+    // Pins the *outcome* of the `size > 0` and `isFile()` filters, not just
+    // their execution: a zero-byte file and a socket-like entry are both
+    // dropped, so the directory lists no files and the row is reported empty.
+    // (If either filter admitted its entry, a platform npm row would pass —
+    // this asserts it does not.)
+    readdirMock.mockImplementation((p) => {
+      const s = String(p);
+      if (s.endsWith('demo-plat')) {
+        return Promise.resolve(['empty.node', 'sock'] as unknown as Awaited<ReturnType<typeof readdir>>);
+      }
+      return Promise.resolve([] as unknown as Awaited<ReturnType<typeof readdir>>);
+    });
+    statMock.mockImplementation((p) => {
+      const s = String(p);
+      const st = (over: Partial<{ isDirectory: boolean; isFile: boolean; size: number }>) =>
+        Promise.resolve({
+          isDirectory: () => over.isDirectory ?? false,
+          isFile: () => over.isFile ?? false,
+          size: over.size ?? 0,
+        } as unknown as Awaited<ReturnType<typeof stat>>);
+      if (s.endsWith('demo-plat')) {return st({ isDirectory: true });}
+      if (s.endsWith('empty.node')) {return st({ isFile: true, size: 0 });} // zero-byte → dropped
+      return st({ size: 5 }); // 'sock': neither dir nor file, non-zero size → dropped
+    });
+
+    const out = await checkCompleteness(
+      [row({ kind: 'npm', target: 'linux-x64-gnu', artifact_name: 'demo-plat' })],
+      root,
+    );
+    expect(out.get('demo')?.ok).toBe(false);
+    expect(out.get('demo')?.missing[0]?.reason).toMatch(/empty/i);
+  });
 });
 
 describe('checkCompleteness: single package, issues', () => {
