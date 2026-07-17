@@ -1,0 +1,48 @@
+# testing-conventions config for the engine package's Conventions job.
+#
+# Wired in via `.github/workflows/conventions.yml` (the `engine` job's
+# `config:` input). It must be package-scoped, not a repo-root
+# `testing-conventions.toml`: exempt `path`s are resolved relative to the
+# scanned source dir and every scan validates every entry, so a shared root
+# config would make the `ci` job (which scans `packages/ci/src`) reject these
+# engine paths as stale.
+#
+# co-change exemptions for the #552 `toError()` refactor.
+#
+# Each file below changed only by swapping an inline
+# `err instanceof Error ? err : new Error(String(err))` (or the `.message`
+# variant) for a call to the separately-tested `toError()` helper. Behaviour is
+# byte-identical, the formerly `/* v8 ignore */`-marked non-Error arm is now
+# exercised in `to-error.test.ts`, and the mutation gate confirms the changed
+# lines carry no surviving mutants — so these files' colocated tests have
+# nothing new to assert. (config.ts is deliberately absent: its test *was*
+# co-changed to add the `invalid TOML:` prefix assertion that kills the
+# config.ts:396 mutant.)
+#
+# Rule name is `co-change` (the diff-scoped "test didn't co-change" check), not
+# `colocated-test` (the tree-wide presence check) — these files all still have
+# their colocated tests.
+[[typescript.exempt]]
+path = "check.ts"
+rules = ["co-change"]
+reason = "#552 refactor: inline String(err) ternaries replaced by the tested toError() helper; behaviour unchanged, non-Error arm covered by to-error.test.ts"
+
+[[typescript.exempt]]
+path = "handlers/crates.ts"
+rules = ["co-change"]
+reason = "#552 refactor: inline String(err) fallback replaced by the tested toError() helper; behaviour unchanged, non-Error arm covered by to-error.test.ts"
+
+[[typescript.exempt]]
+path = "handlers/npm.ts"
+rules = ["co-change"]
+reason = "#552 refactor: inline String(err) fallbacks replaced by the tested toError() helper; behaviour unchanged, non-Error arm covered by to-error.test.ts"
+
+[[typescript.exempt]]
+path = "handlers/pypi.ts"
+rules = ["co-change"]
+reason = "#552 refactor: inline String(err) fallbacks replaced by the tested toError() helper; behaviour unchanged, non-Error arm covered by to-error.test.ts"
+
+[[typescript.exempt]]
+path = "write-version.ts"
+rules = ["co-change"]
+reason = "#552 refactor: inline String(err) fallback replaced by the tested toError() helper; behaviour unchanged, non-Error arm covered by to-error.test.ts"
