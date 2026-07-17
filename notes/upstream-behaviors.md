@@ -54,8 +54,8 @@ exchanged short-lived `CARGO_REGISTRY_TOKEN` reaches cargo, but the
 registry rejects the publish because there is no crate of that name
 yet to match the TP record against.
 
-**Engine reaction.** `looksLikeFirstPublishTpRejection` in
-[`src/handlers/crates.ts`](../packages/engine/src/handlers/crates.ts) anchors on the
+**Engine reaction.** `matchFirstPublishTpRejection` in
+[`src/handlers/match-first-publish-tp-rejection.ts`](../packages/engine/src/handlers/match-first-publish-tp-rejection.ts) anchors on the
 404-status line plus the registry's prose. When it fires (outside the
 e2e seam — the alt-registry `PIOT_CRATES_REGISTRY_PRIMARY` doesn't
 model TP), the handler throws `PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED`
