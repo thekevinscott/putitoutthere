@@ -17,6 +17,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathExists } from './utils/path-exists.js';
+import { toPosixPath } from './utils/to-posix-path.js';
 import type { Kind } from './types.js';
 
 export interface MatrixRow {
@@ -147,13 +148,14 @@ async function listFiles(dir: string): Promise<string[]> {
   for (const entry of await readdir(dir)) {
     const full = join(dir, entry);
     const st = await stat(full);
-    /* v8 ignore start -- both arms exercised across runs but coverage is per-platform */
     if (st.isDirectory()) {
       out.push(...(await listFiles(full)));
     } else if (st.isFile() && st.size > 0) {
-      out.push(full);
+      // Normalize separators once, here at the listing boundary, so every
+      // downstream trailing-name check is a single `/<name>` comparison
+      // that holds on Windows and POSIX alike.
+      out.push(toPosixPath(full));
     }
-    /* v8 ignore stop */
   }
   return out;
 }
@@ -192,7 +194,7 @@ function hasSuffix(files: readonly string[], suffix: string): boolean {
 }
 
 function hasFile(files: readonly string[], name: string): boolean {
-  // Trailing-name match across both unix and windows separators.
-  return files.some((f) => f.endsWith(`/${name}`) || f.endsWith(`\\${name}`));
+  // Paths are normalized to `/` at the listing boundary (see `listFiles`),
+  // so a single-separator trailing-name match is enough on every OS.
+  return files.some((f) => f.endsWith(`/${name}`));
 }
-/* v8 ignore next -- the OR-of-separators in hasFile only exercises one platform per CI run */

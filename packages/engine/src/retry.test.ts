@@ -135,8 +135,9 @@ describe('withRetry', () => {
   });
 
   it('throws immediately (rejecting undefined) when retries is 0 — loop body never runs', async () => {
-    // `retries: 0` skips the while-loop entirely, falling through to the
-    // final `throw lastErr` (still undefined). The fn is never invoked.
+    // `retries: 0` fails the `attempt <= retries` guard on the first check, so
+    // the loop body never runs and control reaches the post-loop `throw`
+    // (rejecting `undefined`). The fn is never invoked.
     const fn = vi.fn().mockResolvedValue('ok');
     const out = withRetry(fn, { retries: 0 });
     await Promise.all([

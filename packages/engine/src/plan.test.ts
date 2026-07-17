@@ -50,9 +50,22 @@ function setHeadBody(msg: string): void {
   vi.mocked(commitBody).mockResolvedValue(msg);
 }
 
+/**
+ * Build a `lastTag` result from a tag whose trailing segment is `X.Y.Z`
+ * — mirrors the real resolver, which now hands back the parsed version
+ * alongside the tag so callers never re-parse.
+ */
+function tagResult(tag: string): { tag: string; version: { major: number; minor: number; patch: number } } {
+  const m = /(\d+)\.(\d+)\.(\d+)$/.exec(tag)!;
+  return { tag, version: { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) } };
+}
+
 /** Map each package name to its resolved last tag (or absent → first release). */
 function setTags(tags: Record<string, string>): void {
-  vi.mocked(lastTag).mockImplementation((name: string) => Promise.resolve(tags[name] ?? null));
+  vi.mocked(lastTag).mockImplementation((name: string) => {
+    const tag = tags[name];
+    return Promise.resolve(tag === undefined ? null : tagResult(tag));
+  });
 }
 
 /** Map each tag to the file paths changed since it (drives the cascade). */
@@ -314,10 +327,12 @@ describe('plan: subsequent release with last_tag', () => {
     expect(vi.mocked(diffNames)).toHaveBeenCalledWith('lib-rust-v0.3.4', 'HEAD', { cwd: CWD });
   });
 
-  it('falls back to first_version when the resolved last tag is unparseable', async () => {
-    // A tag that matches the package glob but whose version part fails strict
-    // semver: production `lastTag` never surfaces such a tag, but a direct
-    // mock does, exercising the `?? firstVersion(pkg)` defensive fallback.
+  it('plans first_version when a package has no resolvable last tag', async () => {
+    // `lastTag` now filters any candidate whose version part fails strict
+    // semver (git.test.ts pins that), handing back the already-parsed
+    // version or null — never a malformed tag for the planner to re-parse.
+    // A repo whose only tag is unparseable therefore resolves to no last
+    // tag, and the planner plans the first release at first_version.
     useToml(`
 [putitoutthere]
 version = 1
@@ -328,13 +343,12 @@ kind  = "crates"
 path  = "packages/lib"
 globs = ["packages/lib/**"]
 `);
-    setTags({ lib: 'lib-vNONSENSE' });
-    setDiff({ 'lib-vNONSENSE': ['packages/lib/src.rs'] });
+    vi.mocked(lastTag).mockResolvedValue(null);
     setHeadBody('fix: x');
 
     const matrix = await plan({ cwd: CWD });
-    // first_version defaults to 0.1.0; no trailer → patch bump → 0.1.1.
-    expect(matrix.find((r) => r.name === 'lib')!.version).toBe('0.1.1');
+    // No prior tag → first release at first_version (0.1.0 default).
+    expect(matrix.find((r) => r.name === 'lib')!.version).toBe('0.1.0');
   });
 
   it('reuses a memoized diff when two packages resolve to the same last tag (#140)', async () => {

@@ -170,6 +170,44 @@ describe('checkCompleteness: single package, all present', () => {
     );
     expect(out.get('demo')?.ok).toBe(true);
   });
+
+  it('recurses into subdirectories and skips empty / non-file entries', async () => {
+    // Drive `listFiles` through every arm on a single OS — the branches a
+    // per-platform run otherwise leaves uncovered: a nested directory
+    // (recursion), a non-empty file (kept), a zero-byte file (skipped by the
+    // `size > 0` guard), and a socket-like entry that is neither dir nor file
+    // (the `isFile()` false fall-through). The package.json lives one level
+    // deep, so a passing verdict proves the recursion actually descended.
+    readdirMock.mockImplementation((p) => {
+      const s = String(p);
+      if (s.endsWith('demo-npm-main')) {
+        return Promise.resolve(['nested', 'empty.json', 'sock'] as unknown as Awaited<ReturnType<typeof readdir>>);
+      }
+      if (s.endsWith('nested')) {
+        return Promise.resolve(['package.json'] as unknown as Awaited<ReturnType<typeof readdir>>);
+      }
+      return Promise.resolve([] as unknown as Awaited<ReturnType<typeof readdir>>);
+    });
+    statMock.mockImplementation((p) => {
+      const s = String(p);
+      const st = (over: Partial<{ isDirectory: boolean; isFile: boolean; size: number }>) =>
+        Promise.resolve({
+          isDirectory: () => over.isDirectory ?? false,
+          isFile: () => over.isFile ?? false,
+          size: over.size ?? 0,
+        } as unknown as Awaited<ReturnType<typeof stat>>);
+      if (s.endsWith('demo-npm-main') || s.endsWith('nested')) {return st({ isDirectory: true });}
+      if (s.endsWith('package.json')) {return st({ isFile: true, size: 12 });}
+      if (s.endsWith('empty.json')) {return st({ isFile: true, size: 0 });}
+      return st({}); // 'sock': neither directory nor file
+    });
+
+    const out = await checkCompleteness(
+      [row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' })],
+      root,
+    );
+    expect(out.get('demo')?.ok).toBe(true);
+  });
 });
 
 describe('checkCompleteness: single package, issues', () => {
