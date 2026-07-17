@@ -1083,10 +1083,11 @@ describe('publishPlatforms: staging cleanup is best-effort (#581)', () => {
       return Promise.resolve(ok('')); // publish succeeds
     });
     // The cleanup rejects AFTER the publish already succeeded.
-    vi.mocked(rm).mockRejectedValueOnce(
-      Object.assign(new Error('EBUSY: resource busy or locked, rmdir'), { code: 'EBUSY' }),
-    );
-    const warn = vi.fn();
+    const cleanupErr = Object.assign(new Error('EBUSY: resource busy or locked, rmdir'), {
+      code: 'EBUSY',
+    });
+    vi.mocked(rm).mockRejectedValueOnce(cleanupErr);
+    const warn = vi.fn<Ctx['log']['warn']>();
     const ctx = makeCtx({
       log: { debug: () => {}, info: () => {}, warn, error: () => {} },
     });
@@ -1099,9 +1100,10 @@ describe('publishPlatforms: staging cleanup is best-effort (#581)', () => {
     // the staging directory it could not remove and forwards the caught
     // error as a structured field so the operator can see the cause.
     expect(warn).toHaveBeenCalledTimes(1);
-    const [warnMsg, warnFields] = warn.mock.calls[0]!;
-    expect(warnMsg).toMatch(/failed to clean up .*staging directory/i);
-    expect(warnFields).toEqual({ error: expect.any(Error) });
+    expect(warn.mock.calls[0]).toEqual([
+      expect.stringMatching(/failed to clean up .*staging directory/i),
+      { error: cleanupErr },
+    ]);
     // The main package.json still received the optionalDependencies rewrite.
     const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
