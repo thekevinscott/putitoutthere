@@ -1029,6 +1029,9 @@ describe('crates.publish', () => {
       expect(msg).toMatch(/status 404 Not Found/);
       // The matched cargo stderr is hoisted into the message verbatim.
       expect(msg).toContain(STDERR);
+      // The hint lines are newline-joined (not concatenated): the summary
+      // line and the TP-binding explanation sit on separate lines.
+      expect(msg).toContain('has never been published.\ncrates.io Trusted Publishing binds');
       fetchSpy.mockRestore();
     });
 

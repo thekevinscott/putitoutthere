@@ -14,9 +14,8 @@
  * does not match or `stderr` is absent.
  */
 export function matchTlogDuplicate(stderr: string | undefined): string | null {
-  if (!stderr) {return null;}
-  return /TLOG_CREATE_ENTRY_ERROR|equivalent entry already exists in the transparency log/i.test(
-    stderr,
+  return stderr?.match(
+    /TLOG_CREATE_ENTRY_ERROR|equivalent entry already exists in the transparency log/i,
   )
     ? stderr
     : null;

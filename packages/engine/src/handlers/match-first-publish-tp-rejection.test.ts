@@ -47,4 +47,30 @@ describe('matchFirstPublishTpRejection (#284)', () => {
   it('returns null on an undefined stderr (defensive)', () => {
     expect(matchFirstPublishTpRejection(undefined)).toBeNull();
   });
+
+  // Empty string flows past the `stderr !== undefined` guard; no anchor
+  // matches, so the result is null. Pins the guard against a `&&`->`||`
+  // rewrite that would return '' verbatim for empty stderr.
+  it('returns null on empty string', () => {
+    expect(matchFirstPublishTpRejection('')).toBeNull();
+  });
+
+  // Whitespace near-misses: each anchor's inter-token gap requires one-or-more
+  // whitespace (`\s+`). Feeding a matching shape with *two* spaces at a gap
+  // proves the regex needs `\s+`, not a single `\s` — collapsing any `\s+` to
+  // `\s` then fails to match multi-space output and the predicate returns null.
+  it('matches multi-space "status  404" (pins status anchor as \\s+)', () => {
+    const stderr = 'the remote server responded with an error (status  404 Not Found): Crate `demo` does not exist';
+    expect(matchFirstPublishTpRejection(stderr)).toBe(stderr);
+  });
+
+  it('matches multi-space "crate does not exist" prose (pins each prose gap as \\s+)', () => {
+    const stderr = 'status 404 Not Found: Crate  `demo`  does  not  exist or you do not have permission';
+    expect(matchFirstPublishTpRejection(stderr)).toBe(stderr);
+  });
+
+  it('matches multi-space "trusted  publishing" mention (pins trusted anchor as \\s+)', () => {
+    const stderr = 'status 404 Not Found\nTrusted  publishing requires the crate to already exist.';
+    expect(matchFirstPublishTpRejection(stderr)).toBe(stderr);
+  });
 });

@@ -17,10 +17,9 @@
  * does not match or `stderr` is absent.
  */
 export function matchFirstPublishTpRejection(stderr: string | undefined): string | null {
-  if (!stderr) {return null;}
-  if (!/status\s+404\b/i.test(stderr)) {return null;}
-  return /crate\s+`[^`]+`\s+does\s+not\s+exist/i.test(stderr) ||
-    /trusted\s+publish/i.test(stderr)
+  return stderr?.match(/status\s+404\b/i) &&
+    (stderr.match(/crate\s+`[^`]+`\s+does\s+not\s+exist/i) ||
+      stderr.match(/trusted\s+publish/i))
     ? stderr
     : null;
 }

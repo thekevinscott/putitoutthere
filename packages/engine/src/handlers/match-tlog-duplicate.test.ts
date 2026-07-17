@@ -18,8 +18,15 @@ describe('matchTlogDuplicate', () => {
     expect(matchTlogDuplicate('npm error code E409\nnpm error 409 Conflict')).toBeNull();
   });
 
-  it('returns null on undefined / empty', () => {
-    expect(matchTlogDuplicate(undefined)).toBeNull();
+  // Empty string flows past the `stderr !== undefined` guard into the regex,
+  // which cannot match it, so the result is still null. This pins the guard
+  // against a `&&`->`||` rewrite that would return '' verbatim for empty
+  // stderr.
+  it('returns null on empty string', () => {
     expect(matchTlogDuplicate('')).toBeNull();
+  });
+
+  it('returns null on undefined', () => {
+    expect(matchTlogDuplicate(undefined)).toBeNull();
   });
 });
