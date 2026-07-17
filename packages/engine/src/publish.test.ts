@@ -250,6 +250,25 @@ describe('publish: pre-flight and completeness', () => {
     expect(handler.publish).not.toHaveBeenCalled();
   });
 
+  it('runs the auth pre-flight against the packages resolved by name from config', async () => {
+    // publish resolves each planned package name back to its config object
+    // through the seeded by-name index:
+    //   `[...perPackage.keys()].map((name) => mustGet(byName, name))`.
+    // Assert the resolved objects reach requireAuth so that mapping is
+    // pinned — an empty spread (`[...keys] -> []`) would call requireAuth
+    // with [], and a per-name arrow that drops its result (`(name) => … ->
+    // () => undefined`) would call it with [undefined, undefined].
+    const a = npmPkg('lib-a', 'packages/a');
+    const b = npmPkg('lib-b', 'packages/b');
+    configWith(a, b);
+    vi.mocked(plan).mockResolvedValue([row(a), row(b)]);
+    allComplete(a, b);
+
+    await publish({ cwd: CWD, handlerFor: () => makeHandler() });
+
+    expect(requireAuth).toHaveBeenCalledWith([a, b]);
+  });
+
   it('aborts when the repo-url pre-flight fails (manifest vs GITHUB_REPOSITORY)', async () => {
     const p = npmPkg('lib-js', 'packages/ts');
     configWith(p);
