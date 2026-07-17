@@ -135,8 +135,9 @@ describe('withRetry', () => {
   });
 
   it('throws immediately (rejecting undefined) when retries is 0 — loop body never runs', async () => {
-    // `retries: 0` skips the while-loop entirely, falling through to the
-    // final `throw lastErr` (still undefined). The fn is never invoked.
+    // `retries: 0` fails the `attempt <= retries` guard on the first check, so
+    // the loop body never runs and control reaches the post-loop `throw`
+    // (rejecting `undefined`). The fn is never invoked.
     const fn = vi.fn().mockResolvedValue('ok');
     const out = withRetry(fn, { retries: 0 });
     await Promise.all([
@@ -146,17 +147,25 @@ describe('withRetry', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
-  it('applies no jitter offset when jitter is 0', async () => {
+  it('applies no jitter offset when jitter is 0 — delay is exactly the base', async () => {
     // A retryable first failure forces a backoff sleep; with jitter 0 the
-    // `fraction <= 0` guard short-circuits jitterOffset to 0.
+    // `fraction <= 0` guard short-circuits jitterOffset to 0, so the delay is
+    // exactly the base (initialDelayMs * multiplier^0 = 1000ms) with no random
+    // offset. Pin it precisely: the retry must not fire a tick early (a
+    // negative jitter would let it) and must fire by 1000ms (a positive jitter
+    // would push it past). Bracketing the exact boundary proves the offset is 0.
     const fn = vi
       .fn()
       .mockRejectedValueOnce(new TransientError('x'))
       .mockResolvedValueOnce('ok');
     const out = withRetry(fn, { jitter: 0 });
-    await vi.runAllTimersAsync();
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fn).toHaveBeenCalledTimes(1); // still sleeping at 999ms — no negative jitter
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fn).toHaveBeenCalledTimes(2); // retried at exactly 1000ms — no positive jitter
     expect(await out).toBe('ok');
-    expect(fn).toHaveBeenCalledTimes(2);
   });
 
   it('respects a custom retries cap', async () => {

@@ -306,6 +306,28 @@ describe('createLogger: redaction (§22.5)', () => {
   });
 });
 
+describe('createLogger: default stream', () => {
+  it('writes to process.stderr when no stream is passed', () => {
+    // Pins the `opts.stream ?? process.stderr` default (log.ts): stdout stays
+    // clean for machine-readable `--json` output, so a stream-less logger must
+    // land its line on stderr. Spy on the real fd so the default is exercised
+    // end to end rather than through an injected double.
+    const spy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const log = createLogger({ pretty: false });
+      log.info('to-stderr', { pkg: 'a' });
+      expect(spy).toHaveBeenCalledTimes(1);
+      const written = String(spy.mock.calls[0]![0]);
+      expect(JSON.parse(written.trim()) as Record<string, unknown>).toMatchObject({
+        msg: 'to-stderr',
+        pkg: 'a',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('createLogger: pretty mode', () => {
   it('writes human-readable output (not pure JSON)', () => {
     const dest = makeStream();

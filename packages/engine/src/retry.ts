@@ -39,14 +39,14 @@ export async function withRetry<T>(
 ): Promise<T> {
   const { retries, initialDelayMs, multiplier, jitter } = { ...DEFAULTS, ...opts };
 
-  let attempt = 0;
-  let lastErr: unknown;
-  while (attempt < retries) {
+  // The final attempt (`attempt >= retries`) rethrows inside the catch, so a
+  // positive `retries` always exits by returning or throwing from within the
+  // loop. The statement after the loop is reached only when `retries <= 0`:
+  // the loop never runs, no attempt is made, and there is no error to report.
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      lastErr = err;
-      attempt++;
       if (attempt >= retries || !isRetryable(err)) {
         throw err;
       }
@@ -56,9 +56,10 @@ export async function withRetry<T>(
       await sleep(delay);
     }
   }
-  // Unreachable: loop either returns or throws. TypeScript can't infer that.
-  /* v8 ignore next 2 */
-  throw lastErr;
+  // `retries <= 0`: preserve the historical contract of rejecting with
+  // `undefined` (the caller capped attempts at zero, so `fn` is never run).
+  const nothingAttempted: unknown = undefined;
+  throw nothingAttempted;
 }
 
 function isRetryable(err: unknown): boolean {
@@ -90,7 +91,6 @@ function extractProp(err: unknown, key: string): unknown {
 }
 
 function jitterOffset(baseDelay: number, fraction: number): number {
-  /* v8 ignore next -- default jitter is 0.25; the <=0 guard isn't exercised */
   if (fraction <= 0) {return 0;}
   // ±fraction of the base delay.
   const amp = baseDelay * fraction;

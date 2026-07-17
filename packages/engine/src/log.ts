@@ -66,7 +66,6 @@ export interface LoggerOptions {
 export function createLogger(opts: LoggerOptions = {}): Logger {
   // Default to stderr so stdout stays clean for machine-readable
   // output from `plan --json` and `publish --json`.
-  /* v8 ignore next -- tests always pass an explicit stream */
   const stream: Writable = opts.stream ?? process.stderr;
   const pretty = opts.pretty ?? isTty(stream);
   const minLevel = LEVEL_ORDER[opts.level ?? 'info'];
@@ -105,7 +104,6 @@ function formatPretty(record: Record<string, unknown>): string {
 
 function formatScalar(v: unknown): string {
   if (typeof v === 'string') {return v;}
-  /* v8 ignore next -- null/boolean primitive branches not all hit by current tests */
   if (typeof v === 'number' || typeof v === 'boolean' || v === null) {return String(v);}
   return JSON.stringify(v);
 }

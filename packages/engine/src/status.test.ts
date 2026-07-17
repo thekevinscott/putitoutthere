@@ -71,7 +71,11 @@ describe('computeStatus', () => {
     configWith(pkg('a'), pkg('b'), pkg('c'));
     // a + c are tagged at v1.0.0; b has never been tagged.
     vi.mocked(lastTag).mockImplementation((name) =>
-      Promise.resolve(name === 'b' ? null : `${name}-v1.0.0`),
+      Promise.resolve(
+        name === 'b'
+          ? null
+          : { tag: `${name}-v1.0.0`, version: { major: 1, minor: 0, patch: 0 } },
+      ),
     );
 
     const handler = handlerReturning((name) => {
@@ -103,7 +107,7 @@ describe('computeStatus', () => {
 
   it('falls back to the default handlerFor when none is injected, threading an inert-artifacts ctx', async () => {
     configWith(pkg('solo'));
-    vi.mocked(lastTag).mockResolvedValue('solo-v1.0.0');
+    vi.mocked(lastTag).mockResolvedValue({ tag: 'solo-v1.0.0', version: { major: 1, minor: 0, patch: 0 } });
     const probe: { got?: string; had?: boolean } = {};
     vi.mocked(defaultHandlerFor).mockReturnValue({
       kind: 'npm',

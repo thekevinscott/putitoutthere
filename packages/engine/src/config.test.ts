@@ -1491,4 +1491,18 @@ describe('formatZodError (internal): root-path label', () => {
     const err = zodErrorLike([{ path: ['package', 0, 'name'], message: 'bad field' }]);
     expect(formatZodError(err)).toBe('package.0.name: bad field');
   });
+
+  it('labels the empty-path issue <root> when mixed with nested-path issues', () => {
+    // Both ternary arms fire within a single formatted string: the empty path
+    // takes the `<root>` alternate while the nested path takes the dot-join,
+    // and the two are `; `-joined. Pins the `<root>` label alongside a
+    // real path so the branch is exercised in composition, not just alone.
+    const err = zodErrorLike([
+      { path: [], message: 'whole-document problem' },
+      { path: ['package', 1, 'globs'], message: 'expected array' },
+    ]);
+    expect(formatZodError(err)).toBe(
+      '<root>: whole-document problem; package.1.globs: expected array',
+    );
+  });
 });
