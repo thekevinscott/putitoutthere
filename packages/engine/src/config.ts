@@ -480,7 +480,6 @@ function assertUniqueNames(packages: readonly Package[]): void {
 export function formatZodError(error: ZodError): string {
   return error.issues
     .map((issue) => {
-      /* v8 ignore next -- TOML always parses to an object root; '<root>' label can't fire */
       const path = issue.path.length > 0 ? issue.path.join('.') : '<root>';
       return `${path}: ${issue.message}`;
     })
