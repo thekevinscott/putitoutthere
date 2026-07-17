@@ -128,11 +128,9 @@ async function verifyRow(row: MatrixRow, artifactsRoot: string): Promise<string 
   let files: string[];
   try {
     files = await listFiles(dir);
-    /* v8 ignore start -- defensive; existsSync passed and we own the temp dir */
   } catch (err) {
     return `cannot read ${row.artifact_name}/: ${err instanceof Error ? err.message : String(err)}`;
   }
-  /* v8 ignore stop */
   if (files.length === 0) {
     return `empty artifact directory ${row.artifact_name}/`;
   }

@@ -243,11 +243,9 @@ async function synthesizePlatformPackage(
   const artifactDir = join(artifactsRoot, artifactName);
 
   const files = await readdir(artifactDir);
-  /* v8 ignore start -- completeness check already verified the artifact tree */
   if (files.length === 0) {
     throw new Error(`platform artifact empty: ${artifactDir}`);
   }
-  /* v8 ignore stop */
   for (const f of files) {
     await cp(join(artifactDir, f), join(staging, f), { recursive: true });
   }

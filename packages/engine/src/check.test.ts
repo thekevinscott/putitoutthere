@@ -248,6 +248,12 @@ name  = "lib"
 kind  = "npm"
 path  = "packages/ts"
 globs = ["packages/ts/never-matches/**"]
+
+[[package]]
+name  = "gone"
+kind  = "npm"
+path  = "packages/missing"
+globs = ["packages/missing/never-matches/**"]
 `,
       'packages/ts/package.json': JSON.stringify({
         name: 'lib',
@@ -256,14 +262,19 @@ globs = ["packages/ts/never-matches/**"]
       }),
     });
     // `git ls-files` rejects (e.g. run outside a git repo) → listTrackedFiles
-    // returns null and the check short-circuits: no glob finding despite the
-    // deliberately non-matching glob.
+    // returns null and `checkGlobsMatchTrackedFiles` short-circuits: no glob
+    // finding despite the deliberately non-matching globs on BOTH packages.
     vi.mocked(execCapture).mockImplementation((cmd) => {
       if (cmd === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', 128));}
       return Promise.reject(new ExecError('cargo package failed', '', '', 1));
     });
     const findings = await runChecks({ cwd: ROOT });
     expect(findings.some((f) => /glob/i.test(f.message))).toBe(false);
+    // The null-tracked short-circuit is scoped to the glob check alone: the
+    // other per-package checks still run, so `gone`'s missing path is reported.
+    expect(
+      findings.some((f) => f.package === 'gone' && /path/.test(f.message)),
+    ).toBe(true);
   });
 
   it("flags cyclic depends_on", async () => {

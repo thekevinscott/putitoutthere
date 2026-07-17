@@ -264,6 +264,55 @@ describe('checkCompleteness: single package, issues', () => {
     expect(out.get('demo')?.missing[0]?.reason).toMatch(/empty/i);
   });
 
+  it('reports a directory that cannot be read as unreadable', async () => {
+    // pathExists passes (stat resolves the dir) but the subsequent listFiles
+    // read fails — a permission fault or race between the existence probe and
+    // the directory read. verifyRow's catch surfaces the reason instead of
+    // letting the completeness pass crash.
+    const dirName = 'demo-sdist';
+    statMock.mockImplementation((p) => {
+      if (String(p).endsWith(dirName)) {
+        return Promise.resolve({
+          isDirectory: () => true, isFile: () => false, size: 0,
+        } as unknown as Awaited<ReturnType<typeof stat>>);
+      }
+      return Promise.reject(enoent(p));
+    });
+    readdirMock.mockRejectedValue(
+      Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }),
+    );
+    const out = await checkCompleteness(
+      [row({ kind: 'pypi', target: 'sdist', artifact_name: dirName })],
+      root,
+    );
+    expect(out.get('demo')?.missing[0]?.reason).toBe(
+      'cannot read demo-sdist/: EACCES: permission denied',
+    );
+  });
+
+  it('stringifies a non-Error read failure', async () => {
+    // A rejected read need not carry an Error — the catch's `String(err)` arm
+    // renders whatever was thrown so the reason is never `[object Object]`-less
+    // or a crash.
+    const dirName = 'demo-sdist';
+    statMock.mockImplementation((p) => {
+      if (String(p).endsWith(dirName)) {
+        return Promise.resolve({
+          isDirectory: () => true, isFile: () => false, size: 0,
+        } as unknown as Awaited<ReturnType<typeof stat>>);
+      }
+      return Promise.reject(enoent(p));
+    });
+    readdirMock.mockRejectedValue('raw string failure');
+    const out = await checkCompleteness(
+      [row({ kind: 'pypi', target: 'sdist', artifact_name: dirName })],
+      root,
+    );
+    expect(out.get('demo')?.missing[0]?.reason).toBe(
+      'cannot read demo-sdist/: raw string failure',
+    );
+  });
+
   it('reports a pypi artifact with no .whl as wrong-shape', async () => {
     stageDirs({ 'demo-wheel-x86_64-unknown-linux-gnu': ['something.txt'] });
     const out = await checkCompleteness(

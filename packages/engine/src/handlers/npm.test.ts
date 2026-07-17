@@ -459,7 +459,15 @@ describe('npm.writeVersion', () => {
       '0.2.0',
       makeCtx({ cwd: dir }),
     );
-    expect(readFileSync(p, 'utf8')).toContain('  "version": "0.2.0"');
+    const out = readFileSync(p, 'utf8');
+    // The bumped version lands 2-space indented,
+    expect(out).toContain('  "version": "0.2.0"');
+    // every top-level key is 2-space indented (proves the fallback drove the
+    // whole re-serialization, not just the version line),
+    expect(out).toContain('  "name": "demo"');
+    // and no tab or 4-space indent leaked in.
+    expect(out).not.toContain('\t"');
+    expect(out).not.toContain('    "');
   });
 });
 

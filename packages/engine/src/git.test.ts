@@ -220,7 +220,10 @@ describe('lastTag', () => {
     // in minor pins that second early return in isolation — the higher minor
     // wins even though the lower-minor tag has the larger patch.
     execMock.mockResolvedValue({ stdout: 'pkg-v1.3.9\npkg-v1.4.0', stderr: '' });
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v1.4.0');
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
+      tag: 'pkg-v1.4.0',
+      version: { major: 1, minor: 4, patch: 0 },
+    });
   });
 });
 
