@@ -1069,6 +1069,43 @@ describe('publishPlatforms: generic platform publish failure', () => {
   });
 });
 
+describe('publishPlatforms: staging cleanup is best-effort (#581)', () => {
+  it('reports the platform as published and warns when cleanup rm rejects after a successful publish', async () => {
+    // Per the all-or-nothing-per-package commitment, a publish that
+    // succeeded must not be masked by a post-publish cleanup failure.
+    // `rm` on the staging tempdir can reject (EBUSY/EPERM on Windows
+    // runners even with force:true); the row should still report
+    // published and the failure should be swallowed with a warning.
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok('')); // publish succeeds
+    });
+    // The cleanup rejects AFTER the publish already succeeded.
+    vi.mocked(rm).mockRejectedValueOnce(
+      Object.assign(new Error('EBUSY: resource busy or locked, rmdir'), { code: 'EBUSY' }),
+    );
+    const warn = vi.fn();
+    const ctx = makeCtx({
+      log: { debug: () => {}, info: () => {}, warn, error: () => {} },
+    });
+
+    const r = await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', ctx);
+
+    // The successful publish is not masked by the cleanup rejection.
+    expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
+    // A warning is emitted about the swallowed cleanup failure.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/clean|staging/i);
+    // The main package.json still received the optionalDependencies rewrite.
+    const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
+      optionalDependencies: Record<string, string>;
+    };
+    expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
+  });
+});
+
 describe('looksLikePublishOverRace', () => {
   it('matches npm\'s E403 over-publish stderr', () => {
     expect(
