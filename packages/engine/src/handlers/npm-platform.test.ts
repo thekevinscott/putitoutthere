@@ -17,6 +17,7 @@
  */
 
 import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture, type ExecResult } from '../utils/exec-capture.js';
@@ -614,8 +615,11 @@ describe('publishPlatforms: empty artifact directory', () => {
       if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
       return Promise.resolve(ok(''));
     });
+    // The source builds the path with real `node:path`, so it is back-slashed
+    // on Windows. Build the expected string the same way so the assertion pins
+    // the full path on every OS.
     await expect(publishPlatforms(basePkg(), '0.2.0', makeCtx())).rejects.toThrow(
-      `platform artifact empty: ${artifactsRoot}/demo-cli-linux-x64-gnu`,
+      `platform artifact empty: ${join(artifactsRoot, 'demo-cli-linux-x64-gnu')}`,
     );
   });
 });
