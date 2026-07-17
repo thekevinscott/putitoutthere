@@ -184,10 +184,17 @@ describe('cli: top-level dispatch', () => {
     expect(usage).not.toMatch(/--json[^\n]*plan only/);
   });
 
-  it('prints version from package.json', async () => {
-    const code = await run(argv('version'));
-    expect(code).toBe(0);
-    expect(stdout.join('')).toMatch(/putitoutthere \d+\.\d+\.\d+/);
+  it('prints version from package.json for `version` and its --version / -v aliases', async () => {
+    // `version` is dispatched by the early guard, ahead of (and no longer a
+    // member of) the command `switch`. Pin that all three spellings resolve
+    // through that guard and print the version — so the switch reshape (which
+    // dropped the dead `case 'version'`) can't silently break the command.
+    for (const spelling of ['version', '--version', '-v']) {
+      stdout.length = 0;
+      const code = await run(argv(spelling));
+      expect(code).toBe(0);
+      expect(stdout.join('')).toMatch(/^putitoutthere \d+\.\d+\.\d+\n$/);
+    }
   });
 
   it('exits 1 on unknown command', async () => {

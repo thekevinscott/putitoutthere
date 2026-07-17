@@ -475,6 +475,35 @@ describe('verifyShape: crates arm (exercised directly)', () => {
   });
 });
 
+// `verifyShape`'s npm-main arm delegates to `hasFile`, which matches a
+// trailing `/<name>` segment across a normalized (POSIX-separator) listing.
+// These pin its exact contract so mutations of the `.some(...)` search or the
+// `/${name}` suffix die.
+describe('verifyShape: npm main arm (hasFile trailing-name match)', () => {
+  const npmMain = row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' });
+
+  it('is ok when package.json sits among other files (found by search, not by all)', () => {
+    // Multiple entries, only one of which matches: `.some` returns null (ok)
+    // where `.every` would wrongly fail on `readme.md`. Kills the
+    // `.some` → `.every` mutant.
+    expect(
+      verifyShape(npmMain, [
+        'artifacts/demo-npm-main/readme.md',
+        'artifacts/demo-npm-main/dist/package.json',
+      ]),
+    ).toBeNull();
+  });
+
+  it('does not accept a filename that merely ends in "package.json" without a `/` boundary', () => {
+    // `mypackage.json` ends with `package.json` but not `/package.json`, so a
+    // suffix-only match must reject it. Kills mutants that drop the `/` from
+    // the `/${name}` suffix.
+    expect(verifyShape(npmMain, ['artifacts/demo-npm-main/mypackage.json'])).toMatch(
+      /no package\.json in demo-npm-main\//,
+    );
+  });
+});
+
 async function captureError(fn: () => Promise<void>): Promise<string> {
   try {
     await fn();

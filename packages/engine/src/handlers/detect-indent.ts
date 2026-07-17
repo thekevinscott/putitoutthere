@@ -6,9 +6,10 @@
  * both round-trip a package.json without reflowing it.
  */
 export function detectIndent(source: string): number | string {
-  const m = /^(?<indent>[ \t]+)"/m.exec(source);
-  if (!m?.groups?.indent) {return 2;}
-  const indent = m.groups.indent;
+  // `^…"` (multiline) anchors to a line's leading whitespace before a key
+  // quote, so an inline `": "` inside a value is never mistaken for indent.
+  const indent = /^([ \t]+)"/m.exec(source)?.[1];
+  if (indent === undefined) {return 2;}
   if (indent.includes('\t')) {return '\t';}
   return indent.length;
 }

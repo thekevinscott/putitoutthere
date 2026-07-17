@@ -16,6 +16,17 @@ describe('detectIndent', () => {
   });
 
   it('defaults to 2 when the source has no indented line (minified)', () => {
+    // No line begins with whitespace + `"`, so the regex misses and the
+    // optional-chained match access falls through to the default. Kills the
+    // optional-chaining mutant: without `?.` this input would throw on `m[1]`.
     expect(detectIndent('{"name":"x"}')).toBe(2);
+  });
+
+  it('samples only a line-leading indent, not an inline space before a quote', () => {
+    // Line 1 carries an inline ` "` (space-before-quote) that is NOT at the
+    // line start; the real indent is the 4 spaces on line 2. The `^` anchor
+    // must skip the inline match and report 4 — without it the regex grabs the
+    // single inline space and reports 1. Kills the `^`-removal regex mutant.
+    expect(detectIndent('{ "compact": 1,\n    "name": "x"\n}')).toBe(4);
   });
 });
