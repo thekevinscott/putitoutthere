@@ -250,6 +250,25 @@ describe('publish: pre-flight and completeness', () => {
     expect(handler.publish).not.toHaveBeenCalled();
   });
 
+  it('runs the auth pre-flight against the packages resolved by name from config', async () => {
+    // publish resolves each planned package name back to its config object
+    // through the seeded by-name index:
+    //   `[...perPackage.keys()].map((name) => mustGet(byName, name))`.
+    // Assert the resolved objects reach requireAuth so that mapping is
+    // pinned — an empty spread (`[...keys] -> []`) would call requireAuth
+    // with [], and a per-name arrow that drops its result (`(name) => … ->
+    // () => undefined`) would call it with [undefined, undefined].
+    const a = npmPkg('lib-a', 'packages/a');
+    const b = npmPkg('lib-b', 'packages/b');
+    configWith(a, b);
+    vi.mocked(plan).mockResolvedValue([row(a), row(b)]);
+    allComplete(a, b);
+
+    await publish({ cwd: CWD, handlerFor: () => makeHandler() });
+
+    expect(requireAuth).toHaveBeenCalledWith([a, b]);
+  });
+
   it('aborts when the repo-url pre-flight fails (manifest vs GITHUB_REPOSITORY)', async () => {
     const p = npmPkg('lib-js', 'packages/ts');
     configWith(p);
@@ -343,6 +362,30 @@ describe('publish: publish order (toposort)', () => {
     const result = await publish({ cwd: CWD, handlerFor: () => handler });
     expect(result.ok).toBe(true);
     expect(calls).toEqual(['a', 'b', 'c']);
+  });
+
+  it('orders only the selected set, dropping a dependency that is not planned', async () => {
+    // `b` depends on `a`, but only `b` is planned. publishOrder seeds its
+    // `deps` map for the selected set and filters each package's
+    // depends_on down to it, so `b`'s child-deps are empty and the
+    // toposort's seeded lookup visits only `b` — it never reaches the
+    // unselected `a`.
+    const a = npmPkg('a', 'packages/a');
+    const b = npmPkg('b', 'packages/b', ['a']);
+    configWith(a, b);
+    vi.mocked(plan).mockResolvedValue([row(b)]);
+    allComplete(b);
+
+    const calls: string[] = [];
+    const handler = makeHandler({
+      publish: vi.fn().mockImplementation((pkg: { name: string }) => {
+        calls.push(pkg.name);
+        return Promise.resolve({ status: 'published' as const });
+      }),
+    });
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual(['b']);
   });
 });
 

@@ -280,7 +280,9 @@ async function rowsForPackage(pkg: Package, version: string, cwd: string): Promi
       ];
 
     case 'pypi': {
-      const build = (pkg as { build?: string }).build;
+      // `pkg` is narrowed to the pypi variant here, whose `build` the Zod
+      // schema defaults to `'setuptools'` — so it is always defined.
+      const build = pkg.build;
       const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
       const bundleCli = (pkg as { bundle_cli?: MatrixRow['bundle_cli'] }).bundle_cli;
       // #369: every wheel is built for a specific CPython version.
@@ -345,9 +347,9 @@ async function rowsForPackage(pkg: Package, version: string, cwd: string): Promi
         artifact_path: at('dist'),
         path: pkg.path,
         python_version: buildPython,
-        /* v8 ignore start -- pypi build defaults to 'setuptools' at config-load, so it's always defined here; the empty-spread fallback is defensive */
-        ...(build !== undefined ? { build } : {}),
-        /* v8 ignore stop */
+        // `build` is non-optional post-parse (defaults to 'setuptools'), so
+        // the sdist row always carries it — no conditional spread.
+        build,
       });
       // #324: pure-Python hatch packages also emit a `wheel-any` row.
       // `pypa/build`'s default on a pure-Python tree produces both an

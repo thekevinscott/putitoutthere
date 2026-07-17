@@ -63,9 +63,9 @@ export function computeCascade(
     changed = false;
     for (const p of packages) {
       if (cascaded.has(p.name)) {continue;}
-      /* v8 ignore next -- depends_on default is always [] from the Zod schema */
-      const deps = p.depends_on ?? [];
-      if (deps.some((d) => cascaded.has(d))) {
+      // `depends_on` is `string[]` post-parse — the Zod schema defaults it
+      // to `[]` — so no `?? []` fallback is representable here.
+      if (p.depends_on.some((d) => cascaded.has(d))) {
         cascaded.add(p.name);
         changed = true;
       }
@@ -105,8 +105,9 @@ export function assertNoCycles(packages: readonly Package[]): void {
     /* v8 ignore start -- byName always contains every visited name; unreachable */
     if (!node) {return;}
     /* v8 ignore stop */
-    /* v8 ignore next -- depends_on default is always [] from the Zod schema */
-    for (const dep of node.depends_on ?? []) {
+    // `depends_on` is `string[]` post-parse (Zod default `[]`), so the
+    // traversal never needs a `?? []` fallback.
+    for (const dep of node.depends_on) {
       if (!byName.has(dep)) {
         throw new Error(
           `putitoutthere.toml: package "${name}" has unknown depends_on: "${dep}"`,

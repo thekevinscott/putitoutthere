@@ -1005,6 +1005,30 @@ build = "setuptools"
     // consult the helper for setuptools too).
     expect(vi.mocked(isVersionIndependentWheel)).not.toHaveBeenCalled();
   });
+
+  it('sdist row carries the defaulted build ("setuptools") when build is omitted', async () => {
+    // plan.ts reads `pkg.build` off the narrowed pypi type and spreads it
+    // onto the sdist row unconditionally (no `build !== undefined` guard).
+    // That narrowing rests on the Zod schema defaulting `build` to
+    // 'setuptools' at config-load, so a config that omits `build` must
+    // still produce an sdist row whose `build` is the default — never
+    // undefined.
+    useToml(`
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "py-default"
+kind  = "pypi"
+path  = "py"
+globs = ["py/**"]
+`);
+
+    const matrix = await plan({ cwd: CWD });
+    const sdist = matrix.find((r) => r.target === 'sdist');
+    expect(sdist).toBeDefined();
+    expect(sdist!.build).toBe('setuptools');
+  });
 });
 
 describe('plan: npm bundle_cli passthrough (#298)', () => {

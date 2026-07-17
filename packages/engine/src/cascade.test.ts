@@ -195,15 +195,18 @@ describe('computeCascade: edge cases', () => {
     expect(cascade.map((p) => p.name).sort()).toEqual(['a', 'b']);
   });
 
-  it('treats a package whose `depends_on` is absent at runtime as having no deps', () => {
-    // The Zod schema always defaults `depends_on` to []; a hand-built
-    // package object without the field bypasses that default and exercises
-    // the `depends_on ?? []` fallback in both the transitive pass and the
-    // cycle check.
-    const noDeps = { name: 'b', kind: 'crates', path: 'b', globs: ['b/**'], first_version: '0.1.0' } as unknown as Package;
-    const pkgs = [pkg('a', ['a/**']), noDeps];
-    const cascade = computeCascade(pkgs, perPkg({ a: ['a/x'], b: ['unrelated/y'] }));
-    // `a` matches directly; `b` (no deps, no direct match) is not pulled in.
+  it('reads an empty depends_on as a real array (no `?? []` fallback needed)', () => {
+    // Post-parse, `depends_on` is always a `string[]` — the Zod schema
+    // defaults it to [] (proven in config.test.ts). cascade relies on that
+    // narrowing: both passes read `p.depends_on` / `node.depends_on`
+    // directly, with no `?? []` fallback. A package whose deps default to []
+    // and has no direct glob match must therefore not be pulled into the
+    // cascade — and the traversal must treat the empty array as iterable, not
+    // as an absence.
+    const b = pkg('b', ['b/**']); // pkg() defaults depends_on to []
+    expect(b.depends_on).toEqual([]);
+    const cascade = computeCascade([pkg('a', ['a/**']), b], perPkg({ a: ['a/x'], b: ['unrelated/y'] }));
+    // `a` matches directly; `b` (empty deps, no direct match) is not pulled in.
     expect(cascade.map((p) => p.name)).toEqual(['a']);
   });
 });

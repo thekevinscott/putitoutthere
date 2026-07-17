@@ -19,6 +19,8 @@
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type Package } from './config.js';
+import { mustGet } from './must-get.js';
+import { packagesByName } from './packages-by-name.js';
 import { checkCompleteness } from './completeness.js';
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ErrorCodes } from './error-codes.js';
@@ -116,9 +118,14 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   // per package (one per target) share a single version.
   const perPackage = groupByPackage(matrix, config.packages);
 
+  // Names are unique (config load enforces it), so a by-name index is a
+  // total lookup for every planned package — `mustGet` turns a name that
+  // somehow escaped the config into a diagnosable throw.
+  const byName = packagesByName(config.packages);
+
   // 2. Pre-flight auth: every selected package must have a viable
   //    auth path (OIDC env or env-var token) before any side effects.
-  const selectedPackages = [...perPackage.keys()].map((name) => mustGet(config.packages, name));
+  const selectedPackages = [...perPackage.keys()].map((name) => mustGet(byName, name));
   requireAuth(selectedPackages);
 
   // 2b. Pre-flight npm provenance metadata: every selected npm package's
@@ -193,7 +200,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   const order = publishOrder(config.packages, [...perPackage.keys()]);
 
   for (const name of order) {
-    const pkg = mustGet(config.packages, name);
+    const pkg = mustGet(byName, name);
     const rows = perPackage.get(name)!;
     const version = rows[0]!.version;
     const handler = handlerFor(pkg.kind);
@@ -272,14 +279,6 @@ function artifactsRoot(cwd: string): string {
   return join(cwd, 'artifacts');
 }
 
-function mustGet(packages: readonly Package[], name: string): Package {
-  const p = packages.find((x) => x.name === name);
-  /* v8 ignore start -- name came from the plan output, which is derived from config.packages; always exists */
-  if (!p) {throw new Error(`publish: unknown package: ${name}`);}
-  /* v8 ignore stop -- end of unreachable guard above */
-  return p;
-}
-
 function groupByPackage(
   rows: readonly MatrixRow[],
   _packages: readonly Package[],
@@ -314,12 +313,10 @@ function publishOrder(packages: readonly Package[], selected: readonly string[])
   const visit = (name: string): void => {
     if (visited.has(name)) {return;}
     visited.add(name);
-    // The `?? []` fallback is unreachable: every selected package is seeded
-    // into `deps` above, so the lookup never misses. The recursion below is
-    // covered via the toposort test.
-    /* v8 ignore start -- unreachable `?? []`; `deps` is seeded for every selected package above */
-    const childDeps = deps.get(name) ?? [];
-    /* v8 ignore stop -- end deps default */
+    // `deps` is seeded for every selected package above, and recursion only
+    // reaches names already filtered into `inSet` (⊆ selected), so the
+    // lookup is total — `mustGet` reflects that instead of a dead `?? []`.
+    const childDeps = mustGet(deps, name);
     for (const d of childDeps) {visit(d);}
     order.push(name);
   };
