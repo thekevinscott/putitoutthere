@@ -17,7 +17,6 @@
  */
 
 import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture, type ExecResult } from '../utils/exec-capture.js';
@@ -616,10 +615,11 @@ describe('publishPlatforms: empty artifact directory', () => {
       return Promise.resolve(ok(''));
     });
     // The source builds the path with real `node:path`, so it is back-slashed
-    // on Windows. Build the expected string the same way so the assertion pins
-    // the full path on every OS.
+    // on Windows. Assert with a separator-agnostic regex (no `node:path` import,
+    // which the unit-isolation gate forbids) that still pins the prefix and the
+    // artifact basename at the end of the path.
     await expect(publishPlatforms(basePkg(), '0.2.0', makeCtx())).rejects.toThrow(
-      `platform artifact empty: ${join(artifactsRoot, 'demo-cli-linux-x64-gnu')}`,
+      /^platform artifact empty: .*[/\\]demo-cli-linux-x64-gnu$/,
     );
   });
 });
