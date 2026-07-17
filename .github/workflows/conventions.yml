@@ -11,11 +11,26 @@ on: [pull_request]
 # commit under e2e-attestations/ or set `run_e2e`. See AGENTS.md > "We do not
 # use e2e attestations" and #521.
 
+# testing-conventions is pinned to a known-good npm version rather than
+# floating to npx-latest. testing-conventions 0.0.82 shipped a broken TS
+# mutation gate: with the package-root sandbox, Stryker's ts-config
+# preprocessor did a bare `import('typescript')` that resolved into the
+# npx-isolated install (where `typescript` is absent) and failed with
+# ERR_MODULE_NOT_FOUND, so every TypeScript-package mutation run on a real
+# source diff died at startup (silent on empty-diff PRs, which no-op green).
+# Both of our packages are TypeScript, so both jobs were affected. Fixed in
+# 0.0.84 by running TS mutation in place (no sandbox copy — Stryker resolves
+# `typescript` from the project's own node_modules and reaches a mutant
+# verdict). We floated to latest before, which is how 0.0.82 reached CI in
+# the first place; pin so the gate stays deterministic and a future broken
+# release can't silently disable it again. Bump this literal to adopt newer
+# testing-conventions versions.
 jobs:
   ci:
     uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
     with:
       source: packages/ci/src
+      version: '0.0.84'
 
   # packages/engine now meets the full testing-conventions standard: every
   # gate runs with no `gates:` filter and no config/exemptions (epic #474 /
@@ -25,3 +40,4 @@ jobs:
     uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
     with:
       source: packages/engine/src
+      version: '0.0.84'
