@@ -17,12 +17,12 @@ import { ExecError } from '../utils/exec-error.js';
 import { detectIndent } from './detect-indent.js';
 import {
   looksLikePublishOverRace,
-  looksLikeTlogDuplicate,
   normalizeBuild,
   publishPlatforms,
   type NpmBuildField,
   type PlatformPkg,
 } from './npm-platform.js';
+import { matchTlogDuplicate } from './match-tlog-duplicate.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { ErrorCodes } from '../error-codes.js';
 import { toError } from '../to-error.js';
@@ -180,7 +180,8 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     // the upload landed, so re-probe the registry: present => the publish
     // actually succeeded; absent => a genuine partial publish that a fresh
     // run (new attestation) resolves.
-    if (looksLikeTlogDuplicate(stderr)) {
+    const tlogStderr = matchTlogDuplicate(stderr);
+    if (tlogStderr !== null) {
       if (await isPublishedImpl(pkg, version, ctx)) {
         return {
           status: 'already-published',
@@ -192,12 +193,7 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
           `(TLOG_CREATE_ENTRY_ERROR) and ${name}@${version} is not on the ` +
           `registry — npm's provenance retry re-submitted an identical ` +
           `attestation. Re-run the release to mint a fresh attestation.` +
-          `${
-            stderr
-              ? `\n${stderr}`
-              : /* v8 ignore next -- looksLikeTlogDuplicate only matches a non-empty stderr, so this '' fallback is unreachable */
-                ''
-          }`,
+          `\n${tlogStderr}`,
         { cause: err },
       );
     }

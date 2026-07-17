@@ -33,6 +33,7 @@ import type { Ctx } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+import { matchTlogDuplicate } from './match-tlog-duplicate.js';
 
 export type NpmBuildMode = 'napi' | 'bundled-cli';
 
@@ -332,7 +333,8 @@ async function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): Promi
     // deciding: present => the publish actually succeeded (benign dup);
     // absent => a genuine partial publish that a fresh run (new
     // attestation) resolves.
-    if (looksLikeTlogDuplicate(stderr)) {
+    const tlogStderr = matchTlogDuplicate(stderr);
+    if (tlogStderr !== null) {
       const staged = await readStagedIdentity(stagingDir);
       if (await platformPublished(staged.name, staged.version, ctx)) {
         return;
@@ -342,12 +344,7 @@ async function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): Promi
           `(TLOG_CREATE_ENTRY_ERROR) and ${staged.name}@${staged.version} is not ` +
           `on the registry — npm's provenance retry re-submitted an identical ` +
           `attestation. Re-run the release to mint a fresh attestation.` +
-          `${
-            stderr
-              ? `\n${stderr}`
-              : /* v8 ignore next -- looksLikeTlogDuplicate only matches a non-empty stderr, so this '' fallback is unreachable */
-                ''
-          }`,
+          `\n${tlogStderr}`,
         { cause: err },
       );
     }
@@ -370,23 +367,6 @@ async function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): Promi
 export function looksLikePublishOverRace(stderr: string | undefined): boolean {
   if (!stderr) {return false;}
   return /cannot publish over the previously published versions/i.test(stderr);
-}
-
-/**
- * Match npm's Sigstore/Rekor transparency-log dedupe error. The same
- * retry-on-transient-network-error that produces the publish-over race
- * (above) also re-submits an identical `--provenance` attestation; Rekor
- * rejects the duplicate with `TLOG_CREATE_ENTRY_ERROR` / "an equivalent
- * entry already exists in the transparency log". Unlike the publish-over
- * race, a 409 here does NOT by itself prove the package landed (the first
- * submit may have written the Rekor entry but failed the registry PUT),
- * so callers must re-probe `npm view` to disambiguate.
- */
-export function looksLikeTlogDuplicate(stderr: string | undefined): boolean {
-  if (!stderr) {return false;}
-  return /TLOG_CREATE_ENTRY_ERROR|equivalent entry already exists in the transparency log/i.test(
-    stderr,
-  );
 }
 
 /**

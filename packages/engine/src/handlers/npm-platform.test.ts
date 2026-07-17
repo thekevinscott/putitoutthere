@@ -27,7 +27,6 @@ import {
   assertTripleSupported,
   DEFAULT_NAME_TEMPLATE,
   looksLikePublishOverRace,
-  looksLikeTlogDuplicate,
   normalizeBuild,
   pickMainFile,
   platformArtifactName,
@@ -1116,33 +1115,6 @@ describe('looksLikePublishOverRace', () => {
   });
 });
 
-describe('looksLikeTlogDuplicate', () => {
-  it('matches npm\'s TLOG_CREATE_ENTRY_ERROR code', () => {
-    expect(
-      looksLikeTlogDuplicate(
-        'npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) ...',
-      ),
-    ).toBe(true);
-  });
-
-  it('matches the Rekor "equivalent entry already exists" prose even without the code', () => {
-    expect(
-      looksLikeTlogDuplicate(
-        'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID 108e9186e8c5677a',
-      ),
-    ).toBe(true);
-  });
-
-  it('returns false on an unrelated bare 409 (not the tlog dedupe shape)', () => {
-    expect(looksLikeTlogDuplicate('npm error code E409\nnpm error 409 Conflict')).toBe(false);
-  });
-
-  it('returns false on undefined / empty', () => {
-    expect(looksLikeTlogDuplicate(undefined)).toBe(false);
-    expect(looksLikeTlogDuplicate('')).toBe(false);
-  });
-});
-
 describe('publishPlatforms: npm CLI retry race (#dirsql)', () => {
   it('treats E403 over-publish as success and continues to rewrite optionalDependencies', async () => {
     // npm CLI retried a successful PUT after a transient response and the
@@ -1252,9 +1224,19 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
       );
     });
 
-    await expect(
-      publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx()),
-    ).rejects.toThrow(/Re-run the release to mint a fresh attestation/);
+    let captured: unknown;
+    try {
+      await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
+    } catch (err) {
+      captured = err;
+    }
+    const msg = (captured as Error).message;
+    expect(msg).toMatch(/Re-run the release to mint a fresh attestation/);
+    // The matched npm stderr is hoisted into the message verbatim so the
+    // failure is debuggable without re-running.
+    expect(msg).toContain(
+      'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+    );
     // Failed before the rewrite: main package.json must NOT carry optionalDependencies.
     const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as Record<string, unknown>;
     expect(pkgJson.optionalDependencies).toBeUndefined();
