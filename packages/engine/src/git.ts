@@ -251,7 +251,6 @@ export async function lastTag(
 }
 
 function greater(a: Semver, b: Semver): boolean {
-  /* v8 ignore next 2 -- comparison branches not all reachable from current test data */
   if (a.major !== b.major) {return a.major > b.major;}
   if (a.minor !== b.minor) {return a.minor > b.minor;}
   return a.patch > b.patch;

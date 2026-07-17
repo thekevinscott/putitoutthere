@@ -179,6 +179,14 @@ describe('parsePackageList (internal): defensive open-bracket guard', () => {
   // early-return contract.
   it('returns null for a string that does not open with `[`', () => {
     expect(parsePackageList('minor')).toBeNull();
+    expect(parsePackageList('no-bracket')).toBeNull();
+  });
+
+  it('checks bracket position, not mere presence (a non-leading `[` still fails the guard)', () => {
+    // The guard is `!s.startsWith('[')`, not `!s.includes('[')`: a string that
+    // contains a bracket somewhere other than index 0 must still bail out at
+    // the leading-bracket check rather than slip through to list parsing.
+    expect(parsePackageList('x[a]')).toBeNull();
   });
 
   it('still parses a well-formed list when called directly', () => {
