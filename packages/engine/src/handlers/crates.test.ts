@@ -21,7 +21,6 @@ import { ExecError } from '../utils/exec-error.js';
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import {
   crates,
-  looksLikeFirstPublishTpRejection,
   relativeOrSelf,
   scanDirtyOutsideManifest,
 } from './crates.js';
@@ -1061,6 +1060,11 @@ describe('crates.publish', () => {
       expect(msg).toMatch(/demo-crate/);
       expect(msg).toMatch(/--- cargo stderr ---/);
       expect(msg).toMatch(/status 404 Not Found/);
+      // The matched cargo stderr is hoisted into the message verbatim.
+      expect(msg).toContain(STDERR);
+      // The hint lines are newline-joined (not concatenated): the summary
+      // line and the TP-binding explanation sit on separate lines.
+      expect(msg).toContain('has never been published.\ncrates.io Trusted Publishing binds');
       fetchSpy.mockRestore();
     });
 
@@ -1128,52 +1132,6 @@ describe('crates.publish', () => {
   });
 });
 
-describe('looksLikeFirstPublishTpRejection (#284)', () => {
-  it('matches the canonical 404 + "crate does not exist" stderr', () => {
-    const stderr = [
-      'error: failed to publish to registry at https://crates.io',
-      'Caused by:',
-      '  the remote server responded with an error (status 404 Not Found): Crate `demo-crate` does not exist or you do not have permission to publish to it.',
-    ].join('\n');
-    expect(looksLikeFirstPublishTpRejection(stderr)).toBe(true);
-  });
-
-  it('matches when the 404 line and a "trusted publish" mention co-occur', () => {
-    const stderr = [
-      'status 404 Not Found',
-      'Trusted publishing requires the crate to already exist.',
-    ].join('\n');
-    expect(looksLikeFirstPublishTpRejection(stderr)).toBe(true);
-  });
-
-  it('rejects when only one anchor is present (404 without the prose)', () => {
-    expect(
-      looksLikeFirstPublishTpRejection(
-        'status 404 Not Found\nsome unrelated error about a missing index file',
-      ),
-    ).toBe(false);
-  });
-
-  it('rejects when only one anchor is present (prose without the 404)', () => {
-    expect(
-      looksLikeFirstPublishTpRejection(
-        'crate `demo-crate` does not exist — but this is a dependency error, not a 4xx',
-      ),
-    ).toBe(false);
-  });
-
-  it('rejects on an unrelated 429 rate-limit stderr', () => {
-    expect(
-      looksLikeFirstPublishTpRejection(
-        'status 429 Too Many Requests\nYou have published too many versions of this crate in the last 24 hours',
-      ),
-    ).toBe(false);
-  });
-
-  it('rejects an undefined stderr (defensive)', () => {
-    expect(looksLikeFirstPublishTpRejection(undefined)).toBe(false);
-  });
-});
 
 describe('scanDirtyOutsideManifest (#135)', () => {
   // The git subprocess is mocked: `rev-parse --show-toplevel` establishes the
