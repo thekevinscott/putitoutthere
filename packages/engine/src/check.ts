@@ -195,9 +195,7 @@ async function checkGlobsMatchTrackedFiles(
   findings: CheckFinding[],
 ): Promise<void> {
   const tracked = await listTrackedFiles(cwd);
-  /* v8 ignore start -- checks run inside the repo checkout where git ls-files always resolves; the null branch is defensive against callers outside a worktree */
   if (tracked === null) {return;}
-  /* v8 ignore stop -- end of defensive guard above */
   for (const p of packages) {
     const matched = tracked.some((f) => matchesAny(p.globs, f));
     if (!matched) {

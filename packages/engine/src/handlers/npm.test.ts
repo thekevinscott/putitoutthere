@@ -428,8 +428,10 @@ describe('npm.writeVersion', () => {
   });
 
   it('defaults to 2-space indent for a minified package.json (no detectable indent)', async () => {
-    // A single-line, un-indented package.json has no indent for detectIndent to
-    // find, so it falls back to 2 spaces (the `!m?.groups?.indent` branch).
+    // A single-line, un-indented package.json is real in the wild (npm writes
+    // them, and consumers commit them). detectIndent's regex finds no indented
+    // line, so it falls back to 2 spaces (the `!m?.groups?.indent` branch), and
+    // the whole file is re-serialized pretty-printed at 2 spaces.
     const p = `${dir}/package.json`;
     writeFileSync(p, '{"name":"demo","version":"0.1.0"}', 'utf8');
     await npm.writeVersion(
@@ -437,7 +439,15 @@ describe('npm.writeVersion', () => {
       '0.2.0',
       makeCtx({ cwd: dir }),
     );
-    expect(readFileSync(p, 'utf8')).toContain('  "version": "0.2.0"');
+    const out = readFileSync(p, 'utf8');
+    // The bumped version lands 2-space indented,
+    expect(out).toContain('  "version": "0.2.0"');
+    // every top-level key is 2-space indented (proves the fallback drove the
+    // whole re-serialization, not just the version line),
+    expect(out).toContain('  "name": "demo"');
+    // and no tab or 4-space indent leaked in.
+    expect(out).not.toContain('\t"');
+    expect(out).not.toContain('    "');
   });
 });
 

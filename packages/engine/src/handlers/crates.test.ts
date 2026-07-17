@@ -1153,6 +1153,10 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     toplevel?: string;
     managedRel?: string;
     porcelain?: string;
+    /** When true, `git ls-files -- Cargo.toml` throws (Cargo.toml untracked). */
+    lsFilesThrows?: boolean;
+    /** When true, `git status --porcelain` throws after rev-parse succeeded. */
+    statusThrows?: boolean;
   }
 
   function mockGit(routes: GitRoutes): void {
@@ -1163,8 +1167,14 @@ describe('scanDirtyOutsideManifest (#135)', () => {
         if (routes.noRepo) {return Promise.reject(new ExecError('not a git repo', '', '', null));}
         return Promise.resolve(ok(`${routes.toplevel ?? '/repo'}\n`));
       }
-      if (a[0] === 'ls-files') {return Promise.resolve(ok(`${routes.managedRel ?? ''}\n`));}
-      if (a[0] === 'status') {return Promise.resolve(ok(routes.porcelain ?? ''));}
+      if (a[0] === 'ls-files') {
+        if (routes.lsFilesThrows) {return Promise.reject(new ExecError('not in index', '', '', 1));}
+        return Promise.resolve(ok(`${routes.managedRel ?? ''}\n`));
+      }
+      if (a[0] === 'status') {
+        if (routes.statusThrows) {return Promise.reject(new ExecError('status failed', '', '', 128));}
+        return Promise.resolve(ok(routes.porcelain ?? ''));
+      }
       return Promise.reject(new ExecError(`unexpected git: ${a.join(' ')}`, '', '', null));
     });
   }
@@ -1237,6 +1247,24 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     // verify" and fall through to cargo's own --allow-dirty behavior.
     mockGit({ toplevel: '' });
     expect(await scanDirtyOutsideManifest('/repo', '/repo')).toBeNull();
+  });
+
+  it('treats every dirty file as unexpected when Cargo.toml is untracked', async () => {
+    // Fresh tree, first release: `git ls-files -- Cargo.toml` fails because
+    // the manifest is not yet in the index. managedRel stays empty, so nothing
+    // is exempted — even a dirty Cargo.toml is flagged, refusing the publish
+    // rather than silently packing an unexpected edit.
+    mockGit({ lsFilesThrows: true, porcelain: ' M crate/Cargo.toml\n' });
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate');
+    expect(result).toContain('crate/Cargo.toml');
+  });
+
+  it('returns null when git status fails after rev-parse succeeded', async () => {
+    // rev-parse established the worktree, but the porcelain read then errors
+    // (e.g. a mid-run index lock). Bail to null and let cargo's own
+    // --allow-dirty handling take over rather than crashing the publish.
+    mockGit({ managedRel: 'crate/Cargo.toml', statusThrows: true });
+    expect(await scanDirtyOutsideManifest('/repo', '/repo/crate')).toBeNull();
   });
 
   it('handles artifactsRoot equal to cwd (empty relative path)', async () => {

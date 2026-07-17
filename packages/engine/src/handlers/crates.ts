@@ -342,7 +342,6 @@ export async function scanDirtyOutsideManifest(
     managedRel = (await execCapture('git', ['ls-files', '--full-name', '--', 'Cargo.toml'], {
       cwd: pkgPath,
     })).stdout.trim();
-    /* v8 ignore next 4 -- Cargo.toml is always tracked at publish time */
   } catch {
     // Cargo.toml not tracked (e.g. first release on a fresh tree).
     // Fall through; empty managedRel means nothing is allowed dirty.
@@ -352,11 +351,9 @@ export async function scanDirtyOutsideManifest(
     porcelain = (await execCapture('git', ['status', '--porcelain'], {
       cwd,
     })).stdout;
-    /* v8 ignore start -- rev-parse succeeded above, status shouldn't fail */
   } catch {
     return null;
   }
-  /* v8 ignore stop */
   // Reusable workflow's `actions/download-artifact@v4` step creates
   // `artifacts/` under cwd unconditionally — even for fixtures whose
   // packages don't upload anything (crates-only). That entry is engine-

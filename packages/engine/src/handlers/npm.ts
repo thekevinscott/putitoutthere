@@ -300,7 +300,6 @@ export async function isBootstrapPublish(name: string): Promise<boolean> {
 /** 2 / 4 / tab. Defaults to 2 when undetectable. */
 function detectIndent(source: string): number | string {
   const m = /^(?<indent>[ \t]+)"/m.exec(source);
-  /* v8 ignore next -- JSON.parse of valid JSON always has at least one indented line when pretty-printed */
   if (!m?.groups?.indent) {return 2;}
   const indent = m.groups.indent;
   if (indent.includes('\t')) {return '\t';}

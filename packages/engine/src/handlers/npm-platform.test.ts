@@ -597,6 +597,29 @@ describe('publishPlatforms (napi)', () => {
 
 });
 
+describe('publishPlatforms: empty artifact directory', () => {
+  beforeEach(() => {
+    // Seed the first target's artifact dir as present-but-empty (mkdir, no
+    // files). The napi describe's makeArtifact seeding does NOT run here, so
+    // readdir(artifactDir) resolves to [].
+    mkdirSync(`${artifactsRoot}/demo-cli-linux-x64-gnu`, { recursive: true });
+  });
+
+  it('refuses to publish and names the empty dir', async () => {
+    // Normally the completeness check catches an empty artifact tree upstream,
+    // but synthesize re-checks defensively: an empty directory must abort with
+    // the offending path rather than publish an empty platform tarball.
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
+    });
+    await expect(publishPlatforms(basePkg(), '0.2.0', makeCtx())).rejects.toThrow(
+      `platform artifact empty: ${artifactsRoot}/demo-cli-linux-x64-gnu`,
+    );
+  });
+});
+
 describe('publishPlatforms (bundled-cli)', () => {
   it('synthesized platform package.json picks the executable as main', async () => {
     mkdirSync(`${artifactsRoot}/demo-cli-linux-x64-gnu`, { recursive: true });
