@@ -1095,9 +1095,13 @@ describe('publishPlatforms: staging cleanup is best-effort (#581)', () => {
 
     // The successful publish is not masked by the cleanup rejection.
     expect(r.published).toEqual(['demo-cli-linux-x64-gnu']);
-    // A warning is emitted about the swallowed cleanup failure.
+    // A warning is emitted about the swallowed cleanup failure: it names
+    // the staging directory it could not remove and forwards the caught
+    // error as a structured field so the operator can see the cause.
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]![0]).toMatch(/clean|staging/i);
+    const [warnMsg, warnFields] = warn.mock.calls[0]!;
+    expect(warnMsg).toMatch(/failed to clean up .*staging directory/i);
+    expect(warnFields).toEqual({ error: expect.any(Error) });
     // The main package.json still received the optionalDependencies rewrite.
     const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
       optionalDependencies: Record<string, string>;
