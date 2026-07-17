@@ -40,6 +40,7 @@
  * so a preview-only mode is meaningful there and is supported (#403).
  */
 
+import { appendFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import { advanceFloatingMajor } from './advance-floating-major.js';
@@ -293,12 +294,10 @@ export async function run(argv: readonly string[]): Promise<number> {
         // races against the "output not set" branch the workflow expects.
         const githubOutput = process.env.GITHUB_OUTPUT;
         if (githubOutput && matrix.length > 0) {
-          await import('node:fs').then((fs) =>
-            fs.appendFileSync(
-              githubOutput,
-              `matrix=${JSON.stringify(matrix)}\n`,
-              'utf8',
-            ),
+          await appendFile(
+            githubOutput,
+            `matrix=${JSON.stringify(matrix)}\n`,
+            'utf8',
           );
         }
         return 0;
@@ -309,7 +308,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // consumer fixes the whole config in one push. Exits non-zero
         // when any finding lands; CI surfaces the same vocabulary the
         // publish-phase `require*` helpers use.
-        const findings = runChecks({
+        const findings = await runChecks({
           cwd: flags.cwd,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
         });
@@ -460,21 +459,21 @@ export async function run(argv: readonly string[]): Promise<number> {
         // idempotent-create per #436/#437, now ordinary engine code rather
         // than inline bash. Reads GH_TOKEN from the environment for `gh`
         // auth and operates on `--cwd` (the checked-out repo).
-        return releaseGithub({ cwd: flags.cwd });
+        return await releaseGithub({ cwd: flags.cwd });
       }
       case 'advance-v0': {
         // #446: force-move the floating `v0` tag to HEAD. Invoked by
         // `advance-v0.yml` after `fold-bundle` synthesizes the bundle
         // commit, so `uses: …@v0` resolves to a runnable action. Shares
         // `forceMoveTag` with the floating-major mover.
-        return advanceV0({ cwd: flags.cwd });
+        return await advanceV0({ cwd: flags.cwd });
       }
       case 'advance-floating-major': {
         // #446: move the floating `v<major>` tag to the newest release in
         // its major line. Invoked by `release-npm.yml`'s dogfood publish
         // job; reads the release tag via the same `lastTag` resolver the
         // publish path uses. Idempotent.
-        return advanceFloatingMajor({ cwd: flags.cwd });
+        return await advanceFloatingMajor({ cwd: flags.cwd });
       }
       case 'fold-bundle': {
         // #446: commit the freshly-built `dist-action/` bundle on top of
@@ -482,7 +481,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // `release:` trailer survives. Invoked by both `release-npm.yml`
         // and `advance-v0.yml` (differing only in the subject).
         if (!flags.subject) {throw new Error('fold-bundle: --subject <line> is required');}
-        return foldActionBundle({ cwd: flags.cwd, subject: flags.subject });
+        return await foldActionBundle({ cwd: flags.cwd, subject: flags.subject });
       }
       case 'write-launcher': {
         // #299: pre-build hook used by `_matrix.yml`'s npm bundled-cli
@@ -491,7 +490,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         // packages and for npm packages without a bundled-cli build
         // entry, so the build job can invoke this on every main row.
         if (!flags.path) {throw new Error('write-launcher: --path <pkg-dir> is required');}
-        const written = writeLauncherFromConfig({
+        const written = await writeLauncherFromConfig({
           cwd: flags.cwd,
           packagePath: flags.path,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
@@ -514,7 +513,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         if (!flags.path) {throw new Error('write-version: --path <pkg-dir> is required');}
         if (!flags.version) {throw new Error('write-version: --version <v> is required');}
         const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
-        const written = writeVersionForBuild(target, flags.version);
+        const written = await writeVersionForBuild(target, flags.version);
         process.stdout.write(
           `write-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
         );
@@ -530,7 +529,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         if (!flags.path) {throw new Error('write-crate-version: --path <crate-dir> is required');}
         if (!flags.version) {throw new Error('write-crate-version: --version <v> is required');}
         const target = isAbsolute(flags.path) ? flags.path : resolve(flags.cwd, flags.path);
-        const written = writeCrateVersionForBuild(target, flags.version);
+        const written = await writeCrateVersionForBuild(target, flags.version);
         process.stdout.write(
           `write-crate-version: ${target} → ${flags.version}; wrote ${written.join(', ')}\n`,
         );
@@ -572,13 +571,11 @@ export async function run(argv: readonly string[]): Promise<number> {
             version: p.version,
             tag: p.tag,
           }));
-          await import('node:fs').then((fs) =>
-            fs.appendFileSync(
-              publishGithubOutput,
-              `released=${shipped.length > 0}\n` +
-                `released_packages=${JSON.stringify(releasedPackages)}\n`,
-              'utf8',
-            ),
+          await appendFile(
+            publishGithubOutput,
+            `released=${shipped.length > 0}\n` +
+              `released_packages=${JSON.stringify(releasedPackages)}\n`,
+            'utf8',
           );
         }
         return 0;

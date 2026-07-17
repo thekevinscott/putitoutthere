@@ -6,14 +6,14 @@
  * `assert-artifacts.ts`'s.
  */
 
-import { readdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 
 import { decideAssertArtifacts } from './assert-artifacts.js';
 
 const DIST_DIR = 'dist';
 
-export function runTestpypiAssert(): number {
-  const filenames = readdirSync(DIST_DIR, { withFileTypes: true })
+export async function runTestpypiAssert(): Promise<number> {
+  const filenames = (await readdir(DIST_DIR, { withFileTypes: true }))
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name);
   const decision = decideAssertArtifacts(filenames);

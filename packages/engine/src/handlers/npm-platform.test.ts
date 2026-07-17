@@ -1,36 +1,28 @@
 /**
  * npm platform-package orchestration tests.
  *
- * Mocks `execFileSync` so we can assert every npm invocation (platform
- * publishes, then main) and stub per-package `isPublished` lookups.
+ * Mocks the process seam (`execCapture`) so we can assert every npm
+ * invocation (platform publishes, then main) and stub per-package
+ * `isPublished` lookups.
  *
- * Unit-suite isolation: the subprocess boundary (`node:child_process`) and
- * the filesystem (`node:fs`) are both mocked. `node:fs` is backed by a small
- * in-memory tree (below) shared between test setup and the unit under test,
- * so synthesized staging dirs, artifact reads, and package.json rewrites all
- * observe the same state without a real temp tree. Real end-to-end file
- * behavior is covered by the npm integration tier
- * (tests/integration/npm.integration.test.ts).
+ * Unit-suite isolation: the subprocess boundary (the process seam,
+ * `execCapture`) and the filesystem (`node:fs/promises`) are both mocked.
+ * `node:fs/promises` is backed by a small in-memory tree (below) shared
+ * between test setup and the unit under test, so synthesized staging dirs,
+ * artifact reads, and package.json rewrites all observe the same state
+ * without a real temp tree. Real end-to-end file behavior is covered by
+ * the npm integration tier (tests/integration/npm.integration.test.ts).
  *
  * Issue #19. Plan: §13.7.
  */
 
-import { execFileSync } from 'node:child_process';
-import type { Stats } from 'node:fs';
-import {
-  chmodSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { execCapture, type ExecResult } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
+
+vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import {
   assertTripleSupported,
   DEFAULT_NAME_TEMPLATE,
@@ -47,16 +39,23 @@ import {
 } from './npm-platform.js';
 import type { Ctx } from '../types.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../utils/exec-capture.js');
+vi.mock('node:fs/promises');
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execCapture);
+
+/** A resolved `execCapture` result carrying `stdout`. */
+function ok(stdout: string): ExecResult {
+  return { stdout, stderr: '' };
+}
 
 /* -------------------------- in-memory filesystem -------------------------- */
-// A minimal `node:fs` substitute keyed by normalized (forward-slash) path, so
-// the source's real-`node:path` joins (back-slashed on Windows) resolve to the
-// same entries the test seeds. Covers exactly the calls crossing the mocked
-// boundary: mkdir/write/read/readdir/exists/stat/chmod/cp/mkdtemp/rm.
+// A minimal `node:fs/promises` substitute keyed by normalized (forward-slash)
+// path, so the source's real-`node:path` joins (back-slashed on Windows)
+// resolve to the same entries the test seeds. Covers exactly the calls
+// crossing the mocked boundary: write/read/readdir/chmod/cp/mkdtemp/rm. The
+// `*Sync` names below are module-local store helpers used to seed the tree
+// and assert on it in test bodies — they are not the source's I/O.
 
 type FsFile = { type: 'file'; content: Buffer; mode: number };
 type FsDir = { type: 'dir'; mode: number };
@@ -89,71 +88,90 @@ function resetFs(): void {
   store.set('/', { type: 'dir', mode: 0o755 });
 }
 
-function installFs(): void {
-  vi.mocked(mkdirSync).mockImplementation(((p: string) => {
-    ensureDir(norm(p));
-    return undefined;
-  }) as typeof mkdirSync);
-
-  vi.mocked(writeFileSync).mockImplementation(((p: string, data: string | Buffer) => {
-    const np = norm(p);
-    ensureDir(parentOf(np));
-    const content = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data));
-    store.set(np, { type: 'file', content, mode: 0o644 });
-  }) as typeof writeFileSync);
-
-  vi.mocked(readFileSync).mockImplementation(((p: string, enc?: unknown) => {
-    const np = norm(p);
-    const node = store.get(np);
-    if (!node || node.type !== 'file') {throw enoent(np);}
-    const encoding = typeof enc === 'string' ? enc : (enc as { encoding?: string } | undefined)?.encoding;
-    return encoding ? node.content.toString(encoding as BufferEncoding) : Buffer.from(node.content);
-  }) as typeof readFileSync);
-
-  vi.mocked(readdirSync).mockImplementation(((p: string): string[] => {
-    const np = norm(p);
-    const node = store.get(np);
-    if (!node || node.type !== 'dir') {throw enoent(np);}
-    const prefix = np === '/' ? '/' : `${np}/`;
-    const names: string[] = [];
-    for (const key of store.keys()) {
-      if (key === np) {continue;}
-      if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
-        names.push(key.slice(prefix.length));
-      }
+/* --------- sync store helpers for test-body seeding + assertions --------- */
+function mkdirSync(p: string, _opts?: unknown): void {
+  ensureDir(norm(p));
+}
+function writeFileSync(p: string, data: string | Buffer, _enc?: unknown): void {
+  const np = norm(p);
+  ensureDir(parentOf(np));
+  const content = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data));
+  store.set(np, { type: 'file', content, mode: 0o644 });
+}
+function readFileSync(p: string, enc: BufferEncoding): string;
+function readFileSync(p: string, enc?: unknown): string | Buffer;
+function readFileSync(p: string, enc?: unknown): string | Buffer {
+  const np = norm(p);
+  const node = store.get(np);
+  if (!node || node.type !== 'file') {throw enoent(np);}
+  const encoding = typeof enc === 'string' ? enc : (enc as { encoding?: string } | undefined)?.encoding;
+  return encoding ? node.content.toString(encoding as BufferEncoding) : Buffer.from(node.content);
+}
+function readdirStore(np: string): string[] {
+  const prefix = np === '/' ? '/' : `${np}/`;
+  const names: string[] = [];
+  for (const key of store.keys()) {
+    if (key === np) {continue;}
+    if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
+      names.push(key.slice(prefix.length));
     }
-    return names;
-  }) as unknown as typeof readdirSync);
+  }
+  return names;
+}
+function existsSync(p: string): boolean {
+  return store.has(norm(p));
+}
+function chmodSync(p: string, mode: number): void {
+  const np = norm(p);
+  const node = store.get(np);
+  if (!node) {throw enoent(np);}
+  node.mode = mode;
+}
+function statSync(p: string): { mode: number } {
+  const np = norm(p);
+  const node = store.get(np);
+  if (!node) {throw enoent(np);}
+  return { mode: node.mode };
+}
 
-  vi.mocked(existsSync).mockImplementation(((p: string) => store.has(norm(p))) as typeof existsSync);
+function installFs(): void {
+  vi.mocked(writeFile).mockImplementation(((p: string, data: string | Buffer) => {
+    writeFileSync(p, data);
+    return Promise.resolve();
+  }) as typeof writeFile);
 
-  vi.mocked(statSync).mockImplementation(((p: string) => {
+  vi.mocked(readFile).mockImplementation(((p: string, enc?: unknown) => {
+    try {
+      return Promise.resolve(readFileSync(p, enc));
+    } catch (err) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }) as typeof readFile);
+
+  vi.mocked(readdir).mockImplementation(((p: string) => {
     const np = norm(p);
     const node = store.get(np);
-    if (!node) {throw enoent(np);}
-    return {
-      mode: node.mode,
-      isFile: () => node.type === 'file',
-      isDirectory: () => node.type === 'dir',
-    } as unknown as Stats;
-  }) as typeof statSync);
+    if (!node || node.type !== 'dir') {return Promise.reject(enoent(np));}
+    return Promise.resolve(readdirStore(np));
+  }) as unknown as typeof readdir);
 
-  vi.mocked(chmodSync).mockImplementation(((p: string, mode: number) => {
+  vi.mocked(chmod).mockImplementation(((p: string, mode: number) => {
     const np = norm(p);
     const node = store.get(np);
-    if (!node) {throw enoent(np);}
+    if (!node) {return Promise.reject(enoent(np));}
     node.mode = typeof mode === 'string' ? parseInt(mode, 8) : mode;
-  }) as typeof chmodSync);
+    return Promise.resolve();
+  }) as typeof chmod);
 
-  vi.mocked(cpSync).mockImplementation(((src: string, dest: string) => {
+  vi.mocked(cp).mockImplementation(((src: string, dest: string) => {
     const from = norm(src);
     const to = norm(dest);
     const node = store.get(from);
-    if (!node) {throw enoent(from);}
+    if (!node) {return Promise.reject(enoent(from));}
     if (node.type === 'file') {
       ensureDir(parentOf(to));
       store.set(to, { type: 'file', content: Buffer.from(node.content), mode: node.mode });
-      return;
+      return Promise.resolve();
     }
     ensureDir(to);
     const prefix = `${from}/`;
@@ -169,23 +187,25 @@ function installFs(): void {
         );
       }
     }
-  }) as typeof cpSync);
+    return Promise.resolve();
+  }) as typeof cp);
 
-  vi.mocked(mkdtempSync).mockImplementation((prefix: string) => {
+  vi.mocked(mkdtemp).mockImplementation((prefix: string) => {
     mkdtempCounter += 1;
     const dir = `${norm(prefix)}${mkdtempCounter.toString().padStart(6, '0')}`;
     ensureDir(dir);
-    return dir;
+    return Promise.resolve(dir);
   });
 
-  vi.mocked(rmSync).mockImplementation(((p: string) => {
+  vi.mocked(rm).mockImplementation(((p: string) => {
     const np = norm(p);
     store.delete(np);
     const prefix = `${np}/`;
     for (const key of [...store.keys()]) {
       if (key.startsWith(prefix)) {store.delete(key);}
     }
-  }) as typeof rmSync);
+    return Promise.resolve();
+  }) as typeof rm);
 }
 
 installFs();
@@ -489,8 +509,8 @@ describe('publishPlatforms (napi)', () => {
     // All `npm publish` calls → succeed (return Buffer).
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
 
     const r = await publishPlatforms(basePkg(), '0.2.0', makeCtx());
@@ -503,14 +523,45 @@ describe('publishPlatforms (napi)', () => {
       'demo-cli-linux-x64-gnu': '0.2.0',
       'demo-cli-darwin-arm64': '0.2.0',
     });
+
+    // Exact subprocess/fs contract of the synthesize→publish→cleanup path:
+    // the published-probe queries the exact platform coordinate, scoped to cwd,
+    expect(execMock).toHaveBeenCalledWith(
+      'npm',
+      ['view', 'demo-cli-linux-x64-gnu@0.2.0', 'version'],
+      { cwd: '/repo' },
+    );
+    // the staging tempdir uses the engine's prefix,
+    expect(vi.mocked(mkdtemp)).toHaveBeenCalledWith(expect.stringContaining('putitoutthere-plat-'));
+    // artifact files are copied recursively into staging,
+    expect(vi.mocked(cp)).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      recursive: true,
+    });
+    // the FIRST fs read is the main package.json, as utf8 text (synthesize
+    // inherits repository/license); pin that specific call's encoding.
+    expect(vi.mocked(readFile).mock.calls[0]).toEqual([
+      expect.stringContaining('package.json'),
+      'utf8',
+    ]);
+    // the platform tarball is published via `npm publish`,
+    expect(execMock).toHaveBeenCalledWith('npm', expect.arrayContaining(['publish']), expect.anything());
+    // the staging dir is force-removed recursively afterwards,
+    expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
+    // and the LAST fs write is the rewritten main package.json, as utf8 text.
+    const writeCalls = vi.mocked(writeFile).mock.calls;
+    expect(writeCalls[writeCalls.length - 1]).toEqual([
+      expect.stringContaining('package.json'),
+      expect.any(String),
+      'utf8',
+    ]);
   });
 
   it('skips platform packages that are already published', async () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view' && String(a[1]).includes('linux-x64-gnu')) {return Buffer.from('0.2.0\n');}
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view' && String(a[1]).includes('linux-x64-gnu')) {return Promise.resolve(ok('0.2.0\n'));}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
 
     const r = await publishPlatforms(basePkg(), '0.2.0', makeCtx());
@@ -531,9 +582,9 @@ describe('publishPlatforms (napi)', () => {
     execMock.mockImplementation((_cmd, args) => {
       calls++;
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      if (a[0] === 'publish') {throw Object.assign(new Error('boom'), { status: 1, stderr: Buffer.from('registry error') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      if (a[0] === 'publish') {return Promise.reject(new ExecError('boom', '', 'registry error', 1));}
+      return Promise.resolve(ok(''));
     });
 
     await expect(publishPlatforms(basePkg(), '0.2.0', makeCtx())).rejects.toThrow(/platform/);
@@ -554,7 +605,7 @@ describe('publishPlatforms (bundled-cli)', () => {
     const stagingPkgJsons: Record<string, unknown>[] = [];
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
       // #305: `npm publish <folder>` — staging dir is the last positional
       // arg; cwd is the consumer's pkg.path (so npm finds the consumer's
       // .npmrc for auth). Inspect package.json by parsing the folder arg.
@@ -562,7 +613,7 @@ describe('publishPlatforms (bundled-cli)', () => {
       if (folder) {
         stagingPkgJsons.push(JSON.parse(readFileSync(`${folder}/package.json`, 'utf8')) as Record<string, unknown>);
       }
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     const pkg: PlatformPkg = basePkg({
@@ -596,12 +647,12 @@ describe('publishPlatforms (bundled-cli)', () => {
     const stagingPkgJsons: Record<string, unknown>[] = [];
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
       const folder = stagingDirArg(a);
       if (folder) {
         stagingPkgJsons.push(JSON.parse(readFileSync(`${folder}/package.json`, 'utf8')) as Record<string, unknown>);
       }
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     const pkg: PlatformPkg = basePkg({
@@ -635,12 +686,12 @@ describe('publishPlatforms (bundled-cli)', () => {
     const stagedModes: number[] = [];
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
       const folder = stagingDirArg(a);
       if (folder) {
         stagedModes.push(statSync(`${folder}/demo-cli`).mode);
       }
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     const pkg: PlatformPkg = basePkg({
@@ -675,7 +726,7 @@ describe('publishPlatforms — cwd is pkg.path so npm finds the consumer .npmrc 
     }[] = [];
     execMock.mockImplementation((_cmd, args, opts) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
       if (a[0] === 'publish') {
         // Capture staging-dir state at call time — `publishPlatforms` cleans
         // up the tempdir in a `finally` after each publish, so post-hoc
@@ -689,7 +740,7 @@ describe('publishPlatforms — cwd is pkg.path so npm finds the consumer .npmrc 
             folder !== undefined && existsSync(`${folder}/package.json`),
         });
       }
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     const pkg: PlatformPkg = basePkg({ targets: ['linux-x64-gnu'] });
@@ -713,9 +764,9 @@ describe('publishPlatforms + scoped main package', () => {
         if (!String(a[1]).startsWith('@acme/demo-cli-linux-x64-gnu@')) {
           throw new Error(`unexpected view target: ${a[1]}`);
         }
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        return Promise.reject(new ExecError('E404', '', '404', 1));
       }
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     const pkg: PlatformPkg = basePkg({
@@ -734,8 +785,8 @@ describe('publishPlatforms: publish flags', () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       calls.push(a);
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
     await publishPlatforms(
       basePkg({ targets: ['linux-x64-gnu'], access: 'restricted', tag: 'next' }),
@@ -753,8 +804,8 @@ describe('publishPlatforms: publish flags', () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       calls.push(a);
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
     await publishPlatforms(
       basePkg({ targets: ['linux-x64-gnu'] }),
@@ -771,8 +822,8 @@ describe('publishPlatforms: publish flags', () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       calls.push(a);
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
     await publishPlatforms(
       basePkg({ targets: ['linux-x64-gnu'] }),
@@ -797,8 +848,8 @@ describe('publishPlatforms: publish flags', () => {
     );
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
     await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
     const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as {
@@ -825,8 +876,8 @@ describe('artifact path resolution', () => {
     writeFileSync(`${dir}/cachetta.linux-x64-gnu.node`, Buffer.from('napi-bytes'));
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
     const r = await publishPlatforms(
       basePkg({ name: 'js/cachetta', targets: ['linux-x64-gnu'] }),
@@ -848,8 +899,8 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
 
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
 
     const pkg: PlatformPkg = basePkg({
@@ -880,13 +931,13 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
     const stagingByName = new Map<string, Record<string, unknown>>();
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
       const folder = stagingDirArg(a);
       if (folder) {
         const json = JSON.parse(readFileSync(`${folder}/package.json`, 'utf8')) as Record<string, unknown>;
         stagingByName.set(String(json.name), json);
       }
-      return Buffer.from('');
+      return Promise.resolve(ok(''));
     });
 
     await publishPlatforms(
@@ -912,8 +963,8 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
 
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });}
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
 
     const r = await publishPlatforms(
@@ -959,10 +1010,8 @@ describe('artifact path resolution: artifactsRoot unset', () => {
     makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
-      if (a[0] === 'view') {
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
-      }
-      return Buffer.from('');
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
     });
     // artifactsRoot absent (not undefined-valued) so the source's
     // `ctx.artifactsRoot ?? join(ctx.cwd, 'artifacts')` fallback fires.
@@ -1000,6 +1049,23 @@ describe('publishPlatforms: generic platform publish failure', () => {
     // Failed before the rewrite: main package.json must NOT carry optionalDependencies.
     const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as Record<string, unknown>;
     expect(pkgJson.optionalDependencies).toBeUndefined();
+  });
+
+  it('trims surrounding whitespace from npm stderr in the generic failure message (#469)', async () => {
+    // A publish failure that matches neither the over-publish nor the tlog
+    // race interpolates npm's stderr into the thrown message — trimmed, not raw.
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.reject(new ExecError('boom', '', '\n  npm ERR! nope  \n', 1));
+    });
+    const err = await publishPlatforms(
+      basePkg({ targets: ['linux-x64-gnu'] }),
+      '0.2.0',
+      makeCtx(),
+    ).catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toBe('npm publish (platform) failed:\nnpm ERR! nope');
   });
 });
 
@@ -1060,15 +1126,17 @@ describe('publishPlatforms: npm CLI retry race (#dirsql)', () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
       if (a[0] === 'view') {
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        return Promise.reject(new ExecError('E404', '', '404', 1));
       }
       // publish: simulate the retry-race E403
-      throw Object.assign(new Error('publish failed'), {
-        status: 1,
-        stderr: Buffer.from(
+      return Promise.reject(
+        new ExecError(
+          'publish failed',
+          '',
           'npm error code E403\nnpm error 403 You cannot publish over the previously published versions: 0.2.0.',
+          1,
         ),
-      });
+      );
     });
 
     const r = await publishPlatforms(
@@ -1106,17 +1174,19 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
         // 1st view: pre-publish idempotency probe (not yet published).
         // 2nd view: catch-block re-probe (the attestation's submit landed it).
         if (viewCount === 1) {
-          throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+          return Promise.reject(new ExecError('E404', '', '404', 1));
         }
-        return Buffer.from('0.2.0\n');
+        return Promise.resolve(ok('0.2.0\n'));
       }
-      throw Object.assign(new Error('publish failed'), {
-        status: 1,
-        stderr: Buffer.from(
+      return Promise.reject(
+        new ExecError(
+          'publish failed',
+          '',
           'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
             'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID 108e9186e8c5677a',
+          1,
         ),
-      });
+      );
     });
 
     const r = await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
@@ -1125,6 +1195,15 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
+    // The catch-block re-probe is the last npm call and queries the exact
+    // platform coordinate with the `version` field, scoped to cwd — pins the
+    // full argv + options object.
+    const npmCalls = execMock.mock.calls.filter((c) => c[0] === 'npm');
+    expect(npmCalls[npmCalls.length - 1]).toEqual([
+      'npm',
+      ['view', 'demo-cli-linux-x64-gnu@0.2.0', 'version'],
+      { cwd: '/repo' },
+    ]);
   });
 
   it('throws an actionable re-run error on TLOG 409 when the platform package is NOT on the registry, before rewriting main', async () => {
@@ -1133,15 +1212,17 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
       const a = args as string[];
       if (a[0] === 'view') {
         // Both probes miss: the attestation was orphaned, the PUT never landed.
-        throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+        return Promise.reject(new ExecError('E404', '', '404', 1));
       }
-      throw Object.assign(new Error('publish failed'), {
-        status: 1,
-        stderr: Buffer.from(
+      return Promise.reject(
+        new ExecError(
+          'publish failed',
+          '',
           'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
             'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+          1,
         ),
-      });
+      );
     });
 
     await expect(

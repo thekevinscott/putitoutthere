@@ -80,26 +80,41 @@ instead of resuming the stale one.
 
 ## Engine code conventions
 
-The engine (`src/`) is **synchronous throughout**. File I/O uses the
-sync `node:fs` calls (`readFileSync`, `writeFileSync`, `cpSync`,
-`chmodSync`, `mkdtempSync`, …) and subprocesses use `execFileSync`.
-There is no `node:fs/promises` usage and no `await`ed I/O anywhere in
-`src/`.
+The engine (`packages/engine/src`) and the internal CI package
+(`packages/ci/src`) are **async throughout**. File I/O uses
+`node:fs/promises` (`readFile`, `writeFile`, `cp`, `chmod`, `mkdtemp`, …),
+subprocesses go through the process seam (`src/utils/exec-capture.ts` /
+`src/utils/exec-inherit.ts`, thin awaited wrappers over
+`node:child_process` — landing in the next #469 sub-issue), and waiting
+is `await sleep(...)` — never a blocking call, never
+`execFileSync('sleep', …)`.
 
-This is deliberate, not legacy. `putitoutthere` runs as a one-shot CLI
-invoked inside a GitHub Actions step: it does its work and exits. There
-is no server, no event loop to keep responsive, and no concurrent
-requests, so the usual reason to prefer async — not blocking other
-work — does not apply. The release pipeline is also inherently
-sequential (plan → build → preflight → publish), so async would not
-buy parallelism; and `execFileSync` blocks regardless, so the process
-is sync-shaped end to end already.
+This reverses the earlier "synchronous throughout" convention (#469).
+The old rationale — a one-shot CLI with no event loop to keep
+responsive — stopped matching reality when registry HTTP moved to
+`fetch`: `plan`, `publish`, `computeStatus`, `reconcile`, `withRetry`,
+the CLI `run()`, and the whole `Handler` interface are `async` already,
+so the engine was permanently two-colored. The sync half cost more than
+it saved: no `AbortSignal`/timeout support on subprocess calls, CI gates
+shelling out to `sleep` because the convention forbade `await`, and a
+signature cascade whenever a leaf needed to adopt awaited I/O. One
+color removes the seam.
 
-New engine code stays synchronous — match the surrounding `*Sync` calls
-rather than introducing `await`ed I/O. Converting the engine to async
-fs is a repo-wide refactor with no runtime benefit; if it is ever
-wanted, it belongs in its own issue and PR, not bundled into a feature
-or bug-fix change.
+Rules:
+
+- New code awaits its I/O. `*Sync` fs calls, `execFileSync`, `execSync`,
+  and `spawnSync` are banned in `src/` (enforced by the
+  `no-restricted-imports` rule in each package's `eslint.config.js`). The
+  #469 migration is complete: both packages are async throughout, so there
+  is no longer a `SYNC_EXEMPT` escape list — the ban applies to all of
+  `src/` with no exemptions.
+- Pure functions stay sync. `async` marks I/O, not fashion — a parser or
+  formatter that touches no I/O keeps a plain signature.
+- Sequential semantics are preserved: the release pipeline is
+  plan → build → preflight → publish and stays that way. Do not
+  introduce `Promise.all` or other concurrency without an issue that
+  explicitly justifies it — the all-or-nothing publish guarantee depends
+  on ordering.
 
 ### One function per file
 
@@ -377,8 +392,9 @@ caught the bug.
      mock.
    - **Integration tests** — `tests/integration/**/*.integration.test.ts`,
      run via `pnpm test:integration`. Mock only the subprocess
-     boundary (`execFileSync`, `fetch`). Real config loader, real
-     plan, real preflight, real handler dispatch.
+     boundary (the process seam — `execCapture`/`execInherit` — and
+     `fetch`; `execFileSync` in not-yet-migrated modules). Real config
+     loader, real plan, real preflight, real handler dispatch.
 
    Behavior bugs that show up in the wild — "consumer published a
    broken artifact and we didn't catch it" — almost always belong in

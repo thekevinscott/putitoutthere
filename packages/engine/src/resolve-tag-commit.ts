@@ -17,16 +17,16 @@ import type { Package } from './config.js';
 import { headCommit, tagCommit, tagList } from './git.js';
 import { formatTag } from './tag-template.js';
 
-export function resolveTagCommit(
+export async function resolveTagCommit(
   version: string,
   siblings: readonly Package[],
   opts: { cwd: string },
-): { commit: string; source: 'sibling' | 'head' } {
+): Promise<{ commit: string; source: 'sibling' | 'head' }> {
   for (const sib of siblings) {
     const sibTag = formatTag(sib.tag_format, { name: sib.name, version });
-    if (tagList(sibTag, { cwd: opts.cwd }).length > 0) {
-      return { commit: tagCommit(sibTag, { cwd: opts.cwd }), source: 'sibling' };
+    if ((await tagList(sibTag, { cwd: opts.cwd })).length > 0) {
+      return { commit: await tagCommit(sibTag, { cwd: opts.cwd }), source: 'sibling' };
     }
   }
-  return { commit: headCommit({ cwd: opts.cwd }), source: 'head' };
+  return { commit: await headCommit({ cwd: opts.cwd }), source: 'head' };
 }

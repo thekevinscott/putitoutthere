@@ -8,13 +8,12 @@
  * failed create aborts the run rather than being swallowed.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execInherit } from '../utils/exec-inherit.js';
 
 import type { GhOptions } from './types.js';
 
-export function ghReleaseCreate(tag: string, opts: GhOptions = {}): void {
-  execFileSync('gh', ['release', 'create', tag, '--title', tag, '--generate-notes'], {
+export async function ghReleaseCreate(tag: string, opts: GhOptions = {}): Promise<void> {
+  await execInherit('gh', ['release', 'create', tag, '--title', tag, '--generate-notes'], {
     cwd: opts.cwd,
-    stdio: 'inherit',
   });
 }

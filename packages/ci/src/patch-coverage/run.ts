@@ -11,9 +11,9 @@
  * unreachable SHA, unreadable coverage file), 1 for violations, 0 for a pass.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
+import { execCapture } from '../utils/exec-capture.js';
 import { coveredLines } from './covered-lines.js';
 import { decidePatchCoverage } from './decide.js';
 import { parseAddedLines } from './parse-added-lines.js';
@@ -25,7 +25,7 @@ import type { FileCoverage } from './patch-coverage-types.js';
 // absolute keys line up.
 const COVERAGE_PATH = 'packages/engine/coverage/coverage-final.json';
 
-export function runPatchCoverage(): number {
+export async function runPatchCoverage(): Promise<number> {
   const base = process.env.BASE_SHA;
   const head = process.env.HEAD_SHA;
   if (base === undefined || base === '' || head === undefined || head === '') {
@@ -36,17 +36,16 @@ export function runPatchCoverage(): number {
   // Defensive: actions/checkout@v6 with fetch-depth: 0 gives a full clone, so
   // both SHAs should be present. A missing object is a fatal setup error.
   try {
-    execFileSync('git', ['cat-file', '-e', base], { stdio: 'ignore' });
-    execFileSync('git', ['cat-file', '-e', head], { stdio: 'ignore' });
+    await execCapture('git', ['cat-file', '-e', base]);
+    await execCapture('git', ['cat-file', '-e', head]);
   } catch {
     process.stderr.write(`::error::patch-coverage: ${base} or ${head} not reachable in this clone\n`);
     return 2;
   }
 
-  const diffOut = execFileSync('git', ['diff', '--unified=0', '--no-prefix', '-M', `${base}..${head}`], {
-    encoding: 'utf8',
+  const diffOut = (await execCapture('git', ['diff', '--unified=0', '--no-prefix', '-M', `${base}..${head}`], {
     maxBuffer: 64 * 1024 * 1024,
-  });
+  })).stdout;
   const addedByFile = parseAddedLines(diffOut);
 
   const cwd = process.cwd();
@@ -57,7 +56,7 @@ export function runPatchCoverage(): number {
   let cov: Record<string, FileCoverage> = {};
   if (addedByFile.length > 0) {
     try {
-      cov = JSON.parse(readFileSync(covPath, 'utf8')) as Record<string, FileCoverage>;
+      cov = JSON.parse(await readFile(covPath, 'utf8')) as Record<string, FileCoverage>;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(`::error::patch-coverage: cannot read ${covPath}: ${message}\n`);

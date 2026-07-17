@@ -79,7 +79,7 @@ function pypiPkg(name: string, path: string): Package {
 }
 
 function configWith(...packages: Package[]): void {
-  vi.mocked(loadConfig).mockReturnValue({
+  vi.mocked(loadConfig).mockResolvedValue({
     putitoutthere: { version: 1 },
     packages,
   });
@@ -100,7 +100,7 @@ function row(pkg: Package): MatrixRow {
 
 /** A completeness map where every package is complete. */
 function allComplete(...packages: Package[]): void {
-  vi.mocked(checkCompleteness).mockReturnValue(
+  vi.mocked(checkCompleteness).mockResolvedValue(
     new Map(packages.map((p) => [p.name, { ok: true, missing: [] }])),
   );
 }
@@ -119,23 +119,25 @@ function makeHandler(over: Partial<Handler> = {}): Handler {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(headCommit).mockReturnValue('HEAD-SHA');
-  vi.mocked(normalizeArtifactLayout).mockReturnValue(undefined);
+  vi.mocked(headCommit).mockResolvedValue('HEAD-SHA');
+  vi.mocked(normalizeArtifactLayout).mockResolvedValue(undefined);
   vi.mocked(readHandlerMeta).mockReturnValue(undefined);
   // Preflight gates pass by default; individual tests override one to abort.
+  // requireAuth is the only synchronous preflight gate.
+  vi.mocked(requireAuth).mockReturnValue(undefined);
+  // Async gates.
   for (const gate of [
-    requireAuth,
     requireProvenanceMetadata,
     requireCratesMetadata,
     requirePypiVersionSource,
     requirePyprojectShape,
-    requireCargoShape,
     requirePackageJsonShape,
     requireRepoUrlMatch,
+    requireCargoShape,
+    requireRepoPublic,
   ]) {
-    vi.mocked(gate).mockReturnValue(undefined);
+    vi.mocked(gate).mockResolvedValue(undefined);
   }
-  vi.mocked(requireRepoPublic).mockResolvedValue(undefined);
 });
 
 describe('publish: happy path', () => {
@@ -159,6 +161,12 @@ describe('publish: happy path', () => {
       { cwd: CWD },
       expect.anything(),
     );
+    // The cargo-shape pre-flight and the HEAD read must both be threaded
+    // the caller's `cwd` (pins the `{ cwd }` options object against `{}`):
+    //   requireCargoShape(pkgs, { cwd }) — publish.ts:152
+    //   headCommit({ cwd })              — publish.ts:192
+    expect(vi.mocked(requireCargoShape)).toHaveBeenCalledWith(expect.anything(), { cwd: CWD });
+    expect(vi.mocked(headCommit)).toHaveBeenCalledWith({ cwd: CWD });
     expect(result.ok).toBe(true);
     expect(result.published.map((r) => r.package)).toEqual(['lib-js']);
   });
@@ -192,6 +200,18 @@ describe('publish: happy path', () => {
     expect(handler.publish).not.toHaveBeenCalled();
     // Skip path still ensures the tag (auto-heal #407).
     expect(ensureTag).toHaveBeenCalledTimes(1);
+    // The auto-heal tag write (publish.ts:223) must thread `{ cwd }` as its
+    // 5th positional arg — pins the options object against the `{}` mutant
+    // on the skip branch (distinct from the success-path ensureTag at :236,
+    // asserted by the happy-path test).
+    expect(ensureTag).toHaveBeenCalledWith(
+      '{name}-v{version}',
+      'lib-js',
+      '0.1.0',
+      'HEAD-SHA',
+      { cwd: CWD },
+      expect.anything(),
+    );
     expect(result.ok).toBe(true);
   });
 
@@ -266,7 +286,7 @@ describe('publish: pre-flight and completeness', () => {
     const r = row(p);
     vi.mocked(plan).mockResolvedValue([r]);
     // Completeness reports a missing artifact for the package.
-    vi.mocked(checkCompleteness).mockReturnValue(
+    vi.mocked(checkCompleteness).mockResolvedValue(
       new Map([['lib-py', { ok: false, missing: [{ row: r, reason: 'missing sdist' }] }]]),
     );
 

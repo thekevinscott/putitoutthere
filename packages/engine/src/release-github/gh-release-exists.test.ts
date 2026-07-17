@@ -2,36 +2,34 @@
  * `ghReleaseExists` — the `gh release view` idempotency guard (#444).
  */
 
-import { execFileSync } from 'node:child_process';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ghReleaseExists } from './gh-release-exists.js';
+import { execCapture } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
 
-// Bare automock (no factory): vitest generates the double from the real
-// module, so it can't drift from the source — satisfying the unit-suite
-// isolation lint without a hand-written (untyped) factory. Every call is
-// driven per-test via `execMock`.
-vi.mock('node:child_process');
+vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 
-const execMock = vi.mocked(execFileSync);
+// Mock the process seam, not node:child_process (#469 seam-mock recipe).
+vi.mock('../utils/exec-capture.js');
+
+const execMock = vi.mocked(execCapture);
 
 beforeEach(() => {
   execMock.mockReset();
 });
 
 describe('ghReleaseExists', () => {
-  it('returns true and runs `gh release view <tag>` with cwd when it exits 0', () => {
-    execMock.mockReturnValue(Buffer.from(''));
-    expect(ghReleaseExists('pkg-v1.0.0', { cwd: '/repo' })).toBe(true);
+  it('returns true and runs `gh release view <tag>` with cwd when it exits 0', async () => {
+    execMock.mockResolvedValue({ stdout: '', stderr: '' });
+    expect(await ghReleaseExists('pkg-v1.0.0', { cwd: '/repo' })).toBe(true);
     expect(execMock).toHaveBeenCalledWith(
-      'gh', ['release', 'view', 'pkg-v1.0.0'], { cwd: '/repo', stdio: 'ignore' },
+      'gh', ['release', 'view', 'pkg-v1.0.0'], { cwd: '/repo' },
     );
   });
 
-  it('returns false when `gh release view` exits non-zero (Release absent)', () => {
-    execMock.mockImplementation(() => {
-      throw new Error('release not found');
-    });
-    expect(ghReleaseExists('pkg-v1.0.0', { cwd: '/repo' })).toBe(false);
+  it('returns false when `gh release view` exits non-zero (Release absent)', async () => {
+    execMock.mockRejectedValue(new ExecError('release not found', '', '', 1));
+    expect(await ghReleaseExists('pkg-v1.0.0', { cwd: '/repo' })).toBe(false);
   });
 });

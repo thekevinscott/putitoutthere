@@ -8,9 +8,9 @@
  * decisions are `decide.ts`'s.
  */
 
-import { execFileSync } from 'node:child_process';
-import { appendFileSync, cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFile, cp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 
+import { execInherit } from '../utils/exec-inherit.js';
 import { applySubstitutions } from './apply-substitutions.js';
 import { decideFixtureMaterialize, type FixtureMaterializeMode } from './decide.js';
 
@@ -35,7 +35,7 @@ function isMode(value: string | undefined): value is FixtureMaterializeMode {
   return value === 'plan' || value === 'build' || value === 'publish';
 }
 
-export function runFixtureMaterialize(argv: readonly string[]): number {
+export async function runFixtureMaterialize(argv: readonly string[]): Promise<number> {
   const mode = argv[3];
   if (!isMode(mode)) {
     process.stdout.write(
@@ -81,24 +81,24 @@ export function runFixtureMaterialize(argv: readonly string[]): number {
     }
   }
 
-  rmSync(FIXTURE_TREE, { recursive: true, force: true });
-  cpSync(`${FIXTURES_ROOT}/${fixture}`, FIXTURE_TREE, { recursive: true });
+  await rm(FIXTURE_TREE, { recursive: true, force: true });
+  await cp(`${FIXTURES_ROOT}/${fixture}`, FIXTURE_TREE, { recursive: true });
 
   if (githubEnv !== undefined) {
-    appendFileSync(githubEnv, `FIXTURE_VERSION=${version}\n`);
+    await appendFile(githubEnv, `FIXTURE_VERSION=${version}\n`);
   }
 
-  for (const entry of readdirSync(FIXTURE_TREE, { recursive: true, withFileTypes: true })) {
+  for (const entry of await readdir(FIXTURE_TREE, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile() || !MANIFEST_NAMES.includes(entry.name)) {
       continue;
     }
     const filePath = `${entry.parentPath}/${entry.name}`;
-    writeFileSync(filePath, applySubstitutions(readFileSync(filePath, 'utf8'), plan.substitutions));
+    await writeFile(filePath, applySubstitutions(await readFile(filePath, 'utf8'), plan.substitutions));
   }
 
   if (plan.gitInit) {
     for (const args of GIT_STEPS) {
-      execFileSync('git', [...args], { cwd: FIXTURE_TREE, stdio: 'inherit' });
+      await execInherit('git', [...args], { cwd: FIXTURE_TREE });
     }
   }
 

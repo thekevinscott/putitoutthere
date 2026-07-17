@@ -23,9 +23,9 @@ const advanceFloatingMajorMock = vi.mocked(advanceFloatingMajor);
 const foldActionBundleMock = vi.mocked(foldActionBundle);
 
 beforeEach(() => {
-  advanceV0Mock.mockReset().mockReturnValue(0);
-  advanceFloatingMajorMock.mockReset().mockReturnValue(0);
-  foldActionBundleMock.mockReset().mockReturnValue(0);
+  advanceV0Mock.mockReset().mockResolvedValue(0);
+  advanceFloatingMajorMock.mockReset().mockResolvedValue(0);
+  foldActionBundleMock.mockReset().mockResolvedValue(0);
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 });

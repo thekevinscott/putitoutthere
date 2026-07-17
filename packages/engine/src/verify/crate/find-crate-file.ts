@@ -9,19 +9,19 @@
  * recurses.
  */
 
-import { statSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 
-export function findCrateFile(
+export async function findCrateFile(
   registryRoot: string,
   name: string,
   version: string,
-): string | null {
+): Promise<string | null> {
   const target = `${name}-${version}.crate`;
-  for (const file of listFilesRecursive(registryRoot)) {
-    if (basename(file) === target && statSync(file).size > 0) {
+  for (const file of await listFilesRecursive(registryRoot)) {
+    if (basename(file) === target && (await stat(file)).size > 0) {
       return file;
     }
   }

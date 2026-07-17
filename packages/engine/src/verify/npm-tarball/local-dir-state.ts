@@ -9,13 +9,14 @@
  * string is appended to the tarball-missing `::error::`.
  */
 
-import { existsSync, statSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
+import { pathExists } from '../../utils/path-exists.js';
 
-export function localDirState(localPath: string): string {
-  if (existsSync(localPath) && statSync(localPath).isDirectory()) {
-    const files = listFilesRecursive(localPath);
+export async function localDirState(localPath: string): Promise<string> {
+  if ((await pathExists(localPath)) && (await stat(localPath)).isDirectory()) {
+    const files = await listFilesRecursive(localPath);
     return `local ${localPath}: present, ${files.length} file(s) — ${files.join(' ')} `;
   }
   return `local ${localPath}: missing`;

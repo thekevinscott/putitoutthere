@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -21,11 +21,11 @@ import { replaceWorkspacePackageVersion } from './replace-workspace-package-vers
  * the crate declares no resolvable version source (via `replaceCargoVersion`),
  * or when it inherits but no ancestor `[workspace]` exists.
  */
-export function writeResolvedCargoVersion(
+export async function writeResolvedCargoVersion(
   crateDir: string,
   cargoSource: string,
   version: string,
-): string[] {
+): Promise<string[]> {
   // Detect inheritance from the parsed manifest. An unparseable manifest
   // falls through to the literal path, preserving the pre-#428 regex
   // behavior for odd-but-writable manifests.
@@ -45,19 +45,19 @@ export function writeResolvedCargoVersion(
     // throws the same "no [package].version" error the callers relied on).
     const cargoPath = join(crateDir, 'Cargo.toml');
     const updated = replaceCargoVersion(cargoSource, version);
-    if (updated !== cargoSource) {writeFileSync(cargoPath, updated, 'utf8');}
+    if (updated !== cargoSource) {await writeFile(cargoPath, updated, 'utf8');}
     return [cargoPath];
   }
 
-  const root = findWorkspaceRoot(crateDir);
+  const root = await findWorkspaceRoot(crateDir);
   if (root === null) {
     throw new Error(
       `Cargo.toml: ${join(crateDir, 'Cargo.toml')} sets \`version.workspace = true\` but no ancestor [workspace] Cargo.toml was found. Declare [workspace.package].version at the workspace root.`,
     );
   }
   const rootPath = join(root, 'Cargo.toml');
-  const rootSource = readFileSync(rootPath, 'utf8');
+  const rootSource = await readFile(rootPath, 'utf8');
   const updated = replaceWorkspacePackageVersion(rootSource, version);
-  if (updated !== rootSource) {writeFileSync(rootPath, updated, 'utf8');}
+  if (updated !== rootSource) {await writeFile(rootPath, updated, 'utf8');}
   return [rootPath];
 }

@@ -20,7 +20,7 @@ const wheelMock = vi.mocked(verifyWheel);
 const stderr: string[] = [];
 
 beforeEach(() => {
-  wheelMock.mockReset().mockReturnValue(0);
+  wheelMock.mockReset().mockResolvedValue(0);
   stderr.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(process.stderr, 'write').mockImplementation((c) => {

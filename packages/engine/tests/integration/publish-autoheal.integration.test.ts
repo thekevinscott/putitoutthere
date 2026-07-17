@@ -17,8 +17,9 @@
  * Red before the fix: the skip path creates no tag.
  */
 
+import { EventEmitter } from 'node:events';
 import type * as ChildProcess from 'node:child_process';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,20 +27,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { publish } from '../../src/publish.js';
 
-const real = vi.hoisted(() => ({ execFileSync: undefined as unknown as typeof execFileSync }));
-
+// Dual-mock window: the npm handler + plan()'s git reads both flow through
+// the first-party process seam (`execCapture`). Integration tests run that
+// seam for real and mock only the Node built-in underneath it — `execFile`
+// (what `execCapture` uses); mocking the seam module itself would trip the
+// testing-conventions `no-first-party-mock` gate. Intercept `npm` here and
+// delegate everything else — `git` in particular — to the real `execFile`
+// so plan()'s git reads and the tag-write heal run against the real fixture
+// repo.
+const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
-  real.execFileSync = actual.execFileSync;
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+  return { ...actual, execFile: vi.fn() };
 });
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execFile);
+
+/** A minimal execFile-child stand-in that emits `close` with `code`. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
 
 let repo: string;
 
 function gitInRepo(args: string[]): string {
-  return real.execFileSync('git', args, { cwd: repo, encoding: 'utf8' }) as string;
+  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
 }
 
 function writeRepoFile(rel: string, body: string): void {
@@ -64,14 +78,20 @@ beforeEach(() => {
 
   // npm `view` SUCCEEDS -> the version looks already-published, so the
   // package takes the skip path; `npm publish` should never be invoked.
-  execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) => {
+  execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     if (cmd === 'npm') {
       const a = args as string[];
-      if (a[0] === 'view') {return Buffer.from('0.1.0');}
-      if (a[0] === 'publish') {return Buffer.from('');}
+      if (a[0] === 'view') {
+        cb(null, '0.1.0', '');
+        return fakeChild(0);
+      }
+      if (a[0] === 'publish') {
+        cb(null, '', '');
+        return fakeChild(0);
+      }
     }
-    return real.execFileSync(cmd, args as readonly string[], opts as Parameters<typeof execFileSync>[2]);
-  }) as typeof execFileSync);
+    return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
+  }) as unknown as typeof execFile);
 
   gitInRepo(['init', '-q', '-b', 'main']);
   gitInRepo(['config', 'user.email', 'test@example.com']);

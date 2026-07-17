@@ -5,17 +5,19 @@
  * deterministic pick when a dist dir holds more than one match.
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export function findDistFile(dir: string, ext: string): string | null {
-  if (!existsSync(dir)) {
+import { pathExists } from '../../utils/path-exists.js';
+
+export async function findDistFile(dir: string, ext: string): Promise<string | null> {
+  if (!(await pathExists(dir))) {
     return null;
   }
-  for (const name of readdirSync(dir).sort()) {
+  for (const name of (await readdir(dir)).sort()) {
     if (name.endsWith(ext)) {
       const full = join(dir, name);
-      if (statSync(full).isFile()) {
+      if ((await stat(full)).isFile()) {
         return full;
       }
     }

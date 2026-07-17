@@ -30,29 +30,29 @@ function deps(overrides: {
     needles: new Set(overrides.needles),
     deadlineMs: overrides.deadlineMs ?? 1000,
     now: overrides.now,
-    sleep: vi.fn(),
+    sleep: vi.fn(() => Promise.resolve()),
     log: vi.fn(),
-    loadRuns: vi.fn(() => []),
+    loadRuns: vi.fn(() => Promise.resolve([])),
     jobsForRun: vi.fn(() => []),
     resetCaches: vi.fn(),
   };
 }
 
 describe('pollUntilResolved', () => {
-  it('returns immediately, touching nothing, when there are no needles', () => {
+  it('returns immediately, touching nothing, when there are no needles', async () => {
     const now = vi.fn(() => 0);
     const d = deps({ needles: [], now });
-    pollUntilResolved(d);
+    await pollUntilResolved(d);
     expect(now).not.toHaveBeenCalled();
     expect(d.loadRuns).not.toHaveBeenCalled();
     expect(d.sleep).not.toHaveBeenCalled();
   });
 
-  it('loads runs once and stops without sleeping when everything resolves first look', () => {
+  it('loads runs once and stops without sleeping when everything resolves first look', async () => {
     resolution.mockReturnValue('passed');
     const now = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(0);
     const d = deps({ needles: ['a'], now });
-    pollUntilResolved(d);
+    await pollUntilResolved(d);
     expect(d.loadRuns).toHaveBeenCalledTimes(1);
     expect(d.sleep).not.toHaveBeenCalled();
     expect(d.resetCaches).not.toHaveBeenCalled();
@@ -60,7 +60,7 @@ describe('pollUntilResolved', () => {
     expect(message).not.toHaveBeenCalled();
   });
 
-  it('logs the elapsed message, sleeps, and resets caches per pending iteration', () => {
+  it('logs the elapsed message, sleeps, and resets caches per pending iteration', async () => {
     resolution.mockReturnValueOnce('pending').mockReturnValue('passed');
     message.mockReturnValue('POLL-MSG');
     // now(): start=1000, while=1000, elapsed=4000, while=1000. deadline=2000.
@@ -73,7 +73,7 @@ describe('pollUntilResolved', () => {
       .mockReturnValue(1000);
     const d = deps({ needles: ['a'], now, deadlineMs: 1000 });
 
-    pollUntilResolved(d);
+    await pollUntilResolved(d);
 
     expect(d.loadRuns).toHaveBeenCalledTimes(2);
     expect(message).toHaveBeenCalledWith(3, ['a']);
@@ -88,7 +88,7 @@ describe('pollUntilResolved', () => {
     expect(sleepOrder).toBeLessThan(resetOrder);
   });
 
-  it('stops at the deadline when citations never resolve', () => {
+  it('stops at the deadline when citations never resolve', async () => {
     resolution.mockReturnValue('pending');
     message.mockReturnValue('POLL-MSG');
     // start=0, while=0 (enter), elapsed=0, then while=1000 (== deadline, exit).
@@ -100,7 +100,7 @@ describe('pollUntilResolved', () => {
       .mockReturnValue(1000);
     const d = deps({ needles: ['a'], now, deadlineMs: 1000 });
 
-    pollUntilResolved(d);
+    await pollUntilResolved(d);
 
     expect(d.loadRuns).toHaveBeenCalledTimes(1);
     expect(d.sleep).toHaveBeenCalledTimes(1);

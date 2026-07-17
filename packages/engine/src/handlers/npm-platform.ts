@@ -23,14 +23,15 @@
  * Issue #19. Plan: §13.7, §12.2.
  */
 
-import { execFileSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { sanitizeArtifactName } from '../config.js';
 import type { Ctx } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
+import { execCapture } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
 
 export type NpmBuildMode = 'napi' | 'bundled-cli';
 
@@ -116,7 +117,7 @@ export async function publishPlatforms(
         skipped.push(platformName);
         continue;
       }
-      const stagingDir = synthesizePlatformPackage(
+      const stagingDir = await synthesizePlatformPackage(
         pkg,
         entry,
         target,
@@ -126,16 +127,16 @@ export async function publishPlatforms(
         isMulti,
       );
       try {
-        npmPublish(stagingDir, pkg, ctx);
+        await npmPublish(stagingDir, pkg, ctx);
         published.push(platformName);
       } finally {
         /* v8 ignore next -- cleanup after publish; failure here is cosmetic */
-        rmSync(stagingDir, { recursive: true, force: true });
+        await rm(stagingDir, { recursive: true, force: true });
       }
     }
   }
 
-  rewriteOptionalDependencies(pkg, version, [...published, ...skipped]);
+  await rewriteOptionalDependencies(pkg, version, [...published, ...skipped]);
 
   return { published, skipped };
 }
@@ -191,23 +192,22 @@ export function platformArtifactName(
 
 /* --------------------------- internals --------------------------- */
 
-function isPlatformPublished(
+async function isPlatformPublished(
   platformName: string,
   version: string,
   ctx: Ctx,
 ): Promise<boolean> {
   try {
-    execFileSync('npm', ['view', `${platformName}@${version}`, 'version'], {
+    await execCapture('npm', ['view', `${platformName}@${version}`, 'version'], {
       cwd: ctx.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return Promise.resolve(true);
+    return true;
   } catch {
-    return Promise.resolve(false);
+    return false;
   }
 }
 
-function synthesizePlatformPackage(
+async function synthesizePlatformPackage(
   pkg: PlatformPkg,
   entry: NpmBuildEntry,
   target: string,
@@ -215,8 +215,8 @@ function synthesizePlatformPackage(
   version: string,
   ctx: Ctx,
   isMulti: boolean,
-): string {
-  const staging = mkdtempSync(join(tmpdir(), 'putitoutthere-plat-'));
+): Promise<string> {
+  const staging = await mkdtemp(join(tmpdir(), 'putitoutthere-plat-'));
 
   // #237: encode pkg.name to match the on-disk artifact directory the
   // planner emitted (slash-containing names like `js/foo` land at
@@ -225,18 +225,18 @@ function synthesizePlatformPackage(
   const artifactsRoot = ctx.artifactsRoot ?? join(ctx.cwd, 'artifacts');
   const artifactDir = join(artifactsRoot, artifactName);
 
-  const files = readdirSync(artifactDir);
+  const files = await readdir(artifactDir);
   /* v8 ignore start -- completeness check already verified the artifact tree */
   if (files.length === 0) {
     throw new Error(`platform artifact empty: ${artifactDir}`);
   }
   /* v8 ignore stop */
   for (const f of files) {
-    cpSync(join(artifactDir, f), join(staging, f), { recursive: true });
+    await cp(join(artifactDir, f), join(staging, f), { recursive: true });
   }
 
   const { os, cpu, libc } = targetToOsCpu(target);
-  const fileList = readdirSync(staging);
+  const fileList = await readdir(staging);
   const mainFile = pickMainFile(fileList, entry.mode);
 
   // #365: bundled-cli binaries ship as package data referenced via
@@ -246,7 +246,7 @@ function synthesizePlatformPackage(
   // on the staged binary for non-Windows targets; without it the
   // launcher's spawn of the resolved binary EACCESes at runtime.
   if (entry.mode === 'bundled-cli' && !os.includes('win32')) {
-    chmodSync(join(staging, mainFile), 0o755);
+    await chmod(join(staging, mainFile), 0o755);
   }
 
   // npm provenance verifier compares package.json.repository.url against
@@ -254,7 +254,7 @@ function synthesizePlatformPackage(
   // synthesized platform package without `repository` fails with E422
   // "repository.url is \"\"". Inherit repository/license/homepage from
   // the main package so per-platform tarballs validate.
-  const mainPkgRaw = readFileSync(join(pkg.path, 'package.json'), 'utf8');
+  const mainPkgRaw = await readFile(join(pkg.path, 'package.json'), 'utf8');
   const mainPkg = JSON.parse(mainPkgRaw) as Record<string, unknown>;
 
   const platformJson: Record<string, unknown> = {
@@ -269,7 +269,7 @@ function synthesizePlatformPackage(
     ...(mainPkg['license'] !== undefined ? { license: mainPkg['license'] } : {}),
     ...(mainPkg['homepage'] !== undefined ? { homepage: mainPkg['homepage'] } : {}),
   };
-  writeFileSync(
+  await writeFile(
     join(staging, 'package.json'),
     JSON.stringify(platformJson, null, 2) + '\n',
     'utf8',
@@ -278,7 +278,7 @@ function synthesizePlatformPackage(
   return staging;
 }
 
-function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
+async function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): Promise<void> {
   // See src/handlers/npm.ts for the PIOT_NPM_REGISTRY rationale (#304):
   // internal e2e seam, suppresses provenance + assumes `.npmrc`-supplied
   // auth at the override registry.
@@ -307,14 +307,13 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
   args.push(stagingDir);
 
   try {
-    execFileSync('npm', args, {
+    await execCapture('npm', args, {
       cwd: pkg.path,
       // #138: minimal env; don't leak parent process.env to npm.
       env: buildSubprocessEnv(ctx.env),
-      stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
-    const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    const stderr = err instanceof ExecError ? err.stderr.trim() : undefined;
     // npm CLI's retry-on-transient-network-error: a successful PUT that
     // the registry acked but for which npm saw a flaky response (timeout,
     // 502, connection reset) gets retried with the same payload. The
@@ -333,8 +332,8 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
     // absent => a genuine partial publish that a fresh run (new
     // attestation) resolves.
     if (looksLikeTlogDuplicate(stderr)) {
-      const staged = readStagedIdentity(stagingDir);
-      if (platformPublishedSync(staged.name, staged.version, ctx)) {
+      const staged = await readStagedIdentity(stagingDir);
+      if (await platformPublished(staged.name, staged.version, ctx)) {
         return;
       }
       throw new Error(
@@ -390,15 +389,14 @@ export function looksLikeTlogDuplicate(stderr: string | undefined): boolean {
 }
 
 /**
- * Synchronous `npm view <name>@<version>` existence probe. Mirrors
- * `isPlatformPublished` without the Promise wrapper so it can run inside
- * the (execFileSync-based) publish catch.
+ * `npm view <name>@<version>` existence probe. Mirrors
+ * `isPlatformPublished`; kept as a separate helper so the publish catch's
+ * re-probe path reads independently.
  */
-function platformPublishedSync(name: string, version: string, ctx: Ctx): boolean {
+async function platformPublished(name: string, version: string, ctx: Ctx): Promise<boolean> {
   try {
-    execFileSync('npm', ['view', `${name}@${version}`, 'version'], {
+    await execCapture('npm', ['view', `${name}@${version}`, 'version'], {
       cwd: ctx.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
     });
     return true;
   } catch {
@@ -408,21 +406,21 @@ function platformPublishedSync(name: string, version: string, ctx: Ctx): boolean
 
 /** Read the synthesized platform package's name + version back from its
  *  staged package.json (written by `synthesizePlatformPackage`). */
-function readStagedIdentity(stagingDir: string): { name: string; version: string } {
-  const pkg = JSON.parse(readFileSync(join(stagingDir, 'package.json'), 'utf8')) as {
+async function readStagedIdentity(stagingDir: string): Promise<{ name: string; version: string }> {
+  const pkg = JSON.parse(await readFile(join(stagingDir, 'package.json'), 'utf8')) as {
     name: string;
     version: string;
   };
   return { name: pkg.name, version: pkg.version };
 }
 
-function rewriteOptionalDependencies(
+async function rewriteOptionalDependencies(
   pkg: PlatformPkg,
   version: string,
   platformPackages: readonly string[],
-): void {
+): Promise<void> {
   const p = join(pkg.path, 'package.json');
-  const raw = readFileSync(p, 'utf8');
+  const raw = await readFile(p, 'utf8');
   const parsed = JSON.parse(raw) as Record<string, unknown>;
 
   const optionalDeps: Record<string, string> = {};
@@ -439,7 +437,7 @@ function rewriteOptionalDependencies(
   const indentArg: number | string = indent === undefined ? 2 : indent.includes('\t') ? '\t' : indent.length;
   const trailing = raw.endsWith('\n') ? '\n' : '';
   /* v8 ignore stop */
-  writeFileSync(p, JSON.stringify(parsed, null, indentArg) + trailing, 'utf8');
+  await writeFile(p, JSON.stringify(parsed, null, indentArg) + trailing, 'utf8');
 }
 
 interface OsCpu {

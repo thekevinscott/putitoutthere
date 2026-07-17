@@ -18,7 +18,7 @@ import { releaseGithub } from './release-github/index.js';
 const releaseGithubMock = vi.mocked(releaseGithub);
 
 beforeEach(() => {
-  releaseGithubMock.mockReset().mockReturnValue(0);
+  releaseGithubMock.mockReset().mockResolvedValue(0);
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 });
@@ -36,7 +36,7 @@ describe('run: release-github dispatch', () => {
   });
 
   it('passes the engine exit code through', async () => {
-    releaseGithubMock.mockReturnValue(0);
+    releaseGithubMock.mockResolvedValue(0);
     const { run } = await import('./cli.js');
     const code = await run(['node', 'piot', 'release-github', '--cwd', '/x']);
     expect(code).toBe(0);

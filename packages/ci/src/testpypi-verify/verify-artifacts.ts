@@ -9,9 +9,9 @@
  * decisions are the pure cores'. Returns the exit code (0 = all verified).
  */
 
-import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 
+import { execCapture } from '../utils/exec-capture.js';
 import { metadataVersion } from './metadata-version.js';
 import { parseRequirement } from './parse-requirement.js';
 import { selectDownloadedSdist } from './select-downloaded-sdist.js';
@@ -27,9 +27,9 @@ function listEntries(output: string): string[] {
   return output.split('\n').filter((name) => name.length > 0);
 }
 
-export function verifyArtifacts(requirements: readonly string[]): number {
-  const wheelFiles = readdirSync(WHEELS_DIR);
-  const sdistFiles = readdirSync(SDISTS_DIR);
+export async function verifyArtifacts(requirements: readonly string[]): Promise<number> {
+  const wheelFiles = await readdir(WHEELS_DIR);
+  const sdistFiles = await readdir(SDISTS_DIR);
   for (const requirement of requirements) {
     const { version, stem } = parseRequirement(requirement);
 
@@ -40,14 +40,14 @@ export function verifyArtifacts(requirements: readonly string[]): number {
     }
     const wheelPath = `${WHEELS_DIR}/${wheelName}`;
     const metaSelection = selectMetadataMember(
-      listEntries(execFileSync('unzip', ['-Z1', wheelPath], { encoding: 'utf8' })),
+      listEntries((await execCapture('unzip', ['-Z1', wheelPath])).stdout),
       wheelName,
     );
     if ('errorLine' in metaSelection) {
       process.stderr.write(`${metaSelection.errorLine}\n`);
       return 1;
     }
-    const metadataText = execFileSync('unzip', ['-p', wheelPath, metaSelection.member], { encoding: 'utf8' });
+    const metadataText = (await execCapture('unzip', ['-p', wheelPath, metaSelection.member])).stdout;
     const wheelResult = versionMatch({
       name: wheelName,
       label: 'METADATA',
@@ -67,14 +67,14 @@ export function verifyArtifacts(requirements: readonly string[]): number {
     }
     const sdistPath = `${SDISTS_DIR}/${sdistName}`;
     const pkgSelection = selectPkgInfoMember(
-      listEntries(execFileSync('tar', ['-tzf', sdistPath], { encoding: 'utf8' })),
+      listEntries((await execCapture('tar', ['-tzf', sdistPath])).stdout),
       sdistName,
     );
     if ('errorLine' in pkgSelection) {
       process.stderr.write(`${pkgSelection.errorLine}\n`);
       return 1;
     }
-    const pkgInfoText = execFileSync('tar', ['-xzOf', sdistPath, pkgSelection.member], { encoding: 'utf8' });
+    const pkgInfoText = (await execCapture('tar', ['-xzOf', sdistPath, pkgSelection.member])).stdout;
     const sdistResult = versionMatch({
       name: sdistName,
       label: 'PKG-INFO',

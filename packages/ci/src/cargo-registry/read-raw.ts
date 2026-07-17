@@ -4,11 +4,11 @@
  * error) used in the start-failure log dump and the diagnostic dump.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
-export function readRaw(path: string): string | null {
+export async function readRaw(path: string): Promise<string | null> {
   try {
-    return readFileSync(path, 'utf8');
+    return await readFile(path, 'utf8');
   } catch {
     return null;
   }

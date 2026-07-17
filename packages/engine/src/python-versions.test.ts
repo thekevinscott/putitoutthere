@@ -2,7 +2,7 @@
  * `requires-python` → concrete CPython version expansion. Issue #369.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -12,13 +12,13 @@ import {
   resolvePythonVersions,
 } from './python-versions.js';
 
-// `resolvePythonVersions`'s only collaborator is `node:fs` (reading
+// `resolvePythonVersions`'s only collaborator is `node:fs/promises` (reading
 // pyproject.toml); mock it so this isolates the resolution logic — override /
 // inference / fallback — from disk. The real read is covered at the
 // integration + e2e tiers.
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 
-const readFileMock = vi.mocked(readFileSync);
+const readFileMock = vi.mocked(readFile);
 
 describe('expandRequiresPython', () => {
   it('expands `>=3.10` to the released CPython set it allows', () => {
@@ -127,48 +127,50 @@ describe('resolvePythonVersions', () => {
   // `cwd`/`path` are opaque to the mocked reader; the pyproject *contents* it
   // returns (or the error it throws) are what drives each branch.
   const pyproject = (contents: string): void => {
-    readFileMock.mockReturnValue(contents);
+    readFileMock.mockResolvedValue(contents);
   };
   const missingPyproject = (): void => {
-    readFileMock.mockImplementation(() => {
-      throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
-    });
+    readFileMock.mockRejectedValue(
+      Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }),
+    );
   };
 
-  it('prefers an explicit python_versions override, sorted ascending', () => {
+  it('prefers an explicit python_versions override, sorted ascending', async () => {
     pyproject('[project]\nrequires-python = ">=3.10"\n');
     expect(
-      resolvePythonVersions({ path: '.', python_versions: ['3.13', '3.9'] }, '/repo'),
+      await resolvePythonVersions({ path: '.', python_versions: ['3.13', '3.9'] }, '/repo'),
     ).toEqual(['3.9', '3.13']);
   });
 
-  it('infers from requires-python when no override is given', () => {
+  it('infers from requires-python when no override is given', async () => {
     pyproject('[project]\nrequires-python = ">=3.12"\n');
-    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual(['3.12', '3.13', '3.14']);
+    expect(await resolvePythonVersions({ path: '.' }, '/repo')).toEqual(['3.12', '3.13', '3.14']);
+    // pyproject.toml is read by that filename, as utf8 text.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
   });
 
-  it('falls back to the default when pyproject.toml is missing', () => {
+  it('falls back to the default when pyproject.toml is missing', async () => {
     missingPyproject();
-    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(await resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when requires-python is absent', () => {
+  it('falls back to the default when requires-python is absent', async () => {
     pyproject('[project]\nname = "x"\n');
-    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(await resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when pyproject.toml has no [project] table', () => {
+  it('falls back to the default when pyproject.toml has no [project] table', async () => {
     pyproject('[build-system]\nrequires = []\n');
-    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(await resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when pyproject.toml is malformed TOML', () => {
+  it('falls back to the default when pyproject.toml is malformed TOML', async () => {
     pyproject('this is not = = valid toml [[');
-    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(await resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 
-  it('falls back to the default when requires-python is unparseable', () => {
+  it('falls back to the default when requires-python is unparseable', async () => {
     pyproject('[project]\nrequires-python = "banana"\n');
-    expect(resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
+    expect(await resolvePythonVersions({ path: '.' }, '/repo')).toEqual([DEFAULT_PYTHON_VERSION]);
   });
 });

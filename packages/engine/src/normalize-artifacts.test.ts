@@ -16,39 +16,47 @@
  * agnostic so they hold on Windows as well as POSIX.
  */
 
-import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
+import { mkdir, readdir, rename, stat } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import type { MatrixRow } from './plan.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 
-const existsMock = vi.mocked(existsSync);
-const readdirMock = vi.mocked(readdirSync);
-const mkdirMock = vi.mocked(mkdirSync);
-const renameMock = vi.mocked(renameSync);
+const readdirMock = vi.mocked(readdir);
+const mkdirMock = vi.mocked(mkdir);
+const renameMock = vi.mocked(rename);
+const statMock = vi.mocked(stat);
+
+/** Paths reported present, matched by trailing-segment suffix. */
+let presentPaths: string[] = [];
 
 /**
- * Drive `existsSync` from a set of paths that should report present.
- * Membership is matched by suffix so callers can name a path by its
- * trailing segment without hard-coding a separator.
+ * Drive `pathExists` (via stat) from a set of paths that should report
+ * present. Membership is matched by suffix so callers can name a path by
+ * its trailing segment without hard-coding a separator.
  */
 function existing(...present: string[]): void {
-  existsMock.mockImplementation((p) =>
-    present.some((suffix) => String(p).endsWith(suffix)),
-  );
+  presentPaths = present;
 }
 
-/** Feed `readdirSync` a set of dumped entries. */
+/** Feed `readdir` a set of dumped entries. */
 function dumped(...entries: string[]): void {
-  readdirMock.mockReturnValue(entries as unknown as ReturnType<typeof readdirSync>);
+  readdirMock.mockResolvedValue(entries as unknown as Awaited<ReturnType<typeof readdir>>);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  existsMock.mockReturnValue(false);
-  readdirMock.mockReturnValue([]);
+  presentPaths = [];
+  readdirMock.mockResolvedValue([]);
+  // pathExists resolves for present paths, rejects otherwise.
+  statMock.mockImplementation((p) => {
+    if (presentPaths.some((suffix) => String(p).endsWith(suffix))) {
+      return Promise.resolve({} as unknown as Awaited<ReturnType<typeof stat>>);
+    }
+    return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+  });
 });
 
 const SDIST_ROW: MatrixRow = {
@@ -96,12 +104,12 @@ const VANILLA_NPM_ROW: MatrixRow = {
 };
 
 describe('#311 normalizeArtifactLayout', () => {
-  it('moves a dumped sdist into <artifactsRoot>/<artifact_name>/', () => {
+  it('moves a dumped sdist into <artifactsRoot>/<artifact_name>/', async () => {
     // Root present, target subdir absent, one dumped file at the root.
     existing('artifacts');
     dumped('pkg-1.0.0.tar.gz');
 
-    normalizeArtifactLayout([SDIST_ROW], 'artifacts');
+    await normalizeArtifactLayout([SDIST_ROW], 'artifacts');
 
     // Subdir created, the dumped file relocated under it.
     expect(mkdirMock).toHaveBeenCalledWith(
@@ -115,77 +123,83 @@ describe('#311 normalizeArtifactLayout', () => {
     );
   });
 
-  it('leaves the documented subdir layout untouched (no-op)', () => {
-    // The target subdir already exists — nothing to relocate.
+  it('leaves the documented subdir layout untouched (no-op)', async () => {
+    // The target subdir already exists — nothing to relocate. A file is also
+    // dumped at the root, so the early return at the target-exists guard is
+    // the ONLY reason no move happens (bypassing the guard would relocate it).
     existing('artifacts', 'pkg-sdist');
+    dumped('pkg-1.0.0.tar.gz');
 
-    normalizeArtifactLayout([SDIST_ROW], 'artifacts');
+    await normalizeArtifactLayout([SDIST_ROW], 'artifacts');
 
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(renameMock).not.toHaveBeenCalled();
   });
 
-  it('no-ops when the matrix expects multiple staged artifacts (only single-row case manifests the v8 dump)', () => {
+  it('no-ops when the matrix expects multiple staged artifacts (only single-row case manifests the v8 dump)', async () => {
     // Two expected artifacts — the multi-artifact code path on the action
     // side creates the right subdirs, so re-arranging in-process would be
     // actively harmful. The function bails before touching the fs.
     existing('artifacts');
     dumped('stray.txt');
 
-    normalizeArtifactLayout([SDIST_ROW, WHEEL_ROW], 'artifacts');
+    await normalizeArtifactLayout([SDIST_ROW, WHEEL_ROW], 'artifacts');
 
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(renameMock).not.toHaveBeenCalled();
   });
 
-  it('no-ops on a crates-only matrix (build job never uploads a crate artifact)', () => {
+  it('no-ops on a crates-only matrix (build job never uploads a crate artifact)', async () => {
     existing('artifacts');
     dumped('whatever');
 
-    normalizeArtifactLayout([CRATE_ROW], 'artifacts');
+    await normalizeArtifactLayout([CRATE_ROW], 'artifacts');
 
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(renameMock).not.toHaveBeenCalled();
   });
 
-  it('no-ops on a vanilla-npm-only matrix (publish job packages from source)', () => {
+  it('no-ops on a vanilla-npm-only matrix (publish job packages from source)', async () => {
     existing('artifacts');
     dumped('whatever');
 
-    normalizeArtifactLayout([VANILLA_NPM_ROW], 'artifacts');
+    await normalizeArtifactLayout([VANILLA_NPM_ROW], 'artifacts');
 
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(renameMock).not.toHaveBeenCalled();
   });
 
-  it('no-ops when the artifacts root does not exist (no download happened)', () => {
-    // Neither target subdir nor the root exist.
-    existsMock.mockReturnValue(false);
+  it('no-ops when the artifacts root does not exist (no download happened)', async () => {
+    // Neither target subdir nor the root exist. A file is "dumped" so that the
+    // root-absent guard's early return is the ONLY reason no move happens
+    // (bypassing it would proceed to mkdir/rename).
+    existing();
+    dumped('pkg-1.0.0.tar.gz');
 
-    expect(() => normalizeArtifactLayout([SDIST_ROW], 'artifacts')).not.toThrow();
+    await expect(normalizeArtifactLayout([SDIST_ROW], 'artifacts')).resolves.toBeUndefined();
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(renameMock).not.toHaveBeenCalled();
   });
 
-  it('no-ops on an empty artifacts root', () => {
+  it('no-ops on an empty artifacts root', async () => {
     // Root present but nothing was dumped into it.
     existing('artifacts');
     dumped();
 
-    normalizeArtifactLayout([SDIST_ROW], 'artifacts');
+    await normalizeArtifactLayout([SDIST_ROW], 'artifacts');
 
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(renameMock).not.toHaveBeenCalled();
   });
 
-  it('moves multiple dumped files (a wheel and its .pyi stubs, sigfile, etc.) into the same subdir', () => {
+  it('moves multiple dumped files (a wheel and its .pyi stubs, sigfile, etc.) into the same subdir', async () => {
     // download-artifact's single-artifact extraction dumps every file
     // the upstream upload-artifact step staged — preserve them all,
     // not just the headline `.tar.gz`/`.whl`.
     existing('artifacts');
     dumped('pkg-1.0.0-py3-none-any.whl', 'pkg-1.0.0-py3-none-any.whl.sigstore');
 
-    normalizeArtifactLayout([WHEEL_ROW], 'artifacts');
+    await normalizeArtifactLayout([WHEEL_ROW], 'artifacts');
 
     expect(mkdirMock).toHaveBeenCalledWith(
       expect.stringMatching(/artifacts[/\\]pkg-wheel-x86_64-unknown-linux-gnu$/),

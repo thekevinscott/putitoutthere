@@ -10,8 +10,8 @@
  * exit code (0 = all sdists downloaded).
  */
 
-import { execFileSync } from 'node:child_process';
-
+import { execCapture } from '../utils/exec-capture.js';
+import { sleep } from '../utils/sleep.js';
 import { errorMessage } from './error-message.js';
 import { findSdistHref } from './find-sdist-href.js';
 import { normalizeIndexUrl } from './normalize-index-url.js';
@@ -24,13 +24,13 @@ const SDISTS_DIR = 'downloaded-sdists';
 const MAX_ATTEMPTS = 6;
 // A PEP 503 simple-index page lists every file ever published for the
 // project, so it grows without bound as fixtures accumulate versions (the
-// maturin fixture's page is already ~1.1 MiB). `execFileSync` captures the
+// maturin fixture's page is already ~1.1 MiB). The exec seam captures the
 // curl stdout into a fixed buffer whose default is 1 MiB and throws
 // `ENOBUFS` when the page exceeds it — a limit the original bash never had
 // (it piped curl into a streaming HTML parser). Give the capture ample room.
 const SIMPLE_INDEX_MAX_BUFFER = 64 * 1024 * 1024;
 
-export function downloadSdists(requirements: readonly string[], indexUrl: string): number {
+export async function downloadSdists(requirements: readonly string[], indexUrl: string): Promise<number> {
   const indexNorm = normalizeIndexUrl(indexUrl);
   for (const requirement of requirements) {
     const { package: pkg, version } = parseRequirement(requirement);
@@ -38,8 +38,7 @@ export function downloadSdists(requirements: readonly string[], indexUrl: string
     const expectedSuffix = `-${version}.tar.gz`;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       try {
-        const html = execFileSync('curl', ['-fsS', projectUrl], {
-          encoding: 'utf8',
+        const { stdout: html } = await execCapture('curl', ['-fsS', projectUrl], {
           maxBuffer: SIMPLE_INDEX_MAX_BUFFER,
         });
         const href = findSdistHref(parseSimpleIndexHrefs(html), expectedSuffix);
@@ -48,9 +47,7 @@ export function downloadSdists(requirements: readonly string[], indexUrl: string
         }
         const artifactUrl = new URL(href, projectUrl).toString();
         process.stdout.write(`Downloading sdist for ${requirement} from ${artifactUrl}\n`);
-        execFileSync('curl', ['-fsS', '-o', `${SDISTS_DIR}/${sdistFilenameFromHref(href)}`, artifactUrl], {
-          stdio: 'ignore',
-        });
+        await execCapture('curl', ['-fsS', '-o', `${SDISTS_DIR}/${sdistFilenameFromHref(href)}`, artifactUrl]);
         break;
       } catch (error) {
         if (attempt === MAX_ATTEMPTS) {
@@ -59,7 +56,7 @@ export function downloadSdists(requirements: readonly string[], indexUrl: string
         }
         const sleepFor = retrySleepSeconds(attempt);
         process.stdout.write(`TestPyPI sdist index lag for ${requirement}; retrying in ${sleepFor}s\n`);
-        execFileSync('sleep', [String(sleepFor)], { stdio: 'ignore' });
+        await sleep(sleepFor * 1000);
       }
     }
   }

@@ -23,7 +23,7 @@ import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
 import { printUsage } from './usage.js';
 
-export function run(argv: readonly string[]): number {
+export async function run(argv: readonly string[]): Promise<number> {
   const cmd = argv[2];
   if (cmd === undefined) {
     printUsage();

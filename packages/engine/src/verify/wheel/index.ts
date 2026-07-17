@@ -14,27 +14,28 @@
  * `-<version>.tar.gz`; for a wheel row the first `*.whl`'s
  * `*.dist-info/METADATA` `Version:` must equal `--version`. The wheel is
  * read with a pure-Node zip reader (no `unzip`), so this runs on every
- * platform the maturin matrix builds on. Synchronous throughout. Returns the
+ * platform the maturin matrix builds on. Async throughout. Returns the
  * process exit code (0 ok, 1 on any miss).
  */
 
-import { existsSync, statSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { findDistFile } from './find-dist-file.js';
 import { readWheelVersion } from './read-wheel-version.js';
+import { pathExists } from '../../utils/path-exists.js';
 import type { VerifyWheelOptions } from './types.js';
 
-export function verifyWheel(opts: VerifyWheelOptions): number {
+export async function verifyWheel(opts: VerifyWheelOptions): Promise<number> {
   const pkgDir = isAbsolute(opts.path) ? opts.path : resolve(opts.cwd, opts.path);
   const distDir = join(pkgDir, 'dist');
-  if (!existsSync(distDir) || !statSync(distDir).isDirectory()) {
+  if (!(await pathExists(distDir)) || !(await stat(distDir)).isDirectory()) {
     process.stdout.write(`::error::no dist/ produced under ${distDir}\n`);
     return 1;
   }
 
   if (opts.target === 'sdist') {
-    const sdist = findDistFile(distDir, '.tar.gz');
+    const sdist = await findDistFile(distDir, '.tar.gz');
     if (sdist === null) {
       process.stdout.write(`::error::no sdist produced in ${distDir}\n`);
       return 1;
@@ -50,12 +51,12 @@ export function verifyWheel(opts: VerifyWheelOptions): number {
     return 1;
   }
 
-  const wheel = findDistFile(distDir, '.whl');
+  const wheel = await findDistFile(distDir, '.whl');
   if (wheel === null) {
     process.stdout.write(`::error::no wheel produced in ${distDir}\n`);
     return 1;
   }
-  const actual = readWheelVersion(wheel);
+  const actual = await readWheelVersion(wheel);
   if (actual !== opts.version) {
     process.stdout.write(
       `::error::wheel METADATA Version='${actual ?? ''}' but plan='${opts.version}' (wheel: ${basename(wheel)})\n`,

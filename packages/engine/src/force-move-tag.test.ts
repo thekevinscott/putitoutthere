@@ -24,8 +24,8 @@ beforeEach(() => {
 });
 
 describe('forceMoveTag', () => {
-  it('writes the tag locally then force-pushes it ref-scoped to the remote', () => {
-    forceMoveTag('v0', 'headsha', { cwd: 'repo' });
+  it('writes the tag locally then force-pushes it ref-scoped to the remote', async () => {
+    await forceMoveTag('v0', 'headsha', { cwd: 'repo' });
 
     expect(forceTagMock).toHaveBeenCalledWith('v0', 'headsha', { cwd: 'repo' });
     expect(pushForceMock).toHaveBeenCalledWith('v0', { cwd: 'repo' });
@@ -35,9 +35,9 @@ describe('forceMoveTag', () => {
     );
   });
 
-  it('re-targets the tag on a subsequent move (the force path)', () => {
-    forceMoveTag('v0', 'first', { cwd: 'repo' });
-    forceMoveTag('v0', 'second', { cwd: 'repo' });
+  it('re-targets the tag on a subsequent move (the force path)', async () => {
+    await forceMoveTag('v0', 'first', { cwd: 'repo' });
+    await forceMoveTag('v0', 'second', { cwd: 'repo' });
 
     // The second move points both the local write and the forced push at the
     // new commit — the diverged-remote overwrite the force flag exists for.

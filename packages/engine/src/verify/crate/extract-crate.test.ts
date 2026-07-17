@@ -1,36 +1,39 @@
 /**
  * `extractCrate` (#449): unpacks a gzipped tar (`.crate`) into a fresh temp
- * dir. Isolated: `node:fs` (`mkdtempSync`) and `node:child_process`
- * (`execFileSync`) are mocked, so the unit is exercised without a real
+ * dir. Isolated: `node:fs/promises` (`mkdtemp`) and the process seam
+ * (`execCapture`) are mocked, so the unit is exercised without a real
  * archive or a real `tar` subprocess — this test asserts the wiring (a fresh
  * temp dir returned, `tar -xzf … -C <dir>` invoked). Real tar extraction is
  * covered by tests/integration/verify-crate.integration.test.ts and e2e.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { extractCrate } from './extract-crate.js';
+import { execCapture } from '../../utils/exec-capture.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../../utils/exec-capture.js');
+vi.mock('node:fs/promises');
 
-const mkdtemp = vi.mocked(mkdtempSync);
-const execFile = vi.mocked(execFileSync);
+const mkdtempMock = vi.mocked(mkdtemp);
+const execMock = vi.mocked(execCapture);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  execMock.mockResolvedValue({ stdout: '', stderr: '' });
 });
 
 describe('extractCrate', () => {
-  it('extracts the archive into a fresh dir via tar -xzf … -C <dir>', () => {
-    mkdtemp.mockReturnValue('/tmp/piot-crate-abc');
+  it('extracts the archive into a fresh dir via tar -xzf … -C <dir>', async () => {
+    mkdtempMock.mockResolvedValue('/tmp/piot-crate-abc');
 
-    const dir = extractCrate('/reg/demo-1.0.0.crate');
+    const dir = await extractCrate('/reg/demo-1.0.0.crate');
 
     expect(dir).toBe('/tmp/piot-crate-abc');
-    expect(execFile).toHaveBeenCalledWith('tar', [
+    // The temp dir is minted with the engine's `piot-crate-` prefix.
+    expect(mkdtempMock).toHaveBeenCalledWith(expect.stringContaining('piot-crate-'));
+    expect(execMock).toHaveBeenCalledWith('tar', [
       '-xzf',
       '/reg/demo-1.0.0.crate',
       '-C',
@@ -38,11 +41,11 @@ describe('extractCrate', () => {
     ]);
   });
 
-  it('returns a fresh directory distinct on each call', () => {
-    mkdtemp.mockReturnValueOnce('/tmp/piot-crate-a').mockReturnValueOnce('/tmp/piot-crate-b');
+  it('returns a fresh directory distinct on each call', async () => {
+    mkdtempMock.mockResolvedValueOnce('/tmp/piot-crate-a').mockResolvedValueOnce('/tmp/piot-crate-b');
 
-    const a = extractCrate('/reg/demo-2.0.0.crate');
-    const b = extractCrate('/reg/demo-2.0.0.crate');
+    const a = await extractCrate('/reg/demo-2.0.0.crate');
+    const b = await extractCrate('/reg/demo-2.0.0.crate');
 
     expect(a).not.toBe(b);
   });

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -14,12 +14,12 @@ import { parse as parseToml } from 'smol-toml';
  * version-write path. A malformed ancestor Cargo.toml is not treated as
  * the workspace root; the walk continues past it.
  */
-export function findWorkspaceRoot(startDir: string): string | null {
+export async function findWorkspaceRoot(startDir: string): Promise<string | null> {
   let dir = startDir;
   for (;;) {
     let source = '';
     try {
-      source = readFileSync(join(dir, 'Cargo.toml'), 'utf8');
+      source = await readFile(join(dir, 'Cargo.toml'), 'utf8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw err;

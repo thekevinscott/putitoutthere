@@ -5,7 +5,7 @@
  * only I/O lives here; the decision is `decide.ts`'s.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
 import { decideActionlintIdToken } from './decide.js';
 
@@ -19,8 +19,11 @@ const PR_TIME_PATH_FILES = [
   '.github/workflows/check.yml',
 ];
 
-export function runActionlintIdToken(): number {
-  const files = PR_TIME_PATH_FILES.map((path) => ({ path, content: readFileSync(path, 'utf8') }));
+export async function runActionlintIdToken(): Promise<number> {
+  const files: { path: string; content: string }[] = [];
+  for (const path of PR_TIME_PATH_FILES) {
+    files.push({ path, content: await readFile(path, 'utf8') });
+  }
   const result = decideActionlintIdToken({ files });
   for (const line of result.lines) {process.stdout.write(`${line}\n`);}
   return result.exitCode;

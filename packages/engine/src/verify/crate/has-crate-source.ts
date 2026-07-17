@@ -11,12 +11,12 @@ import { basename, dirname } from 'node:path';
 
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 
-export function hasCrateSource(dir: string): boolean {
+export async function hasCrateSource(dir: string): Promise<boolean> {
   // Match a `lib.rs` / `main.rs` whose parent dir is `src`, via
   // basename/dirname rather than a `/src/…` string suffix — the extracted
   // paths use the platform separator, so a literal `/` check silently
   // misses on Windows (`…\src\lib.rs`) and the unit matrix goes red.
-  return listFilesRecursive(dir).some((f) => {
+  return (await listFilesRecursive(dir)).some((f) => {
     const name = basename(f);
     return (name === 'lib.rs' || name === 'main.rs') && basename(dirname(f)) === 'src';
   });

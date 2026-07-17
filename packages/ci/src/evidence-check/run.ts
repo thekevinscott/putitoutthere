@@ -7,9 +7,11 @@
  * returns the exit code. The only I/O lives here; every decision is a pure
  * module under this directory.
  */
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
+import { execCapture } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
+import { sleep } from '../utils/sleep.js';
 import { addedUnreleasedBullets } from './added-bullets.js';
 import { citedRunNeedles } from './cited-needles.js';
 import { decideEvidenceCheck } from './decide.js';
@@ -23,7 +25,7 @@ import { pollUntilResolved } from './poll.js';
 const POLL_DEADLINE_MS = 20 * 60 * 1000;
 const POLL_INTERVAL_SECONDS = 30;
 
-export function runEvidenceCheck(): number {
+export async function runEvidenceCheck(): Promise<number> {
   const base = process.env.BASE_SHA;
   const head = process.env.HEAD_SHA;
   if (base === undefined || base === '' || head === undefined || head === '') {
@@ -32,39 +34,50 @@ export function runEvidenceCheck(): number {
   }
   const repository = process.env.GITHUB_REPOSITORY;
 
-  const diff = execFileSync('git', ['diff', '--unified=0', base, head, '--', 'CHANGELOG.md'], { encoding: 'utf8' });
+  const { stdout: diff } = await execCapture('git', ['diff', '--unified=0', base, head, '--', 'CHANGELOG.md']);
   const patch = diff.split(/\r?\n/);
-  const changelog = readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/);
+  const changelog = (await readFile('CHANGELOG.md', 'utf8')).split(/\r?\n/);
   const bullets = addedUnreleasedBullets(changelog, patch);
 
-  const ghApi = (path: string): unknown =>
-    JSON.parse(
-      execFileSync('gh', ['api', '-X', 'GET', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }),
-    );
+  // `gh` stderr was inherited to the terminal under execFileSync; execCapture
+  // captures it, so surface it in the thrown message to keep diagnosability.
+  const ghApi = async (path: string): Promise<unknown> => {
+    let stdout: string;
+    try {
+      ({ stdout } = await execCapture('gh', ['api', '-X', 'GET', path]));
+    } catch (err) {
+      const stderr = err instanceof ExecError ? err.stderr : '';
+      throw new Error(`gh api ${path} failed: ${stderr}`, { cause: err });
+    }
+    return JSON.parse(stdout);
+  };
+
+  const jobsByRun = new Map<number, WorkflowJob[]>();
+  // Sync cache reader handed to the pure decision code (runMatches /
+  // citationResolution / passedEvidence stay sync). The job I/O is prefetched
+  // in `runsForHead` below, so this never triggers a subprocess.
+  const jobsForRun = (runId: number): WorkflowJob[] => jobsByRun.get(runId) ?? [];
 
   let cachedRuns: WorkflowRun[] | null = null;
-  const runsForHead = (): WorkflowRun[] => {
+  const runsForHead = async (): Promise<WorkflowRun[]> => {
     if (cachedRuns !== null) {
       return cachedRuns;
     }
     const encodedSha = encodeURIComponent(head);
-    const response = ghApi(`repos/${repository}/actions/runs?head_sha=${encodedSha}&per_page=100`) as {
+    const response = (await ghApi(`repos/${repository}/actions/runs?head_sha=${encodedSha}&per_page=100`)) as {
       workflow_runs?: WorkflowRun[];
     };
     cachedRuns = response.workflow_runs ?? [];
-    return cachedRuns;
-  };
-
-  const jobsByRun = new Map<number, WorkflowJob[]>();
-  const jobsForRun = (runId: number): WorkflowJob[] => {
-    const cached = jobsByRun.get(runId);
-    if (cached !== undefined) {
-      return cached;
+    // Prefetch each run's jobs so the sync `jobsForRun` reader is I/O-free.
+    for (const run of cachedRuns) {
+      if (!jobsByRun.has(run.id)) {
+        const jobsResponse = (await ghApi(`repos/${repository}/actions/runs/${run.id}/jobs?per_page=100`)) as {
+          jobs?: WorkflowJob[];
+        };
+        jobsByRun.set(run.id, jobsResponse.jobs ?? []);
+      }
     }
-    const response = ghApi(`repos/${repository}/actions/runs/${runId}/jobs?per_page=100`) as { jobs?: WorkflowJob[] };
-    const jobs = response.jobs ?? [];
-    jobsByRun.set(runId, jobs);
-    return jobs;
+    return cachedRuns;
   };
 
   const resetRunCaches = (): void => {
@@ -72,26 +85,32 @@ export function runEvidenceCheck(): number {
     jobsByRun.clear();
   };
 
-  const sleep = (): void => {
-    execFileSync('sleep', [String(POLL_INTERVAL_SECONDS)], { stdio: 'ignore' });
-  };
-
-  pollUntilResolved({
-    needles: citedRunNeedles(bullets),
+  const needles = citedRunNeedles(bullets);
+  await pollUntilResolved({
+    needles,
     deadlineMs: POLL_DEADLINE_MS,
     now: () => Date.now(),
-    sleep,
+    sleep: () => sleep(POLL_INTERVAL_SECONDS * 1000),
     log: (message) => process.stdout.write(`${message}\n`),
     loadRuns: runsForHead,
     jobsForRun,
     resetCaches: resetRunCaches,
   });
 
+  // Resolve run/job state for the sync `passedEvidence` predicate. Only the
+  // cited buckets reach that predicate (decide gates on the same allowed
+  // buckets `citedRunNeedles` collected), so with no needles there is no
+  // citation to check — skip the query entirely, matching the pre-async gate,
+  // which only ever hit `gh` when a citation needed resolving.
+  let runs: readonly WorkflowRun[] = [];
+  if (needles.size > 0) {
+    runs = await runsForHead();
+  }
   const result = decideEvidenceCheck({
     bullets,
     baseSha: base,
     headSha: head,
-    passedEvidence: (citation) => passedEvidence(citation, runsForHead(), jobsForRun),
+    passedEvidence: (citation) => passedEvidence(citation, runs, jobsForRun),
   });
   for (const line of result.lines) {
     process.stdout.write(`${line}\n`);

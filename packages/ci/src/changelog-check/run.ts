@@ -6,8 +6,7 @@
  * `decide.ts`'s.
  */
 
-import { execFileSync } from 'node:child_process';
-
+import { execCapture } from '../utils/exec-capture.js';
 import { decideChangelogCheck } from './decide.js';
 
 // Public-surface globset — broad by design (see AGENTS.md "Changelog and
@@ -22,7 +21,7 @@ const SURFACE_PATHSPECS = [
   ':!docs/guide/migrations.md',
 ];
 
-export function runChangelogCheck(): number {
+export async function runChangelogCheck(): Promise<number> {
   const base = process.env.BASE_SHA;
   const head = process.env.HEAD_SHA;
   if (base === undefined || base === '' || head === undefined || head === '') {
@@ -31,13 +30,12 @@ export function runChangelogCheck(): number {
   }
 
   const lines = (out: string): string[] => out.split('\n').filter((l) => l !== '');
-  const commitLog = execFileSync('git', ['log', '--format=%B', `${base}..${head}`], { encoding: 'utf8' });
+  const commitLog = (await execCapture('git', ['log', '--format=%B', `${base}..${head}`])).stdout;
   const surfaceFiles = lines(
-    execFileSync('git', ['--glob-pathspecs', 'diff', '--name-only', base, head, '--', ...SURFACE_PATHSPECS], {
-      encoding: 'utf8',
-    }),
+    (await execCapture('git', ['--glob-pathspecs', 'diff', '--name-only', base, head, '--', ...SURFACE_PATHSPECS]))
+      .stdout,
   );
-  const changedFiles = lines(execFileSync('git', ['diff', '--name-only', base, head], { encoding: 'utf8' }));
+  const changedFiles = lines((await execCapture('git', ['diff', '--name-only', base, head])).stdout);
 
   const result = decideChangelogCheck({ commitLog, surfaceFiles, changedFiles });
   for (const line of result.lines) {process.stdout.write(`${line}\n`);}

@@ -8,7 +8,7 @@
  * decision and each network phase lives in its own module.
  */
 
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 
 import { buildRequirements } from './build-requirements.js';
 import { downloadSdists } from './download-sdists.js';
@@ -20,14 +20,14 @@ const REQUIREMENTS_FILE = 'testpypi-requirements.txt';
 const WHEELS_DIR = 'downloaded-wheels';
 const SDISTS_DIR = 'downloaded-sdists';
 
-export function runTestpypiMetadata(): number {
+export async function runTestpypiMetadata(): Promise<number> {
   const indexUrl = process.env.TESTPYPI_INDEX_URL;
   if (indexUrl === undefined || indexUrl === '') {
     process.stdout.write('::error::testpypi-verify: TESTPYPI_INDEX_URL must be set.\n');
     return 1;
   }
 
-  const distFiles = readdirSync(DIST_DIR, { withFileTypes: true })
+  const distFiles = (await readdir(DIST_DIR, { withFileTypes: true }))
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name);
   const built = buildRequirements(distFiles);
@@ -36,18 +36,18 @@ export function runTestpypiMetadata(): number {
     return 1;
   }
   const { requirements } = built;
-  writeFileSync(REQUIREMENTS_FILE, requirements.map((requirement) => `${requirement}\n`).join(''));
+  await writeFile(REQUIREMENTS_FILE, requirements.map((requirement) => `${requirement}\n`).join(''));
 
-  rmSync(WHEELS_DIR, { recursive: true, force: true });
-  rmSync(SDISTS_DIR, { recursive: true, force: true });
-  mkdirSync(WHEELS_DIR, { recursive: true });
-  mkdirSync(SDISTS_DIR, { recursive: true });
+  await rm(WHEELS_DIR, { recursive: true, force: true });
+  await rm(SDISTS_DIR, { recursive: true, force: true });
+  await mkdir(WHEELS_DIR, { recursive: true });
+  await mkdir(SDISTS_DIR, { recursive: true });
 
-  const wheelExit = downloadWheels(requirements, indexUrl);
+  const wheelExit = await downloadWheels(requirements, indexUrl);
   if (wheelExit !== 0) {
     return wheelExit;
   }
-  const sdistExit = downloadSdists(requirements, indexUrl);
+  const sdistExit = await downloadSdists(requirements, indexUrl);
   if (sdistExit !== 0) {
     return sdistExit;
   }

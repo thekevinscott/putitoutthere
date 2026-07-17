@@ -9,13 +9,13 @@
  * `false`, matching the bash `gh release view … >/dev/null 2>&1` condition.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execCapture } from '../utils/exec-capture.js';
 
 import type { GhOptions } from './types.js';
 
-export function ghReleaseExists(tag: string, opts: GhOptions = {}): boolean {
+export async function ghReleaseExists(tag: string, opts: GhOptions = {}): Promise<boolean> {
   try {
-    execFileSync('gh', ['release', 'view', tag], { cwd: opts.cwd, stdio: 'ignore' });
+    await execCapture('gh', ['release', 'view', tag], { cwd: opts.cwd });
     return true;
   } catch {
     return false;

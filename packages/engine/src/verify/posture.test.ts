@@ -74,7 +74,7 @@ function stubHandler(): void {
 
 describe('computeVerify', () => {
   it('classifies every posture', async () => {
-    loadConfigMock.mockReturnValue(
+    loadConfigMock.mockResolvedValue(
       configWith(['pkg-oidc', 'pkg-token', 'pkg-unpub', 'pkg-latestflaky', 'pkg-trustflaky']),
     );
     stubHandler();
@@ -95,7 +95,7 @@ describe('computeVerify', () => {
   it('hands the handler a ctx whose inert artifact accessors return empty/false', async () => {
     // The verify path builds a Ctx with stub `artifacts.get`/`has`; drive a
     // handler that invokes them so the stub bodies are exercised.
-    loadConfigMock.mockReturnValue(configWith(['pkg-probe']));
+    loadConfigMock.mockResolvedValue(configWith(['pkg-probe']));
     const probe: { got?: string; had?: boolean } = {};
     handlerForMock.mockReturnValue({
       latestVersion: vi.fn((_pkg: Pkg, ctx: Ctx) => {
@@ -113,7 +113,7 @@ describe('computeVerify', () => {
   });
 
   it('does not read trust for an unpublished package', async () => {
-    loadConfigMock.mockReturnValue(configWith(['pkg-unpub']));
+    loadConfigMock.mockResolvedValue(configWith(['pkg-unpub']));
     stubHandler();
 
     const rows = await computeVerify({ cwd: '/repo' });

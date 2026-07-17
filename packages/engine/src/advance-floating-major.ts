@@ -15,7 +15,6 @@
  * package the config declares, `parseTagVersion` reads the version back
  * out, and the shared `forceMoveTag` performs the move — so the floating
  * tag can never track a release the publish path wouldn't recognize.
- * Synchronous, per the engine convention.
  */
 
 import { join } from 'node:path';
@@ -25,16 +24,16 @@ import { forceMoveTag } from './force-move-tag.js';
 import { fetchTagsForce, lastTag, tagCommit, tagList } from './git.js';
 import { parseTagVersion } from './tag-template.js';
 
-export function advanceFloatingMajor(opts: { cwd: string }): number {
+export async function advanceFloatingMajor(opts: { cwd: string }): Promise<number> {
   const gitOpts = { cwd: opts.cwd };
-  const config = loadConfig(join(opts.cwd, 'putitoutthere.toml'));
+  const config = await loadConfig(join(opts.cwd, 'putitoutthere.toml'));
   const pkg = config.packages[0]!;
 
   // Refresh remote tags (force, so a tag moved on the remote since checkout
   // doesn't reject the fetch — #199) before re-deriving "latest release".
-  fetchTagsForce(gitOpts);
+  await fetchTagsForce(gitOpts);
 
-  const latest = lastTag(pkg.name, pkg.tag_format, gitOpts);
+  const latest = await lastTag(pkg.name, pkg.tag_format, gitOpts);
   if (latest === null) {
     process.stdout.write('No putitoutthere-v* tags yet; nothing to track.\n');
     return 0;
@@ -45,9 +44,9 @@ export function advanceFloatingMajor(opts: { cwd: string }): number {
   const major = version.split('.')[0]!;
   const floating = `v${major}`;
 
-  const target = tagCommit(latest, gitOpts);
-  const existing = tagList(floating, gitOpts);
-  const current = existing.length > 0 ? tagCommit(floating, gitOpts) : null;
+  const target = await tagCommit(latest, gitOpts);
+  const existing = await tagList(floating, gitOpts);
+  const current = existing.length > 0 ? await tagCommit(floating, gitOpts) : null;
   if (current === target) {
     process.stdout.write(`Floating tag ${floating} already at ${latest}; no update.\n`);
     return 0;
@@ -56,6 +55,6 @@ export function advanceFloatingMajor(opts: { cwd: string }): number {
   process.stdout.write(
     `Moving floating tag ${floating} -> ${target} (latest release ${latest})\n`,
   );
-  forceMoveTag(floating, target, gitOpts);
+  await forceMoveTag(floating, target, gitOpts);
   return 0;
 }

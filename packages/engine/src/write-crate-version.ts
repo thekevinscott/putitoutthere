@@ -18,7 +18,7 @@
  * gate. This is that command.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
@@ -34,11 +34,11 @@ import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
  * mirroring `writeVersionForBuild`. Non-ENOENT read failures surface
  * unmodified.
  */
-export function writeCrateVersionForBuild(crateDir: string, version: string): string[] {
+export async function writeCrateVersionForBuild(crateDir: string, version: string): Promise<string[]> {
   const cargoPath = join(crateDir, 'Cargo.toml');
   let original: string;
   try {
-    original = readFileSync(cargoPath, 'utf8');
+    original = await readFile(cargoPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(
@@ -48,5 +48,5 @@ export function writeCrateVersionForBuild(crateDir: string, version: string): st
     }
     throw err;
   }
-  return writeResolvedCargoVersion(crateDir, original, version);
+  return await writeResolvedCargoVersion(crateDir, original, version);
 }

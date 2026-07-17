@@ -26,11 +26,11 @@ beforeEach(() => {
 });
 
 describe('foldActionBundle', () => {
-  it('commits the staged bundle on top of HEAD, forwarding the parent body', () => {
-    hasStagedChangesMock.mockReturnValue(true);
-    commitBodyMock.mockReturnValue('feat: bump\n\nrelease: minor');
+  it('commits the staged bundle on top of HEAD, forwarding the parent body', async () => {
+    hasStagedChangesMock.mockResolvedValue(true);
+    commitBodyMock.mockResolvedValue('feat: bump\n\nrelease: minor');
 
-    const code = foldActionBundle({ cwd: '/repo', subject: 'chore(v0): bundle action' });
+    const code = await foldActionBundle({ cwd: '/repo', subject: 'chore(v0): bundle action' });
 
     expect(code).toBe(0);
     // Stages the freshly-built bundle dir before committing.
@@ -46,14 +46,14 @@ describe('foldActionBundle', () => {
     );
   });
 
-  it('throws the guard message when nothing is staged to fold', () => {
+  it('throws the guard message when nothing is staged to fold', async () => {
     // Empty index after staging: `build:action` produced nothing, an unexpected
     // state the release must abort on rather than commit nothing.
-    hasStagedChangesMock.mockReturnValue(false);
+    hasStagedChangesMock.mockResolvedValue(false);
 
-    expect(() =>
+    await expect(
       foldActionBundle({ cwd: '/repo', subject: 'chore(release): bundle action' }),
-    ).toThrow(
+    ).rejects.toThrow(
       'No bundle changes to commit (unexpected — build:action should have produced output).',
     );
     // The guard fires before any commit is attempted.
