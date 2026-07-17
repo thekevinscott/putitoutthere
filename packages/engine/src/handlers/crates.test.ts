@@ -1028,6 +1028,8 @@ describe('crates.publish', () => {
       expect(msg).toMatch(/demo-crate/);
       expect(msg).toMatch(/--- cargo stderr ---/);
       expect(msg).toMatch(/status 404 Not Found/);
+      // The matched cargo stderr is hoisted into the message verbatim.
+      expect(msg).toContain(STDERR);
       fetchSpy.mockRestore();
     });
 

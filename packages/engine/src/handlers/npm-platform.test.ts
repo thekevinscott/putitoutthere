@@ -1225,9 +1225,19 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
       );
     });
 
-    await expect(
-      publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx()),
-    ).rejects.toThrow(/Re-run the release to mint a fresh attestation/);
+    let captured: unknown;
+    try {
+      await publishPlatforms(basePkg({ targets: ['linux-x64-gnu'] }), '0.2.0', makeCtx());
+    } catch (err) {
+      captured = err;
+    }
+    const msg = (captured as Error).message;
+    expect(msg).toMatch(/Re-run the release to mint a fresh attestation/);
+    // The matched npm stderr is hoisted into the message verbatim so the
+    // failure is debuggable without re-running.
+    expect(msg).toContain(
+      'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+    );
     // Failed before the rewrite: main package.json must NOT carry optionalDependencies.
     const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as Record<string, unknown>;
     expect(pkgJson.optionalDependencies).toBeUndefined();

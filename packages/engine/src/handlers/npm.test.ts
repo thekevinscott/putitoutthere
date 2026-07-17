@@ -1141,13 +1141,23 @@ describe('npm.publish', () => {
         ),
       );
     });
-    await expect(
-      npm.publish(
+    let captured: unknown;
+    try {
+      await npm.publish(
         { ...basePkg(), path: dir },
         '0.1.0',
         makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok' } }),
-      ),
-    ).rejects.toThrow(/Re-run the release to mint a fresh attestation/);
+      );
+    } catch (err) {
+      captured = err;
+    }
+    const msg = (captured as Error).message;
+    expect(msg).toMatch(/Re-run the release to mint a fresh attestation/);
+    // The matched cargo/npm stderr is hoisted into the message verbatim so
+    // the failure is debuggable without re-running.
+    expect(msg).toContain(
+      'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+    );
   });
 });
 
