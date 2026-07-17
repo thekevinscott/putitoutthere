@@ -14,7 +14,7 @@
  * and the workflow respects it.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type NpmPackage } from './config.js';
@@ -97,29 +97,29 @@ export function generateLauncherSource(opts: WriteLauncherOptions): string {
  *
  * Returns the list of paths that were actually written.
  */
-export function writeLauncher(opts: WriteLauncherOptions): string[] {
+export async function writeLauncher(opts: WriteLauncherOptions): Promise<string[]> {
   const written: string[] = [];
   const launcherPath = join(opts.pkgDir, 'bin', `${opts.bin}.js`);
   // CodeQL TOCTOU: use `wx` (write-exclusive) rather than `existsSync`
   // precheck so the "absent only" guarantee is atomic. EEXIST means a
   // consumer-authored launcher (or a concurrent write) won this race —
   // exactly the override path we want to respect.
-  mkdirSync(dirname(launcherPath), { recursive: true });
+  await mkdir(dirname(launcherPath), { recursive: true });
   try {
-    writeFileSync(launcherPath, generateLauncherSource(opts), { encoding: 'utf8', flag: 'wx' });
+    await writeFile(launcherPath, generateLauncherSource(opts), { encoding: 'utf8', flag: 'wx' });
     written.push(launcherPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {throw err;}
   }
 
   const pkgJsonPath = join(opts.pkgDir, 'package.json');
-  const raw = readFileSync(pkgJsonPath, 'utf8');
+  const raw = await readFile(pkgJsonPath, 'utf8');
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   if (parsed['bin'] === undefined) {
     parsed['bin'] = { [opts.bin]: `bin/${opts.bin}.js` };
     const indent = detectIndent(raw);
     const trailing = raw.endsWith('\n') ? '\n' : '';
-    writeFileSync(pkgJsonPath, JSON.stringify(parsed, null, indent) + trailing, 'utf8');
+    await writeFile(pkgJsonPath, JSON.stringify(parsed, null, indent) + trailing, 'utf8');
     written.push(pkgJsonPath);
   }
   return written;
@@ -143,10 +143,10 @@ export interface WriteLauncherFromConfigOptions {
  * job invokes this on every main row and only bundled-cli rows need
  * the launcher.
  */
-export function writeLauncherFromConfig(
+export async function writeLauncherFromConfig(
   opts: WriteLauncherFromConfigOptions,
-): string[] {
-  const cfg = loadConfig(opts.configPath ?? join(opts.cwd, 'putitoutthere.toml'));
+): Promise<string[]> {
+  const cfg = await loadConfig(opts.configPath ?? join(opts.cwd, 'putitoutthere.toml'));
   const absPkg = isAbsolute(opts.packagePath)
     ? opts.packagePath
     : resolve(opts.cwd, opts.packagePath);
@@ -185,7 +185,7 @@ export function writeLauncherFromConfig(
   const targets = npmPkg.targets!;
   const triples = targets.map((t) => (typeof t === 'string' ? t : t.triple));
   const npmName = npmPkg.npm ?? npmPkg.name;
-  return writeLauncher({
+  return await writeLauncher({
     pkgDir: resolve(opts.cwd, npmPkg.path),
     npmName,
     bin: bundleCli.bin,

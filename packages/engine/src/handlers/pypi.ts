@@ -35,7 +35,7 @@
  * Issue #17. Plan: §6.4, §12.2, §12.3, §13.1, §14.5, §16.1.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -70,7 +70,7 @@ async function isPublishedImpl(
   throw new Error(`pypi.org GET ${url} returned ${res.status}`);
 }
 
-function writeVersionImpl(
+async function writeVersionImpl(
   pkg: { name?: string; path: string },
   version: string,
   ctx: Ctx,
@@ -78,26 +78,23 @@ function writeVersionImpl(
   const pyProjectPath = join(pkg.path, 'pyproject.toml');
   let original: string;
   try {
-    original = readFileSync(pyProjectPath, 'utf8');
+    original = await readFile(pyProjectPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return Promise.reject(new Error(`pyproject.toml not found at ${pyProjectPath}`));
+      throw new Error(`pyproject.toml not found at ${pyProjectPath}`, { cause: err });
     }
-    return Promise.reject(toError(err));
+    throw toError(err);
   }
   let parsed: unknown;
   try {
     parsed = parseToml(original);
   } catch (err) {
-    const msg = toError(err).message;
-    return Promise.reject(new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${msg}`));
+    throw new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${toError(err).message}`, { cause: err });
   }
   const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } })?.project;
   if (!project) {
-    return Promise.reject(
-      new Error(
-        `pyproject.toml has no [project] table -- declare [project].dynamic = ["version"] with hatch-vcs (or setuptools-scm / maturin Cargo.toml). See ${DYNAMIC_VERSION_DOC_POINTER}.`,
-      ),
+    throw new Error(
+      `pyproject.toml has no [project] table -- declare [project].dynamic = ["version"] with hatch-vcs (or setuptools-scm / maturin Cargo.toml). See ${DYNAMIC_VERSION_DOC_POINTER}.`,
     );
   }
   if (projectDynamicIncludesVersion(project)) {
@@ -123,7 +120,7 @@ function writeVersionImpl(
         `  See ${DYNAMIC_VERSION_DOC_POINTER}`,
       ].join('\n'),
     );
-    return Promise.resolve([]);
+    return [];
   }
   // Static literal — not allowed. Preflight should have rejected this
   // already (`requirePypiVersionSource` runs before any writeVersion
@@ -131,16 +128,12 @@ function writeVersionImpl(
   // can be invoked directly; guard here so the failure mode is the
   // same actionable error rather than a silent rewrite. See #333.
   if (typeof project.version === 'string') {
-    return Promise.reject(
-      new Error(
-        `[${ErrorCodes.PYPI_STATIC_VERSION}] pyproject.toml at ${pyProjectPath} declares a static \`[project].version\` literal. Use \`[project].dynamic = ["version"]\` with hatch-vcs (recommended), setuptools-scm, or the maturin Cargo.toml-driven path — putitoutthere does not edit pyproject.toml at release time. See ${DYNAMIC_VERSION_DOC_POINTER}.`,
-      ),
+    throw new Error(
+      `[${ErrorCodes.PYPI_STATIC_VERSION}] pyproject.toml at ${pyProjectPath} declares a static \`[project].version\` literal. Use \`[project].dynamic = ["version"]\` with hatch-vcs (recommended), setuptools-scm, or the maturin Cargo.toml-driven path — putitoutthere does not edit pyproject.toml at release time. See ${DYNAMIC_VERSION_DOC_POINTER}.`,
     );
   }
-  return Promise.reject(
-    new Error(
-      `pyproject.toml at ${pyProjectPath}: [project] table declares no version source -- add \`dynamic = ["version"]\`. See ${DYNAMIC_VERSION_DOC_POINTER}.`,
-    ),
+  throw new Error(
+    `pyproject.toml at ${pyProjectPath}: [project] table declares no version source -- add \`dynamic = ["version"]\`. See ${DYNAMIC_VERSION_DOC_POINTER}.`,
   );
 }
 

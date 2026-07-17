@@ -10,26 +10,27 @@
  * See `notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md`
  * and the handler comment in `pypi.ts` for the why.
  *
- * Unit-suite isolation: the subprocess boundary (`node:child_process`) and
- * the filesystem (`node:fs`) are mocked so each case isolates the unit under
- * test — pyproject.toml contents are driven through `readFileSync` returns
- * rather than a real temp tree. Real end-to-end file behavior is covered by
- * the pypi integration tier (tests/integration/pypi.integration.test.ts).
+ * Unit-suite isolation: the subprocess boundary (the process seam,
+ * `execCapture`) and the filesystem (`node:fs/promises`) are mocked so each
+ * case isolates the unit under test — pyproject.toml contents are driven
+ * through `readFile` resolutions rather than a real temp tree. Real
+ * end-to-end file behavior is covered by the pypi integration tier
+ * (tests/integration/pypi.integration.test.ts).
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { pypi } from './pypi.js';
+import { execCapture } from '../utils/exec-capture.js';
 import type { Ctx } from '../types.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../utils/exec-capture.js');
+vi.mock('node:fs/promises');
 
-const execMock = vi.mocked(execFileSync);
-const readMock = vi.mocked(readFileSync);
-const writeMock = vi.mocked(writeFileSync);
+const execMock = vi.mocked(execCapture);
+const readMock = vi.mocked(readFile);
+const writeMock = vi.mocked(writeFile);
 
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
@@ -59,7 +60,7 @@ function basePkg(over: Partial<{ name: string; path: string; pypi?: string; buil
   };
 }
 
-/** ENOENT the way `node:fs` throws it, so the handler's `code` branch fires. */
+/** ENOENT the way `node:fs/promises` rejects it, so the handler's `code` branch fires. */
 function enoent(): NodeJS.ErrnoException {
   return Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
 }
@@ -183,7 +184,7 @@ describe('pypi.writeVersion', () => {
     // does not edit pyproject.toml at release time (design-commitment #1),
     // and the writeVersion call point must error rather than silently
     // accept the misconfigured shape.
-    readMock.mockReturnValue(
+    readMock.mockResolvedValue(
       ['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'),
     );
     await expect(
@@ -193,13 +194,15 @@ describe('pypi.writeVersion', () => {
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('throws when pyproject.toml is missing', async () => {
-    readMock.mockImplementation(() => {
-      throw enoent();
-    });
-    await expect(
-      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
-    ).rejects.toThrow(/pyproject\.toml not found/);
+  it('throws when pyproject.toml is missing, chaining the ENOENT as cause', async () => {
+    const missing = enoent();
+    readMock.mockRejectedValue(missing);
+    const err = await pypi
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx())
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/pyproject\.toml not found/);
+    // The original ENOENT read error is preserved as `cause`.
+    expect(err.cause).toBe(missing);
   });
 
   it('surfaces a non-ENOENT read error as-is (e.g. EACCES)', async () => {
@@ -214,14 +217,14 @@ describe('pypi.writeVersion', () => {
   });
 
   it('throws when [project] is present but declares no version source', async () => {
-    readMock.mockReturnValue(['[project]', 'name = "demo"', ''].join('\n'));
+    readMock.mockResolvedValue(['[project]', 'name = "demo"', ''].join('\n'));
     await expect(
       pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
     ).rejects.toThrow(/declares no version source.*dynamic\s*=\s*\["version"\]/s);
   });
 
   it('skips the rewrite when [project].dynamic contains "version" (hatch-vcs / setuptools-scm)', async () => {
-    readMock.mockReturnValue(
+    readMock.mockResolvedValue(
       [
         '[project]',
         'name = "demo"',
@@ -240,6 +243,8 @@ describe('pypi.writeVersion', () => {
     expect(changed).toEqual([]);
     // Dynamic-version projects are never rewritten.
     expect(writeMock).not.toHaveBeenCalled();
+    // pyproject.toml is read by that filename, as utf8 text.
+    expect(readMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
   });
 
   it('emits a bare "pypi" label in the dynamic-version hint when the package has no name', async () => {
@@ -248,7 +253,7 @@ describe('pypi.writeVersion', () => {
     // the impl signature) still emits the hint, prefixed with the bare `pypi`
     // label rather than `pypi: <name>`. Pins the falsy-name branch.
     const infoLines: string[] = [];
-    readMock.mockReturnValue(['[project]', 'dynamic = ["version"]', ''].join('\n'));
+    readMock.mockResolvedValue(['[project]', 'dynamic = ["version"]', ''].join('\n'));
     const pkg = { ...basePkg(), path: dir };
     delete (pkg as { name?: string }).name;
     const changed = await pypi.writeVersion(
@@ -271,7 +276,7 @@ describe('pypi.writeVersion', () => {
   });
 
   it('skips the rewrite when "version" is one of several entries in dynamic', async () => {
-    readMock.mockReturnValue(
+    readMock.mockResolvedValue(
       [
         '[project]',
         'name = "demo"',
@@ -291,7 +296,7 @@ describe('pypi.writeVersion', () => {
     // The literal still drives the build backend regardless of what
     // other entries `dynamic` carries, so the rule is the same as the
     // plain static-literal case: reject with PIOT_PYPI_STATIC_VERSION.
-    readMock.mockReturnValue(
+    readMock.mockResolvedValue(
       [
         '[project]',
         'name = "demo"',
@@ -306,7 +311,7 @@ describe('pypi.writeVersion', () => {
   });
 
   it('throws with a distinct message when [project] table is absent entirely', async () => {
-    readMock.mockReturnValue(
+    readMock.mockResolvedValue(
       ['[build-system]', 'requires = ["setuptools>=64"]', ''].join('\n'),
     );
     await expect(
@@ -318,10 +323,13 @@ describe('pypi.writeVersion', () => {
     // smol-toml rejects bare `=` lines. The message names the offending
     // pyproject.toml path; assert separator-agnostically (Windows joins
     // with backslashes) rather than pinning a resolved absolute literal.
-    readMock.mockReturnValue('not = valid = toml');
-    await expect(
-      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
-    ).rejects.toThrow(/failed to parse.*pyproject\.toml/s);
+    readMock.mockResolvedValue('not = valid = toml');
+    const err = await pypi
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx())
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/failed to parse.*pyproject\.toml/s);
+    // The underlying smol-toml parse error is preserved as `cause`.
+    expect(err.cause).toBeInstanceOf(Error);
   });
 });
 

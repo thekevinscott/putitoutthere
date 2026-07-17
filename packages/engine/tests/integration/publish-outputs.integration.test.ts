@@ -16,8 +16,9 @@
  * real file the runner would read, not a mock of it.
  */
 
+import { EventEmitter } from 'node:events';
 import type * as ChildProcess from 'node:child_process';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,21 +26,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
 
-const real = vi.hoisted(() => ({ execFileSync: undefined as unknown as typeof execFileSync }));
-
+// Mock only the Node built-in `execFile` underneath the first-party
+// process seam (`execCapture`); the seam itself runs for real. Intercept
+// `npm` (canned registry responses) and delegate everything else — `git`
+// in particular — to the real `execFile` so plan()'s git reads work
+// against the real fixture repo.
+const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
-  real.execFileSync = actual.execFileSync;
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+  return { ...actual, execFile: vi.fn() };
 });
 
-const execMock = vi.mocked(execFileSync);
+const execMock = vi.mocked(execFile);
+
+/** A minimal execFile-child stand-in that emits `close` with `code`. */
+function fakeChild(code: number): ChildProcess.ChildProcess {
+  const child = new EventEmitter() as ChildProcess.ChildProcess;
+  queueMicrotask(() => child.emit('close', code));
+  return child;
+}
 
 let repo: string;
 let ghOutput: string;
 
 function gitInRepo(args: string[]): void {
-  real.execFileSync('git', args, { cwd: repo });
+  execFileSync('git', args, { cwd: repo });
 }
 
 function writeRepoFile(rel: string, body: string): void {
@@ -64,19 +75,20 @@ beforeEach(() => {
   ghOutput = join(repo, 'gha-output.txt');
   writeFileSync(ghOutput, '', 'utf8');
 
-  execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) => {
+  execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     if (cmd === 'npm') {
       const a = args as string[];
       if (a[0] === 'view') {
-        throw Object.assign(new Error('E404'), {
-          status: 1,
-          stderr: Buffer.from('404 not found'),
-        });
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', '404 not found');
+        return fakeChild(1);
       }
-      if (a[0] === 'publish') return Buffer.from('');
+      if (a[0] === 'publish') {
+        cb(null, '', '');
+        return fakeChild(0);
+      }
     }
-    return real.execFileSync(cmd, args as readonly string[], opts as Parameters<typeof execFileSync>[2]);
-  }) as typeof execFileSync);
+    return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
+  }) as unknown as typeof execFile);
 
   gitInRepo(['init', '-q', '-b', 'main']);
   gitInRepo(['config', 'user.email', 'test@example.com']);
@@ -140,14 +152,20 @@ describe('publish: $GITHUB_OUTPUT release facts (#461)', () => {
   it('appends released=false and released_packages=[] on an idempotent re-run (already published)', async () => {
     // npm `view` now reports the version as live, so the publish path
     // takes the already-published skip branch and nothing newly ships.
-    execMock.mockImplementation(((cmd: string, args: readonly string[], opts?: unknown) => {
+    execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
       if (cmd === 'npm') {
         const a = args as string[];
-        if (a[0] === 'view') return Buffer.from('1.0.0\n');
-        if (a[0] === 'publish') return Buffer.from('');
+        if (a[0] === 'view') {
+          cb(null, '1.0.0\n', '');
+          return fakeChild(0);
+        }
+        if (a[0] === 'publish') {
+          cb(null, '', '');
+          return fakeChild(0);
+        }
       }
-      return real.execFileSync(cmd, args as readonly string[], opts as Parameters<typeof execFileSync>[2]);
-    }) as typeof execFileSync);
+      return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
+    }) as unknown as typeof execFile);
 
     const code = await run(['node', 'putitoutthere', 'publish', '--cwd', repo]);
     expect(code).toBe(0);

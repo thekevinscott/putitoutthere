@@ -8,17 +8,17 @@
  * on-disk manifest round-trips are covered by the integration + e2e tiers.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findWorkspaceRoot } from './find-workspace-root.js';
 import { writeVersionForBuild } from './write-version.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./find-workspace-root.js');
 
-const readFileMock = vi.mocked(readFileSync);
-const writeMock = vi.mocked(writeFileSync);
+const readFileMock = vi.mocked(readFile);
+const writeMock = vi.mocked(writeFile);
 const findRootMock = vi.mocked(findWorkspaceRoot);
 
 const dynamicPyproject = [
@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 describe('writeVersionForBuild (#276, #428)', () => {
-  it('rewrites the sibling [package].version for a single-crate maturin package', () => {
+  it('rewrites the sibling [package].version for a single-crate maturin package', async () => {
     const cargo = [
       '[package]',
       'name = "template-lib"',
@@ -46,18 +46,21 @@ describe('writeVersionForBuild (#276, #428)', () => {
       '',
     ].join('\n');
     readFileMock.mockImplementation((p) =>
-      String(p).endsWith('pyproject.toml') ? dynamicPyproject : cargo,
+      Promise.resolve((p as string).endsWith('pyproject.toml') ? dynamicPyproject : cargo),
     );
 
-    const written = writeVersionForBuild('pkg', '1.2.3');
+    const written = await writeVersionForBuild('pkg', '1.2.3');
 
     expect(written).toHaveLength(1);
     expect(written[0]!.endsWith('Cargo.toml')).toBe(true);
+    // Both manifests are read as utf8 text, from their respective filenames.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
     // No workspace walk on the literal path.
     expect(findRootMock).not.toHaveBeenCalled();
     expect(writeMock).toHaveBeenCalledTimes(1);
     const [path, contents] = writeMock.mock.calls[0]!;
-    expect(String(path).endsWith('Cargo.toml')).toBe(true);
+    expect((path as string).endsWith('Cargo.toml')).toBe(true);
     expect(contents).toContain('version = "1.2.3"');
   });
 
@@ -68,7 +71,7 @@ describe('writeVersionForBuild (#276, #428)', () => {
   // no literal `[package].version`, so the pre-build bump must rewrite the
   // workspace root's `[workspace.package].version` instead of throwing
   // `no [package].version field found`.
-  it('rewrites [workspace.package].version when the maturin crate inherits it (version.workspace = true)', () => {
+  it('rewrites [workspace.package].version when the maturin crate inherits it (version.workspace = true)', async () => {
     const memberCargo = [
       '[package]',
       'name = "template-lib-py"',
@@ -91,14 +94,14 @@ describe('writeVersionForBuild (#276, #428)', () => {
     ].join('\n');
     // `wsroot` is a single path segment (no separator), so matching on it is
     // cross-platform safe; the member read is anything not the root.
-    findRootMock.mockReturnValue('wsroot');
+    findRootMock.mockResolvedValue('wsroot');
     readFileMock.mockImplementation((p) => {
-      const path = String(p);
-      if (path.endsWith('pyproject.toml')) {return dynamicPyproject;}
-      return path.includes('wsroot') ? rootCargo : memberCargo;
+      const path = p as string;
+      if (path.endsWith('pyproject.toml')) {return Promise.resolve(dynamicPyproject);}
+      return Promise.resolve(path.includes('wsroot') ? rootCargo : memberCargo);
     });
 
-    const written = writeVersionForBuild('pkg', '1.2.3');
+    const written = await writeVersionForBuild('pkg', '1.2.3');
 
     expect(findRootMock).toHaveBeenCalled();
     expect(written).toHaveLength(1);
@@ -106,7 +109,7 @@ describe('writeVersionForBuild (#276, #428)', () => {
     // manifest keeps inheriting — no literal version is injected into it.
     expect(writeMock).toHaveBeenCalledTimes(1);
     const [path, contents] = writeMock.mock.calls[0]!;
-    expect(String(path).includes('wsroot')).toBe(true);
+    expect((path as string).includes('wsroot')).toBe(true);
     expect(contents).toContain('version = "1.2.3"');
     expect(contents).not.toContain('version.workspace = true');
   });
@@ -120,49 +123,49 @@ describe('writeVersionForBuild (#276, #428)', () => {
     return err;
   };
 
-  it('throws when pyproject.toml is missing', () => {
-    readFileMock.mockImplementation(() => {
-      throw enoent();
-    });
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('pyproject.toml not found');
+  it('throws when pyproject.toml is missing', async () => {
+    readFileMock.mockImplementation(() => Promise.reject(enoent()));
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow('pyproject.toml not found');
   });
 
-  it('throws when pyproject.toml is malformed', () => {
+  it('throws when pyproject.toml is malformed', async () => {
     readFileMock.mockImplementation((p) =>
-      String(p).endsWith('pyproject.toml') ? 'not valid = = toml ][' : '',
+      Promise.resolve((p as string).endsWith('pyproject.toml') ? 'not valid = = toml ][' : ''),
     );
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('failed to parse');
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow('failed to parse');
   });
 
-  it('throws when pyproject.toml has no [project] table', () => {
+  it('throws when pyproject.toml has no [project] table', async () => {
     readFileMock.mockImplementation((p) =>
-      String(p).endsWith('pyproject.toml') ? '[build-system]\nrequires = []\n' : '',
+      Promise.resolve((p as string).endsWith('pyproject.toml') ? '[build-system]\nrequires = []\n' : ''),
     );
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('has no [project] table');
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow('has no [project] table');
   });
 
-  it('throws on a static [project].version literal (#333)', () => {
+  it('throws on a static [project].version literal (#333)', async () => {
     readFileMock.mockImplementation((p) =>
-      String(p).endsWith('pyproject.toml')
-        ? '[project]\nname = "lib"\nversion = "1.0.0"\n'
-        : '',
+      Promise.resolve(
+        (p as string).endsWith('pyproject.toml')
+          ? '[project]\nname = "lib"\nversion = "1.0.0"\n'
+          : '',
+      ),
     );
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('declares a static');
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow('declares a static');
   });
 
-  it('throws when [project] declares no version source', () => {
+  it('throws when [project] declares no version source', async () => {
     readFileMock.mockImplementation((p) =>
-      String(p).endsWith('pyproject.toml') ? '[project]\nname = "lib"\n' : '',
+      Promise.resolve((p as string).endsWith('pyproject.toml') ? '[project]\nname = "lib"\n' : ''),
     );
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('declares no version source');
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow('declares no version source');
   });
 
-  it('throws when Cargo.toml is missing under a dynamic pyproject', () => {
+  it('throws when Cargo.toml is missing under a dynamic pyproject', async () => {
     readFileMock.mockImplementation((p) => {
-      if (String(p).endsWith('pyproject.toml')) {return dynamicPyproject;}
-      throw enoent();
+      if ((p as string).endsWith('pyproject.toml')) {return Promise.resolve(dynamicPyproject);}
+      return Promise.reject(enoent());
     });
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow('Cargo.toml is missing');
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow('Cargo.toml is missing');
   });
 
   // A non-ENOENT read error (e.g. EACCES) is not the "missing file" case, so
@@ -173,21 +176,21 @@ describe('writeVersionForBuild (#276, #428)', () => {
     return err;
   };
 
-  it('rethrows a non-ENOENT error from the pyproject read as-is', () => {
+  it('rethrows a non-ENOENT error from the pyproject read as-is', async () => {
     readFileMock.mockImplementation((p) => {
-      if (String(p).endsWith('pyproject.toml')) {throw eacces();}
-      return '';
+      if ((p as string).endsWith('pyproject.toml')) {return Promise.reject(eacces());}
+      return Promise.resolve('');
     });
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow(/EACCES/);
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).not.toThrow(/not found/);
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow(/EACCES/);
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.not.toThrow(/not found/);
   });
 
-  it('rethrows a non-ENOENT error from the Cargo.toml read as-is', () => {
+  it('rethrows a non-ENOENT error from the Cargo.toml read as-is', async () => {
     readFileMock.mockImplementation((p) => {
-      if (String(p).endsWith('pyproject.toml')) {return dynamicPyproject;}
-      throw eacces();
+      if ((p as string).endsWith('pyproject.toml')) {return Promise.resolve(dynamicPyproject);}
+      return Promise.reject(eacces());
     });
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).toThrow(/EACCES/);
-    expect(() => writeVersionForBuild('pkg', '1.2.3')).not.toThrow(/is missing/);
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.toThrow(/EACCES/);
+    await expect(writeVersionForBuild('pkg', '1.2.3')).rejects.not.toThrow(/is missing/);
   });
 });

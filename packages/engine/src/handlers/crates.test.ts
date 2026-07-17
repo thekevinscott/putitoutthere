@@ -3,18 +3,22 @@
  *
  * Issue #16. Plan: §7.4, §13.1, §14.5, §16.1.
  *
- * Unit-suite isolation: the subprocess boundary (`node:child_process` — cargo
- * + git) and the filesystem (`node:fs`) are mocked so each case isolates the
- * unit under test. Cargo.toml contents are driven through `readFileSync`
- * returns; the dirty-tree scan is driven through mocked `git` output rather
- * than a real repo. Real end-to-end file + git behavior is covered by the
- * crates integration tier (tests/integration/crates.integration.test.ts).
+ * Unit-suite isolation: the subprocess boundary (the process seam —
+ * `execCapture`, driving cargo + git) and the filesystem
+ * (`node:fs/promises`) are mocked so each case isolates the unit under
+ * test. Cargo.toml contents are driven through `readFile` resolutions;
+ * the dirty-tree scan is driven through mocked `git` output rather than a
+ * real repo. Real end-to-end file + git behavior is covered by the crates
+ * integration tier (tests/integration/crates.integration.test.ts).
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { execCapture, type ExecResult } from '../utils/exec-capture.js';
+import { ExecError } from '../utils/exec-error.js';
+
+vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import {
   crates,
   looksLikeFirstPublishTpRejection,
@@ -23,14 +27,19 @@ import {
 } from './crates.js';
 import type { Ctx } from '../types.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../utils/exec-capture.js');
+vi.mock('node:fs/promises');
 
-const execMock = vi.mocked(execFileSync);
-const readMock = vi.mocked(readFileSync);
-const writeMock = vi.mocked(writeFileSync);
+const execMock = vi.mocked(execCapture);
+const readMock = vi.mocked(readFile);
+const writeMock = vi.mocked(writeFile);
 
-/** ENOENT the way `node:fs` throws it, so the handler's `code` branch fires. */
+/** A resolved `execCapture` result carrying `stdout`. */
+function ok(stdout: string): ExecResult {
+  return { stdout, stderr: '' };
+}
+
+/** ENOENT the way `node:fs/promises` rejects it, so the handler's `code` branch fires. */
 function enoent(): NodeJS.ErrnoException {
   return Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
 }
@@ -225,7 +234,7 @@ describe('crates.writeVersion', () => {
   const dir = '/wv';
 
   it('rewrites the [package] version in Cargo.toml', async () => {
-    readMock.mockReturnValue(
+    readMock.mockResolvedValue(
       `[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nserde = "1"\n`,
     );
     const paths = await crates.writeVersion(
@@ -237,13 +246,16 @@ describe('crates.writeVersion', () => {
     expect(out).toContain('version = "0.2.3"');
     expect(out).not.toContain('version = "0.1.0"');
     expect(out).toContain('name = "demo"');
+    // The manifest is read and rewritten as utf8 text.
+    expect(readMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
+    expect(writeMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), expect.anything(), 'utf8');
     // The rewritten path is the package's Cargo.toml (separator-agnostic).
     expect(paths).toHaveLength(1);
     expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
   });
 
   it('is idempotent when version already matches', async () => {
-    readMock.mockReturnValue(`[package]\nname = "demo"\nversion = "1.0.0"\n`);
+    readMock.mockResolvedValue(`[package]\nname = "demo"\nversion = "1.0.0"\n`);
     const paths = await crates.writeVersion(
       { ...basePkg(), path: dir },
       '1.0.0',
@@ -253,13 +265,15 @@ describe('crates.writeVersion', () => {
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('throws when Cargo.toml is missing', async () => {
-    readMock.mockImplementation(() => {
-      throw enoent();
-    });
-    await expect(
-      crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
-    ).rejects.toThrow(/Cargo\.toml/);
+  it('throws when Cargo.toml is missing, chaining the ENOENT as the cause', async () => {
+    const missing = enoent();
+    readMock.mockRejectedValue(missing);
+    const err = await crates
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/Cargo\.toml/);
+    // The original ENOENT is preserved as `cause` (not dropped).
+    expect(err.cause).toBe(missing);
   });
 
   it('surfaces a non-ENOENT read error as-is (perms/io)', async () => {
@@ -287,14 +301,14 @@ describe('crates.writeVersion', () => {
   });
 
   it('throws when the [package] version line is missing', async () => {
-    readMock.mockReturnValue(`[workspace]\nmembers = ["a"]\n`);
+    readMock.mockResolvedValue(`[workspace]\nmembers = ["a"]\n`);
     await expect(
       crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
     ).rejects.toThrow(/version/i);
   });
 
   it('preserves comments and whitespace around the version line', async () => {
-    readMock.mockReturnValue(
+    readMock.mockResolvedValue(
       `[package]
 name    = "demo"
 # keep me
@@ -337,8 +351,8 @@ describe('crates.publish', () => {
     );
     // git → not a repo (scanDirty returns null); cargo → ok.
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -364,8 +378,8 @@ describe('crates.publish', () => {
     // null from the first rev-parse short-circuits that scan so only the
     // cargo invocation we care about lands in the mock calls list.
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -388,8 +402,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -410,8 +424,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -432,8 +446,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -454,8 +468,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -476,8 +490,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -498,8 +512,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'secret';
 
@@ -524,8 +538,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      return Buffer.from('ok');
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.resolve(ok('ok'));
     });
     process.env.UNRELATED_AWS_SECRET = 'parent-leak-should-not-ship';
     process.env.PATH = process.env.PATH ?? '/usr/bin';
@@ -567,19 +581,22 @@ describe('crates.publish', () => {
       );
       let cargoCalls = 0;
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
         cargoCalls += 1;
         if (cargoCalls === 1) {
-          throw Object.assign(new Error('exit 1'), {
-            stderr: Buffer.from(
+          return Promise.reject(
+            new ExecError(
+              'exit 1',
+              '',
               'error: failed to publish demo-crate v0.1.0 to registry at https://crates.io\n\n' +
                 'Caused by:\n' +
                 '  the remote server responded with an error (status 429 Too Many Requests):\n' +
                 '  You have published too many versions of this crate in the last 24 hours\n',
+              1,
             ),
-          });
+          );
         }
-        return Buffer.from('ok');
+        return Promise.resolve(ok('ok'));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -613,14 +630,14 @@ describe('crates.publish', () => {
       );
       let cargoCalls = 0;
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
         cargoCalls += 1;
         if (cargoCalls === 1) {
-          throw Object.assign(new Error('exit 1'), {
-            stderr: Buffer.from('status 429 Too Many Requests\nrate-limited'),
-          });
+          return Promise.reject(
+            new ExecError('exit 1', '', 'status 429 Too Many Requests\nrate-limited', 1),
+          );
         }
-        return Buffer.from('ok');
+        return Promise.resolve(ok('ok'));
       });
       const writes: string[] = [];
       const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(
@@ -655,10 +672,8 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
-        throw Object.assign(new Error('exit 1'), {
-          stderr: Buffer.from('status 429 Too Many Requests'),
-        });
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', 'status 429 Too Many Requests', 1));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -679,10 +694,8 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
-        throw Object.assign(new Error('exit 1'), {
-          stderr: Buffer.from('error: authentication required'),
-        });
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', 'error: authentication required', 1));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -704,13 +717,74 @@ describe('crates.publish', () => {
       fetchSpy.mockRestore();
     });
 
+    it('trims surrounding whitespace from cargo stderr in the generic failure message (#469)', async () => {
+      // The generic (non-429, non-first-publish) failure interpolates cargo's
+      // stderr into the thrown message; it must be trimmed, not raw.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', '\n  boom: build failed  \n', 1));
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const err = await crates
+        .publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        )
+        .catch((e: unknown) => e as Error) as Error;
+      expect(err.message).toBe('cargo publish failed:\nboom: build failed');
+      fetchSpy.mockRestore();
+    });
+
+    it('trims surrounding whitespace from cargo stderr in the fallback failure message (#469)', async () => {
+      // Primary 429 engages the fallback; the fallback also fails, and its
+      // stderr is interpolated into the thrown message — trimmed, not raw.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          return Promise.reject(new ExecError('exit 1', '', 'status 429 Too Many Requests', 1));
+        }
+        return Promise.reject(new ExecError('exit 1', '', '\n  fallback boom  \n', 1));
+      });
+      const stdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation((): boolean => true);
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const err = await crates
+        .publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        )
+        .catch((e: unknown) => e as Error) as Error;
+      expect(err.message).toBe(
+        'cargo publish (fallback http://localhost:8000) failed:\nfallback boom',
+      );
+      stdoutSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
     it('routes publish at PIOT_CRATES_REGISTRY_PRIMARY when set (no real-crates.io attempt, no fallback)', async () => {
       const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
-        return Buffer.from('ok');
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.resolve(ok('ok'));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -740,10 +814,8 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
-        throw Object.assign(new Error('exit 1'), {
-          stderr: Buffer.from('status 429 Too Many Requests'),
-        });
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', 'status 429 Too Many Requests', 1));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -772,18 +844,16 @@ describe('crates.publish', () => {
       );
       let cargoCalls = 0;
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
         cargoCalls += 1;
         if (cargoCalls === 1) {
           // Primary crates.io 429 → engages the fallback.
-          throw Object.assign(new Error('exit 1'), {
-            stderr: Buffer.from('status 429 Too Many Requests'),
-          });
+          return Promise.reject(
+            new ExecError('exit 1', '', 'status 429 Too Many Requests', 1),
+          );
         }
-        // The fallback registry also errors — an Error carrying stderr.
-        throw Object.assign(new Error('exit 7'), {
-          stderr: Buffer.from('fallback registry down'),
-        });
+        // The fallback registry also errors — an ExecError carrying stderr.
+        return Promise.reject(new ExecError('exit 7', '', 'fallback registry down', 7));
       });
       const stdoutSpy = vi
         .spyOn(process.stdout, 'write')
@@ -813,17 +883,17 @@ describe('crates.publish', () => {
       );
       let cargoCalls = 0;
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
         cargoCalls += 1;
         if (cargoCalls === 1) {
-          throw Object.assign(new Error('exit 1'), {
-            stderr: Buffer.from('status 429 Too Many Requests'),
-          });
+          return Promise.reject(
+            new ExecError('exit 1', '', 'status 429 Too Many Requests', 1),
+          );
         }
         // Non-Error, no stderr — exercises the String(retryErr) fallback and
         // the "no retry stderr" message branch.
-        // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
-        throw 'catastrophic fallback failure';
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- deliberately non-Error to hit the String(err) branch
+        return Promise.reject('catastrophic fallback failure');
       });
       const stdoutSpy = vi
         .spyOn(process.stdout, 'write')
@@ -886,8 +956,8 @@ describe('crates.publish', () => {
       new Response('{}', { status: 404 }),
     );
     execMock.mockImplementation((file: string) => {
-      if (file === 'git') {throw new Error('not a git repo');}
-      throw Object.assign(new Error('exit 1'), { stderr: Buffer.from('permission denied') });
+      if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+      return Promise.reject(new ExecError('exit 1', '', 'permission denied', 1));
     });
     process.env.CARGO_REGISTRY_TOKEN = 'tok';
     await expect(
@@ -913,8 +983,8 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
-        throw Object.assign(new Error('exit 1'), { stderr: Buffer.from(STDERR) });
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', STDERR, 1));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -954,10 +1024,10 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
-        throw Object.assign(new Error('exit 1'), {
-          stderr: Buffer.from('error: could not compile `demo-crate` due to previous error'),
-        });
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(
+          new ExecError('exit 1', '', 'error: could not compile `demo-crate` due to previous error', 1),
+        );
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -987,8 +1057,8 @@ describe('crates.publish', () => {
         new Response('{}', { status: 404 }),
       );
       execMock.mockImplementation((file: string) => {
-        if (file === 'git') {throw new Error('not a git repo');}
-        throw Object.assign(new Error('exit 1'), { stderr: Buffer.from(STDERR) });
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', STDERR, 1));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
 
@@ -1072,45 +1142,53 @@ describe('scanDirtyOutsideManifest (#135)', () => {
 
   function mockGit(routes: GitRoutes): void {
     execMock.mockImplementation((file: string, args?: readonly string[]) => {
-      if (file !== 'git') {throw new Error(`unexpected exec: ${file}`);}
+      if (file !== 'git') {return Promise.reject(new ExecError(`unexpected exec: ${file}`, '', '', null));}
       const a = (args ?? []) as string[];
       if (a[0] === 'rev-parse') {
-        if (routes.noRepo) {throw new Error('not a git repo');}
-        return `${routes.toplevel ?? '/repo'}\n`;
+        if (routes.noRepo) {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.resolve(ok(`${routes.toplevel ?? '/repo'}\n`));
       }
-      if (a[0] === 'ls-files') {return `${routes.managedRel ?? ''}\n`;}
-      if (a[0] === 'status') {return routes.porcelain ?? '';}
-      throw new Error(`unexpected git: ${a.join(' ')}`);
+      if (a[0] === 'ls-files') {return Promise.resolve(ok(`${routes.managedRel ?? ''}\n`));}
+      if (a[0] === 'status') {return Promise.resolve(ok(routes.porcelain ?? ''));}
+      return Promise.reject(new ExecError(`unexpected git: ${a.join(' ')}`, '', '', null));
     });
   }
 
-  it('returns an empty list when only the managed Cargo.toml is dirty', () => {
+  it('returns an empty list when only the managed Cargo.toml is dirty', async () => {
     mockGit({ managedRel: 'Cargo.toml', porcelain: ' M Cargo.toml\n' });
-    expect(scanDirtyOutsideManifest('/repo', '/repo')).toEqual([]);
+    expect(await scanDirtyOutsideManifest('/repo', '/repo')).toEqual([]);
+    // The three git probes run with their exact argv + cwd scoping.
+    expect(execMock).toHaveBeenCalledWith('git', ['rev-parse', '--show-toplevel'], { cwd: '/repo' });
+    expect(execMock).toHaveBeenCalledWith(
+      'git',
+      ['ls-files', '--full-name', '--', 'Cargo.toml'],
+      { cwd: '/repo' },
+    );
+    expect(execMock).toHaveBeenCalledWith('git', ['status', '--porcelain'], { cwd: '/repo' });
   });
 
-  it('flags a stray dirty file outside the package dir', () => {
+  it('flags a stray dirty file outside the package dir', async () => {
     mockGit({
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/Cargo.toml\n M README.md\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate');
     expect(result).toContain('README.md');
     expect(result).not.toContain('crate/Cargo.toml');
   });
 
-  it('flags a dirty sibling file inside the package dir that is not Cargo.toml', () => {
+  it('flags a dirty sibling file inside the package dir that is not Cargo.toml', async () => {
     // Only src/lib.rs dirty -- the managed Cargo.toml is unchanged. Still
     // a surprise: our writeVersion didn't produce this edit.
     mockGit({
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/src/lib.rs\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate');
     expect(result).toContain('crate/src/lib.rs');
   });
 
-  it('skips files under artifactsRoot — engine-managed scratch (#244)', () => {
+  it('skips files under artifactsRoot — engine-managed scratch (#244)', async () => {
     // The reusable workflow's `actions/download-artifact@v4` step always
     // creates `artifacts/` under cwd, even when nothing was uploaded
     // (crates-only fixtures). git status sees `?? artifacts/` and the
@@ -1120,33 +1198,33 @@ describe('scanDirtyOutsideManifest (#135)', () => {
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/Cargo.toml\n?? artifacts/\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo/artifacts');
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo/artifacts');
     expect(result).toEqual([]);
   });
 
-  it('still flags non-artifacts-root files when artifactsRoot is provided', () => {
+  it('still flags non-artifacts-root files when artifactsRoot is provided', async () => {
     mockGit({
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/Cargo.toml\n M README.md\n?? artifacts/file.txt\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo/artifacts');
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo/artifacts');
     expect(result).toContain('README.md');
     expect(result?.some((p) => p.startsWith('artifacts'))).toBe(false);
   });
 
-  it('returns null when cwd is not inside a git worktree', () => {
+  it('returns null when cwd is not inside a git worktree', async () => {
     mockGit({ noRepo: true });
-    expect(scanDirtyOutsideManifest('/plain', '/plain')).toBeNull();
+    expect(await scanDirtyOutsideManifest('/plain', '/plain')).toBeNull();
   });
 
-  it('returns null when git reports an empty toplevel', () => {
+  it('returns null when git reports an empty toplevel', async () => {
     // rev-parse succeeds but prints only whitespace — treat as "can't
     // verify" and fall through to cargo's own --allow-dirty behavior.
     mockGit({ toplevel: '' });
-    expect(scanDirtyOutsideManifest('/repo', '/repo')).toBeNull();
+    expect(await scanDirtyOutsideManifest('/repo', '/repo')).toBeNull();
   });
 
-  it('handles artifactsRoot equal to cwd (empty relative path)', () => {
+  it('handles artifactsRoot equal to cwd (empty relative path)', async () => {
     // relative(cwd, artifactsRoot) === '' when they are the same dir; the
     // artifacts-skip is then disabled (empty prefix), so stray files still
     // surface.
@@ -1154,11 +1232,11 @@ describe('scanDirtyOutsideManifest (#135)', () => {
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/Cargo.toml\n M README.md\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo');
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate', '/repo');
     expect(result).toContain('README.md');
   });
 
-  it('skips sibling paths that equal cwd or resolve outside the worktree', () => {
+  it('skips sibling paths that equal cwd or resolve outside the worktree', async () => {
     // A sibling equal to cwd (relative === '') and a sibling outside cwd
     // (relative starts with '..') are both skipped by the guard, leaving
     // only genuine strays flagged.
@@ -1166,14 +1244,14 @@ describe('scanDirtyOutsideManifest (#135)', () => {
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/Cargo.toml\n M README.md\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate', undefined, [
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate', undefined, [
       '/repo',
       '/outside',
     ]);
     expect(result).toContain('README.md');
   });
 
-  it('skips files inside sibling package paths — workflow-managed install state', () => {
+  it('skips files inside sibling package paths — workflow-managed install state', async () => {
     // Polyglot setup: rust crate at packages/rust/, npm package at
     // packages/ts/. The reusable workflow's `Build npm packages` step
     // creates packages/ts/{node_modules,dist,package-lock.json} as
@@ -1190,7 +1268,7 @@ describe('scanDirtyOutsideManifest (#135)', () => {
         '',
       ].join('\n'),
     });
-    const result = scanDirtyOutsideManifest(
+    const result = await scanDirtyOutsideManifest(
       '/repo',
       '/repo/packages/rust',
       undefined,
@@ -1199,7 +1277,7 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     expect(result).toEqual([]);
   });
 
-  it('still flags non-sibling paths when siblingPackagePaths is provided', () => {
+  it('still flags non-sibling paths when siblingPackagePaths is provided', async () => {
     mockGit({
       managedRel: 'packages/rust/Cargo.toml',
       porcelain: [
@@ -1209,7 +1287,7 @@ describe('scanDirtyOutsideManifest (#135)', () => {
         '',
       ].join('\n'),
     });
-    const result = scanDirtyOutsideManifest(
+    const result = await scanDirtyOutsideManifest(
       '/repo',
       '/repo/packages/rust',
       undefined,
@@ -1219,26 +1297,26 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     expect(result?.some((p) => p.startsWith('packages/ts'))).toBe(false);
   });
 
-  it('reads the destination path from a porcelain rename row (XY old -> new)', () => {
+  it('reads the destination path from a porcelain rename row (XY old -> new)', async () => {
     // git renders renames as `R  old -> new`; the scan must flag the
     // destination path, not the arrow-joined raw row.
     mockGit({
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/Cargo.toml\nR  old-name.rs -> crate/src/new-name.rs\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate');
     expect(result).toContain('crate/src/new-name.rs');
     expect(result).not.toContain('old-name.rs -> crate/src/new-name.rs');
   });
 
-  it('strips git quoting from a quoted porcelain path', () => {
+  it('strips git quoting from a quoted porcelain path', async () => {
     // git quotes paths containing spaces/unusual bytes as `"a b.rs"`; the
     // scan must compare/report the unquoted form.
     mockGit({
       managedRel: 'crate/Cargo.toml',
       porcelain: ' M crate/Cargo.toml\n?? "crate/a file.rs"\n',
     });
-    const result = scanDirtyOutsideManifest('/repo', '/repo/crate');
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate');
     expect(result).toContain('crate/a file.rs');
     expect(result).not.toContain('"crate/a file.rs"');
   });

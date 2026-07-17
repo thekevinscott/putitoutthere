@@ -13,21 +13,23 @@
  * single leading `./` and any trailing slashes.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
+
+import { pathExists } from '../../utils/path-exists.js';
 
 interface MaturinPyproject {
   tool?: { maturin?: { 'python-source'?: unknown; python_source?: unknown } };
 }
 
-export function readPythonSource(pkgDir: string): string {
+export async function readPythonSource(pkgDir: string): Promise<string> {
   const pyproject = join(pkgDir, 'pyproject.toml');
-  if (!existsSync(pyproject)) {
+  if (!(await pathExists(pyproject))) {
     return '';
   }
-  const cfg = parseToml(readFileSync(pyproject, 'utf8')) as unknown as MaturinPyproject;
+  const cfg = parseToml(await readFile(pyproject, 'utf8')) as unknown as MaturinPyproject;
   const maturin = cfg.tool?.maturin;
   const raw = maturin?.['python-source'] ?? maturin?.python_source;
   const src = typeof raw === 'string' ? raw : '';

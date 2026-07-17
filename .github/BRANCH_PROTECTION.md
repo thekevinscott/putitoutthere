@@ -56,7 +56,8 @@ must pass for CI Gate to go green:
 |---|---|---|
 | Lint (typecheck + eslint) | `lint.yml` | ✓ |
 | Tests (unit on ubuntu/macos/windows) | `test.yml` | ✓ |
-| Coverage (≥90% global) | `coverage.yml` | ✓ |
+| Coverage (100% floor, reasoned `v8 ignore` markers) | `conventions.yml` (`Unit-test coverage`) | ✓ |
+| Diff coverage (100% on new `src/` lines) | `patch-coverage.yml` | ✓ |
 | TDD lint (tests required for `src/` changes) | `tdd-lint.yml` | ✓ |
 | Actionlint (workflow YAML) | `actionlint.yml` | ✓ (when workflow files change) |
 | CodeQL (security) | `codeql.yml` | ✓ |

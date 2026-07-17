@@ -20,7 +20,7 @@ const bundleMock = vi.mocked(verifyBundleCli);
 const stderr: string[] = [];
 
 beforeEach(() => {
-  bundleMock.mockReset().mockReturnValue(0);
+  bundleMock.mockReset().mockResolvedValue(0);
   stderr.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(process.stderr, 'write').mockImplementation((c) => {

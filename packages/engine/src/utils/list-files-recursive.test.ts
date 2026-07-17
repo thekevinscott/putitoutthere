@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,12 +6,12 @@ import { listFilesRecursive } from './list-files-recursive.js';
 
 // Bare automock (no factory): the fs collaborators are the unit-under-test's
 // only side channel, so isolate them and drive the directory tree through
-// `existsSync` / `readdirSync` returns. Real dir walking over a temp tree is
-// covered by the integration tier.
-vi.mock('node:fs');
+// `stat` (via `pathExists`) / `readdir` returns. Real dir walking over a temp
+// tree is covered by the integration tier.
+vi.mock('node:fs/promises');
 
-const existsMock = vi.mocked(existsSync);
-const readdirMock = vi.mocked(readdirSync);
+const statMock = vi.mocked(stat);
+const readdirMock = vi.mocked(readdir);
 
 /** A minimal `Dirent` double — only `name` + `isDirectory`/`isFile` matter. */
 function dirent(name: string, isDir: boolean): Dirent {
@@ -27,37 +27,41 @@ function dirent(name: string, isDir: boolean): Dirent {
 const norm = (p: unknown): string => String(p).replace(/\\/g, '/');
 
 beforeEach(() => {
-  existsMock.mockReset();
+  statMock.mockReset();
   readdirMock.mockReset();
 });
 
 describe('listFilesRecursive', () => {
-  it('returns every regular file, descending into subdirectories', () => {
-    existsMock.mockReturnValue(true);
-    readdirMock.mockImplementation(((p: Parameters<typeof readdirSync>[0]): Dirent[] => {
+  it('returns every regular file, descending into subdirectories', async () => {
+    // `pathExists` resolves for every path (the tree exists).
+    statMock.mockResolvedValue({} as never);
+    readdirMock.mockImplementation(((p: Parameters<typeof readdir>[0]): Promise<Dirent[]> => {
       switch (norm(p)) {
         case '/root':
-          return [dirent('a', true), dirent('top.txt', false)];
+          return Promise.resolve([dirent('a', true), dirent('top.txt', false)]);
         case '/root/a':
-          return [dirent('b', true), dirent('mid.txt', false)];
+          return Promise.resolve([dirent('b', true), dirent('mid.txt', false)]);
         case '/root/a/b':
-          return [dirent('leaf.txt', false)];
+          return Promise.resolve([dirent('leaf.txt', false)]);
         default:
-          return [];
+          return Promise.resolve([]);
       }
-    }) as unknown as typeof readdirSync);
+    }) as unknown as typeof readdir);
 
-    const files = listFilesRecursive('/root').map(norm).sort();
+    const files = (await listFilesRecursive('/root')).map(norm).sort();
     expect(files).toEqual(['/root/a/b/leaf.txt', '/root/a/mid.txt', '/root/top.txt']);
+    // readdir must request Dirent objects (`withFileTypes: true`), otherwise
+    // `entry.isDirectory()/isFile()` are unavailable and the walk breaks.
+    expect(readdirMock).toHaveBeenCalledWith(expect.anything(), { withFileTypes: true });
   });
 
-  it('returns [] for a path that does not exist', () => {
-    existsMock.mockReturnValue(false);
-    expect(listFilesRecursive('/root/nope')).toEqual([]);
+  it('returns [] for a path that does not exist', async () => {
+    statMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    expect(await listFilesRecursive('/root/nope')).toEqual([]);
   });
 
-  it('skips entries that are neither a regular file nor a directory (e.g. a socket)', () => {
-    existsMock.mockReturnValue(true);
+  it('skips entries that are neither a regular file nor a directory (e.g. a socket)', async () => {
+    statMock.mockResolvedValue({} as never);
     // A dirent that is neither a directory nor a file (socket/fifo/symlink)
     // exercises the else-of-else-if fall-through: it is silently dropped.
     const special = {
@@ -65,9 +69,9 @@ describe('listFilesRecursive', () => {
       isDirectory: () => false,
       isFile: () => false,
     } as unknown as Dirent;
-    readdirMock.mockImplementation(((p: Parameters<typeof readdirSync>[0]): Dirent[] =>
-      norm(p) === '/root' ? [special, dirent('real.txt', false)] : []) as unknown as typeof readdirSync);
+    readdirMock.mockImplementation(((p: Parameters<typeof readdir>[0]): Promise<Dirent[]> =>
+      Promise.resolve(norm(p) === '/root' ? [special, dirent('real.txt', false)] : [])) as unknown as typeof readdir);
 
-    expect(listFilesRecursive('/root').map(norm)).toEqual(['/root/real.txt']);
+    expect((await listFilesRecursive('/root')).map(norm)).toEqual(['/root/real.txt']);
   });
 });

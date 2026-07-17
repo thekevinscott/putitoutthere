@@ -15,12 +15,13 @@
  * `tests/integration/check-crate-size.integration.test.ts`.
  */
 
-import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { join } from 'node:path';
 
 import type { CheckFinding } from './check.js';
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
+import { execCapture } from './utils/exec-capture.js';
+import { ExecError } from './utils/exec-error.js';
 
 // crates.io rejects any `.crate` upload over this size.
 const CRATES_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -39,14 +40,14 @@ const CARGO_SIZE_UNIT_BYTES: Record<string, number> = {
  * within the limit — or when a crate's size can't be determined, in
  * which case the check skips it rather than inventing a finding.
  */
-export function checkCratesPackageSize(
+export async function checkCratesPackageSize(
   packages: readonly Package[],
-): CheckFinding[] {
+): Promise<CheckFinding[]> {
   const findings: CheckFinding[] = [];
   for (const p of packages) {
     if (p.kind !== 'crates') {continue;}
     const cargoTomlPath = join(p.path, 'Cargo.toml');
-    const compressedBytes = packagedCrateBytes(cargoTomlPath);
+    const compressedBytes = await packagedCrateBytes(cargoTomlPath);
     if (compressedBytes === null) {continue;}
     if (compressedBytes > CRATES_MAX_UPLOAD_BYTES) {
       findings.push({
@@ -66,20 +67,24 @@ export function checkCratesPackageSize(
  * mirroring the null-means-skip shape `listTrackedFiles` uses outside a
  * git repo.
  */
-function packagedCrateBytes(cargoTomlPath: string): number | null {
-  let result: SpawnSyncReturns<string>;
+async function packagedCrateBytes(cargoTomlPath: string): Promise<number | null> {
+  let stderr: string;
+  let status: number | null;
   try {
-    result = spawnSync(
-      'cargo',
-      ['package', '--no-verify', '--allow-dirty', '--manifest-path', cargoTomlPath],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-  } catch {
-    return null;
+    const r = await execCapture('cargo', [
+      'package', '--no-verify', '--allow-dirty', '--manifest-path', cargoTomlPath,
+    ]);
+    stderr = r.stderr;
+    status = 0;
+  } catch (err) {
+    // cargo absent (ENOENT → status null) or a non-zero exit both mean
+    // "can't verify"; skip rather than invent a size finding.
+    if (!(err instanceof ExecError)) {return null;}
+    stderr = err.stderr;
+    status = err.status;
   }
-  if (result.error !== undefined) {return null;}
-  if (result.status !== 0) {return null;}
-  return parseCargoCompressedBytes(result.stderr);
+  if (status !== 0) {return null;}
+  return parseCargoCompressedBytes(stderr);
 }
 
 /**

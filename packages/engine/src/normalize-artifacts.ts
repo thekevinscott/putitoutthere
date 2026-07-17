@@ -20,8 +20,9 @@
  * Issue #311.
  */
 
-import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
+import { mkdir, readdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathExists } from './utils/path-exists.js';
 import type { MatrixRow } from './plan.js';
 
 /**
@@ -32,10 +33,10 @@ import type { MatrixRow } from './plan.js';
  * subdir-shaped, nothing downloaded, crates-only / vanilla-npm plans
  * that stage nothing).
  */
-export function normalizeArtifactLayout(
+export async function normalizeArtifactLayout(
   matrix: readonly MatrixRow[],
   artifactsRoot: string,
-): void {
+): Promise<void> {
   // Only rows whose handler expects a staged artifact directory. crates
   // publishes from the source tree (no upload step in the build job);
   // vanilla npm packages the source on the publish runner. completeness
@@ -50,14 +51,14 @@ export function normalizeArtifactLayout(
   // Already in the documented layout — either a multi-artifact run
   // earlier in the same job, or a developer running locally with the
   // engine's contract honored. Either way, leave it alone.
-  if (existsSync(targetDir)) {return;}
-  if (!existsSync(artifactsRoot)) {return;}
+  if (await pathExists(targetDir)) {return;}
+  if (!(await pathExists(artifactsRoot))) {return;}
 
-  const dumped = readdirSync(artifactsRoot);
+  const dumped = await readdir(artifactsRoot);
   if (dumped.length === 0) {return;}
 
-  mkdirSync(targetDir, { recursive: true });
+  await mkdir(targetDir, { recursive: true });
   for (const entry of dumped) {
-    renameSync(join(artifactsRoot, entry), join(targetDir, entry));
+    await rename(join(artifactsRoot, entry), join(targetDir, entry));
   }
 }

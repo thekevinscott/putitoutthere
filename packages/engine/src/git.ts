@@ -1,15 +1,14 @@
 /**
  * Thin wrapper around the `git` CLI for the ops putitoutthere needs.
  *
- * Sync-only, by design — the caller is either CI (which we don't mind
- * blocking) or a doctor run (which is interactive). Stderr is captured
- * and surfaced in thrown errors so failures are diagnosable without
- * re-running with --verbose.
+ * Stderr is captured and surfaced in thrown errors so failures are
+ * diagnosable without re-running with --verbose.
  *
  * Issue #9. Plan: §13.6 (no-push tag model), §14.2 (last-tag resolver).
  */
 
-import { execFileSync } from 'node:child_process';
+import { execCapture } from './utils/exec-capture.js';
+import { ExecError } from './utils/exec-error.js';
 import { parseTagVersion, tagGlob } from './tag-template.js';
 import { parseSemver, type Semver } from './version.js';
 
@@ -23,19 +22,14 @@ interface TagOptions extends GitOptions {
 
 /* ------------------------------ core ------------------------------ */
 
-function run(args: string[], opts: GitOptions = {}): string {
+async function run(args: string[], opts: GitOptions = {}): Promise<string> {
   try {
-    return execFileSync('git', args, {
-      cwd: opts.cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trimEnd();
+    return (await execCapture('git', args, { cwd: opts.cwd })).stdout.trimEnd();
   } catch (err) {
-    // execFileSync throws an Error whose `stderr` field carries git's
-    // error output. Fold it into the thrown message so tests + logs
-    // see the root cause without separate plumbing.
-    /* v8 ignore start -- defensive: execFileSync always throws Error with .stderr */
-    const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    // execCapture rejects with an ExecError whose `stderr` field carries
+    // git's error output (already a string). Fold it into the thrown
+    // message so tests + logs see the root cause without separate plumbing.
+    const stderr = err instanceof ExecError ? err.stderr.trim() : undefined;
     const base = err instanceof Error ? err.message : String(err);
     // `git tag -a` on a runner with no user.name/email surfaces as
     // "Please tell me who you are" / "unable to auto-detect email
@@ -47,6 +41,7 @@ function run(args: string[], opts: GitOptions = {}): string {
     if (needsIdentity) {
       throw new Error(
         [
+          /* v8 ignore next -- args[0] is always defined: every git wrapper passes a non-empty argv, so the `?? ''` fallback is unreachable via the public API */
           `git ${args[0] ?? ''}: no committer identity configured.`,
           'piot cuts annotated tags which require `user.name` + `user.email`.',
           'Configure them in the publish job before invoking piot:',
@@ -61,58 +56,57 @@ function run(args: string[], opts: GitOptions = {}): string {
       );
     }
     throw new Error(stderr ? `${base}\n${stderr}` : base, { cause: err });
-    /* v8 ignore stop */
   }
 }
 
 /* ---------------------------- observers ---------------------------- */
 
-export function headCommit(opts: GitOptions = {}): string {
+export async function headCommit(opts: GitOptions = {}): Promise<string> {
   return run(['rev-parse', 'HEAD'], opts);
 }
 
-export function commitBody(sha: string, opts: GitOptions = {}): string {
+export async function commitBody(sha: string, opts: GitOptions = {}): Promise<string> {
   // %B = raw body (subject + body, no trailer folding).
   return run(['log', '-1', '--format=%B', sha], opts);
 }
 
-export function commitParents(sha: string, opts: GitOptions = {}): string[] {
+export async function commitParents(sha: string, opts: GitOptions = {}): Promise<string[]> {
   // %P = parent SHAs, space-separated. Merge commits have ≥2;
   // plain commits have 1; root commits have 0.
-  const out = run(['log', '-1', '--format=%P', sha], opts);
+  const out = await run(['log', '-1', '--format=%P', sha], opts);
   if (out === '') {return [];}
   return out.split(' ').filter((s) => s.length > 0);
 }
 
-export function diffNames(
+export async function diffNames(
   from: string,
   to: string,
   opts: GitOptions = {},
-): string[] {
-  const out = run(['diff', '--name-only', `${from}..${to}`], opts);
+): Promise<string[]> {
+  const out = await run(['diff', '--name-only', `${from}..${to}`], opts);
   if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
 
 /* ------------------------------ tags ------------------------------ */
 
-export function tagList(glob: string, opts: GitOptions = {}): string[] {
-  const out = run(['tag', '-l', glob], opts);
+export async function tagList(glob: string, opts: GitOptions = {}): Promise<string[]> {
+  const out = await run(['tag', '-l', glob], opts);
   if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
 
-export function createTag(
+export async function createTag(
   name: string,
   sha: string,
   opts: TagOptions = {},
-): void {
+): Promise<void> {
   const message = opts.message ?? name;
-  run(['tag', '-a', '-m', message, name, sha], opts);
+  await run(['tag', '-a', '-m', message, name, sha], opts);
 }
 
-export function pushTag(name: string, opts: GitOptions = {}): void {
-  run(['push', 'origin', name], opts);
+export async function pushTag(name: string, opts: GitOptions = {}): Promise<void> {
+  await run(['push', 'origin', name], opts);
 }
 
 /**
@@ -122,8 +116,8 @@ export function pushTag(name: string, opts: GitOptions = {}): void {
  * rejected as a non-fast-forward, failing the fetch. Used before the
  * floating-major-tag move re-derives "latest release" from local tags.
  */
-export function fetchTagsForce(opts: GitOptions = {}): void {
-  run(['fetch', '--tags', '--force', 'origin'], opts);
+export async function fetchTagsForce(opts: GitOptions = {}): Promise<void> {
+  await run(['fetch', '--tags', '--force', 'origin'], opts);
 }
 
 /**
@@ -131,8 +125,8 @@ export function fetchTagsForce(opts: GitOptions = {}): void {
  * `target`, overwriting an existing tag of the same name. The local half of
  * a floating-tag move; pair with `pushTagRefForce` to publish it.
  */
-export function forceTag(name: string, target: string, opts: GitOptions = {}): void {
-  run(['tag', '-f', name, target], opts);
+export async function forceTag(name: string, target: string, opts: GitOptions = {}): Promise<void> {
+  await run(['tag', '-f', name, target], opts);
 }
 
 /**
@@ -141,8 +135,8 @@ export function forceTag(name: string, target: string, opts: GitOptions = {}): v
  * a floating-tag move: unlike `pushTagRef` (which fails on a non-fast-
  * forward), this overwrites the remote tag, which floating tags require.
  */
-export function pushTagRefForce(name: string, opts: GitOptions = {}): void {
-  run(['push', '--force', 'origin', `refs/tags/${name}`], opts);
+export async function pushTagRefForce(name: string, opts: GitOptions = {}): Promise<void> {
+  await run(['push', '--force', 'origin', `refs/tags/${name}`], opts);
 }
 
 /**
@@ -150,8 +144,8 @@ export function pushTagRefForce(name: string, opts: GitOptions = {}): void {
  * the tags the engine just created on this commit, with no fetch and no
  * remote dependency (#444). Empty array when HEAD carries no tag.
  */
-export function tagsPointingAtHead(opts: GitOptions = {}): string[] {
-  const out = run(['tag', '--points-at', 'HEAD'], opts);
+export async function tagsPointingAtHead(opts: GitOptions = {}): Promise<string[]> {
+  const out = await run(['tag', '--points-at', 'HEAD'], opts);
   if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
@@ -165,8 +159,8 @@ export function tagsPointingAtHead(opts: GitOptions = {}): string[] {
  * remote) still fails loudly, which the release concurrency group exists to
  * prevent. Distinct from `pushTag`, which pushes by bare name (#444).
  */
-export function pushTagRef(name: string, opts: GitOptions = {}): void {
-  run(['push', 'origin', `refs/tags/${name}`], opts);
+export async function pushTagRef(name: string, opts: GitOptions = {}): Promise<void> {
+  await run(['push', 'origin', `refs/tags/${name}`], opts);
 }
 
 /* ---------------------------- staging ---------------------------- */
@@ -176,8 +170,8 @@ export function pushTagRef(name: string, opts: GitOptions = {}): void {
  * action bundle (`dist-action/`) is gitignored on main and exists only on
  * tag commits, so folding it in requires the force flag.
  */
-export function addForce(pathspec: string, opts: GitOptions = {}): void {
-  run(['add', '-f', pathspec], opts);
+export async function addForce(pathspec: string, opts: GitOptions = {}): Promise<void> {
+  await run(['add', '-f', pathspec], opts);
 }
 
 /**
@@ -186,9 +180,9 @@ export function addForce(pathspec: string, opts: GitOptions = {}): void {
  * `false` on a clean index. Used to guard the fold against committing
  * nothing when `build:action` produced no bundle output.
  */
-export function hasStagedChanges(opts: GitOptions = {}): boolean {
+export async function hasStagedChanges(opts: GitOptions = {}): Promise<boolean> {
   try {
-    run(['diff', '--cached', '--quiet'], opts);
+    await run(['diff', '--cached', '--quiet'], opts);
     return false;
   } catch {
     return true;
@@ -203,8 +197,8 @@ export function hasStagedChanges(opts: GitOptions = {}): boolean {
  * the fold relies on so a `release:` trailer survives — see
  * notes/handoff/2026-04-24-dist-action.md).
  */
-export function commitWithBody(subject: string, body: string, opts: GitOptions = {}): void {
-  run(['commit', '-m', subject, '-m', body], opts);
+export async function commitWithBody(subject: string, body: string, opts: GitOptions = {}): Promise<void> {
+  await run(['commit', '-m', subject, '-m', body], opts);
 }
 
 /* ------------------------------ tags ------------------------------ */
@@ -213,7 +207,7 @@ export function commitWithBody(subject: string, body: string, opts: GitOptions =
  * The commit a tag points at. `rev-list -n 1` dereferences an annotated
  * tag down to the commit it ultimately references.
  */
-export function tagCommit(name: string, opts: GitOptions = {}): string {
+export async function tagCommit(name: string, opts: GitOptions = {}): Promise<string> {
   return run(['rev-list', '-n', '1', name], opts);
 }
 
@@ -230,12 +224,12 @@ export function tagCommit(name: string, opts: GitOptions = {}): string {
  *
  * Returns null when no tag for this package exists.
  */
-export function lastTag(
+export async function lastTag(
   packageName: string,
   tagFormat: string,
   opts: GitOptions = {},
-): string | null {
-  const candidates = tagList(tagGlob(tagFormat, packageName), opts);
+): Promise<string | null> {
+  const candidates = await tagList(tagGlob(tagFormat, packageName), opts);
 
   let best: { tag: string; version: Semver } | null = null;
   for (const tag of candidates) {

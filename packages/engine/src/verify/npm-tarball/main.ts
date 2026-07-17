@@ -15,11 +15,12 @@
  * per-tree assertion. Returns the process exit code (0 ok, 1 on any miss).
  */
 
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { downloadNpmTarball } from './download.js';
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
+import { pathExists } from '../../utils/path-exists.js';
 import { localDirState } from './local-dir-state.js';
 import { resolveNpmTarballUrl } from './resolve-url.js';
 import type { TarballRow, VerifyNpmTarballOptions } from './types.js';
@@ -43,7 +44,7 @@ export async function verifyNpmTarballMain(
   let fail = 0;
   for (const row of npmRows) {
     const pkgDirLocal = join(opts.cwd, row.path);
-    const pkgJson = JSON.parse(readFileSync(join(pkgDirLocal, 'package.json'), 'utf8')) as {
+    const pkgJson = JSON.parse(await readFile(join(pkgDirLocal, 'package.json'), 'utf8')) as {
       name: string;
       files?: string[];
     };
@@ -67,23 +68,23 @@ export async function verifyNpmTarballMain(
       continue;
     }
 
-    const { root, packageDir } = downloadNpmTarball(url, 5);
+    const { root, packageDir } = await downloadNpmTarball(url, 5);
     for (const d of dirs) {
       const target = join(packageDir, d);
       // `-d` before counting: `listFilesRecursive` reads the dir, so it
       // must not run on a non-directory. The `&&` short-circuit mirrors
       // the bash `[ -d dir ] && [ "$(find … | wc -l)" -gt 0 ]`.
-      if (existsSync(target) && statSync(target).isDirectory() && listFilesRecursive(target).length > 0) {
-        const count = listFilesRecursive(target).length;
+      if ((await pathExists(target)) && (await stat(target)).isDirectory() && (await listFilesRecursive(target)).length > 0) {
+        const count = (await listFilesRecursive(target)).length;
         process.stdout.write(`  ok: package/${d}/ (${count} file(s))\n`);
       } else {
         process.stdout.write(
-          `::error::[${pkgName}@${version}] tarball missing '${d}'. ${localDirState(join(pkgDirLocal, d))}\n`,
+          `::error::[${pkgName}@${version}] tarball missing '${d}'. ${await localDirState(join(pkgDirLocal, d))}\n`,
         );
         fail = 1;
       }
     }
-    rmSync(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
   return fail;
 }

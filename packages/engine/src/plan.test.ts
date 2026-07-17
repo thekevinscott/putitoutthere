@@ -17,7 +17,7 @@
  * planner's genuine output.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
@@ -25,12 +25,12 @@ import { plan } from './plan.js';
 import { resolvePythonVersions } from './python-versions.js';
 import { isVersionIndependentWheel } from './wheel-abi.js';
 
-// Mock only the I/O boundary. `readFileSync` is driven so `loadConfig`'s
+// Mock only the I/O boundary. `readFile` is driven so `loadConfig`'s
 // real `parseConfig` runs on each test's TOML; the `git.js` observers are
 // driven to describe the repo state the planner would otherwise read from
 // a real temp git repo; the pypi helpers are driven so the planner's
 // version-fan logic is exercised without touching the filesystem.
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./git.js');
 vi.mock('./python-versions.js');
 vi.mock('./wheel-abi.js');
@@ -42,41 +42,42 @@ const HEAD = 'HEADSHA';
 
 /** Drive `loadConfig` to see `toml` as the `putitoutthere.toml` contents. */
 function useToml(toml: string): void {
-  vi.mocked(readFileSync).mockReturnValue(toml);
+  vi.mocked(readFile).mockResolvedValue(toml);
 }
 
 /** The commit message the planner reads the `release:` trailer from. */
 function setHeadBody(msg: string): void {
-  vi.mocked(commitBody).mockReturnValue(msg);
+  vi.mocked(commitBody).mockResolvedValue(msg);
 }
 
 /** Map each package name to its resolved last tag (or absent → first release). */
 function setTags(tags: Record<string, string>): void {
-  vi.mocked(lastTag).mockImplementation((name: string) => tags[name] ?? null);
+  vi.mocked(lastTag).mockImplementation((name: string) => Promise.resolve(tags[name] ?? null));
 }
 
 /** Map each tag to the file paths changed since it (drives the cascade). */
 function setDiff(byTag: Record<string, string[]>): void {
-  vi.mocked(diffNames).mockImplementation((from: string) => byTag[from] ?? []);
+  vi.mocked(diffNames).mockImplementation((from: string) => Promise.resolve(byTag[from] ?? []));
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   // Sane defaults: HEAD is a plain, trailer-less, non-merge commit and no
   // package has a tag (the first-release shape). Tests override per case.
-  vi.mocked(headCommit).mockReturnValue(HEAD);
-  vi.mocked(commitBody).mockReturnValue('feat: initial');
-  vi.mocked(commitParents).mockReturnValue(['parent']);
-  vi.mocked(lastTag).mockReturnValue(null);
-  vi.mocked(diffNames).mockReturnValue([]);
-  vi.mocked(isVersionIndependentWheel).mockReturnValue(false);
+  vi.mocked(headCommit).mockResolvedValue(HEAD);
+  vi.mocked(commitBody).mockResolvedValue('feat: initial');
+  vi.mocked(commitParents).mockResolvedValue(['parent']);
+  vi.mocked(lastTag).mockResolvedValue(null);
+  vi.mocked(diffNames).mockResolvedValue([]);
+  vi.mocked(isVersionIndependentWheel).mockResolvedValue(false);
   // Restore the real resolution shape the prior factory encoded: an
   // explicit `python_versions` is sorted numerically, else a single
   // default. The resolution logic itself is covered by
   // python-versions.test.ts and the integration suite.
   vi.mocked(resolvePythonVersions).mockImplementation((pkg) => {
     if (pkg.python_versions !== undefined) {
-      return [...pkg.python_versions].sort((a, b) => {
+      return Promise.resolve(
+        [...pkg.python_versions].sort((a, b) => {
         const av = a.split('.').map(Number);
         const bv = b.split('.').map(Number);
         for (let i = 0; i < Math.max(av.length, bv.length); i++) {
@@ -84,9 +85,10 @@ beforeEach(() => {
           if (d !== 0) {return d;}
         }
         return 0;
-      });
+        }),
+      );
     }
-    return ['3.12'];
+    return Promise.resolve(['3.12']);
   });
 });
 
@@ -297,6 +299,19 @@ describe('plan: subsequent release with last_tag', () => {
     const matrix = await plan({ cwd: CWD });
     expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('0.3.5');
     expect(matrix.find((r) => r.name === 'lib-python')!.version).toBe('1.2.1');
+
+    // Every `lastTag` call — from both `collectChanges` (plan.ts:211) and
+    // `nextVersion` (plan.ts:232) — must carry the `{ cwd }` options
+    // object. Checking *every* call (not just "some call matched") kills
+    // the `{ cwd } -> {}` mutant at either site independently, since both
+    // fire here with identical name/format args.
+    for (const call of vi.mocked(lastTag).mock.calls) {
+      expect(call[2]).toEqual({ cwd: CWD });
+    }
+    // `diffNames` is threaded the seed tag, the literal 'HEAD' ref, and
+    // `{ cwd }` (plan.ts:218 — kills both the 'HEAD'->"" and {cwd}->{}
+    // mutants; single call site, so a targeted match is exact).
+    expect(vi.mocked(diffNames)).toHaveBeenCalledWith('lib-rust-v0.3.4', 'HEAD', { cwd: CWD });
   });
 
   it('falls back to first_version when the resolved last tag is unparseable', async () => {
@@ -691,7 +706,7 @@ targets = ["x86_64-unknown-linux-gnu"]
     expect(linux.artifact_path).toBe('packages/ts/build/x86_64-unknown-linux-gnu');
   });
 
-  it('throws at plan time when a napi target triple is unmapped (#170)', () => {
+  it('throws at plan time when a napi target triple is unmapped (#170)', async () => {
     // Plan-time guard: a bogus triple (`mips64-unknown-linux-gnu`) has no
     // TRIPLE_MAP entry. Without this guard, the mistake surfaces only
     // mid-publish, after the CI matrix has already burned compute.
@@ -708,10 +723,9 @@ build   = "napi"
 targets = ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnu"]
 `);
 
-    // `plan()` throws synchronously from `rowsForPackage` before it
-    // can wrap the result in a Promise, so assert on the synchronous
-    // call rather than `.rejects`.
-    expect(() => plan({ cwd: CWD })).toThrow(
+    // `plan()` is async, so the plan-time guard in `rowsForPackage`
+    // surfaces as a rejection.
+    await expect(plan({ cwd: CWD })).rejects.toThrow(
       /lib-napi.*mips64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
     );
   });
@@ -768,11 +782,13 @@ describe('plan: merge-commit trailer resolution', () => {
     });
     // HEAD is a merge commit: its body has no trailer; the trailer lives
     // on the second (feature) parent whose message carried `release: minor`.
-    vi.mocked(commitParents).mockReturnValue(['main-parent', 'feat-parent']);
+    vi.mocked(commitParents).mockResolvedValue(['main-parent', 'feat-parent']);
     vi.mocked(commitBody).mockImplementation((sha: string) =>
-      sha === 'feat-parent'
-        ? 'change rust\n\nrelease: minor'
-        : 'Merge pull request #1 from feat',
+      Promise.resolve(
+        sha === 'feat-parent'
+          ? 'change rust\n\nrelease: minor'
+          : 'Merge pull request #1 from feat',
+      ),
     );
 
     const matrix = await plan({ cwd: CWD });
@@ -780,6 +796,18 @@ describe('plan: merge-commit trailer resolution', () => {
     // bump defaults to patch → 0.1.1). With the fallback we see 0.2.0.
     const rust = matrix.find((r) => r.name === 'lib-rust');
     expect(rust?.version).toBe('0.2.0');
+
+    // The change-detection collaborators must all be threaded the caller's
+    // `cwd` (pins the `{ cwd }` options object against `{}` mutants, and
+    // the trailer-resolution first-arg identities against being swapped):
+    //   headCommit({ cwd })            — plan.ts:107
+    //   commitBody(HEAD, { cwd })      — plan.ts:507 (direct HEAD body)
+    //   commitParents(HEAD, { cwd })   — plan.ts:509
+    //   commitBody('feat-parent', …)   — plan.ts:513 (merge-parent body)
+    expect(vi.mocked(headCommit)).toHaveBeenCalledWith({ cwd: CWD });
+    expect(vi.mocked(commitBody)).toHaveBeenCalledWith(HEAD, { cwd: CWD });
+    expect(vi.mocked(commitParents)).toHaveBeenCalledWith(HEAD, { cwd: CWD });
+    expect(vi.mocked(commitBody)).toHaveBeenCalledWith('feat-parent', { cwd: CWD });
   });
 
   it('still prefers the HEAD trailer when present (non-merge commits)', async () => {
@@ -803,9 +831,9 @@ describe('plan: merge-commit trailer resolution', () => {
       'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
       'lib-python-v0.1.0': ['packages/rust/lib.rs'],
     });
-    vi.mocked(commitParents).mockReturnValue(['main-parent', 'feat-parent']);
+    vi.mocked(commitParents).mockResolvedValue(['main-parent', 'feat-parent']);
     vi.mocked(commitBody).mockImplementation((sha: string) =>
-      sha === 'feat-parent' ? 'change rust (no trailer)' : 'Merge feat',
+      Promise.resolve(sha === 'feat-parent' ? 'change rust (no trailer)' : 'Merge feat'),
     );
 
     const matrix = await plan({ cwd: CWD });
@@ -953,6 +981,15 @@ build = "setuptools"
 
     const matrix = await plan({ cwd: CWD });
     expect(matrix.map((r) => r.target)).toEqual(['sdist']);
+
+    // #401 short-circuit (plan.ts:305): `build === 'maturin' &&
+    // isVersionIndependentWheel(...)`. For a non-maturin build the
+    // left operand is false, so `isVersionIndependentWheel` must never be
+    // consulted — the wheel fan is treated as version-DEPENDENT regardless
+    // of what that helper would return. Asserting it was NOT called kills
+    // the mutant that drops the `build === 'maturin'` guard (which would
+    // consult the helper for setuptools too).
+    expect(vi.mocked(isVersionIndependentWheel)).not.toHaveBeenCalled();
   });
 });
 
@@ -1296,7 +1333,7 @@ python_versions = ["3.11", "3.12", "3.13"]
 
   it('collapses a `bindings = "bin"` wheel to one unsuffixed row despite a 3-version fan', async () => {
     useToml(TOML);
-    vi.mocked(isVersionIndependentWheel).mockReturnValue(true);
+    vi.mocked(isVersionIndependentWheel).mockResolvedValue(true);
     const wheels = wheelRows(await plan({ cwd: CWD }));
     expect(wheels).toHaveLength(1);
     expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
@@ -1305,7 +1342,7 @@ python_versions = ["3.11", "3.12", "3.13"]
 
   it('collapses a pyo3 abi3 Cargo wheel to one unsuffixed row despite a 3-version fan', async () => {
     useToml(TOML);
-    vi.mocked(isVersionIndependentWheel).mockReturnValue(true);
+    vi.mocked(isVersionIndependentWheel).mockResolvedValue(true);
     const wheels = wheelRows(await plan({ cwd: CWD }));
     expect(wheels).toHaveLength(1);
     expect(wheels[0]!.artifact_name).toBe('py-lib-wheel-x86_64-unknown-linux-gnu');
@@ -1347,6 +1384,14 @@ describe('plan: manual release (release-packages)', () => {
 
     const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust' });
     expect(matrix.every((r) => r.version === '1.2.4')).toBe(true);
+
+    // The manual path resolves the bump via `manualVersion` (plan.ts:190),
+    // the only `lastTag` caller on this path (change detection is bypassed).
+    // Assert every call carries `{ cwd }` to kill the `{ cwd } -> {}` mutant.
+    expect(vi.mocked(lastTag)).toHaveBeenCalled();
+    for (const call of vi.mocked(lastTag).mock.calls) {
+      expect(call[2]).toEqual({ cwd: CWD });
+    }
   });
 
   it('uses an explicit version verbatim', async () => {
@@ -1389,12 +1434,12 @@ describe('plan: manual release (release-packages)', () => {
     expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
   });
 
-  it('throws when a named package is not declared in the config', () => {
+  it('throws when a named package is not declared in the config', async () => {
     useToml(PUTITOUTTHERE_TOML);
 
-    // Like `loadConfig`, the manual planner rejects bad input
-    // synchronously — before any promise is returned.
-    expect(() => plan({ cwd: CWD, releasePackages: 'lib-ghost@minor' })).toThrow(
+    // The manual planner rejects bad input; `plan` is async so the throw
+    // surfaces as a rejection.
+    await expect(plan({ cwd: CWD, releasePackages: 'lib-ghost@minor' })).rejects.toThrow(
       /lib-ghost/,
     );
   });

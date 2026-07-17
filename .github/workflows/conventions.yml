@@ -18,14 +18,12 @@ jobs:
       source: packages/ci/src
 
   # packages/engine meets the full testing-conventions standard: every gate
-  # runs with no `gates:` filter (epic #474 / #476, adopted gate-by-gate —
-  # colocated-test, unit-lint, integration-lint, unit-coverage, mutation,
-  # packaging — then flipped to the full standard).
-  #
-  # `config:` points at a package-scoped exemption file (exempt paths resolve
-  # relative to the scanned source dir, so it can't be shared with the `ci`
-  # job's scan). It currently carries only `co-change` exemptions for the #552
-  # toError refactor — see that file for the reasons.
+  # runs with no `gates:` filter (epic #474 / #476). The only tuning is an
+  # engine-scoped `config:` that lifts three genuinely-equivalent mutation
+  # mutants (see packages/engine/testing-conventions.toml, each with a reason).
+  # It is kept separate from the ci job so its engine-only
+  # `[[typescript.exempt]]` paths don't error against packages/ci/src; the ci
+  # job keeps the default config and needs no exemptions.
   engine:
     uses: thekevinscott/testing-conventions/.github/workflows/testing-conventions.yml@v0
     with:

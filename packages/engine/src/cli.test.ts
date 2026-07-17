@@ -13,7 +13,7 @@
  * imported here) so the human-readable render is asserted end to end.
  */
 
-import { appendFileSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,7 +40,7 @@ import type { MatrixRow } from './plan.js';
 import type { PlanStatus } from './plan-status-types.js';
 import type { StatusRow } from './status-types.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 vi.mock('./advance-floating-major.js');
 vi.mock('./advance-v0.js');
 vi.mock('./check.js');
@@ -76,7 +76,7 @@ const foldActionBundleMock = vi.mocked(foldActionBundle);
 const writeCrateVersionMock = vi.mocked(writeCrateVersionForBuild);
 const writeLauncherMock = vi.mocked(writeLauncherFromConfig);
 const writeVersionMock = vi.mocked(writeVersionForBuild);
-const appendFileSyncMock = vi.mocked(appendFileSync);
+const appendFileMock = vi.mocked(appendFile);
 
 function matrixRow(name: string, version = '1.0.0'): MatrixRow {
   return {
@@ -135,22 +135,22 @@ beforeEach(() => {
     return true;
   });
   computePlanStatusMock.mockResolvedValue(planStatus([]));
-  runChecksMock.mockReturnValue([]);
+  runChecksMock.mockResolvedValue([]);
   computeStatusMock.mockResolvedValue([]);
   publishMock.mockResolvedValue({ ok: true, published: [] });
   reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
   computeVerifyMock.mockResolvedValue([]);
   verifyNpmTarballMock.mockResolvedValue(0);
-  verifyCrateMock.mockReturnValue(0);
-  verifyWheelMock.mockReturnValue(0);
-  verifyBundleCliMock.mockReturnValue(0);
-  releaseGithubMock.mockReturnValue(0);
-  advanceV0Mock.mockReturnValue(0);
-  advanceFloatingMajorMock.mockReturnValue(0);
-  foldActionBundleMock.mockReturnValue(0);
-  writeVersionMock.mockReturnValue(['pyproject.toml']);
-  writeCrateVersionMock.mockReturnValue(['Cargo.toml']);
-  writeLauncherMock.mockReturnValue([]);
+  verifyCrateMock.mockResolvedValue(0);
+  verifyWheelMock.mockResolvedValue(0);
+  verifyBundleCliMock.mockResolvedValue(0);
+  releaseGithubMock.mockResolvedValue(0);
+  advanceV0Mock.mockResolvedValue(0);
+  advanceFloatingMajorMock.mockResolvedValue(0);
+  foldActionBundleMock.mockResolvedValue(0);
+  writeVersionMock.mockResolvedValue(['pyproject.toml']);
+  writeCrateVersionMock.mockResolvedValue(['Cargo.toml']);
+  writeLauncherMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -284,7 +284,7 @@ describe('cli: check dispatch', () => {
     const findings: CheckFinding[] = [
       { message: 'putitoutthere.toml not found at /x/putitoutthere.toml' },
     ];
-    runChecksMock.mockReturnValue(findings);
+    runChecksMock.mockResolvedValue(findings);
     const code = await run(argv('check', '--cwd', '/x'));
     expect(code).toBe(1);
     expect(stderr.join('')).toMatch(/check: 1 finding/);
@@ -292,14 +292,14 @@ describe('cli: check dispatch', () => {
   });
 
   it('exits 0 with a "no findings" line when checks pass', async () => {
-    runChecksMock.mockReturnValue([]);
+    runChecksMock.mockResolvedValue([]);
     const code = await run(argv('check', '--cwd', '/x'));
     expect(code).toBe(0);
     expect(stdout.join('')).toMatch(/no findings/);
   });
 
   it('renders multiple findings with per-package prefixes and --config (#319)', async () => {
-    runChecksMock.mockReturnValue([
+    runChecksMock.mockResolvedValue([
       { message: 'top-level problem' },
       { package: 'demo', message: 'package problem' },
     ]);
@@ -315,7 +315,7 @@ describe('cli: check dispatch', () => {
   });
 
   it('emits the findings array on stdout under --json', async () => {
-    runChecksMock.mockReturnValue([{ message: 'putitoutthere.toml missing' }]);
+    runChecksMock.mockResolvedValue([{ message: 'putitoutthere.toml missing' }]);
     const code = await run(argv('check', '--cwd', '/x', '--json'));
     expect(code).toBe(1);
     const parsed = JSON.parse(stdout.join('').trim()) as {
@@ -406,9 +406,16 @@ describe('cli: plan dispatch', () => {
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
     const code = await run(argv('plan', '--cwd', '/x', '--json'));
     expect(code).toBe(0);
-    expect(appendFileSyncMock).toHaveBeenCalledOnce();
-    expect(appendFileSyncMock.mock.calls[0]![0]).toBe('/gha/output.txt');
-    expect(String(appendFileSyncMock.mock.calls[0]![1])).toMatch(/^matrix=/);
+    expect(appendFileMock).toHaveBeenCalledOnce();
+    expect(appendFileMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+    expect(String(appendFileMock.mock.calls[0]![1] as string)).toMatch(/^matrix=/);
+    // Pin the write's encoding so a StringLiteral mutant dropping 'utf8'
+    // from appendFile(githubOutput, ..., 'utf8') (cli.ts:290) is killed.
+    expect(appendFileMock).toHaveBeenCalledWith(
+      '/gha/output.txt',
+      expect.stringMatching(/^matrix=/),
+      'utf8',
+    );
   });
 
   it('does NOT write matrix= to $GITHUB_OUTPUT when the plan is empty (#146)', async () => {
@@ -416,7 +423,7 @@ describe('cli: plan dispatch', () => {
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
     const code = await run(argv('plan', '--cwd', '/x', '--json'));
     expect(code).toBe(0);
-    expect(appendFileSyncMock).not.toHaveBeenCalled();
+    expect(appendFileMock).not.toHaveBeenCalled();
   });
 
   it('prints "no packages to release" when the plan is empty', async () => {
@@ -516,7 +523,7 @@ describe('cli: write-crate-version dispatch', () => {
 
 describe('cli: write-launcher dispatch', () => {
   it('reports the authored files when the engine writes a launcher (#299)', async () => {
-    writeLauncherMock.mockReturnValue(['bin/demo-cli.js', 'package.json']);
+    writeLauncherMock.mockResolvedValue(['bin/demo-cli.js', 'package.json']);
     const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts'));
     expect(code).toBe(0);
     expect(writeLauncherMock).toHaveBeenCalledWith(
@@ -526,14 +533,14 @@ describe('cli: write-launcher dispatch', () => {
   });
 
   it('prints a no-op line when the engine authors nothing (#299)', async () => {
-    writeLauncherMock.mockReturnValue([]);
+    writeLauncherMock.mockResolvedValue([]);
     const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts'));
     expect(code).toBe(0);
     expect(stdout.join('')).toMatch(/no-op/);
   });
 
   it('forwards --config to the launcher engine (#299)', async () => {
-    writeLauncherMock.mockReturnValue([]);
+    writeLauncherMock.mockResolvedValue([]);
     const code = await run(argv('write-launcher', '--cwd', '/tree', '--path', 'packages/ts', '--config', '/tree/piot.toml'));
     expect(code).toBe(0);
     expect(writeLauncherMock).toHaveBeenCalledWith(
@@ -716,7 +723,7 @@ describe('cli: verify dispatch', () => {
   });
 
   it('routes verify crate to the verifier', async () => {
-    verifyCrateMock.mockReturnValue(0);
+    verifyCrateMock.mockResolvedValue(0);
     const code = await run(argv('verify', 'crate', '--cwd', '/x', '--matrix', '[]', '--registry-root', '/root'));
     expect(code).toBe(0);
     expect(verifyCrateMock).toHaveBeenCalledWith({ matrix: '[]', registryRoot: '/root' });
@@ -735,7 +742,7 @@ describe('cli: verify dispatch', () => {
   });
 
   it('routes verify wheel to the verifier', async () => {
-    verifyWheelMock.mockReturnValue(0);
+    verifyWheelMock.mockResolvedValue(0);
     const code = await run(
       argv('verify', 'wheel', '--cwd', '/x', '--path', '/pkg', '--version', '1.0.0', '--target', 'sdist'),
     );
@@ -764,7 +771,7 @@ describe('cli: verify dispatch', () => {
   });
 
   it('routes verify bundle-cli to the verifier', async () => {
-    verifyBundleCliMock.mockReturnValue(0);
+    verifyBundleCliMock.mockResolvedValue(0);
     const code = await run(
       argv('verify', 'bundle-cli', '--cwd', '/x', '--path', '/pkg', '--stage-to', 'dir', '--bin', 'demo', '--target', 'x86_64'),
     );
@@ -807,28 +814,28 @@ describe('cli: verify dispatch', () => {
 
 describe('cli: release-github / advance / fold dispatch', () => {
   it('routes release-github to the engine', async () => {
-    releaseGithubMock.mockReturnValue(0);
+    releaseGithubMock.mockResolvedValue(0);
     const code = await run(argv('release-github', '--cwd', '/x'));
     expect(code).toBe(0);
     expect(releaseGithubMock).toHaveBeenCalledWith({ cwd: '/x' });
   });
 
   it('routes advance-v0 to the engine', async () => {
-    advanceV0Mock.mockReturnValue(0);
+    advanceV0Mock.mockResolvedValue(0);
     const code = await run(argv('advance-v0', '--cwd', '/x'));
     expect(code).toBe(0);
     expect(advanceV0Mock).toHaveBeenCalledWith({ cwd: '/x' });
   });
 
   it('routes advance-floating-major to the engine', async () => {
-    advanceFloatingMajorMock.mockReturnValue(0);
+    advanceFloatingMajorMock.mockResolvedValue(0);
     const code = await run(argv('advance-floating-major', '--cwd', '/x'));
     expect(code).toBe(0);
     expect(advanceFloatingMajorMock).toHaveBeenCalledWith({ cwd: '/x' });
   });
 
   it('routes fold-bundle to the engine with the subject', async () => {
-    foldActionBundleMock.mockReturnValue(0);
+    foldActionBundleMock.mockResolvedValue(0);
     const code = await run(argv('fold-bundle', '--cwd', '/x', '--subject', 'chore(release): bundle'));
     expect(code).toBe(0);
     expect(foldActionBundleMock).toHaveBeenCalledWith({ cwd: '/x', subject: 'chore(release): bundle' });
@@ -855,8 +862,8 @@ describe('cli: release-github / advance / fold dispatch', () => {
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
     const code = await run(argv('publish', '--cwd', '/x'));
     expect(code).toBe(0);
-    const written = appendFileSyncMock.mock.calls
-      .map((c) => String(c[1]))
+    const written = appendFileMock.mock.calls
+      .map((c) => String(c[1] as string))
       .join('');
     expect(written).toMatch(/(^|\n)released=true\n/);
     const line = written.split('\n').find((l) => l.startsWith('released_packages='));
@@ -867,7 +874,14 @@ describe('cli: release-github / advance / fold dispatch', () => {
       tag: string;
     }>;
     expect(parsed).toEqual([{ name: 'lib-js', version: '1.2.3', tag: 'lib-js-v1.2.3' }]);
-    expect(appendFileSyncMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+    expect(appendFileMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+    // Pin the write's encoding so a StringLiteral mutant dropping 'utf8'
+    // from appendFile(publishGithubOutput, ..., 'utf8') (cli.ts:568) is killed.
+    expect(appendFileMock).toHaveBeenCalledWith(
+      '/gha/output.txt',
+      expect.stringContaining('released='),
+      'utf8',
+    );
   });
 
   it('appends released=false with an empty released_packages= when nothing newly ships (#461)', async () => {
@@ -875,8 +889,8 @@ describe('cli: release-github / advance / fold dispatch', () => {
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
     const code = await run(argv('publish', '--cwd', '/x'));
     expect(code).toBe(0);
-    const written = appendFileSyncMock.mock.calls
-      .map((c) => String(c[1]))
+    const written = appendFileMock.mock.calls
+      .map((c) => String(c[1] as string))
       .join('');
     expect(written).toMatch(/(^|\n)released=false\n/);
     expect(written).toMatch(/(^|\n)released_packages=\[\]\n/);
@@ -892,8 +906,8 @@ describe('cli: release-github / advance / fold dispatch', () => {
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
     const code = await run(argv('publish', '--cwd', '/x'));
     expect(code).toBe(0);
-    const written = appendFileSyncMock.mock.calls
-      .map((c) => String(c[1]))
+    const written = appendFileMock.mock.calls
+      .map((c) => String(c[1] as string))
       .join('');
     expect(written).toMatch(/(^|\n)released=false\n/);
     expect(written).toMatch(/(^|\n)released_packages=\[\]\n/);
@@ -909,6 +923,6 @@ describe('cli: release-github / advance / fold dispatch', () => {
     delete process.env.GITHUB_OUTPUT;
     const code = await run(argv('publish', '--cwd', '/x'));
     expect(code).toBe(0);
-    expect(appendFileSyncMock).not.toHaveBeenCalled();
+    expect(appendFileMock).not.toHaveBeenCalled();
   });
 });

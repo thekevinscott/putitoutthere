@@ -39,7 +39,7 @@ export async function computeStatus(opts: StatusOptions): Promise<StatusRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
   const handlerFor = opts.handlerFor ?? defaultHandlerFor;
-  const config = loadConfig(cfgPath);
+  const config = await loadConfig(cfgPath);
   const ctx: Ctx = {
     cwd,
     log: createLogger(),
@@ -49,7 +49,7 @@ export async function computeStatus(opts: StatusOptions): Promise<StatusRow[]> {
 
   const rows: StatusRow[] = [];
   for (const pkg of config.packages) {
-    const tag = lastTag(pkg.name, pkg.tag_format, { cwd });
+    const tag = await lastTag(pkg.name, pkg.tag_format, { cwd });
     const tagVersion = tag === null ? null : parseTagVersion(pkg.tag_format, pkg.name, tag);
 
     let registry: string | null = null;

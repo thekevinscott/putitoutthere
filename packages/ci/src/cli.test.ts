@@ -44,93 +44,93 @@ afterEach(() => {
 const argv = (...rest: string[]) => ['node', 'piot-ci', ...rest];
 
 describe('piot-ci dispatcher', () => {
-  it('prints usage to stdout and exits 1 with no command', () => {
-    const code = run(argv());
+  it('prints usage to stdout and exits 1 with no command', async () => {
+    const code = await run(argv());
     expect(code).toBe(1);
     expect(out.join('')).toContain('piot-ci — putitoutthere repo-internal CI gates');
     expect(err.join('')).toBe('');
   });
 
-  it.each(['help', '--help', '-h'])('prints usage and exits 0 for %s', (flag) => {
-    const code = run(argv(flag));
+  it.each(['help', '--help', '-h'])('prints usage and exits 0 for %s', async (flag) => {
+    const code = await run(argv(flag));
     expect(code).toBe(0);
     expect(out.join('')).toContain('Usage: piot-ci <command>');
   });
 
-  it('reports an unknown command on stderr, prints usage, exits 1', () => {
-    const code = run(argv('bogus'));
+  it('reports an unknown command on stderr, prints usage, exits 1', async () => {
+    const code = await run(argv('bogus'));
     expect(code).toBe(1);
     expect(err.join('')).toContain("piot-ci: unknown command 'bogus'");
     expect(out.join('')).toContain('Usage: piot-ci <command>');
   });
 
-  it('dispatches changelog-check to its gate and returns its exit code', () => {
-    vi.mocked(runChangelogCheck).mockReturnValue(1);
-    const code = run(argv('changelog-check'));
+  it('dispatches changelog-check to its gate and returns its exit code', async () => {
+    vi.mocked(runChangelogCheck).mockResolvedValue(1);
+    const code = await run(argv('changelog-check'));
     expect(code).toBe(1);
     expect(runChangelogCheck).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches tdd-lint to its gate and returns its exit code', () => {
-    vi.mocked(runTddLint).mockReturnValue(1);
-    const code = run(argv('tdd-lint'));
+  it('dispatches tdd-lint to its gate and returns its exit code', async () => {
+    vi.mocked(runTddLint).mockResolvedValue(1);
+    const code = await run(argv('tdd-lint'));
     expect(code).toBe(1);
     expect(runTddLint).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches actionlint-idtoken to its gate and returns its exit code', () => {
-    vi.mocked(runActionlintIdToken).mockReturnValue(1);
-    const code = run(argv('actionlint-idtoken'));
+  it('dispatches actionlint-idtoken to its gate and returns its exit code', async () => {
+    vi.mocked(runActionlintIdToken).mockResolvedValue(1);
+    const code = await run(argv('actionlint-idtoken'));
     expect(code).toBe(1);
     expect(runActionlintIdToken).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches evidence-check to its gate and returns its exit code', () => {
-    vi.mocked(runEvidenceCheck).mockReturnValue(1);
-    const code = run(argv('evidence-check'));
+  it('dispatches evidence-check to its gate and returns its exit code', async () => {
+    vi.mocked(runEvidenceCheck).mockResolvedValue(1);
+    const code = await run(argv('evidence-check'));
     expect(code).toBe(1);
     expect(runEvidenceCheck).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches fixture-materialize to its gate, forwarding argv, and returns its exit code', () => {
-    vi.mocked(runFixtureMaterialize).mockReturnValue(1);
-    const code = run(argv('fixture-materialize', 'plan'));
+  it('dispatches fixture-materialize to its gate, forwarding argv, and returns its exit code', async () => {
+    vi.mocked(runFixtureMaterialize).mockResolvedValue(1);
+    const code = await run(argv('fixture-materialize', 'plan'));
     expect(code).toBe(1);
     expect(runFixtureMaterialize).toHaveBeenCalledWith(['node', 'piot-ci', 'fixture-materialize', 'plan']);
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches verdaccio-auth to its gate and returns its exit code', () => {
-    vi.mocked(runVerdaccioAuth).mockReturnValue(1);
-    const code = run(argv('verdaccio-auth'));
+  it('dispatches verdaccio-auth to its gate and returns its exit code', async () => {
+    vi.mocked(runVerdaccioAuth).mockResolvedValue(1);
+    const code = await run(argv('verdaccio-auth'));
     expect(code).toBe(1);
     expect(runVerdaccioAuth).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches cargo-registry to its gate, forwarding argv, and returns its exit code', () => {
-    vi.mocked(runCargoRegistry).mockReturnValue(1);
-    const code = run(argv('cargo-registry', 'start'));
+  it('dispatches cargo-registry to its gate, forwarding argv, and returns its exit code', async () => {
+    vi.mocked(runCargoRegistry).mockResolvedValue(1);
+    const code = await run(argv('cargo-registry', 'start'));
     expect(code).toBe(1);
     expect(runCargoRegistry).toHaveBeenCalledWith(['node', 'piot-ci', 'cargo-registry', 'start']);
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches patch-coverage to its gate and returns its exit code', () => {
-    vi.mocked(runPatchCoverage).mockReturnValue(2);
-    const code = run(argv('patch-coverage'));
+  it('dispatches patch-coverage to its gate and returns its exit code', async () => {
+    vi.mocked(runPatchCoverage).mockResolvedValue(2);
+    const code = await run(argv('patch-coverage'));
     expect(code).toBe(2);
     expect(runPatchCoverage).toHaveBeenCalledOnce();
     expect(err.join('')).toBe('');
   });
 
-  it('dispatches testpypi-verify to its gate, forwarding argv, and returns its exit code', () => {
-    vi.mocked(runTestpypiVerify).mockReturnValue(1);
-    const code = run(argv('testpypi-verify', 'assert'));
+  it('dispatches testpypi-verify to its gate, forwarding argv, and returns its exit code', async () => {
+    vi.mocked(runTestpypiVerify).mockResolvedValue(1);
+    const code = await run(argv('testpypi-verify', 'assert'));
     expect(code).toBe(1);
     expect(runTestpypiVerify).toHaveBeenCalledWith(['node', 'piot-ci', 'testpypi-verify', 'assert']);
     expect(err.join('')).toBe('');

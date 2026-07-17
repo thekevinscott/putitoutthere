@@ -25,7 +25,7 @@ import type { Posture, VerifyOptions, VerifyRow } from './posture-types.js';
 export async function computeVerify(opts: VerifyOptions): Promise<VerifyRow[]> {
   const cwd = opts.cwd;
   const cfgPath = opts.configPath ?? join(cwd, 'putitoutthere.toml');
-  const config = loadConfig(cfgPath);
+  const config = await loadConfig(cfgPath);
   const ctx: Ctx = {
     cwd,
     log: createLogger(),

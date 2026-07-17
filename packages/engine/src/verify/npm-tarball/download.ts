@@ -11,26 +11,27 @@
  * Caller owns cleanup of the returned `root`.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { execCapture } from '../../utils/exec-capture.js';
+
 export interface ExtractedTarball {
-  /** Temp dir to `rmSync` when done. */
+  /** Temp dir to `rm` when done. */
   root: string;
   /** The unpacked `package/` directory inside the tarball. */
   packageDir: string;
 }
 
-export function downloadNpmTarball(url: string, retryDelay: number): ExtractedTarball {
-  const root = mkdtempSync(join(tmpdir(), 'piot-tarball-'));
+export async function downloadNpmTarball(url: string, retryDelay: number): Promise<ExtractedTarball> {
+  const root = await mkdtemp(join(tmpdir(), 'piot-tarball-'));
   const tgz = join(root, 'pkg.tgz');
   const extracted = join(root, 'extracted');
-  execFileSync('curl', [
+  await execCapture('curl', [
     '-fsSL', '--retry', '5', '--retry-all-errors', '--retry-delay', String(retryDelay), '-o', tgz, url,
   ]);
-  mkdirSync(extracted);
-  execFileSync('tar', ['-xzf', tgz, '-C', extracted]);
+  await mkdir(extracted);
+  await execCapture('tar', ['-xzf', tgz, '-C', extracted]);
   return { root, packageDir: join(extracted, 'package') };
 }

@@ -16,7 +16,7 @@
 
 import { forceTag, type GitOptions, pushTagRefForce } from './git.js';
 
-export function forceMoveTag(name: string, target: string, opts: GitOptions = {}): void {
-  forceTag(name, target, opts);
-  pushTagRefForce(name, opts);
+export async function forceMoveTag(name: string, target: string, opts: GitOptions = {}): Promise<void> {
+  await forceTag(name, target, opts);
+  await pushTagRefForce(name, opts);
 }

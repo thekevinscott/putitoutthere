@@ -29,16 +29,16 @@ beforeEach(() => {
 });
 
 describe('ensureTag', () => {
-  it('creates the missing tag and warns when the push fails', () => {
-    tagListMock.mockReturnValue([]); // tag absent
-    pushTagMock.mockImplementation(() => {
+  it('creates the missing tag and warns when the push fails', async () => {
+    tagListMock.mockResolvedValue([]); // tag absent
+    pushTagMock.mockRejectedValue(
       // A repo with no `origin` (the heal running before a remote exists)
       // fails the push; ensureTag swallows it into a warning.
-      throw new Error('No configured push destination');
-    });
+      new Error('No configured push destination'),
+    );
     const log = makeLog();
 
-    ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
+    await ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
 
     expect(createTagMock).toHaveBeenCalledWith('lib-v1.0.0', 'headsha', {
       cwd: 'repo',
@@ -48,27 +48,25 @@ describe('ensureTag', () => {
     expect(log.warn).toHaveBeenCalledOnce();
   });
 
-  it('warns with String(err) when the push throws a non-Error', () => {
-    tagListMock.mockReturnValue([]); // tag absent
-    pushTagMock.mockImplementation(() => {
-      // A non-Error rejection (a bare string) exercises the `: String(err)`
-      // arm of the warning's message interpolation.
-      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately non-Error to hit the String(err) branch
-      throw 'push exploded';
-    });
+  it('stringifies a non-Error push rejection in the warning', async () => {
+    tagListMock.mockResolvedValue([]); // tag absent
+    // A rejection that is not an Error (a bare string) has no `.message`;
+    // ensureTag folds it via `String(err)` into the warning text.
+    pushTagMock.mockRejectedValue('push blew up: bare string reason');
     const log = makeLog();
 
-    ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
+    await ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
 
-    expect(log.warn).toHaveBeenCalledOnce();
-    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('push exploded'));
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('push blew up: bare string reason'),
+    );
   });
 
-  it('is a no-op when the tag already exists', () => {
-    tagListMock.mockReturnValue(['lib-v1.0.0']); // tag present
+  it('is a no-op when the tag already exists', async () => {
+    tagListMock.mockResolvedValue(['lib-v1.0.0']); // tag present
     const log = makeLog();
 
-    ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
+    await ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log);
 
     // We neither re-created nor tried to push it.
     expect(createTagMock).not.toHaveBeenCalled();

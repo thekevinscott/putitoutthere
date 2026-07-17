@@ -13,7 +13,7 @@
  * enforces this at every level.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { parse as parseToml } from 'smol-toml';
 import { z, type ZodError } from 'zod';
 
@@ -415,10 +415,10 @@ export function parseConfig(toml: string): Config {
   };
 }
 
-export function loadConfig(path: string): Config {
+export async function loadConfig(path: string): Promise<Config> {
   let text: string;
   try {
-    text = readFileSync(path, 'utf8');
+    text = await readFile(path, 'utf8');
   } catch (err) {
     throw new Error(
       `putitoutthere.toml: cannot read ${path}: ${toError(err).message}`,

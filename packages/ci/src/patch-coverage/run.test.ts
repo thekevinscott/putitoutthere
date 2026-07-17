@@ -1,7 +1,7 @@
 /**
  * Composition-root coverage for the patch-coverage gate (#468). The decision
  * modules (parseAddedLines, coveredLines, decidePatchCoverage) and the I/O
- * boundary (node:child_process, node:fs) are mocked, so this isolates run's
+ * boundary (the exec seam, node:fs/promises) are mocked, so this isolates run's
  * wiring: the env guard, the SHA-reachability `git cat-file` probes, the exact
  * `git diff` invocation (with its `maxBuffer`), how the diff is fed to
  * parseAddedLines, the conditional coverage read (skipped when there are no
@@ -10,23 +10,23 @@
  * streams. The decisions themselves live in their own tests.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { execCapture } from '../utils/exec-capture.js';
 import { coveredLines } from './covered-lines.js';
 import { decidePatchCoverage } from './decide.js';
 import { parseAddedLines } from './parse-added-lines.js';
 import { runPatchCoverage } from './run.js';
 
-vi.mock('node:child_process');
-vi.mock('node:fs');
+vi.mock('../utils/exec-capture.js');
+vi.mock('node:fs/promises');
 vi.mock('./covered-lines.js');
 vi.mock('./decide.js');
 vi.mock('./parse-added-lines.js');
 
-const exec = vi.mocked(execFileSync);
-const readFile = vi.mocked(readFileSync);
+const exec = vi.mocked(execCapture);
+const readFileMock = vi.mocked(readFile);
 const parse = vi.mocked(parseAddedLines);
 const covered = vi.mocked(coveredLines);
 const decide = vi.mocked(decidePatchCoverage);
@@ -39,11 +39,11 @@ const COV_PATH = `${cwd}/packages/engine/coverage/coverage-final.json`;
 // Route git by subcommand: cat-file probes return nothing, diff returns text.
 function routeGit(diffOut: string): void {
   exec.mockImplementation((_cmd, args) => {
-    const a = (args as readonly string[]) ?? [];
+    const a = args ?? [];
     if (a.includes('cat-file')) {
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
-    return diffOut;
+    return Promise.resolve({ stdout: diffOut, stderr: '' });
   });
 }
 
@@ -72,46 +72,44 @@ afterEach(() => {
 });
 
 describe('runPatchCoverage: env guard', () => {
-  it('fails with exit 2 and never shells out when BASE_SHA is absent', () => {
+  it('fails with exit 2 and never shells out when BASE_SHA is absent', async () => {
     delete process.env.BASE_SHA;
-    const code = runPatchCoverage();
+    const code = await runPatchCoverage();
     expect(code).toBe(2);
     expect(err.join('')).toBe('::error::patch-coverage: BASE_SHA and HEAD_SHA must be set\n');
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('fails with exit 2 when BASE_SHA is the empty string', () => {
+  it('fails with exit 2 when BASE_SHA is the empty string', async () => {
     process.env.BASE_SHA = '';
-    expect(runPatchCoverage()).toBe(2);
+    await expect(runPatchCoverage()).resolves.toBe(2);
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('fails with exit 2 when HEAD_SHA is absent', () => {
+  it('fails with exit 2 when HEAD_SHA is absent', async () => {
     delete process.env.HEAD_SHA;
-    expect(runPatchCoverage()).toBe(2);
+    await expect(runPatchCoverage()).resolves.toBe(2);
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('fails with exit 2 when HEAD_SHA is the empty string', () => {
+  it('fails with exit 2 when HEAD_SHA is the empty string', async () => {
     process.env.HEAD_SHA = '';
-    expect(runPatchCoverage()).toBe(2);
+    await expect(runPatchCoverage()).resolves.toBe(2);
     expect(exec).not.toHaveBeenCalled();
   });
 });
 
 describe('runPatchCoverage: SHA reachability', () => {
-  it('probes both SHAs with git cat-file -e before diffing', () => {
+  it('probes both SHAs with git cat-file -e before diffing', async () => {
     routeGit('');
-    runPatchCoverage();
-    expect(exec).toHaveBeenNthCalledWith(1, 'git', ['cat-file', '-e', 'aaaa'], { stdio: 'ignore' });
-    expect(exec).toHaveBeenNthCalledWith(2, 'git', ['cat-file', '-e', 'bbbb'], { stdio: 'ignore' });
+    await runPatchCoverage();
+    expect(exec).toHaveBeenNthCalledWith(1, 'git', ['cat-file', '-e', 'aaaa']);
+    expect(exec).toHaveBeenNthCalledWith(2, 'git', ['cat-file', '-e', 'bbbb']);
   });
 
-  it('fails with exit 2 and the unreachable message when a probe throws', () => {
-    exec.mockImplementation(() => {
-      throw new Error('bad object');
-    });
-    const code = runPatchCoverage();
+  it('fails with exit 2 and the unreachable message when a probe throws', async () => {
+    exec.mockRejectedValue(new Error('bad object'));
+    const code = await runPatchCoverage();
     expect(code).toBe(2);
     expect(err.join('')).toBe('::error::patch-coverage: aaaa or bbbb not reachable in this clone\n');
     expect(parse).not.toHaveBeenCalled();
@@ -119,86 +117,81 @@ describe('runPatchCoverage: SHA reachability', () => {
 });
 
 describe('runPatchCoverage: git diff', () => {
-  it('runs the exact rename-aware unified=0 diff with a generous maxBuffer', () => {
+  it('runs the exact rename-aware unified=0 diff with a generous maxBuffer', async () => {
     routeGit('DIFF');
-    runPatchCoverage();
+    await runPatchCoverage();
     expect(exec).toHaveBeenNthCalledWith(3, 'git', ['diff', '--unified=0', '--no-prefix', '-M', 'aaaa..bbbb'], {
-      encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
   });
 
-  it('feeds the raw diff output to parseAddedLines', () => {
+  it('feeds the raw diff output to parseAddedLines', async () => {
     routeGit('DIFF-TEXT');
-    runPatchCoverage();
+    await runPatchCoverage();
     expect(parse).toHaveBeenCalledWith('DIFF-TEXT');
   });
 });
 
 describe('runPatchCoverage: coverage read gating', () => {
-  it('does NOT read the coverage file when there are no added lines', () => {
+  it('does NOT read the coverage file when there are no added lines', async () => {
     routeGit('');
     parse.mockReturnValue([]);
-    runPatchCoverage();
-    expect(readFile).not.toHaveBeenCalled();
+    await runPatchCoverage();
+    expect(readFileMock).not.toHaveBeenCalled();
     expect(decide).toHaveBeenCalledWith(expect.objectContaining({ addedByFile: [] }));
   });
 
-  it('reads the cwd-relative coverage-final.json when there are added lines', () => {
+  it('reads the cwd-relative coverage-final.json when there are added lines', async () => {
     routeGit('');
     parse.mockReturnValue([{ file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'x' }] }]);
-    readFile.mockReturnValue('{}');
-    runPatchCoverage();
-    expect(readFile).toHaveBeenCalledWith(COV_PATH, 'utf8');
+    readFileMock.mockResolvedValue('{}');
+    await runPatchCoverage();
+    expect(readFileMock).toHaveBeenCalledWith(COV_PATH, 'utf8');
   });
 
-  it('fails with exit 2 and the covPath message when the coverage read throws', () => {
+  it('fails with exit 2 and the covPath message when the coverage read throws', async () => {
     routeGit('');
     parse.mockReturnValue([{ file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'x' }] }]);
-    readFile.mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
-    const code = runPatchCoverage();
+    readFileMock.mockRejectedValue(new Error('ENOENT'));
+    const code = await runPatchCoverage();
     expect(code).toBe(2);
     expect(err.join('')).toBe(`::error::patch-coverage: cannot read ${COV_PATH}: ENOENT\n`);
     expect(decide).not.toHaveBeenCalled();
   });
 
-  it('stringifies a non-Error thrown by the coverage read', () => {
+  it('stringifies a non-Error thrown by the coverage read', async () => {
     routeGit('');
     parse.mockReturnValue([{ file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'x' }] }]);
-    readFile.mockImplementation(() => {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately a non-Error to exercise run's String(err) fallback
-      throw 'disk gone';
-    });
-    const code = runPatchCoverage();
+    // Deliberately a non-Error to exercise run's String(err) fallback.
+    readFileMock.mockRejectedValue('disk gone');
+    const code = await runPatchCoverage();
     expect(code).toBe(2);
     expect(err.join('')).toBe(`::error::patch-coverage: cannot read ${COV_PATH}: disk gone\n`);
   });
 });
 
 describe('runPatchCoverage: coverageFor wiring', () => {
-  it('resolves a file to its cwd-absolute coverage record via coveredLines', () => {
+  it('resolves a file to its cwd-absolute coverage record via coveredLines', async () => {
     routeGit('');
     parse.mockReturnValue([{ file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'x' }] }]);
     const record = { s: { '0': 1 }, statementMap: { '0': { start: { line: 1 }, end: { line: 1 } } } };
-    readFile.mockReturnValue(JSON.stringify({ [`${cwd}/packages/engine/src/foo.ts`]: record }));
+    readFileMock.mockResolvedValue(JSON.stringify({ [`${cwd}/packages/engine/src/foo.ts`]: record }));
     covered.mockReturnValue({ covered: new Set([1]), uncovered: new Set() });
 
-    runPatchCoverage();
+    await runPatchCoverage();
     const input = decide.mock.calls[0]![0];
     const result = input.coverageFor('packages/engine/src/foo.ts');
     expect(covered).toHaveBeenCalledWith(record);
     expect(result).toEqual({ covered: new Set([1]), uncovered: new Set() });
   });
 
-  it('passes undefined to coveredLines for a file with no coverage record', () => {
+  it('passes undefined to coveredLines for a file with no coverage record', async () => {
     routeGit('');
     parse.mockReturnValue([{ file: 'packages/engine/src/foo.ts', added: [{ line: 1, text: 'x' }] }]);
-    readFile.mockReturnValue('{}');
+    readFileMock.mockResolvedValue('{}');
     covered.mockReturnValue(null);
 
-    runPatchCoverage();
+    await runPatchCoverage();
     const input = decide.mock.calls[0]![0];
     input.coverageFor('packages/engine/src/missing.ts');
     expect(covered).toHaveBeenCalledWith(undefined);
@@ -206,19 +199,19 @@ describe('runPatchCoverage: coverageFor wiring', () => {
 });
 
 describe('runPatchCoverage: output surfacing', () => {
-  it('writes decide()’s out lines to stdout, err lines to stderr, and returns its exit code', () => {
+  it('writes decide()’s out lines to stdout, err lines to stderr, and returns its exit code', async () => {
     routeGit('');
     decide.mockReturnValue({ exitCode: 1, out: ['ok note'], err: ['::error boom', 'tail'] });
-    const code = runPatchCoverage();
+    const code = await runPatchCoverage();
     expect(code).toBe(1);
     expect(out.join('')).toBe('ok note\n');
     expect(err.join('')).toBe('::error boom\ntail\n');
   });
 
-  it('returns 0 and writes only the pass line for a clean decide result', () => {
+  it('returns 0 and writes only the pass line for a clean decide result', async () => {
     routeGit('');
     decide.mockReturnValue({ exitCode: 0, out: ['all good'], err: [] });
-    expect(runPatchCoverage()).toBe(0);
+    await expect(runPatchCoverage()).resolves.toBe(0);
     expect(out.join('')).toBe('all good\n');
     expect(err.join('')).toBe('');
   });

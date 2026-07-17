@@ -49,7 +49,7 @@ function pkg(name: string): Package {
 
 /** Drive `loadConfig` to return exactly these packages. */
 function configWith(...packages: Package[]): void {
-  vi.mocked(loadConfig).mockReturnValue({
+  vi.mocked(loadConfig).mockResolvedValue({
     putitoutthere: { version: 1 },
     packages,
   });
@@ -71,7 +71,7 @@ describe('computeStatus', () => {
     configWith(pkg('a'), pkg('b'), pkg('c'));
     // a + c are tagged at v1.0.0; b has never been tagged.
     vi.mocked(lastTag).mockImplementation((name) =>
-      name === 'b' ? null : `${name}-v1.0.0`,
+      Promise.resolve(name === 'b' ? null : `${name}-v1.0.0`),
     );
 
     const handler = handlerReturning((name) => {
@@ -82,6 +82,9 @@ describe('computeStatus', () => {
 
     const rows = await computeStatus({ cwd: '/repo', handlerFor: () => handler });
     const byName = Object.fromEntries(rows.map((r) => [r.package, r]));
+
+    // The tag lookup is scoped to the working directory.
+    expect(vi.mocked(lastTag)).toHaveBeenCalledWith('a', '{name}-v{version}', { cwd: '/repo' });
 
     expect(byName.a!.state).toBe('in sync');
     expect(byName.a!.tagVersion).toBe('1.0.0');
@@ -100,7 +103,7 @@ describe('computeStatus', () => {
 
   it('falls back to the default handlerFor when none is injected, threading an inert-artifacts ctx', async () => {
     configWith(pkg('solo'));
-    vi.mocked(lastTag).mockReturnValue('solo-v1.0.0');
+    vi.mocked(lastTag).mockResolvedValue('solo-v1.0.0');
     const probe: { got?: string; had?: boolean } = {};
     vi.mocked(defaultHandlerFor).mockReturnValue({
       kind: 'npm',

@@ -7,4 +7,14 @@
 
 import { run } from './cli.js';
 
-process.exit(run(process.argv));
+run(process.argv).then(
+  (code) => {
+    process.exit(code);
+  },
+  (err: unknown) => {
+    process.stderr.write(
+      `piot-ci: fatal: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    process.exit(4);
+  },
+);

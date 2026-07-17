@@ -21,7 +21,7 @@
  * Issue #14, #280.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse as parsePath, resolve } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
@@ -136,16 +136,16 @@ export interface ProvenanceFinding {
  * skipped — other parts of the pipeline already cover those failure
  * modes; this check is scoped to the `repository` field alone.
  */
-export function checkProvenanceMetadata(
+export async function checkProvenanceMetadata(
   packages: readonly Package[],
-): ProvenanceFinding[] {
+): Promise<ProvenanceFinding[]> {
   const findings: ProvenanceFinding[] = [];
   for (const p of packages) {
     if (p.kind !== 'npm') {continue;}
     const pkgJsonPath = join(p.path, 'package.json');
     let raw: string;
     try {
-      raw = readFileSync(pkgJsonPath, 'utf8');
+      raw = await readFile(pkgJsonPath, 'utf8');
     } catch {
       findings.push({ package: p.name, packageJsonPath: pkgJsonPath, reason: 'missing' });
       continue;
@@ -186,8 +186,8 @@ function hasNonEmptyRepository(value: unknown): boolean {
  * blessed publish mode. Even on the token path, missing `repository`
  * is a misconfiguration — fail fast.
  */
-export function requireProvenanceMetadata(packages: readonly Package[]): void {
-  const findings = checkProvenanceMetadata(packages);
+export async function requireProvenanceMetadata(packages: readonly Package[]): Promise<void> {
+  const findings = await checkProvenanceMetadata(packages);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.NPM_MISSING_REPOSITORY}] npm publish requires a non-empty \`repository\` field in package.json.`,
@@ -253,16 +253,16 @@ export interface CratesMetadataFinding {
  * skipped — other parts of the pipeline already cover those failure
  * modes; this check is scoped to the metadata fields alone.
  */
-export function checkCratesMetadata(
+export async function checkCratesMetadata(
   packages: readonly Package[],
-): CratesMetadataFinding[] {
+): Promise<CratesMetadataFinding[]> {
   const findings: CratesMetadataFinding[] = [];
   for (const p of packages) {
     if (p.kind !== 'crates') {continue;}
     const cargoTomlPath = join(p.path, 'Cargo.toml');
     let raw: string;
     try {
-      raw = readFileSync(cargoTomlPath, 'utf8');
+      raw = await readFile(cargoTomlPath, 'utf8');
     } catch {
       // The crates handler surfaces "Cargo.toml not found" with a
       // clear error; this check owns metadata fields, not file
@@ -283,7 +283,7 @@ export function checkCratesMetadata(
     // upload, so the literal value lands on crates.io. The check has
     // to do the same — otherwise crates following Cargo's recommended
     // centralized-metadata pattern false-positive.
-    const wsPkgTable = readWorkspacePackageTable(p.path);
+    const wsPkgTable = await readWorkspacePackageTable(p.path);
     const description = resolveInherited(pkgTable.description, wsPkgTable, 'description');
     const license = resolveInherited(pkgTable.license, wsPkgTable, 'license');
     const licenseFile = resolveInherited(
@@ -341,16 +341,16 @@ export interface PypiVersionFinding {
  * of the pipeline (`checkPyprojectAndBundleCli`, the handler's own
  * read) already surface those failure modes.
  */
-export function checkPypiVersionSource(
+export async function checkPypiVersionSource(
   packages: readonly Package[],
-): PypiVersionFinding[] {
+): Promise<PypiVersionFinding[]> {
   const findings: PypiVersionFinding[] = [];
   for (const p of packages) {
     if (p.kind !== 'pypi') {continue;}
     const pyprojectPath = join(p.path, 'pyproject.toml');
     let raw: string;
     try {
-      raw = readFileSync(pyprojectPath, 'utf8');
+      raw = await readFile(pyprojectPath, 'utf8');
     } catch {
       continue;
     }
@@ -388,8 +388,8 @@ function declaresDynamicVersion(project: { dynamic?: unknown }): boolean {
  * derive the version from a tagged source (git tag,
  * `SETUPTOOLS_SCM_PRETEND_VERSION`, or sibling `Cargo.toml`).
  */
-export function requirePypiVersionSource(packages: readonly Package[]): void {
-  const findings = checkPypiVersionSource(packages);
+export async function requirePypiVersionSource(packages: readonly Package[]): Promise<void> {
+  const findings = await checkPypiVersionSource(packages);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.PYPI_STATIC_VERSION}] pyproject.toml must declare \`[project].dynamic = ["version"]\` instead of a static \`[project].version = "..."\` literal.`,
@@ -454,16 +454,16 @@ function resolveInherited(
  * `undefined` when no workspace root is found or when the workspace
  * defines no shared `[workspace.package]` metadata.
  */
-function readWorkspacePackageTable(
+async function readWorkspacePackageTable(
   crateDir: string,
-): Record<string, unknown> | undefined {
+): Promise<Record<string, unknown> | undefined> {
   const rootMarker = parsePath(crateDir).root;
   let dir = dirname(crateDir);
   while (dir && dir !== rootMarker) {
     const manifest = join(dir, 'Cargo.toml');
     let parsed: Record<string, unknown> | undefined;
     try {
-      parsed = parseToml(readFileSync(manifest, 'utf8'));
+      parsed = parseToml(await readFile(manifest, 'utf8'));
     } catch {
       // Missing or malformed Cargo.toml at this level — skip it and keep
       // walking up. (Cargo surfaces a real parse error itself; we just
@@ -500,8 +500,8 @@ function readWorkspacePackageTable(
  * the entire publish job on a precondition checkable in milliseconds.
  * #290.
  */
-export function requireCratesMetadata(packages: readonly Package[]): void {
-  const findings = checkCratesMetadata(packages);
+export async function requireCratesMetadata(packages: readonly Package[]): Promise<void> {
+  const findings = await checkCratesMetadata(packages);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.CRATES_MISSING_METADATA}] cargo publish requires the following Cargo.toml [package] fields: description, and license (or license-file).`,
@@ -584,16 +584,16 @@ const PYPI_BACKEND_PREFIX: Record<'maturin' | 'setuptools' | 'hatch', readonly s
   hatch: ['hatchling', 'hatch'],
 };
 
-export function checkPyprojectShape(
+export async function checkPyprojectShape(
   packages: readonly Package[],
-): PyprojectShapeFinding[] {
+): Promise<PyprojectShapeFinding[]> {
   const findings: PyprojectShapeFinding[] = [];
   for (const p of packages) {
     if (p.kind !== 'pypi') {continue;}
     const pyprojectPath = join(p.path, 'pyproject.toml');
     let raw: string;
     try {
-      raw = readFileSync(pyprojectPath, 'utf8');
+      raw = await readFile(pyprojectPath, 'utf8');
     } catch {
       // Missing pyproject.toml is a different failure surface (the
       // build tool surfaces it with a clear error, and `check.ts`
@@ -709,8 +709,8 @@ function extractIncludePath(entry: unknown): string | undefined {
   return undefined;
 }
 
-export function requirePyprojectShape(packages: readonly Package[]): void {
-  const findings = checkPyprojectShape(packages);
+export async function requirePyprojectShape(packages: readonly Package[]): Promise<void> {
+  const findings = await checkPyprojectShape(packages);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     'Pre-flight pyproject.toml shape check failed:',
@@ -729,29 +729,29 @@ export function requirePyprojectShape(packages: readonly Package[]): void {
   throw new Error(lines.join('\n'));
 }
 
-export function checkCargoShape(
+export async function checkCargoShape(
   packages: readonly Package[],
   options: CargoShapeOptions = {},
-): CargoShapeFinding[] {
+): Promise<CargoShapeFinding[]> {
   const findings: CargoShapeFinding[] = [];
   const cwd = options.cwd ?? process.cwd();
   for (const p of packages) {
     if (p.kind === 'crates') {
-      collectCratesPackageFindings(p, cwd, findings);
+      await collectCratesPackageFindings(p, cwd, findings);
     } else if (p.kind === 'pypi' && p.bundle_cli !== undefined) {
-      collectBundleCliCrateFindings(p, p.bundle_cli, cwd, findings);
+      await collectBundleCliCrateFindings(p, p.bundle_cli, cwd, findings);
     }
   }
   return findings;
 }
 
-function collectCratesPackageFindings(
+async function collectCratesPackageFindings(
   p: Package & { kind: 'crates' },
   cwd: string,
   findings: CargoShapeFinding[],
-): void {
+): Promise<void> {
   const cargoTomlPath = join(p.path, 'Cargo.toml');
-  const parsed = readToml(cargoTomlPath);
+  const parsed = await readToml(cargoTomlPath);
   if (parsed === null) {return;}
   const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
   const expectedName = p.crate ?? p.name;
@@ -783,7 +783,7 @@ function collectCratesPackageFindings(
 
   // CRATES_WORKSPACE_VERSION_MISMATCH
   if (versionInheritsWorkspace(pkgTable.version)) {
-    if (!workspaceVersionDeclared(cargoTomlPath, cwd)) {
+    if (!(await workspaceVersionDeclared(cargoTomlPath, cwd))) {
       findings.push({
         package: p.name,
         cargoTomlPath,
@@ -795,21 +795,21 @@ function collectCratesPackageFindings(
   }
 }
 
-function collectBundleCliCrateFindings(
+async function collectBundleCliCrateFindings(
   p: Package & { kind: 'pypi' },
   bundleCli: NonNullable<(Package & { kind: 'pypi' })['bundle_cli']>,
   cwd: string,
   findings: CargoShapeFinding[],
-): void {
+): Promise<void> {
   const cratePathAbs = isAbsolute(bundleCli.crate_path)
     ? bundleCli.crate_path
     : resolve(cwd, bundleCli.crate_path);
   const cargoTomlPath = join(cratePathAbs, 'Cargo.toml');
-  const parsed = readToml(cargoTomlPath);
+  const parsed = await readToml(cargoTomlPath);
   if (parsed === null) {return;}
 
   // CRATES_MISSING_BIN
-  const declaredBins = readDeclaredBinNames(parsed, cargoTomlPath);
+  const declaredBins = await readDeclaredBinNames(parsed, cargoTomlPath);
   if (!declaredBins.includes(bundleCli.bin)) {
     findings.push({
       package: p.name,
@@ -834,10 +834,10 @@ function collectBundleCliCrateFindings(
   }
 }
 
-function readToml(path: string): Record<string, unknown> | null {
+async function readToml(path: string): Promise<Record<string, unknown> | null> {
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = await readFile(path, 'utf8');
   } catch {
     return null;
   }
@@ -853,18 +853,18 @@ function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
   return new Set(Object.keys(features));
 }
 
-function readDeclaredBinNames(
+async function readDeclaredBinNames(
   cargoToml: Record<string, unknown>,
   cargoTomlPath: string,
-): string[] {
+): Promise<string[]> {
   const result = collectBinsFromManifest(cargoToml);
   // Workspace manifests delegate [[bin]] declarations to member crates
   // (#337). `cargo build --bin X` from anywhere in the workspace
   // resolves X transparently, so a check that only reads the
   // workspace-root manifest reports bins as missing even when they
   // exist in a member.
-  for (const memberManifest of workspaceMemberManifests(cargoToml, cargoTomlPath)) {
-    const memberParsed = readToml(memberManifest);
+  for (const memberManifest of await workspaceMemberManifests(cargoToml, cargoTomlPath)) {
+    const memberParsed = await readToml(memberManifest);
     if (memberParsed === null) {continue;}
     for (const b of collectBinsFromManifest(memberParsed)) {
       if (!result.includes(b)) {result.push(b);}
@@ -873,10 +873,10 @@ function readDeclaredBinNames(
   return result;
 }
 
-function workspaceMemberManifests(
+async function workspaceMemberManifests(
   cargoToml: Record<string, unknown>,
   cargoTomlPath: string,
-): string[] {
+): Promise<string[]> {
   const workspace = cargoToml.workspace;
   if (typeof workspace !== 'object' || workspace === null) {return [];}
   const members = (workspace as { members?: unknown }).members;
@@ -888,7 +888,7 @@ function workspaceMemberManifests(
       // `members` entries are globs (`packages/*`); expand them against
       // the filesystem the way cargo does so a member crate's [[bin]] is
       // found even when the workspace declares its members with a pattern.
-      for (const memberDir of expandDirGlob(workspaceDir, m)) {
+      for (const memberDir of await expandDirGlob(workspaceDir, m)) {
         out.push(join(memberDir, 'Cargo.toml'));
       }
     }
@@ -927,7 +927,7 @@ function versionInheritsWorkspace(version: unknown): boolean {
   );
 }
 
-function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): boolean {
+async function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): Promise<boolean> {
   // Walk parents until we find a Cargo.toml carrying a [workspace]
   // table; bound the walk at `cwd` so we never escape the repo.
   const cwdAbs = resolve(cwd);
@@ -937,7 +937,7 @@ function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): boolean {
   cur = dirname(cur);
   while (true) {
     const candidate = join(cur, 'Cargo.toml');
-    const parsed = readToml(candidate);
+    const parsed = await readToml(candidate);
     if (parsed !== null) {
       const workspace = (parsed.workspace ?? null) as Record<string, unknown> | null;
       if (workspace !== null) {
@@ -989,15 +989,15 @@ export interface RepoUrlMatchFinding {
 const REPO_URL_DOC_POINTER =
   'https://thekevinscott.github.io/putitoutthere/guide/repository-url';
 
-export function checkRepoUrlMatch(
+export async function checkRepoUrlMatch(
   packages: readonly Package[],
   options: RepoUrlMatchOptions = {},
-): RepoUrlMatchFinding[] {
+): Promise<RepoUrlMatchFinding[]> {
   const expectedOwnerRepo = normalizeOwnerRepo(options.githubRepository);
   if (expectedOwnerRepo === null) {return [];}
   const findings: RepoUrlMatchFinding[] = [];
   for (const p of packages) {
-    const declared = readDeclaredRepoUrl(p);
+    const declared = await readDeclaredRepoUrl(p);
     if (declared === null) {continue;}
     const declaredOwnerRepo = parseOwnerRepo(declared.url);
     if (declaredOwnerRepo === null) {continue;}
@@ -1013,11 +1013,11 @@ export function checkRepoUrlMatch(
   return findings;
 }
 
-export function requireRepoUrlMatch(
+export async function requireRepoUrlMatch(
   packages: readonly Package[],
   options: RepoUrlMatchOptions = {},
-): void {
-  const findings = checkRepoUrlMatch(packages, options);
+): Promise<void> {
+  const findings = await checkRepoUrlMatch(packages, options);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     `[${ErrorCodes.REPO_URL_MISMATCH}] manifest repository URL does not match GITHUB_REPOSITORY.`,
@@ -1052,11 +1052,11 @@ interface DeclaredRepoUrl {
   manifestPath: string;
 }
 
-function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
+async function readDeclaredRepoUrl(p: Package): Promise<DeclaredRepoUrl | null> {
   switch (p.kind) {
     case 'npm': {
       const manifestPath = join(p.path, 'package.json');
-      const parsed = readJson(manifestPath);
+      const parsed = await readJson(manifestPath);
       if (parsed === null) {return null;}
       const repository = (parsed as { repository?: unknown }).repository;
       if (typeof repository === 'string' && repository.trim().length > 0) {
@@ -1072,7 +1072,7 @@ function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
     }
     case 'crates': {
       const manifestPath = join(p.path, 'Cargo.toml');
-      const parsed = readTomlDoc(manifestPath);
+      const parsed = await readTomlDoc(manifestPath);
       if (parsed === null) {return null;}
       const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
       const repo = pkgTable.repository;
@@ -1083,7 +1083,7 @@ function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
     }
     case 'pypi': {
       const manifestPath = join(p.path, 'pyproject.toml');
-      const parsed = readTomlDoc(manifestPath);
+      const parsed = await readTomlDoc(manifestPath);
       if (parsed === null) {return null;}
       const project = (parsed.project ?? {}) as Record<string, unknown>;
       const urls = (project.urls ?? {}) as Record<string, unknown>;
@@ -1103,10 +1103,10 @@ function readDeclaredRepoUrl(p: Package): DeclaredRepoUrl | null {
   }
 }
 
-function readJson(path: string): unknown {
+async function readJson(path: string): Promise<unknown> {
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = await readFile(path, 'utf8');
   } catch {
     return null;
   }
@@ -1117,10 +1117,10 @@ function readJson(path: string): unknown {
   }
 }
 
-function readTomlDoc(path: string): Record<string, unknown> | null {
+async function readTomlDoc(path: string): Promise<Record<string, unknown> | null> {
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = await readFile(path, 'utf8');
   } catch {
     return null;
   }
@@ -1283,11 +1283,11 @@ export async function requireRepoPublic(
   throw new Error(lines.join('\n'));
 }
 
-export function requireCargoShape(
+export async function requireCargoShape(
   packages: readonly Package[],
   options: CargoShapeOptions = {},
-): void {
-  const findings = checkCargoShape(packages, options);
+): Promise<void> {
+  const findings = await checkCargoShape(packages, options);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     'Pre-flight Cargo.toml shape check failed:',
@@ -1326,16 +1326,16 @@ export interface PackageJsonShapeFinding {
   detail: string;
 }
 
-export function checkPackageJsonShape(
+export async function checkPackageJsonShape(
   packages: readonly Package[],
-): PackageJsonShapeFinding[] {
+): Promise<PackageJsonShapeFinding[]> {
   const findings: PackageJsonShapeFinding[] = [];
   for (const p of packages) {
     if (p.kind !== 'npm') {continue;}
     const packageJsonPath = join(p.path, 'package.json');
     let raw: string;
     try {
-      raw = readFileSync(packageJsonPath, 'utf8');
+      raw = await readFile(packageJsonPath, 'utf8');
     } catch {
       // Missing package.json is a different failure surface:
       // `checkProvenanceMetadata` reports it, and `check.ts` surfaces it
@@ -1363,8 +1363,8 @@ export function checkPackageJsonShape(
   return findings;
 }
 
-export function requirePackageJsonShape(packages: readonly Package[]): void {
-  const findings = checkPackageJsonShape(packages);
+export async function requirePackageJsonShape(packages: readonly Package[]): Promise<void> {
+  const findings = await checkPackageJsonShape(packages);
   if (findings.length === 0) {return;}
   const lines: string[] = [
     'Pre-flight package.json shape check failed:',

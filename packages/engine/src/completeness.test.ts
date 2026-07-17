@@ -15,7 +15,7 @@
  * Issue #13.
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -26,11 +26,14 @@ import {
   type MatrixRow,
 } from './completeness.js';
 
-vi.mock('node:fs');
+vi.mock('node:fs/promises');
 
-const existsMock = vi.mocked(existsSync);
-const readdirMock = vi.mocked(readdirSync);
-const statMock = vi.mocked(statSync);
+const readdirMock = vi.mocked(readdir);
+const statMock = vi.mocked(stat);
+
+/** Trailing segments (dir names + file entries) the virtual tree contains. */
+let dirNames: string[] = [];
+let entryNames: string[] = [];
 
 // Plain string root — no `node:os`/`node:path` in the test. The subject
 // joins this with each row's artifact_name via real `node:path`.
@@ -49,30 +52,40 @@ const root = 'artifacts';
  * needs).
  */
 function stageDirs(dirs: Record<string, string[]>): void {
-  const names = Object.keys(dirs);
-  existsMock.mockImplementation((p) =>
-    names.some((name) => String(p).endsWith(name)),
-  );
+  dirNames = Object.keys(dirs);
+  entryNames = Object.values(dirs).flat();
   readdirMock.mockImplementation((p) => {
-    const name = names.find((n) => String(p).endsWith(n));
-    return (name ? dirs[name] : []) as unknown as ReturnType<typeof readdirSync>;
+    const name = dirNames.find((n) => String(p).endsWith(n));
+    return Promise.resolve((name ? dirs[name] : []) as unknown as Awaited<ReturnType<typeof readdir>>);
   });
 }
+
+const enoent = (p: unknown): NodeJS.ErrnoException =>
+  Object.assign(new Error(`ENOENT: ${String(p)}`), { code: 'ENOENT' });
 
 beforeEach(() => {
   vi.clearAllMocks();
   // Default: nothing staged — every directory is absent.
-  existsMock.mockReturnValue(false);
-  readdirMock.mockReturnValue([]);
-  // Every staged entry is a non-empty file.
-  statMock.mockImplementation(
-    () =>
-      ({
-        isDirectory: () => false,
-        isFile: () => true,
-        size: 1,
-      }) as unknown as ReturnType<typeof statSync>,
-  );
+  dirNames = [];
+  entryNames = [];
+  readdirMock.mockResolvedValue([]);
+  // `pathExists` (via stat) + listFiles' per-entry stat. A staged dir path
+  // exists (resolves); a staged file entry resolves as a non-empty file;
+  // anything else rejects with ENOENT so `pathExists` returns false.
+  statMock.mockImplementation((p) => {
+    const s = String(p);
+    if (dirNames.some((n) => s.endsWith(n))) {
+      return Promise.resolve({
+        isDirectory: () => true, isFile: () => false, size: 0,
+      } as unknown as Awaited<ReturnType<typeof stat>>);
+    }
+    if (entryNames.some((n) => s.endsWith(n))) {
+      return Promise.resolve({
+        isDirectory: () => false, isFile: () => true, size: 1,
+      } as unknown as Awaited<ReturnType<typeof stat>>);
+    }
+    return Promise.reject(enoent(p));
+  });
 });
 
 function row(over: Partial<MatrixRow>): MatrixRow {
@@ -87,32 +100,32 @@ function row(over: Partial<MatrixRow>): MatrixRow {
 }
 
 describe('checkCompleteness: single package, all present', () => {
-  it('crates is always ok — pipeline never uploads .crate artifacts (#244)', () => {
+  it('crates is always ok — pipeline never uploads .crate artifacts (#244)', async () => {
     // `cargo publish` builds + uploads from source on the registry
     // side. release.yml has no upload step for crates, so the publish
     // job never sees a `<name>-crate/` directory under artifacts/.
     // Skip the row instead of demanding a file that the pipeline
     // doesn't produce.
-    const out = checkCompleteness([row({})], root);
+    const out = await checkCompleteness([row({})], root);
     expect(out.get('demo')?.ok).toBe(true);
   });
 
-  it('pypi sdist is ok when a .tar.gz is present', () => {
+  it('pypi sdist is ok when a .tar.gz is present', async () => {
     stageDirs({ 'demo-sdist': ['demo-0.1.0.tar.gz'] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
       root,
     );
     expect(out.get('demo')?.ok).toBe(true);
   });
 
-  it('pypi wheel is ok when a .whl is present', () => {
+  it('pypi wheel is ok when a .whl is present', async () => {
     stageDirs({
       'demo-wheel-x86_64-unknown-linux-gnu': [
         'demo-0.1.0-cp310-cp310-manylinux_2_17_x86_64.whl',
       ],
     });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [
         row({
           kind: 'pypi',
@@ -125,9 +138,9 @@ describe('checkCompleteness: single package, all present', () => {
     expect(out.get('demo')?.ok).toBe(true);
   });
 
-  it('npm platform package is ok when a .node or binary is present', () => {
+  it('npm platform package is ok when a .node or binary is present', async () => {
     stageDirs({ 'demo-npm-linux-x64-gnu': ['demo.node'] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [
         row({
           kind: 'npm',
@@ -140,18 +153,18 @@ describe('checkCompleteness: single package, all present', () => {
     expect(out.get('demo')?.ok).toBe(true);
   });
 
-  it('npm main is ok when a package.json is present', () => {
+  it('npm main is ok when a package.json is present', async () => {
     stageDirs({ 'demo-npm-main': ['package.json'] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' })],
       root,
     );
     expect(out.get('demo')?.ok).toBe(true);
   });
 
-  it('npm vanilla (target=noarch) is ok when package.json is present', () => {
+  it('npm vanilla (target=noarch) is ok when package.json is present', async () => {
     stageDirs({ 'demo-vanilla': ['package.json'] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [row({ kind: 'npm', target: 'noarch', artifact_name: 'demo-vanilla' })],
       root,
     );
@@ -160,8 +173,8 @@ describe('checkCompleteness: single package, all present', () => {
 });
 
 describe('checkCompleteness: single package, issues', () => {
-  it('reports a missing artifact directory as missing', () => {
-    const out = checkCompleteness(
+  it('reports a missing artifact directory as missing', async () => {
+    const out = await checkCompleteness(
       [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
       root,
     );
@@ -170,18 +183,18 @@ describe('checkCompleteness: single package, issues', () => {
     expect(pkg?.missing[0]?.reason).toMatch(/missing/i);
   });
 
-  it('reports an empty artifact directory as empty', () => {
+  it('reports an empty artifact directory as empty', async () => {
     stageDirs({ 'demo-sdist': [] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
       root,
     );
     expect(out.get('demo')?.missing[0]?.reason).toMatch(/empty/i);
   });
 
-  it('reports a pypi artifact with no .whl as wrong-shape', () => {
+  it('reports a pypi artifact with no .whl as wrong-shape', async () => {
     stageDirs({ 'demo-wheel-x86_64-unknown-linux-gnu': ['something.txt'] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [
         row({
           kind: 'pypi',
@@ -194,18 +207,18 @@ describe('checkCompleteness: single package, issues', () => {
     expect(out.get('demo')?.missing[0]?.reason).toMatch(/shape|whl/i);
   });
 
-  it('reports a pypi sdist artifact with no .tar.gz as wrong-shape', () => {
+  it('reports a pypi sdist artifact with no .tar.gz as wrong-shape', async () => {
     stageDirs({ 'demo-sdist': ['junk.txt'] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
       root,
     );
     expect(out.get('demo')?.missing[0]?.reason).toMatch(/sdist|tar\.gz/i);
   });
 
-  it('reports an npm main artifact with no package.json as wrong-shape', () => {
+  it('reports an npm main artifact with no package.json as wrong-shape', async () => {
     stageDirs({ 'demo-npm-main': ['junk.txt'] });
-    const out = checkCompleteness(
+    const out = await checkCompleteness(
       [row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' })],
       root,
     );
@@ -214,19 +227,19 @@ describe('checkCompleteness: single package, issues', () => {
 });
 
 describe('checkCompleteness: multi-package', () => {
-  it('reports per package independently', () => {
+  it('reports per package independently', async () => {
     // a's sdist is present; b's artifact is missing entirely.
     stageDirs({ 'a-sdist': ['a-0.1.0.tar.gz'] });
     const matrix: MatrixRow[] = [
       row({ name: 'a', kind: 'pypi', target: 'sdist', artifact_name: 'a-sdist' }),
       row({ name: 'b', kind: 'pypi', target: 'sdist', artifact_name: 'b-sdist' }),
     ];
-    const out = checkCompleteness(matrix, root);
+    const out = await checkCompleteness(matrix, root);
     expect(out.get('a')?.ok).toBe(true);
     expect(out.get('b')?.ok).toBe(false);
   });
 
-  it('reports every missing target on a package, not just the first', () => {
+  it('reports every missing target on a package, not just the first', async () => {
     // Package c expects 3 matrix rows; only one of its artifacts is present.
     stageDirs({ 'c-wheel-x86': ['w.whl'] });
     const matrix: MatrixRow[] = [
@@ -244,7 +257,7 @@ describe('checkCompleteness: multi-package', () => {
       }),
       row({ name: 'c', kind: 'pypi', target: 'sdist', artifact_name: 'c-sdist' }),
     ];
-    const out = checkCompleteness(matrix, root);
+    const out = await checkCompleteness(matrix, root);
     const pkg = out.get('c');
     expect(pkg?.ok).toBe(false);
     expect(pkg?.missing.map((m) => m.row.target).sort()).toEqual([
@@ -253,33 +266,33 @@ describe('checkCompleteness: multi-package', () => {
     ]);
   });
 
-  it('empty matrix returns empty result', () => {
-    const out = checkCompleteness([], root);
+  it('empty matrix returns empty result', async () => {
+    const out = await checkCompleteness([], root);
     expect(out.size).toBe(0);
   });
 });
 
 describe('requireCompleteness', () => {
-  it('returns silently when every package is ok', () => {
+  it('returns silently when every package is ok', async () => {
     stageDirs({ 'demo-sdist': ['demo-0.1.0.tar.gz'] });
-    expect(() =>
+    await expect(
       requireCompleteness(
         [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
         root,
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it('throws naming the missing target(s) per package', () => {
-    expect(() =>
+  it('throws naming the missing target(s) per package', async () => {
+    await expect(
       requireCompleteness(
         [row({ kind: 'pypi', target: 'sdist', artifact_name: 'demo-sdist' })],
         root,
       ),
-    ).toThrow(/demo.*sdist|missing/i);
+    ).rejects.toThrow(/demo.*sdist|missing/i);
   });
 
-  it('throws with every missing target on a multi-target package', () => {
+  it('throws with every missing target on a multi-target package', async () => {
     const matrix: MatrixRow[] = [
       row({
         name: 'c',
@@ -294,14 +307,14 @@ describe('requireCompleteness', () => {
         artifact_name: 'c-wheel-arm',
       }),
     ];
-    const err = captureError(() => requireCompleteness(matrix, root));
+    const err = await captureError(() => requireCompleteness(matrix, root));
     expect(err).toMatch(/x86_64-unknown-linux-gnu/);
     expect(err).toMatch(/aarch64-unknown-linux-gnu/);
   });
 
   // #89: users hit the completeness check with no hint about where the
   // artifact directory should live. Surface the naming contract inline.
-  it('error message includes the expected artifact layout for each missing row', () => {
+  it('error message includes the expected artifact layout for each missing row', async () => {
     const matrix: MatrixRow[] = [
       row({
         name: 'demo',
@@ -311,7 +324,7 @@ describe('requireCompleteness', () => {
         artifact_name: 'demo-wheel-x86_64-unknown-linux-gnu',
       }),
     ];
-    const err = captureError(() => requireCompleteness(matrix, root));
+    const err = await captureError(() => requireCompleteness(matrix, root));
     expect(err).toMatch(/expected: artifacts\/demo-wheel-x86_64-unknown-linux-gnu\/demo-0\.1\.0-/);
     expect(err).toMatch(/plan\.md §12\.4/);
   });
@@ -390,9 +403,9 @@ describe('verifyShape: crates arm (exercised directly)', () => {
   });
 });
 
-function captureError(fn: () => void): string {
+async function captureError(fn: () => Promise<void>): Promise<string> {
   try {
-    fn();
+    await fn();
     return '';
   } catch (err) {
     return err instanceof Error ? err.message : String(err);

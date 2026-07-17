@@ -13,17 +13,17 @@
  * after the positional args so it stays out of the `name@version` slot.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execCapture } from '../../utils/exec-capture.js';
 
 interface ResolveOptions {
   registry?: string | undefined;
   sleeps: number[];
 }
 
-function viewTarballUrl(spec: string, registry?: string): string {
+async function viewTarballUrl(spec: string, registry?: string): Promise<string> {
   try {
     const args = ['view', spec, 'dist.tarball', ...(registry ? ['--registry', registry] : [])];
-    return execFileSync('npm', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return (await execCapture('npm', args)).stdout.trim();
   } catch {
     // `npm view` exits non-zero when the packument isn't there yet.
     return '';
@@ -42,7 +42,7 @@ export async function resolveNpmTarballUrl(
   const spec = `${name}@${version}`;
   const attempts = opts.sleeps.length + 1;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const url = viewTarballUrl(spec, opts.registry);
+    const url = await viewTarballUrl(spec, opts.registry);
     if (url) {return url;}
     if (attempt < attempts) {
       const secs = opts.sleeps[attempt - 1]!;

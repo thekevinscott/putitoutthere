@@ -9,12 +9,12 @@
  * line that begins exactly `Version:`, mirroring the bash `^Version:`.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
 import { readZipEntry } from './read-zip-entry.js';
 
-export function readWheelVersion(wheelPath: string): string | null {
-  const meta = readZipEntry(readFileSync(wheelPath), (name) => name.endsWith('.dist-info/METADATA'));
+export async function readWheelVersion(wheelPath: string): Promise<string | null> {
+  const meta = readZipEntry(await readFile(wheelPath), (name) => name.endsWith('.dist-info/METADATA'));
   if (meta === null) {
     return null;
   }

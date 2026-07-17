@@ -16,7 +16,7 @@
  * process exit code (0 ok, 1 on any metadata-only tarball).
  */
 
-import { readdirSync, rmSync } from 'node:fs';
+import { readdir, rm } from 'node:fs/promises';
 import { basename } from 'node:path';
 
 import { downloadNpmTarball } from './download.js';
@@ -50,20 +50,20 @@ export async function verifyNpmTarballTriple(
       continue;
     }
 
-    const { root, packageDir } = downloadNpmTarball(url, 2);
-    const topLevel = readdirSync(packageDir, { withFileTypes: true })
+    const { root, packageDir } = await downloadNpmTarball(url, 2);
+    const topLevel = (await readdir(packageDir, { withFileTypes: true }))
       .filter((e) => e.isFile() && e.name !== 'package.json')
       .map((e) => e.name);
     if (topLevel.length > 0) {
       process.stdout.write(`  ok: ${topLevel.length} non-metadata file(s): ${topLevel.join(' ')} \n`);
     } else {
-      const listing = listFilesRecursive(packageDir).map((p) => basename(p)).join(' ');
+      const listing = (await listFilesRecursive(packageDir)).map((p) => basename(p)).join(' ');
       process.stdout.write(
         `::error::[${platformName}@${version}] tarball contains only package.json (no synthesized binary/.node staged). Tarball contents: ${listing} \n`,
       );
       fail = 1;
     }
-    rmSync(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
   return fail;
 }

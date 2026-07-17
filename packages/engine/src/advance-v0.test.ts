@@ -35,13 +35,14 @@ afterEach(() => {
 });
 
 describe('advanceV0', () => {
-  it('force-moves v0 to HEAD, logging the move', () => {
-    headMock.mockReturnValue('headsha');
+  it('force-moves v0 to HEAD, logging the move', async () => {
+    headMock.mockResolvedValue('headsha');
 
-    const code = advanceV0({ cwd: 'repo' });
+    const code = await advanceV0({ cwd: 'repo' });
 
     expect(code).toBe(0);
     expect(out.join('')).toBe('Moving v0 -> headsha\n');
+    expect(headMock).toHaveBeenCalledWith({ cwd: 'repo' });
     expect(forceMoveMock).toHaveBeenCalledWith('v0', 'headsha', { cwd: 'repo' });
   });
 });

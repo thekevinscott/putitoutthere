@@ -8,20 +8,20 @@
  * code (0 = all wheels downloaded).
  */
 
-import { execFileSync } from 'node:child_process';
-
+import { execInherit } from '../utils/exec-inherit.js';
+import { sleep } from '../utils/sleep.js';
 import { retrySleepSeconds } from './retry-sleep.js';
 
 const WHEELS_DIR = 'downloaded-wheels';
 const MAX_ATTEMPTS = 6;
 
-export function downloadWheels(requirements: readonly string[], indexUrl: string): number {
+export async function downloadWheels(requirements: readonly string[], indexUrl: string): Promise<number> {
   for (const requirement of requirements) {
     process.stdout.write(`Downloading wheel for ${requirement} from TestPyPI\n`);
     let downloaded = false;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       try {
-        execFileSync(
+        await execInherit(
           'python',
           [
             '-m',
@@ -35,7 +35,6 @@ export function downloadWheels(requirements: readonly string[], indexUrl: string
             WHEELS_DIR,
             requirement,
           ],
-          { stdio: 'inherit' },
         );
         downloaded = true;
         break;
@@ -43,7 +42,7 @@ export function downloadWheels(requirements: readonly string[], indexUrl: string
         if (attempt < MAX_ATTEMPTS) {
           const sleepFor = retrySleepSeconds(attempt);
           process.stdout.write(`TestPyPI wheel index lag for ${requirement}; retrying in ${sleepFor}s\n`);
-          execFileSync('sleep', [String(sleepFor)], { stdio: 'ignore' });
+          await sleep(sleepFor * 1000);
         }
       }
     }

@@ -10,7 +10,7 @@
 import { runTestpypiAssert } from './run-assert.js';
 import { runTestpypiMetadata } from './run-metadata.js';
 
-export function runTestpypiVerify(argv: readonly string[]): number {
+export async function runTestpypiVerify(argv: readonly string[]): Promise<number> {
   const mode = argv[3];
   if (mode === 'assert') {
     return runTestpypiAssert();
