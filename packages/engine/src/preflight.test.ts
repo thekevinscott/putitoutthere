@@ -370,6 +370,12 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
       repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
     });
     expect(await checkProvenanceMetadata([npmPkg('a', p)])).toEqual([]);
+    // Pin the manifest read's encoding so a StringLiteral mutant dropping
+    // 'utf8' from readFile(pkgJsonPath, 'utf8') (preflight.ts:148) is killed.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('package.json'),
+      'utf8',
+    );
     await expect(requireProvenanceMetadata([npmPkg('a', p)])).resolves.toBeUndefined();
   });
 
@@ -503,6 +509,12 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       'license = "MIT"',
     );
     expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    // Pin the manifest read's encoding so a StringLiteral mutant dropping
+    // 'utf8' from readFile(cargoTomlPath, 'utf8') (preflight.ts:265) is killed.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('Cargo.toml'),
+      'utf8',
+    );
     await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
   });
 
@@ -665,6 +677,15 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'license.workspace = true',
       );
       expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+      // The workspace-root manifest is read via
+      // readWorkspacePackageTable's readFile(manifest, 'utf8')
+      // (preflight.ts:466). Pin that specific ancestor path's encoding
+      // (crate reads live under crates-meta/a/, so this matches only the
+      // workspace root read) to kill the StringLiteral mutant there.
+      expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+        expect.stringMatching(/crates-meta[/\\]Cargo\.toml/),
+        'utf8',
+      );
     });
 
     it('resolves description inherited via `description.workspace = true`', async () => {
@@ -810,6 +831,12 @@ version = "0.0.0"
     );
     const pkgs = [pypiPkg('a', p, { build: 'setuptools' })];
     expect(await checkPyprojectShape(pkgs)).toEqual([]);
+    // Pin the manifest read's encoding so a StringLiteral mutant dropping
+    // 'utf8' from readFile(pyprojectPath, 'utf8') (preflight.ts:596) is killed.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('pyproject.toml'),
+      'utf8',
+    );
     await expect(requirePyprojectShape(pkgs)).resolves.toBeUndefined();
   });
 
@@ -1158,6 +1185,12 @@ describe('checkPypiVersionSource / requirePypiVersionSource (#333)', () => {
     const p = j(dir, 'a');
     writePyproject(p, '[project]\nname = "a"\ndynamic = ["version"]\n');
     expect(await checkPypiVersionSource([pypiPkg('a', p)])).toEqual([]);
+    // Pin the manifest read's encoding so a StringLiteral mutant dropping
+    // 'utf8' from readFile(pyprojectPath, 'utf8') (preflight.ts:353) is killed.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('pyproject.toml'),
+      'utf8',
+    );
     await expect(requirePypiVersionSource([pypiPkg('a', p)])).resolves.toBeUndefined();
   });
 
@@ -1195,6 +1228,14 @@ version = "0.0.0"
 `,
     );
     expect(await checkCargoShape([cratesPkg('a', p)])).toEqual([]);
+    // checkCargoShape reads the manifest via readToml's
+    // readFile(path, 'utf8') (preflight.ts:840). This test reads only a
+    // single Cargo.toml, so pinning that basename's encoding kills the
+    // StringLiteral mutant on that line.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('Cargo.toml'),
+      'utf8',
+    );
     await expect(requireCargoShape([cratesPkg('a', p)])).resolves.toBeUndefined();
   });
 
@@ -1499,6 +1540,12 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
     const p = j(dir, 'a');
     writePkgJson(p, { name: 'a', version: '0.0.0' });
     expect(await checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
+    // Pin the manifest read's encoding so a StringLiteral mutant dropping
+    // 'utf8' from readFile(packageJsonPath, 'utf8') (preflight.ts:1338) is killed.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('package.json'),
+      'utf8',
+    );
     await expect(requirePackageJsonShape([npmPkg('a', p)])).resolves.toBeUndefined();
   });
 
@@ -1615,6 +1662,13 @@ describe('checkRepoUrlMatch / requireRepoUrlMatch — manifest URL must match GI
     expect(
       await checkRepoUrlMatch([npmPkg('a', p)], { githubRepository: 'acme/widget' }),
     ).toEqual([]);
+    // The npm manifest is read via readJson's readFile(path, 'utf8')
+    // (preflight.ts:1109). This test reads only a package.json, so pinning
+    // that basename's encoding kills the StringLiteral mutant on that line.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('package.json'),
+      'utf8',
+    );
   });
 
   it('npm: passes when repository is the legacy non-empty string form and matches', async () => {
@@ -1676,6 +1730,14 @@ repository = "https://github.com/acme/widget"
     expect(
       await checkRepoUrlMatch([cratesPkg('a', p)], { githubRepository: 'acme/widget' }),
     ).toEqual([]);
+    // The crates manifest is read via readTomlDoc's readFile(path, 'utf8')
+    // (preflight.ts:1123). checkRepoUrlMatch does not use readToml, so this
+    // Cargo.toml read is the only one here — pinning its encoding kills the
+    // StringLiteral mutant on that line.
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('Cargo.toml'),
+      'utf8',
+    );
   });
 
   it('crates: fails when [package].repository resolves to a different owner/repo', async () => {

@@ -1,0 +1,26 @@
+# testing-conventions config — packages/engine only (wired via the engine job's
+# `config:` input in .github/workflows/conventions.yml).
+#
+# This file exists ONLY to lift three genuinely-equivalent mutation mutants
+# (see reasons below). It intentionally sets no coverage floors, lint rules, or
+# other options, so every other gate (unit/integration lint, coverage, ci
+# mutation) keeps its built-in defaults — the presence of this file must not
+# change any behavior beyond these `mutation`-scoped waivers.
+
+[[typescript.exempt]]
+path = "check.ts"
+lines = [161]
+rules = ["mutation"]
+reason = "checkCargoShape(packages, { cwd }) — the {cwd}->{} mutant is unobservable at the unit tier. checkCargoShape defaults `options.cwd ?? process.cwd()`; the crates branch builds its manifest path from `p.path` and ignores cwd entirely, and the only cwd-dependent branch (pypi+bundle_cli `resolve(cwd, crate_path)`) resolves to an absolute manifest path that the suffix-normalizing in-memory fs harness reads identically and that no finding assertion inspects. Real cwd-relative resolution is exercised at the integration/e2e tiers."
+
+[[typescript.exempt]]
+path = "check.ts"
+lines = [363]
+rules = ["mutation"]
+reason = "listTrackedFiles: `stdout.split('\\n').filter((l) => l.length > 0)`. The three mutants (drop .filter, ConditionalExpression->true, l.length >= 0) all keep empty-string entries produced by a trailing newline. The tracked-file list is consumed only by checkGlobsMatchTrackedFiles via matchesAny(globs, file); an empty-string path never matches any package glob, so retaining or dropping empties yields identical findings — no test can observe the difference."
+
+[[typescript.exempt]]
+path = "plan.ts"
+lines = [130]
+rules = ["mutation"]
+reason = "`if (cascaded.size === 0) { return []; }` — the ConditionalExpression->false and BlockStatement->{} mutants (which remove the early return) are equivalent. When the cascade set is empty the subsequent row-building loop iterates nothing and returns [] anyway, so removing the early-out produces identical observable output. (The ConditionalExpression->true 'always return []' variant IS killed by the many non-empty-cascade tests.)"

@@ -31,6 +31,8 @@ describe('extractCrate', () => {
     const dir = await extractCrate('/reg/demo-1.0.0.crate');
 
     expect(dir).toBe('/tmp/piot-crate-abc');
+    // The temp dir is minted with the engine's `piot-crate-` prefix.
+    expect(mkdtempMock).toHaveBeenCalledWith(expect.stringContaining('piot-crate-'));
     expect(execMock).toHaveBeenCalledWith('tar', [
       '-xzf',
       '/reg/demo-1.0.0.crate',

@@ -194,11 +194,15 @@ describe('pypi.writeVersion', () => {
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('throws when pyproject.toml is missing', async () => {
-    readMock.mockRejectedValue(enoent());
-    await expect(
-      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
-    ).rejects.toThrow(/pyproject\.toml not found/);
+  it('throws when pyproject.toml is missing, chaining the ENOENT as cause', async () => {
+    const missing = enoent();
+    readMock.mockRejectedValue(missing);
+    const err = await pypi
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx())
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/pyproject\.toml not found/);
+    // The original ENOENT read error is preserved as `cause`.
+    expect(err.cause).toBe(missing);
   });
 
   it('surfaces a non-ENOENT read error as-is (e.g. EACCES)', async () => {
@@ -239,6 +243,8 @@ describe('pypi.writeVersion', () => {
     expect(changed).toEqual([]);
     // Dynamic-version projects are never rewritten.
     expect(writeMock).not.toHaveBeenCalled();
+    // pyproject.toml is read by that filename, as utf8 text.
+    expect(readMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
   });
 
   it('emits a bare "pypi" label in the dynamic-version hint when the package has no name', async () => {
@@ -318,9 +324,12 @@ describe('pypi.writeVersion', () => {
     // pyproject.toml path; assert separator-agnostically (Windows joins
     // with backslashes) rather than pinning a resolved absolute literal.
     readMock.mockResolvedValue('not = valid = toml');
-    await expect(
-      pypi.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx()),
-    ).rejects.toThrow(/failed to parse.*pyproject\.toml/s);
+    const err = await pypi
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx())
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/failed to parse.*pyproject\.toml/s);
+    // The underlying smol-toml parse error is preserved as `cause`.
+    expect(err.cause).toBeInstanceOf(Error);
   });
 });
 

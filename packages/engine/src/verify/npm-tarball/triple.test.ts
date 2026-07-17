@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Bare automocks (no factory) isolate the unit under test: the resolve/
@@ -66,19 +66,28 @@ describe('verifyNpmTarballTriple', () => {
     expect(text).toContain('[@scope/pkg-linux-x64-gnu@1.0.0] verifying tarball at http://localhost:4873');
     expect(text).toContain('ok: 1 non-metadata file(s): pkg.linux-x64-gnu.node');
     expect(code).toBe(0);
+    // The top-level listing requests Dirent objects (withFileTypes) so
+    // `isFile()`/`name` are available.
+    expect(readdirMock).toHaveBeenCalledWith(expect.anything(), { withFileTypes: true });
+    // The downloaded tarball's temp root is cleaned up recursively/forcefully.
+    expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
   });
 
   it('fails when the tarball carries only package.json', async () => {
     resolveMock.mockResolvedValue('https://reg/triple.tgz');
     downloadMock.mockResolvedValue(TARBALL);
     readdirMock.mockResolvedValue([entry('package.json')] as never);
-    // `basename` of this path is 'package.json' on every OS.
-    listMock.mockResolvedValue(['tarball-root/package/package.json']);
+    // `basename` of these paths is what appears; two entries pin the space
+    // separator (join(' ')) in the contents listing.
+    listMock.mockResolvedValue([
+      'tarball-root/package/package.json',
+      'tarball-root/package/leftover.txt',
+    ]);
 
     const code = await verifyNpmTarballTriple([row], opts);
     const text = out.join('');
     expect(text).toContain('tarball contains only package.json (no synthesized binary/.node staged)');
-    expect(text).toContain('Tarball contents: package.json');
+    expect(text).toContain('Tarball contents: package.json leftover.txt');
     expect(code).toBe(1);
   });
 

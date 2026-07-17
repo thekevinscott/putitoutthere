@@ -299,6 +299,19 @@ describe('plan: subsequent release with last_tag', () => {
     const matrix = await plan({ cwd: CWD });
     expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('0.3.5');
     expect(matrix.find((r) => r.name === 'lib-python')!.version).toBe('1.2.1');
+
+    // Every `lastTag` call — from both `collectChanges` (plan.ts:211) and
+    // `nextVersion` (plan.ts:232) — must carry the `{ cwd }` options
+    // object. Checking *every* call (not just "some call matched") kills
+    // the `{ cwd } -> {}` mutant at either site independently, since both
+    // fire here with identical name/format args.
+    for (const call of vi.mocked(lastTag).mock.calls) {
+      expect(call[2]).toEqual({ cwd: CWD });
+    }
+    // `diffNames` is threaded the seed tag, the literal 'HEAD' ref, and
+    // `{ cwd }` (plan.ts:218 — kills both the 'HEAD'->"" and {cwd}->{}
+    // mutants; single call site, so a targeted match is exact).
+    expect(vi.mocked(diffNames)).toHaveBeenCalledWith('lib-rust-v0.3.4', 'HEAD', { cwd: CWD });
   });
 
   it('falls back to first_version when the resolved last tag is unparseable', async () => {
@@ -783,6 +796,18 @@ describe('plan: merge-commit trailer resolution', () => {
     // bump defaults to patch → 0.1.1). With the fallback we see 0.2.0.
     const rust = matrix.find((r) => r.name === 'lib-rust');
     expect(rust?.version).toBe('0.2.0');
+
+    // The change-detection collaborators must all be threaded the caller's
+    // `cwd` (pins the `{ cwd }` options object against `{}` mutants, and
+    // the trailer-resolution first-arg identities against being swapped):
+    //   headCommit({ cwd })            — plan.ts:107
+    //   commitBody(HEAD, { cwd })      — plan.ts:507 (direct HEAD body)
+    //   commitParents(HEAD, { cwd })   — plan.ts:509
+    //   commitBody('feat-parent', …)   — plan.ts:513 (merge-parent body)
+    expect(vi.mocked(headCommit)).toHaveBeenCalledWith({ cwd: CWD });
+    expect(vi.mocked(commitBody)).toHaveBeenCalledWith(HEAD, { cwd: CWD });
+    expect(vi.mocked(commitParents)).toHaveBeenCalledWith(HEAD, { cwd: CWD });
+    expect(vi.mocked(commitBody)).toHaveBeenCalledWith('feat-parent', { cwd: CWD });
   });
 
   it('still prefers the HEAD trailer when present (non-merge commits)', async () => {
@@ -956,6 +981,15 @@ build = "setuptools"
 
     const matrix = await plan({ cwd: CWD });
     expect(matrix.map((r) => r.target)).toEqual(['sdist']);
+
+    // #401 short-circuit (plan.ts:305): `build === 'maturin' &&
+    // isVersionIndependentWheel(...)`. For a non-maturin build the
+    // left operand is false, so `isVersionIndependentWheel` must never be
+    // consulted — the wheel fan is treated as version-DEPENDENT regardless
+    // of what that helper would return. Asserting it was NOT called kills
+    // the mutant that drops the `build === 'maturin'` guard (which would
+    // consult the helper for setuptools too).
+    expect(vi.mocked(isVersionIndependentWheel)).not.toHaveBeenCalled();
   });
 });
 
@@ -1350,6 +1384,14 @@ describe('plan: manual release (release-packages)', () => {
 
     const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust' });
     expect(matrix.every((r) => r.version === '1.2.4')).toBe(true);
+
+    // The manual path resolves the bump via `manualVersion` (plan.ts:190),
+    // the only `lastTag` caller on this path (change detection is bypassed).
+    // Assert every call carries `{ cwd }` to kill the `{ cwd } -> {}` mutant.
+    expect(vi.mocked(lastTag)).toHaveBeenCalled();
+    for (const call of vi.mocked(lastTag).mock.calls) {
+      expect(call[2]).toEqual({ cwd: CWD });
+    }
   });
 
   it('uses an explicit version verbatim', async () => {

@@ -11,6 +11,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { rm } from 'node:fs/promises';
+
 import { verifyCrate } from './index.js';
 import { extractCrate } from './extract-crate.js';
 import { findCrateFile } from './find-crate-file.js';
@@ -99,6 +101,10 @@ describe('verifyCrate', () => {
     const text = out.join('');
     expect(text).toContain('.crate tarball missing src/lib.rs and src/main.rs');
     expect(text).toContain('Tarball contents:');
+    // The tarball contents are listed space-separated (join(' ')), not concatenated.
+    expect(text).toContain('Cargo.toml /tmp/extracted/demo-crate-1.0.0/README.md');
+    // The extracted temp dir is cleaned up recursively/forcefully.
+    expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
     expect(code).toBe(1);
   });
 

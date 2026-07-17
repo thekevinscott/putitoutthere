@@ -137,6 +137,8 @@ describe('dumpFailure: GitHub step summary', () => {
     expect(md).toContain('some output');
     expect(md).toContain('some error');
     expect(md).toContain('cargo 1.78.0');
+    // The summary is appended as utf8 text.
+    expect(vi.mocked(appendFile)).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'utf8');
   });
 
   it('no-ops when $GITHUB_STEP_SUMMARY is unset', async () => {

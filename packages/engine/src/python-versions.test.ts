@@ -145,6 +145,8 @@ describe('resolvePythonVersions', () => {
   it('infers from requires-python when no override is given', async () => {
     pyproject('[project]\nrequires-python = ">=3.12"\n');
     expect(await resolvePythonVersions({ path: '.' }, '/repo')).toEqual(['3.12', '3.13', '3.14']);
+    // pyproject.toml is read by that filename, as utf8 text.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
   });
 
   it('falls back to the default when pyproject.toml is missing', async () => {

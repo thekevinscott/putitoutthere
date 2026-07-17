@@ -246,6 +246,9 @@ describe('crates.writeVersion', () => {
     expect(out).toContain('version = "0.2.3"');
     expect(out).not.toContain('version = "0.1.0"');
     expect(out).toContain('name = "demo"');
+    // The manifest is read and rewritten as utf8 text.
+    expect(readMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
+    expect(writeMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), expect.anything(), 'utf8');
     // The rewritten path is the package's Cargo.toml (separator-agnostic).
     expect(paths).toHaveLength(1);
     expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
@@ -262,11 +265,15 @@ describe('crates.writeVersion', () => {
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('throws when Cargo.toml is missing', async () => {
-    readMock.mockRejectedValue(enoent());
-    await expect(
-      crates.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
-    ).rejects.toThrow(/Cargo\.toml/);
+  it('throws when Cargo.toml is missing, chaining the ENOENT as the cause', async () => {
+    const missing = enoent();
+    readMock.mockRejectedValue(missing);
+    const err = await crates
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/Cargo\.toml/);
+    // The original ENOENT is preserved as `cause` (not dropped).
+    expect(err.cause).toBe(missing);
   });
 
   it('surfaces a non-ENOENT read error as-is (perms/io)', async () => {
@@ -710,6 +717,67 @@ describe('crates.publish', () => {
       fetchSpy.mockRestore();
     });
 
+    it('trims surrounding whitespace from cargo stderr in the generic failure message (#469)', async () => {
+      // The generic (non-429, non-first-publish) failure interpolates cargo's
+      // stderr into the thrown message; it must be trimmed, not raw.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', '\n  boom: build failed  \n', 1));
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const err = await crates
+        .publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        )
+        .catch((e: unknown) => e as Error) as Error;
+      expect(err.message).toBe('cargo publish failed:\nboom: build failed');
+      fetchSpy.mockRestore();
+    });
+
+    it('trims surrounding whitespace from cargo stderr in the fallback failure message (#469)', async () => {
+      // Primary 429 engages the fallback; the fallback also fails, and its
+      // stderr is interpolated into the thrown message — trimmed, not raw.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          return Promise.reject(new ExecError('exit 1', '', 'status 429 Too Many Requests', 1));
+        }
+        return Promise.reject(new ExecError('exit 1', '', '\n  fallback boom  \n', 1));
+      });
+      const stdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation((): boolean => true);
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const err = await crates
+        .publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        )
+        .catch((e: unknown) => e as Error) as Error;
+      expect(err.message).toBe(
+        'cargo publish (fallback http://localhost:8000) failed:\nfallback boom',
+      );
+      stdoutSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
     it('routes publish at PIOT_CRATES_REGISTRY_PRIMARY when set (no real-crates.io attempt, no fallback)', async () => {
       const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
         new Response('{}', { status: 404 }),
@@ -1089,6 +1157,14 @@ describe('scanDirtyOutsideManifest (#135)', () => {
   it('returns an empty list when only the managed Cargo.toml is dirty', async () => {
     mockGit({ managedRel: 'Cargo.toml', porcelain: ' M Cargo.toml\n' });
     expect(await scanDirtyOutsideManifest('/repo', '/repo')).toEqual([]);
+    // The three git probes run with their exact argv + cwd scoping.
+    expect(execMock).toHaveBeenCalledWith('git', ['rev-parse', '--show-toplevel'], { cwd: '/repo' });
+    expect(execMock).toHaveBeenCalledWith(
+      'git',
+      ['ls-files', '--full-name', '--', 'Cargo.toml'],
+      { cwd: '/repo' },
+    );
+    expect(execMock).toHaveBeenCalledWith('git', ['status', '--porcelain'], { cwd: '/repo' });
   });
 
   it('flags a stray dirty file outside the package dir', async () => {

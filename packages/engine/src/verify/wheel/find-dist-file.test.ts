@@ -43,6 +43,13 @@ describe('findDistFile', () => {
     expect(await findDistFile('dist', '.whl')).toBeNull();
   });
 
+  it('returns the alphabetically-first match when several files share the extension', async () => {
+    // readdir yields b before a; the `.sort()` makes the result deterministic
+    // (a wins) regardless of directory order.
+    readdirMock.mockResolvedValue(['demo-b.whl', 'demo-a.whl'] as never);
+    expect((await findDistFile('dist', '.whl'))?.endsWith('demo-a.whl')).toBe(true);
+  });
+
   it('returns null for a missing directory', async () => {
     statMock.mockRejectedValue(ENOENT);
     expect(await findDistFile('nope', '.whl')).toBeNull();

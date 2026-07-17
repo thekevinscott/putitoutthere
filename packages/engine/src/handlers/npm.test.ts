@@ -313,6 +313,12 @@ describe('npm.writeVersion', () => {
     // The rewritten path is the package's package.json (separator-agnostic).
     expect(paths).toHaveLength(1);
     expect(paths[0]!.endsWith('package.json')).toBe(true);
+    // The manifest is persisted as utf8 text.
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      expect.stringContaining('package.json'),
+      expect.anything(),
+      'utf8',
+    );
   });
 
   it('is idempotent when version already matches', async () => {
@@ -326,17 +332,23 @@ describe('npm.writeVersion', () => {
     expect(paths).toEqual([]);
   });
 
-  it('throws when package.json is missing', async () => {
-    await expect(
-      npm.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
-    ).rejects.toThrow(/package\.json/);
+  it('throws when package.json is missing, chaining the read error as cause', async () => {
+    const err = await npm
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/package\.json/);
+    // The original ENOENT read error is preserved as `cause`.
+    expect((err.cause as NodeJS.ErrnoException | undefined)?.code).toBe('ENOENT');
   });
 
-  it('throws when package.json is malformed JSON', async () => {
+  it('throws when package.json is malformed JSON, chaining the parse error as cause', async () => {
     writeFileSync(`${dir}/package.json`, 'not json', 'utf8');
-    await expect(
-      npm.writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
-    ).rejects.toThrow(/JSON|parse/i);
+    const err = await npm
+      .writeVersion({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toMatch(/JSON|parse/i);
+    // The underlying JSON parse error is preserved as `cause`.
+    expect(err.cause).toBeInstanceOf(Error);
   });
 
   it('surfaces a non-ENOENT read error as-is (e.g. EACCES)', async () => {
@@ -460,6 +472,25 @@ describe('npm.publish', () => {
     const publishCall = execMock.mock.calls[1]!;
     expect(publishCall[0]).toBe('npm');
     expect(publishCall[1]).toContain('publish');
+  });
+
+  it('trims surrounding whitespace from npm stderr in the generic failure message (#469)', async () => {
+    // A publish failure that matches neither the over-publish/tlog races nor
+    // an auth failure interpolates npm's stderr into the message — trimmed.
+    execMock
+      .mockImplementationOnce(() => Promise.reject(new ExecError('404', '', '', 1))) // view → 404
+      .mockImplementationOnce(() =>
+        Promise.reject(new ExecError('boom', '', '\n  npm ERR! nope  \n', 1)),
+      ); // publish → fail
+    process.env.NODE_AUTH_TOKEN = 'npm-tok';
+    const err = await npm
+      .publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'npm-tok' } }),
+      )
+      .catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toBe('npm publish failed:\nnpm ERR! nope');
   });
 
   it('napi: publishes platform packages before main', async () => {
@@ -601,6 +632,12 @@ describe('npm.publish', () => {
       makeCtx({ cwd: dir, env: { NODE_AUTH_TOKEN: 'tok', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
     );
     expect(execMock.mock.calls[1]![1]).toContain('--provenance');
+    // The OIDC path preflights the repository field, reading package.json as
+    // utf8 text (dropping the encoding would read raw bytes).
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      expect.stringContaining('package.json'),
+      'utf8',
+    );
     delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   });
 

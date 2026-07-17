@@ -738,6 +738,8 @@ describe('loadConfig: filesystem', () => {
     readFileMock.mockResolvedValue(MINIMAL);
     const cfg = await loadConfig('putitoutthere.toml');
     expect(cfg.packages[0]!.name).toBe('app');
+    // The config file is read as utf8 text, from the given path.
+    expect(readFileMock).toHaveBeenCalledWith('putitoutthere.toml', 'utf8');
   });
 
   it('throws a clear error when the file does not exist', async () => {

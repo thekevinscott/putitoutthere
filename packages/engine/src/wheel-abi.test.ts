@@ -54,6 +54,8 @@ describe('isVersionIndependentWheel (#401)', () => {
   it('detects bindings = "bin" in [tool.maturin]', async () => {
     withManifests({ pyproject: '[project]\nname = "x"\n\n[tool.maturin]\nbindings = "bin"\n' });
     expect(await detect()).toBe(true);
+    // Manifests are read as utf8 text; dropping the encoding reads raw bytes.
+    expect(readFileMock).toHaveBeenCalledWith(expect.anything(), 'utf8');
   });
 
   it('does not treat other bindings values as version-independent', async () => {

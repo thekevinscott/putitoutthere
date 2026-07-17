@@ -61,6 +61,8 @@ describe('advanceFloatingMajor', () => {
     const code = await advanceFloatingMajor({ cwd: 'repo' });
 
     expect(code).toBe(0);
+    // Config is loaded from the repo's putitoutthere.toml, not some other file.
+    expect(loadConfigMock).toHaveBeenCalledWith(expect.stringContaining('putitoutthere.toml'));
     // The remote tags are refreshed before "latest release" is re-derived.
     expect(fetchTagsMock).toHaveBeenCalledWith({ cwd: 'repo' });
     expect(out.join('')).toBe(

@@ -25,3 +25,8 @@ jobs:
     with:
       source: packages/engine/src
       gates: '["colocated-test","unit-lint","integration-lint","unit-coverage","mutation"]'
+      # Engine-scoped config: lifts three genuinely-equivalent mutation mutants
+      # (see packages/engine/testing-conventions.toml). Kept separate from the ci
+      # job so its engine-only `[[typescript.exempt]]` paths don't error against
+      # packages/ci/src. The ci job keeps the default (no exemptions needed).
+      config: packages/engine/testing-conventions.toml

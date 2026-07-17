@@ -409,6 +409,13 @@ describe('cli: plan dispatch', () => {
     expect(appendFileMock).toHaveBeenCalledOnce();
     expect(appendFileMock.mock.calls[0]![0]).toBe('/gha/output.txt');
     expect(String(appendFileMock.mock.calls[0]![1] as string)).toMatch(/^matrix=/);
+    // Pin the write's encoding so a StringLiteral mutant dropping 'utf8'
+    // from appendFile(githubOutput, ..., 'utf8') (cli.ts:290) is killed.
+    expect(appendFileMock).toHaveBeenCalledWith(
+      '/gha/output.txt',
+      expect.stringMatching(/^matrix=/),
+      'utf8',
+    );
   });
 
   it('does NOT write matrix= to $GITHUB_OUTPUT when the plan is empty (#146)', async () => {
@@ -868,6 +875,13 @@ describe('cli: release-github / advance / fold dispatch', () => {
     }>;
     expect(parsed).toEqual([{ name: 'lib-js', version: '1.2.3', tag: 'lib-js-v1.2.3' }]);
     expect(appendFileMock.mock.calls[0]![0]).toBe('/gha/output.txt');
+    // Pin the write's encoding so a StringLiteral mutant dropping 'utf8'
+    // from appendFile(publishGithubOutput, ..., 'utf8') (cli.ts:568) is killed.
+    expect(appendFileMock).toHaveBeenCalledWith(
+      '/gha/output.txt',
+      expect.stringContaining('released='),
+      'utf8',
+    );
   });
 
   it('appends released=false with an empty released_packages= when nothing newly ships (#461)', async () => {

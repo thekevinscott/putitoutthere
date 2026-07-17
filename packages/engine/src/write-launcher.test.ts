@@ -12,7 +12,7 @@
  * literal — so they hold on Windows, macOS, and Linux alike.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadConfig } from './config.js';
@@ -29,6 +29,7 @@ vi.mock('./config.js');
 
 const readFileMock = vi.mocked(readFile);
 const writeMock = vi.mocked(writeFile);
+const mkdirMock = vi.mocked(mkdir);
 const loadConfigMock = vi.mocked(loadConfig);
 
 /** The data (2nd arg) of the single writeFileSync whose path ends with `suffix`. */
@@ -78,6 +79,23 @@ describe('writeLauncher (#299)', () => {
 
     expect(written.some((p) => p.endsWith('my-cli.js'))).toBe(true);
     expect(written.some((p) => p.endsWith('package.json'))).toBe(true);
+
+    // The launcher's parent dir is created recursively.
+    expect(mkdirMock).toHaveBeenCalledWith(expect.anything(), { recursive: true });
+    // The launcher is written exclusively (`flag: 'wx'`) as utf8 text, so a
+    // consumer-authored launcher wins the race via EEXIST.
+    expect(writeMock).toHaveBeenCalledWith(
+      expect.stringContaining('my-cli.js'),
+      expect.anything(),
+      { encoding: 'utf8', flag: 'wx' },
+    );
+    // package.json is read and rewritten as utf8 text.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('package.json'), 'utf8');
+    expect(writeMock).toHaveBeenCalledWith(
+      expect.stringContaining('package.json'),
+      expect.anything(),
+      'utf8',
+    );
 
     const src = writtenTo('my-cli.js')!;
     // Standard launcher shape: hashbang, triples table, spawnSync, exit.
@@ -236,6 +254,9 @@ describe('writeLauncherFromConfig (#299)', () => {
 
     const written = await writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' });
     expect(written.length).toBeGreaterThan(0);
+    // With no configPath override, config is loaded from cwd/putitoutthere.toml
+    // (pins both the `??` default and the filename literal).
+    expect(loadConfigMock).toHaveBeenCalledWith(expect.stringContaining('putitoutthere.toml'));
     const launcher = writtenTo('my-cli.js')!;
     expect(launcher).toContain("'linux-x64': 'x86_64-unknown-linux-gnu'");
     expect(launcher).toContain("'darwin-arm64': 'aarch64-apple-darwin'");

@@ -50,6 +50,9 @@ describe('listFilesRecursive', () => {
 
     const files = (await listFilesRecursive('/root')).map(norm).sort();
     expect(files).toEqual(['/root/a/b/leaf.txt', '/root/a/mid.txt', '/root/top.txt']);
+    // readdir must request Dirent objects (`withFileTypes: true`), otherwise
+    // `entry.isDirectory()/isFile()` are unavailable and the walk breaks.
+    expect(readdirMock).toHaveBeenCalledWith(expect.anything(), { withFileTypes: true });
   });
 
   it('returns [] for a path that does not exist', async () => {

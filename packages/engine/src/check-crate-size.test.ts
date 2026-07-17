@@ -64,6 +64,38 @@ describe('checkCratesPackageSize (#362)', () => {
     expect(findings[0]!.message).toMatch(/133\.6 MiB/);
     expect(findings[0]!.message).toMatch(/10\.0 MiB|10485760/);
     expect(findings[0]!.message).toMatch(/413 Payload Too Large/);
+    // The size probe runs the exact non-mutating `cargo package` argv.
+    expect(execMock).toHaveBeenCalledWith('cargo', [
+      'package',
+      '--no-verify',
+      '--allow-dirty',
+      '--manifest-path',
+      expect.any(String),
+    ]);
+  });
+
+  // The catch-block guards (`!(err instanceof ExecError)` and `status !== 0`)
+  // gate whether a rejection's stderr is still parsed for a size. These three
+  // cases pin both guards by driving the (otherwise unreachable) shapes where
+  // bypassing a guard would flip the finding.
+  it('does not parse the stderr of a non-ExecError rejection even if it carries a size line', async () => {
+    execMock.mockRejectedValue(
+      Object.assign(new Error('weird'), { stderr: cargoPackaged('133.6MiB').stderr, status: 0 }),
+    );
+    // `!(err instanceof ExecError)` must return null before the size is read.
+    expect(await checkCratesPackageSize([makePkg('crates')])).toEqual([]);
+  });
+
+  it('parses the size of an ExecError that (unusually) reports exit 0', async () => {
+    execMock.mockRejectedValue(new ExecError('x', '', cargoPackaged('133.6MiB').stderr, 0));
+    // instanceof ExecError AND status === 0 → the stderr size IS parsed.
+    expect(await checkCratesPackageSize([makePkg('crates', 'rust-lib')])).toHaveLength(1);
+  });
+
+  it('does not parse the size of a non-zero-exit ExecError even when its stderr carries one', async () => {
+    execMock.mockRejectedValue(new ExecError('x', '', cargoPackaged('133.6MiB').stderr, 101));
+    // status !== 0 → return null before the size is parsed.
+    expect(await checkCratesPackageSize([makePkg('crates')])).toEqual([]);
   });
 
   it('does not flag a crates package whose .crate is within the limit', async () => {

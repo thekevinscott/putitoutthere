@@ -83,6 +83,9 @@ describe('computeStatus', () => {
     const rows = await computeStatus({ cwd: '/repo', handlerFor: () => handler });
     const byName = Object.fromEntries(rows.map((r) => [r.package, r]));
 
+    // The tag lookup is scoped to the working directory.
+    expect(vi.mocked(lastTag)).toHaveBeenCalledWith('a', '{name}-v{version}', { cwd: '/repo' });
+
     expect(byName.a!.state).toBe('in sync');
     expect(byName.a!.tagVersion).toBe('1.0.0');
     expect(byName.a!.drift).toBe(false);

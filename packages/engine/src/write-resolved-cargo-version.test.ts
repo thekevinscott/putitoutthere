@@ -41,6 +41,8 @@ describe('writeResolvedCargoVersion (#428)', () => {
     const [path, contents] = writeMock.mock.calls[0]!;
     expect((path as string).endsWith('Cargo.toml')).toBe(true);
     expect(contents).toContain('version = "0.2.0"');
+    // The literal rewrite is persisted as utf8 text.
+    expect(writeMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), expect.anything(), 'utf8');
   });
 
   it('throws when an inheriting crate has no ancestor [workspace]', async () => {
@@ -62,5 +64,24 @@ describe('writeResolvedCargoVersion (#428)', () => {
     expect(written).toHaveLength(1);
     expect(written[0]!.endsWith('Cargo.toml')).toBe(true);
     expect(writeMock).not.toHaveBeenCalled();
+    // The workspace-root manifest is read as utf8 text.
+    expect(readMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
+  });
+
+  it('rewrites the workspace-root [workspace.package].version and persists it as utf8', async () => {
+    // Inheriting crate whose workspace root carries a *different* version, so
+    // replaceWorkspacePackageVersion changes it and the root manifest is written.
+    findRootMock.mockResolvedValue('/ws');
+    readMock.mockResolvedValue(['[workspace.package]', 'version = "1.2.3"', ''].join('\n'));
+    const src = ['[package]', 'name = "x"', 'version.workspace = true', ''].join('\n');
+    const written = await writeResolvedCargoVersion('crate', src, '2.0.0');
+    expect(written).toHaveLength(1);
+    expect(written[0]!.endsWith('Cargo.toml')).toBe(true);
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    const [path, contents] = writeMock.mock.calls[0]!;
+    expect((path as string).endsWith('Cargo.toml')).toBe(true);
+    expect(contents).toContain('version = "2.0.0"');
+    // The root rewrite is persisted as utf8 text.
+    expect(writeMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), expect.anything(), 'utf8');
   });
 });

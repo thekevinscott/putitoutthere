@@ -83,6 +83,8 @@ describe('verifyWheel: wheel METADATA', () => {
     const code = await verifyWheel(opts());
     expect(out.join('')).toContain('ok wheel: demo-1.2.3-cp312-cp312-linux_x86_64.whl METADATA Version=1.2.3');
     expect(code).toBe(0);
+    // The wheel lookup searches for the `.whl` extension.
+    expect(findMock).toHaveBeenCalledWith(expect.anything(), '.whl');
   });
 
   it('fails on a version mismatch', async () => {
@@ -116,6 +118,8 @@ describe('verifyWheel: sdist filename', () => {
     expect(out.join('')).toContain('ok sdist: demo-1.2.3.tar.gz');
     expect(code).toBe(0);
     expect(readMock).not.toHaveBeenCalled();
+    // The sdist lookup searches for the `.tar.gz` extension.
+    expect(findMock).toHaveBeenCalledWith(expect.anything(), '.tar.gz');
   });
 
   it('fails when the sdist filename lacks the version', async () => {

@@ -124,8 +124,11 @@ describe('#311 normalizeArtifactLayout', () => {
   });
 
   it('leaves the documented subdir layout untouched (no-op)', async () => {
-    // The target subdir already exists — nothing to relocate.
+    // The target subdir already exists — nothing to relocate. A file is also
+    // dumped at the root, so the early return at the target-exists guard is
+    // the ONLY reason no move happens (bypassing the guard would relocate it).
     existing('artifacts', 'pkg-sdist');
+    dumped('pkg-1.0.0.tar.gz');
 
     await normalizeArtifactLayout([SDIST_ROW], 'artifacts');
 
@@ -167,8 +170,11 @@ describe('#311 normalizeArtifactLayout', () => {
   });
 
   it('no-ops when the artifacts root does not exist (no download happened)', async () => {
-    // Neither target subdir nor the root exist.
+    // Neither target subdir nor the root exist. A file is "dumped" so that the
+    // root-absent guard's early return is the ONLY reason no move happens
+    // (bypassing it would proceed to mkdir/rename).
     existing();
+    dumped('pkg-1.0.0.tar.gz');
 
     await expect(normalizeArtifactLayout([SDIST_ROW], 'artifacts')).resolves.toBeUndefined();
     expect(mkdirMock).not.toHaveBeenCalled();

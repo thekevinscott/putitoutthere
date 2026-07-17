@@ -161,6 +161,12 @@ describe('publish: happy path', () => {
       { cwd: CWD },
       expect.anything(),
     );
+    // The cargo-shape pre-flight and the HEAD read must both be threaded
+    // the caller's `cwd` (pins the `{ cwd }` options object against `{}`):
+    //   requireCargoShape(pkgs, { cwd }) — publish.ts:152
+    //   headCommit({ cwd })              — publish.ts:192
+    expect(vi.mocked(requireCargoShape)).toHaveBeenCalledWith(expect.anything(), { cwd: CWD });
+    expect(vi.mocked(headCommit)).toHaveBeenCalledWith({ cwd: CWD });
     expect(result.ok).toBe(true);
     expect(result.published.map((r) => r.package)).toEqual(['lib-js']);
   });
@@ -194,6 +200,18 @@ describe('publish: happy path', () => {
     expect(handler.publish).not.toHaveBeenCalled();
     // Skip path still ensures the tag (auto-heal #407).
     expect(ensureTag).toHaveBeenCalledTimes(1);
+    // The auto-heal tag write (publish.ts:223) must thread `{ cwd }` as its
+    // 5th positional arg — pins the options object against the `{}` mutant
+    // on the skip branch (distinct from the success-path ensureTag at :236,
+    // asserted by the happy-path test).
+    expect(ensureTag).toHaveBeenCalledWith(
+      '{name}-v{version}',
+      'lib-js',
+      '0.1.0',
+      'HEAD-SHA',
+      { cwd: CWD },
+      expect.anything(),
+    );
     expect(result.ok).toBe(true);
   });
 

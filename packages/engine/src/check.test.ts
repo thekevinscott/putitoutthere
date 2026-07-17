@@ -216,6 +216,8 @@ globs = ["packages/ts/never-matches/**"]
     expect(
       findings.some((f) => f.package === 'lib' && /glob/i.test(f.message)),
     ).toBe(true);
+    // The tracked-file listing runs the exact `git ls-files` argv, scoped to cwd.
+    expect(vi.mocked(execCapture)).toHaveBeenCalledWith('git', ['ls-files'], { cwd: ROOT });
   });
 
   it("skips the glob-vs-tracked check when git ls-files fails (outside a repo)", async () => {
@@ -421,6 +423,16 @@ version = "0.0.0"
           /PIOT_CRATES_MISSING_METADATA/.test(f.message),
       ),
     ).toBe(true);
+    // Every Cargo.toml read on this path (preflight metadata check + the
+    // cargo-shape parseCargoToml) uses utf8 text — asserting EACH call (not
+    // "some call") catches a dropped encoding at any single read site.
+    const cargoReads = vi
+      .mocked(readFile)
+      .mock.calls.filter((c) => (c[0] as string).endsWith('Cargo.toml'));
+    expect(cargoReads.length).toBeGreaterThan(0);
+    for (const c of cargoReads) {
+      expect(c[1]).toBe('utf8');
+    }
   });
 
   it("flags pypi packages with no pyproject.toml at pkg.path", async () => {
@@ -554,6 +566,16 @@ path = "src/main.rs"
         (f) => f.package === 'py-lib' && /my-cli/.test(f.message) && /\[\[bin\]\]/.test(f.message),
       ),
     ).toBe(true);
+    // This bundle_cli bin check walks the crate manifest via check.ts's
+    // parseCargoToml; every Cargo.toml read is utf8 text (dropping the
+    // encoding would read raw bytes).
+    const cargoReads = vi
+      .mocked(readFile)
+      .mock.calls.filter((c) => (c[0] as string).endsWith('Cargo.toml'));
+    expect(cargoReads.length).toBeGreaterThan(0);
+    for (const c of cargoReads) {
+      expect(c[1]).toBe('utf8');
+    }
   });
 
   it("accepts an implicit-binary crate (no [[bin]] table, bin == package name)", async () => {

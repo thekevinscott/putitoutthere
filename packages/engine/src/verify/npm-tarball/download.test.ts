@@ -30,6 +30,8 @@ describe('downloadNpmTarball', () => {
     const { root, packageDir } = await downloadNpmTarball('https://reg/pkg.tgz', 5);
     expect(root).toBe(ROOT);
     expect(packageDir).toMatch(/extracted[/\\]package$/);
+    // The temp root is minted with the engine's `piot-tarball-` prefix.
+    expect(mkdtempMock).toHaveBeenCalledWith(expect.stringContaining('piot-tarball-'));
 
     const curl = execMock.mock.calls.find((c) => c[0] === 'curl')!;
     const curlArgs = curl[1];

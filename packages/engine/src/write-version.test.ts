@@ -53,6 +53,9 @@ describe('writeVersionForBuild (#276, #428)', () => {
 
     expect(written).toHaveLength(1);
     expect(written[0]!.endsWith('Cargo.toml')).toBe(true);
+    // Both manifests are read as utf8 text, from their respective filenames.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
     // No workspace walk on the literal path.
     expect(findRootMock).not.toHaveBeenCalled();
     expect(writeMock).toHaveBeenCalledTimes(1);

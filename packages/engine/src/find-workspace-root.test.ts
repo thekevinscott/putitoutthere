@@ -46,6 +46,9 @@ describe('findWorkspaceRoot (#428)', () => {
     // Return value derives from the input via dirname (which preserves the
     // forward slashes we passed); assert separator-agnostically regardless.
     expect(root?.replace(/\\/g, '/')).toBe('/ws');
+    // Pin the read target: the Cargo.toml filename and the utf8 text encoding.
+    // Dropping either literal reads the wrong path (a directory) or raw bytes.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
   });
 
   it('returns null when no ancestor declares [workspace]', async () => {

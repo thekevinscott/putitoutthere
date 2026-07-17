@@ -36,6 +36,8 @@ describe('writeCrateVersionForBuild (#366)', () => {
     const written = await writeCrateVersionForBuild('crate', '0.3.5');
     expect(written).toHaveLength(1);
     expect(written[0]!.endsWith('Cargo.toml')).toBe(true);
+    // The manifest is read as utf8 text.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
     expect(writeMock).toHaveBeenCalledTimes(1);
     const [path, contents] = writeMock.mock.calls[0]!;
     expect((path as string).endsWith('Cargo.toml')).toBe(true);

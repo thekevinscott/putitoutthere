@@ -523,6 +523,37 @@ describe('publishPlatforms (napi)', () => {
       'demo-cli-linux-x64-gnu': '0.2.0',
       'demo-cli-darwin-arm64': '0.2.0',
     });
+
+    // Exact subprocess/fs contract of the synthesize→publish→cleanup path:
+    // the published-probe queries the exact platform coordinate, scoped to cwd,
+    expect(execMock).toHaveBeenCalledWith(
+      'npm',
+      ['view', 'demo-cli-linux-x64-gnu@0.2.0', 'version'],
+      { cwd: '/repo' },
+    );
+    // the staging tempdir uses the engine's prefix,
+    expect(vi.mocked(mkdtemp)).toHaveBeenCalledWith(expect.stringContaining('putitoutthere-plat-'));
+    // artifact files are copied recursively into staging,
+    expect(vi.mocked(cp)).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      recursive: true,
+    });
+    // the FIRST fs read is the main package.json, as utf8 text (synthesize
+    // inherits repository/license); pin that specific call's encoding.
+    expect(vi.mocked(readFile).mock.calls[0]).toEqual([
+      expect.stringContaining('package.json'),
+      'utf8',
+    ]);
+    // the platform tarball is published via `npm publish`,
+    expect(execMock).toHaveBeenCalledWith('npm', expect.arrayContaining(['publish']), expect.anything());
+    // the staging dir is force-removed recursively afterwards,
+    expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
+    // and the LAST fs write is the rewritten main package.json, as utf8 text.
+    const writeCalls = vi.mocked(writeFile).mock.calls;
+    expect(writeCalls[writeCalls.length - 1]).toEqual([
+      expect.stringContaining('package.json'),
+      expect.any(String),
+      'utf8',
+    ]);
   });
 
   it('skips platform packages that are already published', async () => {
@@ -1019,6 +1050,23 @@ describe('publishPlatforms: generic platform publish failure', () => {
     const pkgJson = JSON.parse(readFileSync(`${repo}/pkg/package.json`, 'utf8')) as Record<string, unknown>;
     expect(pkgJson.optionalDependencies).toBeUndefined();
   });
+
+  it('trims surrounding whitespace from npm stderr in the generic failure message (#469)', async () => {
+    // A publish failure that matches neither the over-publish nor the tlog
+    // race interpolates npm's stderr into the thrown message — trimmed, not raw.
+    makeArtifact('linux-x64-gnu', 'demo.linux-x64-gnu.node', Buffer.from('napi'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.reject(new ExecError('boom', '', '\n  npm ERR! nope  \n', 1));
+    });
+    const err = await publishPlatforms(
+      basePkg({ targets: ['linux-x64-gnu'] }),
+      '0.2.0',
+      makeCtx(),
+    ).catch((e: unknown) => e as Error) as Error;
+    expect(err.message).toBe('npm publish (platform) failed:\nnpm ERR! nope');
+  });
 });
 
 describe('looksLikePublishOverRace', () => {
@@ -1147,6 +1195,15 @@ describe('publishPlatforms: Sigstore tlog dedupe race (#399)', () => {
       optionalDependencies: Record<string, string>;
     };
     expect(pkgJson.optionalDependencies['demo-cli-linux-x64-gnu']).toBe('0.2.0');
+    // The catch-block re-probe is the last npm call and queries the exact
+    // platform coordinate with the `version` field, scoped to cwd — pins the
+    // full argv + options object.
+    const npmCalls = execMock.mock.calls.filter((c) => c[0] === 'npm');
+    expect(npmCalls[npmCalls.length - 1]).toEqual([
+      'npm',
+      ['view', 'demo-cli-linux-x64-gnu@0.2.0', 'version'],
+      { cwd: '/repo' },
+    ]);
   });
 
   it('throws an actionable re-run error on TLOG 409 when the platform package is NOT on the registry, before rewriting main', async () => {

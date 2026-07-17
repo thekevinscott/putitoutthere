@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Bare automocks (no factory) isolate the unit under test: the resolve/
@@ -89,6 +89,8 @@ describe('verifyNpmTarballMain', () => {
     expect(text).toContain('verifying tarball at http://localhost:4873 contains: dist');
     expect(text).toContain('ok: package/dist/ (1 file(s))');
     expect(code).toBe(0);
+    // The downloaded tarball's temp root is cleaned up recursively/forcefully.
+    expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
   });
 
   it('fails with a present-locally diagnostic when the tarball drops a dir', async () => {

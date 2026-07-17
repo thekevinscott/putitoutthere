@@ -42,6 +42,7 @@ describe('advanceV0', () => {
 
     expect(code).toBe(0);
     expect(out.join('')).toBe('Moving v0 -> headsha\n');
+    expect(headMock).toHaveBeenCalledWith({ cwd: 'repo' });
     expect(forceMoveMock).toHaveBeenCalledWith('v0', 'headsha', { cwd: 'repo' });
   });
 });
