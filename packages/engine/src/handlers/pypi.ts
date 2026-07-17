@@ -63,10 +63,15 @@ async function isPublishedImpl(
   });
   if (res.status === 200) {return true;}
   if (res.status === 404) {return false;}
-  if (res.status >= 500) {
+  // 429 (rate limited) is transient: PyPI throttles routine reads, and a
+  // TransientError is what withRetry keys on at the isPublished call site. A
+  // plain Error carries no `status`, so it would hard-fail the publish instead
+  // of retrying. #580.
+  if (res.status === 429 || res.status >= 500) {
     throw new TransientError(`pypi.org GET ${url} returned ${res.status}`);
   }
-  /* v8 ignore next -- defensive 4xx fallthrough; PyPI returns 200/404 for this endpoint */
+  // Remaining 4xx (400/401/403/…) are hard, non-retryable errors — PyPI
+  // returns 200/404 for this endpoint, so anything else is a genuine fault.
   throw new Error(`pypi.org GET ${url} returned ${res.status}`);
 }
 

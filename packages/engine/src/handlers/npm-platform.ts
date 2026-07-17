@@ -28,6 +28,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { sanitizeArtifactName } from '../config.js';
+import { detectIndent } from './detect-indent.js';
 import type { Ctx } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { execCapture } from '../utils/exec-capture.js';
@@ -430,11 +431,8 @@ async function rewriteOptionalDependencies(
     ...optionalDeps,
   };
 
-  /* v8 ignore start -- indent detection + trailing-newline preservation tested via snapshot in npm.test.ts; here we just need something valid */
-  const indent = /^(?<indent>[ \t]+)"/m.exec(raw)?.groups?.indent;
-  const indentArg: number | string = indent === undefined ? 2 : indent.includes('\t') ? '\t' : indent.length;
+  const indentArg = detectIndent(raw);
   const trailing = raw.endsWith('\n') ? '\n' : '';
-  /* v8 ignore stop */
   await writeFile(p, JSON.stringify(parsed, null, indentArg) + trailing, 'utf8');
 }
 

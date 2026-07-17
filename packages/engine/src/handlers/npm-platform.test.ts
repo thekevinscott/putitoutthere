@@ -556,6 +556,33 @@ describe('publishPlatforms (napi)', () => {
     ]);
   });
 
+  it('preserves a trailing newline when rewriting the main package.json', async () => {
+    // The `beforeEach` fixture omits the trailing newline (covering the
+    // no-newline arm of the rewrite); re-seed it WITH one so the
+    // newline-preserving arm is exercised on this OS too — the branch the
+    // old inline copy left uncovered behind a v8-ignore.
+    writeFileSync(
+      `${repo}/pkg/package.json`,
+      JSON.stringify({ name: 'demo-cli', version: '0.0.0' }, null, 2) + '\n',
+    );
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
+    });
+
+    await publishPlatforms(basePkg(), '0.2.0', makeCtx());
+
+    const written = readFileSync(`${repo}/pkg/package.json`, 'utf8');
+    expect(written.endsWith('\n')).toBe(true);
+    expect(
+      (JSON.parse(written) as { optionalDependencies: Record<string, string> }).optionalDependencies,
+    ).toEqual({
+      'demo-cli-linux-x64-gnu': '0.2.0',
+      'demo-cli-darwin-arm64': '0.2.0',
+    });
+  });
+
   it('skips platform packages that are already published', async () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];

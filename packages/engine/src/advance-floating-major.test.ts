@@ -8,7 +8,8 @@
  * "no release tag yet" no-op — with stdout captured for the log lines. The
  * real semver selection lives in `lastTag` (see git.test.ts) and the real
  * git round trip in tests/integration/tag-plumbing.integration.test.ts + the
- * e2e tier. `parseTagVersion` (pure) runs for real.
+ * e2e tier. The floating major reads straight off `lastTag`'s parsed
+ * `version`, so there's no separate version parse to stub.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,7 +55,7 @@ afterEach(() => {
 
 describe('advanceFloatingMajor', () => {
   it('moves v<major> to the newest release commit, logging the move', async () => {
-    lastTagMock.mockResolvedValue('putitoutthere-v0.2.0');
+    lastTagMock.mockResolvedValue({ tag: 'putitoutthere-v0.2.0', version: { major: 0, minor: 2, patch: 0 } });
     tagCommitMock.mockResolvedValue('targetsha');
     tagListMock.mockResolvedValue([]); // no existing floating tag yet
 
@@ -74,7 +75,7 @@ describe('advanceFloatingMajor', () => {
   it('derives the floating tag from the major of the release lastTag selected', async () => {
     // lastTag owns the highest-semver selection (git.test.ts covers it); this
     // pins that a v1.10.0 release drives the `v1` floating tag, not `v1.2`.
-    lastTagMock.mockResolvedValue('putitoutthere-v1.10.0');
+    lastTagMock.mockResolvedValue({ tag: 'putitoutthere-v1.10.0', version: { major: 1, minor: 10, patch: 0 } });
     tagCommitMock.mockResolvedValue('targetsha');
     tagListMock.mockResolvedValue([]);
 
@@ -85,7 +86,7 @@ describe('advanceFloatingMajor', () => {
   });
 
   it('is idempotent: reports no update when the floating tag already matches', async () => {
-    lastTagMock.mockResolvedValue('putitoutthere-v2.0.0');
+    lastTagMock.mockResolvedValue({ tag: 'putitoutthere-v2.0.0', version: { major: 2, minor: 0, patch: 0 } });
     // Both the release tag and the existing floating tag point at the same
     // commit, so no move is issued.
     tagCommitMock.mockResolvedValue('samesha');

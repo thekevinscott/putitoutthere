@@ -12,9 +12,9 @@
  *
  * Reuses the release path's own resolvers rather than re-globbing/sorting
  * in parallel: `lastTag` finds the highest release tag for the (single)
- * package the config declares, `parseTagVersion` reads the version back
- * out, and the shared `forceMoveTag` performs the move — so the floating
- * tag can never track a release the publish path wouldn't recognize.
+ * package the config declares and hands back its already-parsed version,
+ * and the shared `forceMoveTag` performs the move — so the floating tag
+ * can never track a release the publish path wouldn't recognize.
  */
 
 import { join } from 'node:path';
@@ -22,7 +22,6 @@ import { join } from 'node:path';
 import { loadConfig } from './config.js';
 import { forceMoveTag } from './force-move-tag.js';
 import { fetchTagsForce, lastTag, tagCommit, tagList } from './git.js';
-import { parseTagVersion } from './tag-template.js';
 
 export async function advanceFloatingMajor(opts: { cwd: string }): Promise<number> {
   const gitOpts = { cwd: opts.cwd };
@@ -39,21 +38,21 @@ export async function advanceFloatingMajor(opts: { cwd: string }): Promise<numbe
     return 0;
   }
 
-  // `lastTag` only returns a strict-semver tag, so parse + split can't miss.
-  const version = parseTagVersion(pkg.tag_format, pkg.name, latest)!;
-  const major = version.split('.')[0]!;
+  // `lastTag` hands back the already-parsed version, so the floating tag's
+  // major line reads straight off it — no re-parse of the tag string.
+  const major = latest.version.major;
   const floating = `v${major}`;
 
-  const target = await tagCommit(latest, gitOpts);
+  const target = await tagCommit(latest.tag, gitOpts);
   const existing = await tagList(floating, gitOpts);
   const current = existing.length > 0 ? await tagCommit(floating, gitOpts) : null;
   if (current === target) {
-    process.stdout.write(`Floating tag ${floating} already at ${latest}; no update.\n`);
+    process.stdout.write(`Floating tag ${floating} already at ${latest.tag}; no update.\n`);
     return 0;
   }
 
   process.stdout.write(
-    `Moving floating tag ${floating} -> ${target} (latest release ${latest})\n`,
+    `Moving floating tag ${floating} -> ${target} (latest release ${latest.tag})\n`,
   );
   await forceMoveTag(floating, target, gitOpts);
   return 0;

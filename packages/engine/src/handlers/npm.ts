@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { normalizeTarget, TransientError, type Ctx, type Handler, type PublishResult, type TargetEntry, type TrustPosture } from '../types.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+import { detectIndent } from './detect-indent.js';
 import {
   looksLikePublishOverRace,
   looksLikeTlogDuplicate,
@@ -295,15 +296,6 @@ export async function isBootstrapPublish(name: string): Promise<boolean> {
     // rather than hanging or surfacing a misleading hint.
     return false;
   }
-}
-
-/** 2 / 4 / tab. Defaults to 2 when undetectable. */
-function detectIndent(source: string): number | string {
-  const m = /^(?<indent>[ \t]+)"/m.exec(source);
-  if (!m?.groups?.indent) {return 2;}
-  const indent = m.groups.indent;
-  if (indent.includes('\t')) {return '\t';}
-  return indent.length;
 }
 
 /**

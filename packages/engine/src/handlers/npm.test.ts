@@ -412,6 +412,28 @@ describe('npm.writeVersion', () => {
     expect(readFileSync(p, 'utf8').endsWith('\n')).toBe(true);
   });
 
+  it('preserves 4-space indentation (detectIndent space-count branch)', async () => {
+    // writeVersion delegates indent detection to the shared `detectIndent`
+    // helper; a 4-space file must round-trip as 4-space, distinct from the
+    // 2-space default.
+    const p = `${dir}/package.json`;
+    writeFileSync(
+      p,
+      JSON.stringify({ name: 'demo', version: '0.1.0' }, null, 4),
+      'utf8',
+    );
+    await npm.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ cwd: dir }),
+    );
+    const out = readFileSync(p, 'utf8');
+    // 4-space prefix on the version line (a 2-space default would indent it by
+    // two, so a full four-space match proves the detected count round-tripped).
+    expect(out).toContain('\n    "version": "0.2.0"');
+    expect(out).not.toContain('\n  "version"');
+  });
+
   it('preserves tab indentation (detectIndent tab branch)', async () => {
     // A tab-indented package.json must round-trip as tab-indented: detectIndent
     // returns '\t' rather than a space count.
@@ -428,10 +450,8 @@ describe('npm.writeVersion', () => {
   });
 
   it('defaults to 2-space indent for a minified package.json (no detectable indent)', async () => {
-    // A single-line, un-indented package.json is real in the wild (npm writes
-    // them, and consumers commit them). detectIndent's regex finds no indented
-    // line, so it falls back to 2 spaces (the `!m?.groups?.indent` branch), and
-    // the whole file is re-serialized pretty-printed at 2 spaces.
+    // A single-line, un-indented package.json has no indent for detectIndent to
+    // find, so it falls back to 2 spaces (the no-match default branch).
     const p = `${dir}/package.json`;
     writeFileSync(p, '{"name":"demo","version":"0.1.0"}', 'utf8');
     await npm.writeVersion(

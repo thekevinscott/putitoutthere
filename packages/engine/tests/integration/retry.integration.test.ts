@@ -11,6 +11,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { crates } from '../../src/handlers/crates.js';
+import { pypi } from '../../src/handlers/pypi.js';
 import { withRetry } from '../../src/retry.js';
 import type { Ctx } from '../../src/types.js';
 import { makeServer, makeState, type RegistryState } from './mock-registries.js';
@@ -25,8 +26,10 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
 beforeEach(() => {
   state.crates.clear();
+  state.pypi.clear();
   state.requests.length = 0;
   state.cratesNextStatus = undefined;
+  state.pypiNextStatus = undefined;
 });
 afterEach(() => server.resetHandlers());
 
@@ -53,6 +56,42 @@ describe('retry wrapper + transient registry failures', () => {
     // First call: 503 (transient). Second call: 404 (not published).
     state.cratesNextStatus = 503;
     const result = await withRetry(() => crates.isPublished(pkg, '0.1.0', ctx()), {
+      retries: 3,
+      initialDelayMs: 1,
+      multiplier: 2,
+      jitter: 0,
+    });
+    expect(result).toBe(false);
+    expect(state.requests.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('recovers from a single 429 by retrying (crates, #580)', async () => {
+    // crates.io rate-limits routine reads. First call: 429 (rate limited).
+    // Second call: 404 (not published). A 429 must be transient/retryable so
+    // a rate-limited existence check retries instead of hard-failing the
+    // publish — the whole point of #580.
+    state.cratesNextStatus = 429;
+    const result = await withRetry(() => crates.isPublished(pkg, '0.1.0', ctx()), {
+      retries: 3,
+      initialDelayMs: 1,
+      multiplier: 2,
+      jitter: 0,
+    });
+    expect(result).toBe(false);
+    expect(state.requests.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('recovers from a single 429 by retrying (pypi, #580)', async () => {
+    const pypiPkg = {
+      name: 'flaky-py',
+      kind: 'pypi' as const,
+      path: '.',
+      paths: ['**'],
+      depends_on: [],
+      first_version: '0.1.0',
+    };
+    state.pypiNextStatus = 429;
+    const result = await withRetry(() => pypi.isPublished(pypiPkg, '0.1.0', ctx()), {
       retries: 3,
       initialDelayMs: 1,
       multiplier: 2,

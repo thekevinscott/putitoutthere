@@ -26,7 +26,7 @@ import { lastTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { classify, DRIFT_STATES } from './status-classify.js';
-import { parseTagVersion } from './tag-template.js';
+import { formatSemver } from './version.js';
 import type { Ctx } from './types.js';
 import type { StatusOptions, StatusRow } from './status-types.js';
 
@@ -49,8 +49,9 @@ export async function computeStatus(opts: StatusOptions): Promise<StatusRow[]> {
 
   const rows: StatusRow[] = [];
   for (const pkg of config.packages) {
-    const tag = await lastTag(pkg.name, pkg.tag_format, { cwd });
-    const tagVersion = tag === null ? null : parseTagVersion(pkg.tag_format, pkg.name, tag);
+    const last = await lastTag(pkg.name, pkg.tag_format, { cwd });
+    const tag = last?.tag ?? null;
+    const tagVersion = last === null ? null : formatSemver(last.version);
 
     let registry: string | null = null;
     let registryUnreachable = false;
