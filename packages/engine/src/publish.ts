@@ -20,6 +20,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import { loadConfig, type Package } from './config.js';
 import { mustGet } from './must-get.js';
+import { packagesByName } from './packages-by-name.js';
 import { checkCompleteness } from './completeness.js';
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ErrorCodes } from './error-codes.js';
@@ -120,7 +121,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   // Names are unique (config load enforces it), so a by-name index is a
   // total lookup for every planned package — `mustGet` turns a name that
   // somehow escaped the config into a diagnosable throw.
-  const byName = new Map(config.packages.map((p) => [p.name, p] as const));
+  const byName = packagesByName(config.packages);
 
   // 2. Pre-flight auth: every selected package must have a viable
   //    auth path (OIDC env or env-var token) before any side effects.
