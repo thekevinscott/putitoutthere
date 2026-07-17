@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { pypi } from './pypi.js';
 import { execCapture } from '../utils/exec-capture.js';
+import { TransientError } from '../types.js';
 import type { Ctx } from '../types.js';
 
 vi.mock('../utils/exec-capture.js');
@@ -124,15 +125,33 @@ describe('pypi.isPublished', () => {
     fetchSpy.mockRestore();
   });
 
-  it('throws a non-transient error on an unexpected 4xx (not 404)', async () => {
-    // The endpoint contract is 200/404, but a 4xx like 403 must surface a
-    // hard (non-retryable) error rather than be misread as "not published".
+  it('throws TransientError on 429 so the rate-limited GET retries (#580)', async () => {
+    // PyPI rate-limits routine reads. A 429 is not >= 500, so it used to hit
+    // the plain-Error fallthrough, which carries no `status` and is therefore
+    // NOT retried by withRetry — hard-failing the publish. It must surface as
+    // a TransientError (which withRetry keys on) so the check retries.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response('forbidden', { status: 403 }),
+      new Response('rate limited', { status: 429 }),
     );
     await expect(
       pypi.isPublished(basePkg(), '0.1.0', makeCtx()),
-    ).rejects.toThrow(/403/);
+    ).rejects.toBeInstanceOf(TransientError);
+    fetchSpy.mockRestore();
+  });
+
+  it('throws a non-transient error on an unexpected 4xx (not 404)', async () => {
+    // The endpoint contract is 200/404, but a 4xx like 403 (not 429) must
+    // surface a hard (non-retryable) error rather than be misread as "not
+    // published" or retried indefinitely.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('forbidden', { status: 403 }),
+    );
+    const err = await pypi
+      .isPublished(basePkg(), '0.1.0', makeCtx())
+      .then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(TransientError);
+    expect((err as Error).message).toMatch(/403/);
     fetchSpy.mockRestore();
   });
 });
