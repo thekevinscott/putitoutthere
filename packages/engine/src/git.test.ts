@@ -153,7 +153,12 @@ describe('createTag + tagList', () => {
 describe('lastTag', () => {
   it('finds the highest-semver among pkg-v*.*.* tags (numeric, not lexical)', async () => {
     stdout(['pkg-v0.1.0', 'pkg-v0.1.9', 'pkg-v0.10.0', 'pkg-v0.2.0'].join('\n'));
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.10.0');
+    // Returns the winning tag alongside its already-parsed version, so
+    // callers never re-parse the version out of the tag string.
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
+      tag: 'pkg-v0.10.0',
+      version: { major: 0, minor: 10, patch: 0 },
+    });
     // {version} globs to *.*.* so only semver-shaped candidates are listed.
     expectArgv(['tag', '-l', 'pkg-v*.*.*']);
   });
@@ -165,23 +170,36 @@ describe('lastTag', () => {
 
   it('ignores tags from other packages', async () => {
     stdout('other-v9.9.9\npkg-v0.1.0');
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.1.0');
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
+      tag: 'pkg-v0.1.0',
+      version: { major: 0, minor: 1, patch: 0 },
+    });
   });
 
   it('skips malformed tags under the package prefix', async () => {
     stdout('pkg-v0.1.0\npkg-vnope');
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.1.0');
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
+      tag: 'pkg-v0.1.0',
+      version: { major: 0, minor: 1, patch: 0 },
+    });
   });
 
   it('skips tags matching the glob but rejected by strict semver', async () => {
-    // parseSemver rejects leading zeros, exercising the try/catch skip path.
+    // parseTagVersion rejects leading zeros (returns null), so the candidate
+    // is skipped before it can win — no in-loop re-parse guard needed.
     stdout('pkg-v0.1.0\npkg-v01.02.03');
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v0.1.0');
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
+      tag: 'pkg-v0.1.0',
+      version: { major: 0, minor: 1, patch: 0 },
+    });
   });
 
   it('honors a custom `v{version}` tag_format for single-package repos', async () => {
     stdout('v0.1.0\nv0.2.11');
-    expect(await lastTag('pkg', 'v{version}', OPTS)).toBe('v0.2.11');
+    expect(await lastTag('pkg', 'v{version}', OPTS)).toEqual({
+      tag: 'v0.2.11',
+      version: { major: 0, minor: 2, patch: 11 },
+    });
     // The `v*.*.*` glob won't match a default-shaped `pkg-v...` tag.
     expectArgv(['tag', '-l', 'v*.*.*']);
   });
@@ -190,7 +208,10 @@ describe('lastTag', () => {
     // Differing majors exercise the `a.major !== b.major` comparison arm
     // that same-major fixtures never reach.
     execMock.mockResolvedValue({ stdout: 'pkg-v1.9.9\npkg-v2.0.0', stderr: '' });
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBe('pkg-v2.0.0');
+    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
+      tag: 'pkg-v2.0.0',
+      version: { major: 2, minor: 0, patch: 0 },
+    });
   });
 
   it('compares by minor when majors match (higher minor wins)', async () => {

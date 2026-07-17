@@ -170,6 +170,78 @@ describe('checkCompleteness: single package, all present', () => {
     );
     expect(out.get('demo')?.ok).toBe(true);
   });
+
+  it('recurses into subdirectories and skips empty / non-file entries', async () => {
+    // Drive `listFiles` through every arm on a single OS — the branches a
+    // per-platform run otherwise leaves uncovered: a nested directory
+    // (recursion), a non-empty file (kept), a zero-byte file (skipped by the
+    // `size > 0` guard), and a socket-like entry that is neither dir nor file
+    // (the `isFile()` false fall-through). The package.json lives one level
+    // deep, so a passing verdict proves the recursion actually descended.
+    readdirMock.mockImplementation((p) => {
+      const s = String(p);
+      if (s.endsWith('demo-npm-main')) {
+        return Promise.resolve(['nested', 'empty.json', 'sock'] as unknown as Awaited<ReturnType<typeof readdir>>);
+      }
+      if (s.endsWith('nested')) {
+        return Promise.resolve(['package.json'] as unknown as Awaited<ReturnType<typeof readdir>>);
+      }
+      return Promise.resolve([] as unknown as Awaited<ReturnType<typeof readdir>>);
+    });
+    statMock.mockImplementation((p) => {
+      const s = String(p);
+      const st = (over: Partial<{ isDirectory: boolean; isFile: boolean; size: number }>) =>
+        Promise.resolve({
+          isDirectory: () => over.isDirectory ?? false,
+          isFile: () => over.isFile ?? false,
+          size: over.size ?? 0,
+        } as unknown as Awaited<ReturnType<typeof stat>>);
+      if (s.endsWith('demo-npm-main') || s.endsWith('nested')) {return st({ isDirectory: true });}
+      if (s.endsWith('package.json')) {return st({ isFile: true, size: 12 });}
+      if (s.endsWith('empty.json')) {return st({ isFile: true, size: 0 });}
+      return st({}); // 'sock': neither directory nor file
+    });
+
+    const out = await checkCompleteness(
+      [row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' })],
+      root,
+    );
+    expect(out.get('demo')?.ok).toBe(true);
+  });
+
+  it('treats a directory holding only a zero-byte file and a non-file entry as empty', async () => {
+    // Pins the *outcome* of the `size > 0` and `isFile()` filters, not just
+    // their execution: a zero-byte file and a socket-like entry are both
+    // dropped, so the directory lists no files and the row is reported empty.
+    // (If either filter admitted its entry, a platform npm row would pass —
+    // this asserts it does not.)
+    readdirMock.mockImplementation((p) => {
+      const s = String(p);
+      if (s.endsWith('demo-plat')) {
+        return Promise.resolve(['empty.node', 'sock'] as unknown as Awaited<ReturnType<typeof readdir>>);
+      }
+      return Promise.resolve([] as unknown as Awaited<ReturnType<typeof readdir>>);
+    });
+    statMock.mockImplementation((p) => {
+      const s = String(p);
+      const st = (over: Partial<{ isDirectory: boolean; isFile: boolean; size: number }>) =>
+        Promise.resolve({
+          isDirectory: () => over.isDirectory ?? false,
+          isFile: () => over.isFile ?? false,
+          size: over.size ?? 0,
+        } as unknown as Awaited<ReturnType<typeof stat>>);
+      if (s.endsWith('demo-plat')) {return st({ isDirectory: true });}
+      if (s.endsWith('empty.node')) {return st({ isFile: true, size: 0 });} // zero-byte → dropped
+      return st({ size: 5 }); // 'sock': neither dir nor file, non-zero size → dropped
+    });
+
+    const out = await checkCompleteness(
+      [row({ kind: 'npm', target: 'linux-x64-gnu', artifact_name: 'demo-plat' })],
+      root,
+    );
+    expect(out.get('demo')?.ok).toBe(false);
+    expect(out.get('demo')?.missing[0]?.reason).toMatch(/empty/i);
+  });
 });
 
 describe('checkCompleteness: single package, issues', () => {
@@ -400,6 +472,35 @@ describe('verifyShape: crates arm (exercised directly)', () => {
         'artifacts/demo-crate/notes.txt',
       ]),
     ).toMatch(/no \.crate file in demo-crate\//);
+  });
+});
+
+// `verifyShape`'s npm-main arm delegates to `hasFile`, which matches a
+// trailing `/<name>` segment across a normalized (POSIX-separator) listing.
+// These pin its exact contract so mutations of the `.some(...)` search or the
+// `/${name}` suffix die.
+describe('verifyShape: npm main arm (hasFile trailing-name match)', () => {
+  const npmMain = row({ kind: 'npm', target: 'main', artifact_name: 'demo-npm-main' });
+
+  it('is ok when package.json sits among other files (found by search, not by all)', () => {
+    // Multiple entries, only one of which matches: `.some` returns null (ok)
+    // where `.every` would wrongly fail on `readme.md`. Kills the
+    // `.some` → `.every` mutant.
+    expect(
+      verifyShape(npmMain, [
+        'artifacts/demo-npm-main/readme.md',
+        'artifacts/demo-npm-main/dist/package.json',
+      ]),
+    ).toBeNull();
+  });
+
+  it('does not accept a filename that merely ends in "package.json" without a `/` boundary', () => {
+    // `mypackage.json` ends with `package.json` but not `/package.json`, so a
+    // suffix-only match must reject it. Kills mutants that drop the `/` from
+    // the `/${name}` suffix.
+    expect(verifyShape(npmMain, ['artifacts/demo-npm-main/mypackage.json'])).toMatch(
+      /no package\.json in demo-npm-main\//,
+    );
   });
 });
 

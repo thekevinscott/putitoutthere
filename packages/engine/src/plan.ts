@@ -23,11 +23,10 @@ import {
 } from './handlers/npm-platform.js';
 import { resolvePythonVersions } from './python-versions.js';
 import { isVersionIndependentWheel } from './wheel-abi.js';
-import { parseTagVersion } from './tag-template.js';
 import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
 import { parseReleasePackages, type ReleasePackagesEntry } from './release-packages.js';
-import { bump as bumpVersion, firstVersion } from './version.js';
+import { bump as bumpVersion, firstVersion, formatSemver } from './version.js';
 
 export interface MatrixRow {
   name: string;
@@ -185,12 +184,11 @@ async function manualVersion(
   if (entry.version !== undefined) {return entry.version;}
 
   // A bump keyword bumps the last tag, or first_version when the named
-  // package has never been released. `parseTagVersion` is non-null
-  // here: `lastTag` only ever returns a tag the format already matched.
-  const tag = await lastTag(pkg.name, pkg.tag_format, { cwd });
-  if (tag === null) {return firstVersion(pkg);}
-  const lastVersion = parseTagVersion(pkg.tag_format, pkg.name, tag)!;
-  return bumpVersion(lastVersion, entry.bump!);
+  // package has never been released. `lastTag` hands back the parsed
+  // version, so there's nothing left to re-parse.
+  const last = await lastTag(pkg.name, pkg.tag_format, { cwd });
+  if (last === null) {return firstVersion(pkg);}
+  return bumpVersion(formatSemver(last.version), entry.bump!);
 }
 
 async function collectChanges(
@@ -208,11 +206,12 @@ async function collectChanges(
   // instead of one per package (#140).
   const diffCache = new Map<string, ReadonlySet<string>>();
   for (const p of packages) {
-    const tag = await lastTag(p.name, p.tag_format, { cwd });
-    if (tag === null) {
+    const last = await lastTag(p.name, p.tag_format, { cwd });
+    if (last === null) {
       firstRelease.add(p.name);
       continue;
     }
+    const tag = last.tag;
     let diff = diffCache.get(tag);
     if (diff === undefined) {
       diff = new Set(await diffNames(tag, 'HEAD', { cwd }));
@@ -229,12 +228,11 @@ async function nextVersion(
   cwd: string,
   trailerPackages: ReadonlySet<string>,
 ): Promise<string> {
-  const tag = await lastTag(pkg.name, pkg.tag_format, { cwd });
-  if (tag === null) {
+  const last = await lastTag(pkg.name, pkg.tag_format, { cwd });
+  if (last === null) {
     return firstVersion(pkg);
   }
-  /* v8 ignore next -- lastTag only returns tags that parseTagVersion already accepted */
-  const lastVersion = parseTagVersion(pkg.tag_format, pkg.name, tag) ?? firstVersion(pkg);
+  const lastVersion = formatSemver(last.version);
 
   // Trailer bump applies to every cascaded package, OR specifically to
   // packages listed in [trailer.packages]. If the trailer scoped the

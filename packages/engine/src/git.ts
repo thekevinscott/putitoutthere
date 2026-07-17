@@ -222,32 +222,28 @@ export async function tagCommit(name: string, opts: GitOptions = {}): Promise<st
  * match the glob but not strict semver are skipped silently — they're
  * operator noise, not tool output.
  *
- * Returns null when no tag for this package exists.
+ * Returns the winning tag paired with its already-parsed `version` (so
+ * callers never re-parse), or null when no tag for this package exists.
  */
 export async function lastTag(
   packageName: string,
   tagFormat: string,
   opts: GitOptions = {},
-): Promise<string | null> {
+): Promise<{ tag: string; version: Semver } | null> {
   const candidates = await tagList(tagGlob(tagFormat, packageName), opts);
 
   let best: { tag: string; version: Semver } | null = null;
   for (const tag of candidates) {
     const versionPart = parseTagVersion(tagFormat, packageName, tag);
+    // `parseTagVersion` returns null for anything not strict semver, so
+    // the surviving candidates parse cleanly — no defensive re-guard.
     if (versionPart === null) {continue;}
-    let parsed: Semver;
-    try {
-      parsed = parseSemver(versionPart);
-    /* v8 ignore start -- parseTagVersion already validated semver; the re-parse can't throw */
-    } catch {
-      continue;
-    }
-    /* v8 ignore stop */
+    const parsed = parseSemver(versionPart);
     if (!best || greater(parsed, best.version)) {
       best = { tag, version: parsed };
     }
   }
-  return best?.tag ?? null;
+  return best;
 }
 
 function greater(a: Semver, b: Semver): boolean {

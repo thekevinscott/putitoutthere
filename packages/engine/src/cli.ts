@@ -64,6 +64,11 @@ import { writeLauncherFromConfig } from './write-launcher.js';
 import { writeVersionForBuild } from './write-version.js';
 import { VERSION } from './version.js';
 
+// `version` (and its `--version` / `-v` aliases) is dispatched before this
+// list is consulted, so it is intentionally NOT a member: keeping it out
+// makes the `switch (cmd)` below exhaustive over exactly the commands it
+// handles, and the compiler flags any future command added here without a
+// case (the function would no longer return on every path).
 const COMMANDS = [
   'plan',
   'publish',
@@ -78,7 +83,6 @@ const COMMANDS = [
   'write-version',
   'write-crate-version',
   'write-launcher',
-  'version',
 ] as const;
 type Command = (typeof COMMANDS)[number];
 
@@ -580,9 +584,6 @@ export async function run(argv: readonly string[]): Promise<number> {
         }
         return 0;
       }
-      /* v8 ignore next 3 -- exhaustive; 'version' handled above */
-      case 'version':
-        return 0;
     }
   } catch (err) {
     process.stderr.write(
