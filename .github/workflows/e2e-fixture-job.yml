@@ -57,7 +57,7 @@ jobs:
           node-version: '24'
 
       - name: Install pnpm
-        run: npm install -g pnpm@9
+        run: npm install -g pnpm@11
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -120,7 +120,7 @@ jobs:
           node-version: '24'
 
       - name: Install pnpm
-        run: npm install -g pnpm@9
+        run: npm install -g pnpm@11
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -373,7 +373,7 @@ jobs:
               npm install
             }
           elif [ -f pnpm-lock.yaml ]; then
-            npm install -g pnpm@9
+            npm install -g pnpm@11
             pnpm install --frozen-lockfile --ignore-workspace || {
               echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
               pnpm install --no-frozen-lockfile --ignore-workspace
@@ -508,7 +508,7 @@ jobs:
       # job — engine creates the tag, caller's job uploads.
 
       - name: Install pnpm
-        run: npm install -g pnpm@9
+        run: npm install -g pnpm@11
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -624,7 +624,7 @@ jobs:
                 npm install
               }
             elif [ -f pnpm-lock.yaml ]; then
-              npm install -g pnpm@9
+              npm install -g pnpm@11
               pnpm install --frozen-lockfile --ignore-workspace || {
                 echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
                 pnpm install --no-frozen-lockfile --ignore-workspace

@@ -32,6 +32,16 @@ on:
           build steps. Default `24`.
         type: string
         default: '24'
+      pnpm_version:
+        description: >-
+          pnpm version installed on plan / build runners. Default `11`.
+          Override if your repo's lockfile or workspace config targets a
+          different major — pnpm has moved config keys between majors
+          (e.g. the build allowlist is `pnpm.onlyBuiltDependencies` in
+          package.json on 9, `onlyBuiltDependencies` in
+          pnpm-workspace.yaml on 10, and `allowBuilds` on 11).
+        type: string
+        default: '11'
       python_version:
         description: >-
           Deprecated (#369): superseded by per-package
@@ -644,6 +654,9 @@ jobs:
           # `build/<triple>/` artifacts.
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
+          # Via env, not inline interpolation: a `${{ }}` expansion inside
+          # `run:` is a script-injection seam. Consumers control this input.
+          PNPM_VERSION: ${{ inputs.pnpm_version }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci || {
@@ -651,7 +664,7 @@ jobs:
               npm install
             }
           elif [ -f pnpm-lock.yaml ]; then
-            npm install -g pnpm@9
+            npm install -g "pnpm@${PNPM_VERSION}"
             pnpm install --frozen-lockfile || {
               echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
               pnpm install --no-frozen-lockfile

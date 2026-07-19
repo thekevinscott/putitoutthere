@@ -21,6 +21,66 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### `pnpm_version` input; default pnpm is now 11
+
+**Summary.** Every runner step that installed pnpm for a consumer repo
+ran a hardcoded `npm install -g pnpm@9`. No caller could reach it —
+`node_version` was a plumbed `workflow_call` input, but pnpm had no
+counterpart — so a repo whose workspace config targeted a newer major
+could not make the release path agree with itself. Two pnpm 9 behaviors
+made that expensive: it aborts with `packages field missing or empty`
+when a `pnpm-workspace.yaml` exists without a `packages:` key, and its
+build-script allowlist lives at a different path than on 10 and 11.
+Neither reproduces on a modern local pnpm, so both first appeared inside
+a release run. `pnpm_version` (default `11`) is now an input on
+`release.yml`, `build.yml`, and `_matrix.yml`, forwarded the same way
+`node_version` is.
+
+**Required changes.** None if your repo has no `pnpm-lock.yaml` — the
+npm/`package-lock.json` path is untouched. If you do use pnpm, you are
+moving from an implicit 9 to an implicit 11, and the build-script
+allowlist is the thing to check. pnpm 9 ran dependency build scripts
+unconditionally; pnpm 10+ blocks any not allowlisted:
+
+```yaml
+# pnpm-workspace.yaml — required on pnpm 10+ for any dependency
+# that compiles or downloads a binary at install time.
+packages:
+  - 'packages/*'
+allowBuilds:          # pnpm 11 spelling
+  esbuild: true
+```
+
+The key is major-specific — `pnpm.onlyBuiltDependencies` in
+`package.json` on 9, `onlyBuiltDependencies` in `pnpm-workspace.yaml`
+on 10, `allowBuilds` on 11. If you were previously spelling it several
+ways at once to survive whichever major ran, you can now pin the major
+you target and keep one spelling:
+
+```yaml
+# .github/workflows/release.yml — at the call site
+    with:
+      pnpm_version: '9'   # opt back out; omit to take the new default of 11
+```
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Consumers with a
+`pnpm-lock.yaml` who set nothing get pnpm 11 instead of pnpm 9 on plan,
+build, and publish runners. A dependency whose build script is not
+allowlisted will be skipped rather than run — pnpm reports this as
+`Ignored build scripts: …`, and the downstream symptom is usually a
+missing binary at run time rather than a failed install. Repos with only
+a `package-lock.json` see no change.
+
+**Verification.** Look for `Packages: +N` under a `pnpm@11` install in
+the build job log, and confirm no `Ignored build scripts:` line names a
+package you need. To check the input is wired, set
+`pnpm_version: '10'` and confirm the log shows
+`npm install -g pnpm@10`.
+
+---
+
 ### npm-platform staging cleanup is best-effort
 
 **Summary.** The npm platform-package publish loop (`build = "napi"` /

@@ -41,7 +41,7 @@ jobs:
           node-version: "24"
 
       - name: Install pnpm
-        run: npm install -g pnpm@9
+        run: npm install -g pnpm@11
 
       - name: Install dependencies
         # packages/ci's `prepare` script builds its dist during install, so

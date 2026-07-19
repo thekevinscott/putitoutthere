@@ -33,6 +33,17 @@ on:
           steps. Default `24`. Forwarded to `_matrix.yml`.
         type: string
         default: '24'
+      pnpm_version:
+        description: >-
+          pnpm version installed on build runners. Default `11`.
+          Forwarded to `_matrix.yml`. Override if your repo's lockfile
+          or workspace config targets a different major — pnpm has
+          moved config keys between majors (e.g. the build allowlist
+          is `pnpm.onlyBuiltDependencies` in package.json on 9,
+          `onlyBuiltDependencies` in pnpm-workspace.yaml on 10, and
+          `allowBuilds` on 11).
+        type: string
+        default: '11'
       python_version:
         description: >-
           Deprecated (#369): `kind = "pypi"` builds now fan across the
@@ -59,4 +70,5 @@ jobs:
     uses: thekevinscott/putitoutthere/.github/workflows/_matrix.yml@v0
     with:
       node_version: ${{ inputs.node_version }}
+      pnpm_version: ${{ inputs.pnpm_version }}
       python_version: ${{ inputs.python_version }}

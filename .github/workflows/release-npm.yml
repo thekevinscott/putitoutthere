@@ -42,7 +42,7 @@ jobs:
           node-version: '24'
 
       - name: Install pnpm
-        run: npm install -g pnpm@9
+        run: npm install -g pnpm@11
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -79,7 +79,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install pnpm
-        run: npm install -g pnpm@9
+        run: npm install -g pnpm@11
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -1,2 +1,16 @@
 packages:
   - 'packages/*'
+
+# pnpm 10+ blocks dependency build scripts unless allowlisted here; pnpm 9
+# ran them unconditionally. Both entries below preserve the pre-#589
+# behavior rather than granting anything new:
+#   esbuild — installs its platform-native binary; `tsx` (and so every
+#             script run through it) fails with a missing-binary error
+#             without it.
+#   msw     — postinstall stages the service-worker script.
+# The key is major-specific (`allowBuilds` on 11, `onlyBuiltDependencies`
+# on 10, `pnpm.onlyBuiltDependencies` in package.json on 9). This repo
+# pins pnpm 11 everywhere, so the 11 spelling alone is correct here.
+allowBuilds:
+  esbuild: true
+  msw: true
