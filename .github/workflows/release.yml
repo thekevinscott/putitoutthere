@@ -279,7 +279,11 @@ jobs:
                 npm install
               }
             elif [ -f pnpm-lock.yaml ]; then
-              npm install -g pnpm@9
+              # pnpm for the *consumer's* checkout, not ours. Deliberately a
+              # literal and not ./.github/actions/setup-pnpm: that action installs
+              # our build toolchain, this installs theirs, and a `uses:` step
+              # cannot appear inside a run: script anyway.
+              npm install -g pnpm@11
               pnpm install --frozen-lockfile || {
                 echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
                 pnpm install --no-frozen-lockfile

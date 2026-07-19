@@ -1,2 +1,14 @@
 packages:
   - 'packages/*'
+
+# pnpm 10+ blocks dependency build scripts unless allowlisted here; pnpm 9
+# ran them unconditionally. Only esbuild needs one: it installs its
+# platform-native binary, and `tsx` (so every script run through it) fails
+# with a missing-binary error without it.
+#
+# msw is deliberately absent. Its postinstall only stages the *browser*
+# service-worker file; every use here is `msw/node`, which needs nothing
+# staged. Leaving it blocked is the smaller grant.
+allowBuilds:
+  esbuild: true
+  msw: false
