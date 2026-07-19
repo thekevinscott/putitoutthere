@@ -56,7 +56,7 @@ jobs:
       # so a `./` action path would resolve against *their* checkout, which
       # has no such action, and break every consumer. Same reasoning keeps
       # the literal in `_matrix.yml` and `release.yml`. See #591.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
