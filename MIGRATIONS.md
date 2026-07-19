@@ -21,63 +21,86 @@ Each section covers five things, in order:
 
 ## Unreleased
 
-### `pnpm_version` input; default pnpm is now 11
+### pnpm on release runners moves from 9 to 11
 
 **Summary.** Every runner step that installed pnpm for a consumer repo
-ran a hardcoded `npm install -g pnpm@9`. No caller could reach it —
-`node_version` was a plumbed `workflow_call` input, but pnpm had no
-counterpart — so a repo whose workspace config targeted a newer major
-could not make the release path agree with itself. Two pnpm 9 behaviors
-made that expensive: it aborts with `packages field missing or empty`
-when a `pnpm-workspace.yaml` exists without a `packages:` key, and its
-build-script allowlist lives at a different path than on 10 and 11.
-Neither reproduces on a modern local pnpm, so both first appeared inside
-a release run. `pnpm_version` (default `11`) is now an input on
-`release.yml`, `build.yml`, and `_matrix.yml`, forwarded the same way
-`node_version` is.
+ran `npm install -g pnpm@9`; it now installs `pnpm@11`. Two pnpm 9
+behaviors motivated the move, and neither reproduces on a modern local
+pnpm — both first appeared inside a release run. pnpm 9 aborts with
+`packages field missing or empty` when a `pnpm-workspace.yaml` exists
+without a `packages:` key, and it ran dependency build scripts
+unconditionally where pnpm 10+ blocks any not explicitly allowlisted.
+
+There is deliberately **no input to override the version.** A single
+current default is the "as little configuration as possible" commitment,
+and neither pnpm 9 behavior is something a consumer should be opting
+into.
 
 **Required changes.** None if your repo has no `pnpm-lock.yaml` — the
-npm/`package-lock.json` path is untouched. If you do use pnpm, you are
-moving from an implicit 9 to an implicit 11, and the build-script
-allowlist is the thing to check. pnpm 9 ran dependency build scripts
-unconditionally; pnpm 10+ blocks any not allowlisted:
+npm / `package-lock.json` path is untouched. If you do use pnpm, check
+one thing: the build-script allowlist. pnpm 9 ran dependency build
+scripts unconditionally; pnpm 10+ blocks any not allowlisted.
 
 ```yaml
-# pnpm-workspace.yaml — required on pnpm 10+ for any dependency
-# that compiles or downloads a binary at install time.
+# pnpm-workspace.yaml — needed on pnpm 10+ for any dependency that
+# compiles or downloads a binary at install time.
 packages:
   - 'packages/*'
-allowBuilds:          # pnpm 11 spelling
+allowBuilds:
   esbuild: true
 ```
 
-The key is major-specific — `pnpm.onlyBuiltDependencies` in
+The key is major-specific: `pnpm.onlyBuiltDependencies` in
 `package.json` on 9, `onlyBuiltDependencies` in `pnpm-workspace.yaml`
-on 10, `allowBuilds` on 11. If you were previously spelling it several
-ways at once to survive whichever major ran, you can now pin the major
-you target and keep one spelling:
+on 10, `allowBuilds` on 11. If you were spelling it several ways at
+once to survive whichever major ran, you can now keep only the pnpm 11
+form.
 
-```yaml
-# .github/workflows/release.yml — at the call site
-    with:
-      pnpm_version: '9'   # opt back out; omit to take the new default of 11
-```
+Grant the narrowest set that works. A package is worth allowlisting
+only if something you actually run needs what its script produces —
+`esbuild` installs a native binary `tsx` depends on, whereas a mocking
+library whose postinstall stages a *browser* service worker needs
+nothing when you only import its Node entry point.
 
 **Deprecations removed.** None.
 
 **Behavior changes without code changes.** Consumers with a
-`pnpm-lock.yaml` who set nothing get pnpm 11 instead of pnpm 9 on plan,
-build, and publish runners. A dependency whose build script is not
-allowlisted will be skipped rather than run — pnpm reports this as
-`Ignored build scripts: …`, and the downstream symptom is usually a
-missing binary at run time rather than a failed install. Repos with only
-a `package-lock.json` see no change.
+`pnpm-lock.yaml` get pnpm 11 instead of pnpm 9 on plan, build, and
+publish runners. A dependency whose build script is not allowlisted is
+skipped rather than run. pnpm reports this as `Ignored build scripts: …`
+at install time, but the downstream symptom is usually a missing binary
+at run time, well after the install that caused it.
 
 **Verification.** Look for `Packages: +N` under a `pnpm@11` install in
 the build job log, and confirm no `Ignored build scripts:` line names a
-package you need. To check the input is wired, set
-`pnpm_version: '10'` and confirm the log shows
-`npm install -g pnpm@10`.
+package you need.
+
+---
+
+### `engines.node` floor raised to 24
+
+**Summary.** The published `putitoutthere` package declared
+`engines.node` of `>=20` while every CI leg ran Node 24. Nothing in the
+test matrix exercised Node 20, so the declared floor was an unverified
+claim rather than a supported configuration. It is now `>=24`, matching
+what is actually tested.
+
+**Required changes.** Upgrade to Node 24 or later if you are below it.
+
+| | Before | After |
+|---|---|---|
+| `engines.node` | `>=20` | `>=24` |
+
+**Deprecations removed.** Support for Node 20 through 23, which was
+declared but never tested.
+
+**Behavior changes without code changes.** Installing under Node 20–23
+emits an `EBADENGINE` warning under npm and fails with
+`ERR_PNPM_UNSUPPORTED_ENGINE` under pnpm. Node 20 is past end-of-life,
+so this affects runtimes that are already unsupported upstream.
+
+**Verification.** `node --version` reports v24 or later, and
+`npm install putitoutthere` completes with no `EBADENGINE` warning.
 
 ---
 

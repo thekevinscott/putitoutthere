@@ -1,10 +1,10 @@
 {
   "name": "@putitoutthere/workspace",
   "private": true,
-  "packageManager": "pnpm@11.11.0",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=24",
+    "pnpm": ">=10"
   },
   "scripts": {
     "build": "pnpm --filter putitoutthere run build",

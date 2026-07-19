@@ -86,7 +86,6 @@ Optional inputs — `with:` block at the call site:
 |------------------|--------------|--------------------------------------------------------------------------|
 | `environment`    | `release`    | Your GitHub deployment environment is named differently.                 |
 | `node_version`   | `24`         | You need a specific Node version for `kind = "npm"` build steps.         |
-| `pnpm_version`   | `11`         | Your repo's lockfile or workspace config targets a different pnpm major. pnpm moved the build-script allowlist between majors — it is `pnpm.onlyBuiltDependencies` in `package.json` on 9, `onlyBuiltDependencies` in `pnpm-workspace.yaml` on 10, and `allowBuilds` on 11. Only applies to repos with a `pnpm-lock.yaml`. |
 | `python_version` | `3.12`       | Deprecated — no longer affects `kind = "pypi"` builds. Wheel coverage is inferred from `requires-python` or pinned via [`python_versions`](#kind--pypi). |
 
 ### 1b. Recommended: drop in `.github/workflows/check.yml`
