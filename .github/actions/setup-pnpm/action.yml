@@ -21,6 +21,11 @@ description: Installs the pnpm major this repo's own CI builds with.
 #
 # Deriving any of the three from another would assert a coupling that
 # isn't real, and would make one of them impossible to move alone.
+#
+# Sibling: ../setup-node/action.yml does the same job for the Node
+# version. The two are kept separate rather than merged into one "JS
+# toolchain" action because three sites need Node without pnpm — see
+# that file's header for the reasoning.
 runs:
   using: composite
   steps:

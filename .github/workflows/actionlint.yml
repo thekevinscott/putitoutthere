@@ -36,9 +36,7 @@ jobs:
       # referenced via `uses: ./` — without the bundle present, the
       # e2e-fixture workflow's `uses: ./` step trips the existence check.
       # Build the bundle here so actionlint sees what runtime sees.
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
+      - uses: ./.github/actions/setup-node
       - uses: ./.github/actions/setup-pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
