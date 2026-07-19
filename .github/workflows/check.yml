@@ -50,7 +50,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ./.github/actions/setup-node
+      # Deliberately an explicit literal, NOT ./.github/actions/setup-node.
+      # This is a `workflow_call` workflow consumers invoke cross-repo
+      # (`uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0`),
+      # so a `./` action path would resolve against *their* checkout, which
+      # has no such action, and break every consumer. Same reasoning keeps
+      # the literal in `_matrix.yml` and `release.yml`. See #591.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
 
       - uses: thekevinscott/putitoutthere@v0
         with:
