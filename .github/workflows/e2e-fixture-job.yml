@@ -56,8 +56,7 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install pnpm
-        run: npm install -g pnpm@11
+      - uses: ./.github/actions/setup-pnpm
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -119,8 +118,7 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install pnpm
-        run: npm install -g pnpm@11
+      - uses: ./.github/actions/setup-pnpm
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -373,6 +371,10 @@ jobs:
               npm install
             }
           elif [ -f pnpm-lock.yaml ]; then
+            # pnpm for the *consumer's* checkout, not ours. Deliberately a
+            # literal and not ./.github/actions/setup-pnpm: that action installs
+            # our build toolchain, this installs theirs, and a `uses:` step
+            # cannot appear inside a run: script anyway.
             npm install -g pnpm@11
             pnpm install --frozen-lockfile --ignore-workspace || {
               echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
@@ -507,8 +509,7 @@ jobs:
       # (mirrors release.yml). No twine / setup-python in the publish
       # job — engine creates the tag, caller's job uploads.
 
-      - name: Install pnpm
-        run: npm install -g pnpm@11
+      - uses: ./.github/actions/setup-pnpm
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -624,6 +625,10 @@ jobs:
                 npm install
               }
             elif [ -f pnpm-lock.yaml ]; then
+              # pnpm for the *consumer's* checkout, not ours. Deliberately a
+              # literal and not ./.github/actions/setup-pnpm: that action installs
+              # our build toolchain, this installs theirs, and a `uses:` step
+              # cannot appear inside a run: script anyway.
               npm install -g pnpm@11
               pnpm install --frozen-lockfile --ignore-workspace || {
                 echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"

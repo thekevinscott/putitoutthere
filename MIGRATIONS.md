@@ -90,6 +90,7 @@ what is actually tested.
 | | Before | After |
 |---|---|---|
 | `engines.node` | `>=20` | `>=24` |
+| `engines.pnpm` | (unset) | `>=11` |
 
 **Deprecations removed.** Support for Node 20 through 23, which was
 declared but never tested.

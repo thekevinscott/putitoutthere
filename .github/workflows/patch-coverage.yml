@@ -40,8 +40,7 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Install pnpm
-        run: npm install -g pnpm@11
+      - uses: ./.github/actions/setup-pnpm
 
       - name: Install dependencies
         # packages/ci's `prepare` script builds its dist during install, so

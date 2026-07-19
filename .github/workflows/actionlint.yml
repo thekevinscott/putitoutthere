@@ -39,8 +39,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - name: Install pnpm
-        run: npm install -g pnpm@11
+      - uses: ./.github/actions/setup-pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build action bundle
