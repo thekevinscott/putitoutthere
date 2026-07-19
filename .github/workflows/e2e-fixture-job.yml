@@ -52,9 +52,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
+      - uses: ./.github/actions/setup-node
 
       - uses: ./.github/actions/setup-pnpm
 
@@ -114,9 +112,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
+      - uses: ./.github/actions/setup-node
 
       - uses: ./.github/actions/setup-pnpm
 
@@ -238,9 +234,8 @@ jobs:
 
       # ---- npm ----
       - if: matrix.kind == 'npm'
-        uses: actions/setup-node@v6
+        uses: ./.github/actions/setup-node
         with:
-          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       # #298: mirror of the _matrix.yml bundle_cli steps. The e2e fixture
@@ -485,9 +480,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - uses: ./.github/actions/setup-node
         with:
-          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       # npm Trusted Publishing landed in npm 11.5.1 (July 2025). Node 24's

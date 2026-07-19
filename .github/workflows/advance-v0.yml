@@ -37,9 +37,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
+      - uses: ./.github/actions/setup-node
 
       - uses: ./.github/actions/setup-pnpm
 

@@ -1,0 +1,39 @@
+name: Setup Node
+description: Provisions the Node version this repo's own CI builds with.
+
+# Single source of truth for the Node version used to build *this* repo.
+# Eighteen workflow steps spelled the same literal before this action
+# existed; they now carry no version at all, so they cannot drift apart.
+#
+# Kept separate from the sibling `setup-pnpm` action rather than merged
+# into one "JS toolchain" step, even though the two are used together at
+# 14 of 18 sites. Three sites need Node *without* pnpm — `check.yml`
+# (which invokes the `putitoutthere` action instead) and two
+# `e2e-fixture-job.yml` publish steps. A combined action would either
+# exclude those three or install pnpm they never call. Two orthogonal
+# actions compose to cover all eighteen; one merged action covers
+# fifteen. The extra `uses:` line at the paired sites is the cost of
+# that, and it is worth paying.
+#
+# The version here is OUR build toolchain, deliberately not derived from
+# `engines.node` in package.json (what the *published* package claims to
+# support) nor shared with `_matrix.yml` / `release.yml` (what we install
+# into a *consumer's* checkout). All read 24 today by coincidence, not by
+# coupling — see the same note in ../setup-pnpm/action.yml.
+
+inputs:
+  registry-url:
+    description: >-
+      Optional npm registry to authenticate against. Set only by the
+      three publish steps that need an auth-scoped .npmrc; empty
+      elsewhere, which setup-node treats as "no auth setup".
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+        registry-url: ${{ inputs.registry-url }}
