@@ -252,10 +252,32 @@ async function assertRepositoryField(path: string): Promise<void> {
   }
 }
 
-/** Heuristic match on npm's auth-related stderr shapes. */
+/**
+ * Heuristic match on npm's auth-related stderr shapes.
+ *
+ * `E404` belongs here, counterintuitive as a not-found code in an
+ * auth matcher reads: npm answers an **unauthorized publish** with
+ * not-found rather than 401/403, because confirming that a package
+ * exists but is not writable by you is itself an information
+ * disclosure. A publish that comes back 404 has been declined, not
+ * mislaid. npm never says "unauthorized" on this path — see the
+ * captured stderr in
+ * `tests/integration/fixtures/registry-responses/npm/publish-e404-unauthorized.txt`.
+ *
+ * That makes E404 ambiguous, and this predicate deliberately does not
+ * try to resolve the ambiguity — its one caller does. The bootstrap
+ * hint fires only when OIDC is the auth path *and* `isBootstrapPublish`
+ * confirms against the packument endpoint that the package is genuinely
+ * absent. A 404 on a package that IS on the registry falls through to
+ * the raw stderr: piot's own 0.2.80 was exactly that shape (a transient
+ * OIDC token-exchange failure on a package published 80 times over),
+ * and telling that operator "the package does not exist, bootstrap with
+ * NODE_AUTH_TOKEN" would send them to abandon trusted publishing over a
+ * blip. #598.
+ */
 function looksLikeAuthFailure(stderr: string | undefined): boolean {
   if (!stderr) {return false;}
-  return /\b(E401|E403|ENEEDAUTH|EAUTH|need auth|not authori[sz]ed|unauthorized|forbidden)\b/i.test(
+  return /\b(E401|E403|E404|ENEEDAUTH|EAUTH|need auth|not authori[sz]ed|unauthorized|forbidden)\b/i.test(
     stderr,
   );
 }

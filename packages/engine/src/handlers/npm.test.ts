@@ -1081,6 +1081,136 @@ describe('npm.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('on E404 with OIDC + package-not-on-registry, surfaces the bootstrap hint (#598)', async () => {
+    // npm answers an unauthorized publish with E404, not E401/E403 —
+    // confirming a package exists but is not writable by you is itself
+    // an information disclosure. This is the code a consumer's first ever
+    // publish actually gets, so it is the code the bootstrap hint has to
+    // recognise. Kills the mutant that drops E404 from the pattern.
+    execMock
+      .mockImplementationOnce(() => {
+        return Promise.reject(new ExecError('404', '', '', 1));
+      })
+      .mockImplementationOnce(() => {
+        return Promise.reject(
+          new ExecError(
+            'npm exit 1',
+            '',
+            'npm error code E404\nnpm error 404 Not Found - PUT https://registry.npmjs.org/demo-npm - Not found',
+            1,
+          ),
+        );
+      });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/does not exist on registry\.npmjs\.org yet/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
+  it('the E404 bootstrap hint names NODE_AUTH_TOKEN, not just the failure (#598)', async () => {
+    // The hint's value is being actionable. Without the escape hatch
+    // named, it leaves the consumer exactly where the raw npm dump did.
+    execMock
+      .mockImplementationOnce(() => {
+        return Promise.reject(new ExecError('404', '', '', 1));
+      })
+      .mockImplementationOnce(() => {
+        return Promise.reject(
+          new ExecError('npm exit 1', '', 'npm error code E404\nnpm error 404 Not Found', 1),
+        );
+      });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    await expect(
+      npm.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      ),
+    ).rejects.toThrow(/NODE_AUTH_TOKEN/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
+  it('on E404 with OIDC but package already on registry, does not claim bootstrap (#598)', async () => {
+    // The ambiguity guard. piot's own 0.2.80 failed with this identical
+    // E404 on a package published 80 times over — a transient OIDC
+    // exchange failure, not a bootstrap. Telling that operator "the
+    // package does not exist, set NODE_AUTH_TOKEN" would send them to
+    // abandon trusted publishing over a blip, so the packument probe —
+    // not the error code — has to be what decides.
+    execMock
+      .mockImplementationOnce(() => {
+        return Promise.reject(new ExecError('404', '', '', 1));
+      })
+      .mockImplementationOnce(() => {
+        return Promise.reject(
+          new ExecError('npm exit 1', '', 'npm error code E404\nnpm error 404 Not Found', 1),
+        );
+      });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{"name":"demo-npm"}', { status: 200 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    const err = await npm
+      .publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      )
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toMatch(/npm publish failed/);
+    expect(err?.message).not.toMatch(/NODE_AUTH_TOKEN/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
+  it.each(['not authorized', 'not authorised'])(
+    'treats npm\'s prose "%s" as an auth failure, both spellings (#598)',
+    async (phrase) => {
+      // The predicate carries a `not authori[sz]ed` alternative for npm's
+      // prose-only auth refusals — shapes that name no E-code at all. Both
+      // spellings are load-bearing: npm's wording has varied, and a
+      // character class that silently stopped matching one of them would
+      // downgrade a real auth failure to an unexplained publish error.
+      // Deliberately stderr with NO E-code, so this alternative is the only
+      // thing that can match — otherwise E401/E403/E404 would mask it.
+      execMock
+        .mockImplementationOnce(() => {
+          return Promise.reject(new ExecError('404', '', '', 1));
+        })
+        .mockImplementationOnce(() => {
+          return Promise.reject(
+            new ExecError('npm exit 1', '', `npm error ${phrase} to publish "demo-npm"`, 1),
+          );
+        });
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+      await expect(
+        npm.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+        ),
+      ).rejects.toThrow(/does not exist on registry\.npmjs\.org yet/);
+      delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      fetchSpy.mockRestore();
+    },
+  );
+
   it('treats E403 "cannot publish over previously published versions" as already-published (#dirsql)', async () => {
     // npm CLI's retry-on-transient-network-error: the first PUT succeeded
     // (the package + provenance landed on the registry) but came back

@@ -1,0 +1,7 @@
+npm error code E404
+npm error 404 Not Found - PUT https://registry.npmjs.org/demo-pkg - Not found
+npm error 404
+npm error 404  The requested resource 'demo-pkg@0.1.0' could not be found or you do not have permission to access it.
+npm error 404
+npm error 404 Note that you can also install from a
+npm error 404 tarball, folder, http url, or git url.

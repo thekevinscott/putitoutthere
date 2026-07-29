@@ -124,6 +124,48 @@ bypassed; it is not parsed at runtime.
 **Test.** `npm: provenance requires non-empty repository (#281)` —
 asserts the preflight throws and that `npm publish` is never invoked.
 
+#### `npm/publish-e404-unauthorized.txt` — #598
+
+**Shape.** `npm publish` exits non-zero with stderr containing:
+
+```
+npm error code E404
+npm error 404 Not Found - PUT https://registry.npmjs.org/<name> - Not found
+npm error 404  The requested resource '<name>@<ver>' could not be found
+  or you do not have permission to access it.
+```
+
+Note what is *absent*: no `E401`, no `E403`, no "unauthorized". npm
+answers an unauthorized publish with not-found, because confirming a
+package exists but is not writable by you is itself an information
+disclosure.
+
+**Trigger.** Any publish npm declines to authorize. Two distinct
+causes produce byte-identical stderr:
+
+1. **The bootstrap paradox.** npm trusted publishing binds to an
+   already-published package, so a consumer's very first publish has no
+   OIDC path. The token exchange fails, setup-node's placeholder
+   `_authToken` (`XXXXX-XXXXX-XXXXX-XXXXX`) survives in `.npmrc`, and
+   the PUT goes out with a bogus bearer.
+2. **A transient exchange failure on an existing package.** npm's
+   `lib/utils/oidc.js` never throws — every failure path is
+   `log.verbose(...); return undefined` — so a network blip or registry
+   5xx leaves the same placeholder token in place. Captured verbatim
+   from [run 30456638828](https://github.com/thekevinscott/putitoutthere/actions/runs/30456638828),
+   which was this case: `0.2.80` of a package published 80 times over.
+
+**Engine reaction.** `looksLikeAuthFailure` in
+[`src/handlers/npm.ts`](../packages/engine/src/handlers/npm.ts) matches
+the `E404` code, and `isBootstrapPublish` then probes the packument
+endpoint to tell the two causes apart. Absent from the registry =>
+cause 1, and the engine surfaces the bootstrap hint naming
+`NODE_AUTH_TOKEN`. Present => cause 2, and the raw stderr is surfaced
+unchanged; claiming "the package does not exist" there would send a
+consumer to migrate off trusted publishing for no reason.
+
+**Test.** `npm: E404 masks unauthorized on a first publish (#598)`.
+
 ### PyPI
 
 #### `pypi/oidc-mint-tp-filter-rejected.json` — #252
