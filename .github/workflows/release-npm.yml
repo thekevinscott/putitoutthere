@@ -112,6 +112,26 @@ jobs:
           # API; an authenticated call gets 5000 req/hr instead of the
           # unauthenticated 60, so a busy runner never rate-limits.
           GITHUB_TOKEN: ${{ github.token }}
+          # npm's trusted-publishing (OIDC) exchange never throws: every
+          # failure path in npm's `lib/utils/oidc.js` is
+          # `log.verbose(...); return undefined`. When the exchange fails,
+          # setup-node's placeholder `_authToken`
+          # (`XXXXX-XXXXX-XXXXX-XXXXX`) survives in `.npmrc`, the PUT goes
+          # out with a bogus bearer, and npm masks the rejection as a bare
+          # `E404 Not Found - PUT`. Nothing at the default loglevel says
+          # why — see run 30456638828, where 0.2.80 failed exactly this
+          # way with no diagnosable cause in the log.
+          #
+          # `verbose` surfaces the one line that names it:
+          #   npm verbose oidc Failed token exchange request with body
+          #   message: <reason>
+          #
+          # Safe to leave on: npm logs the id-token *request* URL (the
+          # bearer is a header, not a query param) and logs
+          # "Successfully retrieved and set token" without the token
+          # itself. The engine captures npm's stderr and only dumps it on
+          # failure, so green runs are unchanged.
+          NPM_CONFIG_LOGLEVEL: verbose
         run: pnpm exec putitoutthere publish
 
       # Scaffolded workflows reference `thekevinscott/putitoutthere@v<major>`
