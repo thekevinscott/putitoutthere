@@ -51,6 +51,9 @@ describe('action', () => {
     delete process.env.INPUT_WORKING_DIRECTORY;
     delete process.env.INPUT_VERSION;
     delete process.env.INPUT_RELEASE_PACKAGES;
+    delete process.env.INPUT_STAGE_TO;
+    delete process.env.INPUT_BIN;
+    delete process.env.INPUT_TARGET;
   });
 
   it('fails when INPUT_COMMAND is missing', async () => {
@@ -145,5 +148,65 @@ describe('action', () => {
       '--release-packages',
       'demo@minor',
     ]);
+  });
+
+  it('verify-bundle-cli: splits the command and forwards the four flags (#595)', async () => {
+    // `_matrix.yml`'s bundle_cli guard invokes the action with
+    // command: verify-bundle-cli, working_directory: ${{ matrix.path }},
+    // stage_to / bin: ${{ matrix.bundle_cli.* }}, target: ${{ matrix.target }}.
+    // `verify` is a command with subcommands but Actions inputs are flat, so
+    // the adapter owns the split into two argv tokens. No `--json` and no
+    // `--cwd`: the subcommand emits a single human line and resolves its
+    // relative `--path` against the runner working dir (the repo root).
+    process.env.INPUT_COMMAND = 'verify-bundle-cli';
+    process.env.INPUT_WORKING_DIRECTORY = 'packages/python';
+    process.env.INPUT_STAGE_TO = 'python/dirsql/_binary';
+    process.env.INPUT_BIN = 'dirsql';
+    process.env.INPUT_TARGET = 'x86_64-pc-windows-msvc';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'verify',
+      'bundle-cli',
+      '--path',
+      'packages/python',
+      '--stage-to',
+      'python/dirsql/_binary',
+      '--bin',
+      'dirsql',
+      '--target',
+      'x86_64-pc-windows-msvc',
+    ]);
+  });
+
+  it('verify-bundle-cli: omits flags whose inputs are unset (#595)', async () => {
+    // Every one of the four inputs defaults to `''` in action.yml, so an
+    // omitted input must produce *no flag at all* — never a flag carrying
+    // an empty value, which would make `--stage-to` swallow the next token
+    // and verify a path nobody asked for. With all four unset the argv is
+    // the bare subcommand, and the CLI answers with its own
+    // `verify bundle-cli requires --stage-to <dir>` error.
+    process.env.INPUT_COMMAND = 'verify-bundle-cli';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'verify',
+      'bundle-cli',
+    ]);
+  });
+
+  it('verify-bundle-cli: surfaces a failed verification as a non-zero exit (#595)', async () => {
+    // The guard's whole purpose: a wheel missing its staged binary must
+    // fail the build step, not warn. The adapter must not swallow the
+    // subcommand's exit code.
+    process.env.INPUT_COMMAND = 'verify-bundle-cli';
+    process.env.INPUT_WORKING_DIRECTORY = 'packages/python';
+    process.env.INPUT_STAGE_TO = 'stage/bin';
+    process.env.INPUT_BIN = 'mytool';
+    process.env.INPUT_TARGET = 'x86_64-unknown-linux-gnu';
+    runMock.mockResolvedValue(1);
+    await expect(main()).rejects.toThrow(/exit:1/);
   });
 });

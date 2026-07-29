@@ -358,67 +358,43 @@ jobs:
       # layout. A binary that lives on disk at
       # `<pkg.path>/<stage_to>/<bin>` = e.g. `packages/python/python/dirsql/_binary/dirsql`
       # ends up in the wheel at `dirsql/_binary/dirsql` — `python/`
-      # stripped. The guard reads `python-source` from the consumer's
-      # pyproject and subtracts it from `stage_to` before constructing
-      # the regex; when unset/empty the behaviour is identical.
+      # stripped. The engine reads `python-source` from the consumer's
+      # pyproject and subtracts it from `stage_to`; when unset/empty the
+      # behaviour is identical.
+      #
+      # #595: this step used to carry the check inline — `unzip -l | awk |
+      # grep`, plus a `python3 - <<PY … import tomllib … PY` heredoc for the
+      # python-source parse. Both are gone; the engine has shipped the whole
+      # check as `verify bundle-cli` since #451 (same wheel selection, same
+      # python-source stripping, same match, same `::error::` / `ok
+      # bundle_cli:` strings and exit code), and #595 gave `action.yml` the
+      # `verify` surface that finally lets a reusable workflow call it. Two
+      # defects died with the heredoc:
+      #
+      #   - It ran under whatever interpreter `setup-python` provisioned for
+      #     this wheel row, and `tomllib` is stdlib only on CPython >= 3.11 —
+      #     so every fanned wheel row with a <= 3.10 floor crashed the
+      #     release build. The engine parses TOML on the action's own Node,
+      #     which no `requires-python` floor can reach.
+      #   - It was untested workflow YAML duplicating logic the engine
+      #     already owned (`readPythonSource` + `computeStageSuffix`). The
+      #     duplicate is deleted, not relocated — one tested implementation.
+      #
+      # The engine also reads the wheel with a pure-Node zip reader, so the
+      # step no longer depends on `unzip` being on the runner.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — verify wheel contains ${{ matrix.bundle_cli.stage_to }}/${{ matrix.bundle_cli.bin }}
-        shell: bash
-        env:
-          PKG_PATH: ${{ matrix.path }}
-          STAGE_TO: ${{ matrix.bundle_cli.stage_to }}
-          BIN: ${{ matrix.bundle_cli.bin }}
-        run: |
-          set -euo pipefail
-          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
-          dist_dir="${PKG_PATH}/dist"
-          wheel=$(find "$dist_dir" -maxdepth 1 -name '*.whl' -print -quit)
-          if [ -z "${wheel:-}" ]; then
-            echo "::error::no wheel produced under ${dist_dir}"
-            exit 1
-          fi
-          # Read `[tool.maturin].python-source` (or the legacy
-          # `python_source` spelling). Either form is accepted by maturin
-          # across versions. An unset/empty value resolves to "" and
-          # leaves stage_suffix == stage_to.
-          python_source=$(python3 - "$PKG_PATH" <<'PY'
-          import sys, tomllib, pathlib
-          path = pathlib.Path(sys.argv[1]) / "pyproject.toml"
-          try:
-              cfg = tomllib.loads(path.read_text(encoding="utf-8"))
-          except FileNotFoundError:
-              print("")
-              sys.exit(0)
-          tm = cfg.get("tool", {}).get("maturin", {})
-          # Both spellings appear across maturin releases; honor either.
-          src = tm.get("python-source", tm.get("python_source", "")) or ""
-          # Normalize: drop any leading `./` and a trailing `/`.
-          src = src.removeprefix("./").rstrip("/")
-          print(src)
-          PY
-          )
-          # Strip leading ./ if present, then subtract any python-source
-          # prefix that maturin will strip from the wheel layout.
-          stage_suffix="${STAGE_TO#./}"
-          if [ -n "${python_source}" ]; then
-            # Strip exact-prefix match plus its trailing slash. Leave
-            # stage_suffix unchanged when python-source is set but isn't
-            # actually a prefix of stage_to — that combination is the
-            # consumer's misconfiguration to surface, not the workflow's.
-            stripped="${stage_suffix#"${python_source}"/}"
-            if [ "${stripped}" != "${stage_suffix}" ]; then
-              stage_suffix="${stripped}"
-            fi
-          fi
-          expected="${BIN}${ext}"
-          if ! unzip -l "$wheel" | awk '{print $NF}' \
-               | grep -qE "(^|/)${stage_suffix}/${expected}\$"; then
-            echo "::error::wheel $(basename "$wheel") missing bundle_cli binary at ${stage_suffix}/${expected}"
-            echo "wheel contents:"
-            unzip -l "$wheel"
-            exit 1
-          fi
-          echo "ok bundle_cli: ${stage_suffix}/${expected} present in $(basename "$wheel")"
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: verify-bundle-cli
+          working_directory: ${{ matrix.path }}
+          stage_to: ${{ matrix.bundle_cli.stage_to }}
+          bin: ${{ matrix.bundle_cli.bin }}
+          # The Rust target triple, not `RUNNER_OS`: the engine selects the
+          # `.exe` suffix from a triple containing `windows`, which is the
+          # same decision the bash made from `$RUNNER_OS = Windows` for
+          # every row the maturin matrix builds.
+          target: ${{ matrix.target }}
 
       - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
         # hatch-vcs / setuptools-scm derive the version from the latest git

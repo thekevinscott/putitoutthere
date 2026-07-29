@@ -21,67 +21,13 @@
  * subcommand, so `run` errors and no `ok` line is emitted.
  */
 
-import { deflateRawSync } from 'node:zlib';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
-
-/* ------- minimal, pure-Node zip writer (deflate) for .whl fixtures ------- */
-
-function crc32(buf: Buffer): number {
-  let crc = ~0;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i]!;
-    for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (~crc) >>> 0;
-}
-
-function zip(files: Record<string, string>): Buffer {
-  const local: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const [name, content] of Object.entries(files)) {
-    const data = Buffer.from(content, 'utf8');
-    const comp = deflateRawSync(data);
-    const crc = crc32(data);
-    const nameBuf = Buffer.from(name, 'utf8');
-    const lfh = Buffer.alloc(30);
-    lfh.writeUInt32LE(0x04034b50, 0);
-    lfh.writeUInt16LE(20, 4);
-    lfh.writeUInt16LE(8, 8); // method: deflate
-    lfh.writeUInt32LE(crc, 14);
-    lfh.writeUInt32LE(comp.length, 18);
-    lfh.writeUInt32LE(data.length, 22);
-    lfh.writeUInt16LE(nameBuf.length, 26);
-    const localOffset = offset;
-    local.push(lfh, nameBuf, comp);
-    offset += lfh.length + nameBuf.length + comp.length;
-    const cdh = Buffer.alloc(46);
-    cdh.writeUInt32LE(0x02014b50, 0);
-    cdh.writeUInt16LE(20, 4);
-    cdh.writeUInt16LE(20, 6);
-    cdh.writeUInt16LE(8, 10);
-    cdh.writeUInt32LE(crc, 16);
-    cdh.writeUInt32LE(comp.length, 20);
-    cdh.writeUInt32LE(data.length, 24);
-    cdh.writeUInt16LE(nameBuf.length, 28);
-    cdh.writeUInt32LE(localOffset, 42);
-    central.push(cdh, nameBuf);
-  }
-  const cd = Buffer.concat(central);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  const n = Object.keys(files).length;
-  eocd.writeUInt16LE(n, 8);
-  eocd.writeUInt16LE(n, 10);
-  eocd.writeUInt32LE(cd.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-  return Buffer.concat([...local, cd, eocd]);
-}
+import { zip } from './zip-wheel.js';
 
 /* ----------------------------- fixtures ----------------------------- */
 
