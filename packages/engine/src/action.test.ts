@@ -180,6 +180,23 @@ describe('action', () => {
     ]);
   });
 
+  it('verify-bundle-cli: omits flags whose inputs are unset (#595)', async () => {
+    // Every one of the four inputs defaults to `''` in action.yml, so an
+    // omitted input must produce *no flag at all* — never a flag carrying
+    // an empty value, which would make `--stage-to` swallow the next token
+    // and verify a path nobody asked for. With all four unset the argv is
+    // the bare subcommand, and the CLI answers with its own
+    // `verify bundle-cli requires --stage-to <dir>` error.
+    process.env.INPUT_COMMAND = 'verify-bundle-cli';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'verify',
+      'bundle-cli',
+    ]);
+  });
+
   it('verify-bundle-cli: surfaces a failed verification as a non-zero exit (#595)', async () => {
     // The guard's whole purpose: a wheel missing its staged binary must
     // fail the build step, not warn. The adapter must not swallow the
