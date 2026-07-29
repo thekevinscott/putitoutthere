@@ -1,8 +1,10 @@
 /**
  * Vitest config for the e2e tier. These tests **shell out to the built
- * CLI** (`dist/cli-bin.js`) and hit the **real** registries — no mocks.
- * `test:e2e` builds `dist/` first. Kept separate from the unit and
- * integration configs because it depends on a build and on network.
+ * CLI** (`dist/cli-bin.js`) — or, for the surface `_matrix.yml` actually
+ * calls, to the ncc-bundled action (`dist-action/index.js`, #595) — and hit
+ * the **real** registries; no mocks. `test:e2e` builds both first. Kept
+ * separate from the unit and integration configs because it depends on a
+ * build and on network.
  *
  * Issue #403.
  */
