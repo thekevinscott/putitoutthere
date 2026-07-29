@@ -21,6 +21,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { crates } from '../../src/handlers/crates.js';
@@ -290,6 +291,126 @@ describe('npm: provenance requires non-empty `repository` (#281)', () => {
     expect(fixture).toMatch(/422\s+Unprocessable Entity/);
     expect(fixture).toMatch(/repository/);
     expect(fixture).toMatch(/provenance/i);
+  });
+});
+
+describe('npm: E404 masks unauthorized on a first publish (#598)', () => {
+  // The bug: npm returns E404 — not E401/E403 — when a publish is
+  // unauthorized, because leaking "this package exists but you can't
+  // write to it" is itself an information disclosure. That collides with
+  // the bootstrap paradox: npm trusted publishing binds to an
+  // already-published package, so a consumer's very first publish has no
+  // OIDC path at all. The exchange fails, setup-node's placeholder
+  // `_authToken` survives in `.npmrc`, and the PUT comes back 404.
+  //
+  // Both conditions the bootstrap hint was written for hold — OIDC is in
+  // play, and the package genuinely is not on the registry — but
+  // `looksLikeAuthFailure` never matched E404, so the guard
+  // short-circuited and the consumer got a raw npm stderr dump instead of
+  // the one message that tells them what to do.
+
+  function wireNpm(stderrFixture: string): void {
+    execMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+      const a = args as string[];
+      if (cmd === 'npm' && a[0] === 'view') {
+        // isPublished probe: not on the registry, so the handler publishes.
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', '404');
+        return fakeChild(1);
+      }
+      if (cmd === 'npm' && a[0] === 'publish') {
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', stderrFixture);
+        return fakeChild(1);
+      }
+      /* v8 ignore next */
+      cb(Object.assign(new Error(`unexpected subprocess: ${cmd} ${a.join(' ')}`), { code: 1 }), '', '');
+      return fakeChild(1);
+    }) as unknown as typeof execFile);
+  }
+
+  /** package.json with the `repository` field the OIDC path asserts on. */
+  function writeManifest(): void {
+    writeAt(workdir, 'package.json', JSON.stringify({
+      name: 'demo-pkg',
+      version: '0.1.0',
+      repository: { type: 'git', url: 'git+https://github.com/acme/demo.git' },
+    }));
+  }
+
+  it('surfaces the bootstrap hint when the package is absent from the registry', async () => {
+    writeManifest();
+    wireNpm(loadFixture('npm', 'publish-e404-unauthorized.txt'));
+    // The packument probe `isBootstrapPublish` makes: 404 => never published.
+    server.use(
+      http.get('https://registry.npmjs.org/demo-pkg', () => new HttpResponse(null, { status: 404 })),
+    );
+
+    const pkg = { name: 'demo-pkg', path: workdir };
+    await expect(
+      npm.publish(pkg, '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' })),
+    ).rejects.toThrow(/does not exist on registry\.npmjs\.org yet/);
+  });
+
+  it('names NODE_AUTH_TOKEN as the bootstrap path, not just the failure', async () => {
+    // The hint's whole value is being actionable. A message that says
+    // "not found" without naming the escape hatch leaves the consumer
+    // exactly where the raw npm dump did.
+    writeManifest();
+    wireNpm(loadFixture('npm', 'publish-e404-unauthorized.txt'));
+    server.use(
+      http.get('https://registry.npmjs.org/demo-pkg', () => new HttpResponse(null, { status: 404 })),
+    );
+
+    const pkg = { name: 'demo-pkg', path: workdir };
+    await expect(
+      npm.publish(pkg, '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' })),
+    ).rejects.toThrow(/NODE_AUTH_TOKEN/);
+  });
+
+  it('does NOT claim bootstrap when the package already exists (the transient-404 case)', async () => {
+    // Guards the widening. piot's own 0.2.80 release failed with this
+    // exact E404 on a package published 80 times over — a transient OIDC
+    // exchange failure, not a bootstrap. Telling that consumer to "set
+    // NODE_AUTH_TOKEN, the package doesn't exist" would be a lie that
+    // sends them to migrate off trusted publishing for no reason.
+    writeManifest();
+    wireNpm(loadFixture('npm', 'publish-e404-unauthorized.txt'));
+    server.use(
+      http.get('https://registry.npmjs.org/demo-pkg', () =>
+        HttpResponse.json({ name: 'demo-pkg' }, { status: 200 })),
+    );
+
+    const pkg = { name: 'demo-pkg', path: workdir };
+    await expect(
+      npm.publish(pkg, '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' })),
+    ).rejects.toThrow(/npm publish failed/);
+    await expect(
+      npm.publish(pkg, '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' })),
+    ).rejects.not.toThrow(/NODE_AUTH_TOKEN/);
+  });
+
+  it('does NOT claim bootstrap without OIDC — a token publish that 404s is a plain failure', async () => {
+    writeManifest();
+    wireNpm(loadFixture('npm', 'publish-e404-unauthorized.txt'));
+
+    const pkg = { name: 'demo-pkg', path: workdir };
+    // No ACTIONS_ID_TOKEN_REQUEST_TOKEN: the bootstrap paradox needs OIDC
+    // to be the auth path. With a token configured, a 404 means something
+    // else and the packument probe must never run.
+    await expect(
+      npm.publish(pkg, '0.1.0', ctx({ NODE_AUTH_TOKEN: 'tok' })),
+    ).rejects.toThrow(/npm publish failed/);
+  });
+
+  it('fixture captures the real npm E404 shape, not an assumed one', () => {
+    // Captured verbatim from run 30456638828 (only the package name and
+    // version genericised). The engine matches on the `E404` code rather
+    // than the prose, but if npm's shape drifts this surfaces in the diff.
+    const fixture = loadFixture('npm', 'publish-e404-unauthorized.txt');
+    expect(fixture).toMatch(/npm error code E404/);
+    expect(fixture).toMatch(/404 Not Found - PUT https:\/\/registry\.npmjs\.org\//);
+    expect(fixture).toMatch(/could not be found or you do not have permission to access it/);
+    // The trap this whole issue turns on: npm never says "unauthorized".
+    expect(fixture).not.toMatch(/unauthorized|E401|E403/i);
   });
 });
 
