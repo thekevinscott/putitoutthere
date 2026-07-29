@@ -1176,6 +1176,41 @@ describe('npm.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it.each(['not authorized', 'not authorised'])(
+    'treats npm\'s prose "%s" as an auth failure, both spellings (#598)',
+    async (phrase) => {
+      // The predicate carries a `not authori[sz]ed` alternative for npm's
+      // prose-only auth refusals — shapes that name no E-code at all. Both
+      // spellings are load-bearing: npm's wording has varied, and a
+      // character class that silently stopped matching one of them would
+      // downgrade a real auth failure to an unexplained publish error.
+      // Deliberately stderr with NO E-code, so this alternative is the only
+      // thing that can match — otherwise E401/E403/E404 would mask it.
+      execMock
+        .mockImplementationOnce(() => {
+          return Promise.reject(new ExecError('404', '', '', 1));
+        })
+        .mockImplementationOnce(() => {
+          return Promise.reject(
+            new ExecError('npm exit 1', '', `npm error ${phrase} to publish "demo-npm"`, 1),
+          );
+        });
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+      await expect(
+        npm.publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+        ),
+      ).rejects.toThrow(/does not exist on registry\.npmjs\.org yet/);
+      delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      fetchSpy.mockRestore();
+    },
+  );
+
   it('treats E403 "cannot publish over previously published versions" as already-published (#dirsql)', async () => {
     // npm CLI's retry-on-transient-network-error: the first PUT succeeded
     // (the package + provenance landed on the registry) but came back
