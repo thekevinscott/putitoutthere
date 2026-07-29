@@ -599,10 +599,15 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
     const run = step.run ?? '';
     const text = stepText(step);
     // The guard opens the wheel and asserts it contains the staged
-    // binary at <stage_to>/<bin>. unzip -l is the lightweight check;
-    // a CLI subcommand would also satisfy this contract.
-    const looksLikeWheelInspection = run.includes('.whl')
-      && (run.includes('unzip') || run.includes('verify-bundle-cli'));
+    // binary at <stage_to>/<bin>. Two forms satisfy that contract: an
+    // inline `unzip -l` over the produced `.whl`, or delegation to the
+    // engine's tested `verify bundle-cli`, which reads the wheel with a
+    // pure-Node zip reader and needs no `unzip` on the runner (#595).
+    // The delegated form is a `uses:` step carrying its inputs in
+    // `with:` — there is no `run:` script to inspect — so match it
+    // against the whole step rather than the run script.
+    const looksLikeWheelInspection = (run.includes('.whl') && run.includes('unzip'))
+      || text.includes('verify-bundle-cli');
     const referencesBin = text.includes('matrix.bundle_cli.bin')
       && text.includes('matrix.bundle_cli.stage_to');
     return looksLikeWheelInspection && referencesBin;

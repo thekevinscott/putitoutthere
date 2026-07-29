@@ -4,7 +4,7 @@ author: 'Kevin Scott'
 
 inputs:
   command:
-    description: 'Which CLI subcommand to run. Canonical values are `plan`, `publish`, `write-version`, `check`, and `release-github`.'
+    description: 'Which CLI subcommand to run. Canonical values are `plan`, `publish`, `write-version`, `check`, `release-github`, and `verify-bundle-cli`.'
     required: false
     default: 'plan'
   working_directory:
@@ -12,7 +12,9 @@ inputs:
       Path the CLI runs against. For `plan` / `publish`, forwarded as
       `--cwd`. For `write-version` (#276), forwarded as `--path` —
       the package directory whose pyproject.toml / Cargo.toml gets
-      bumped. Defaults to the runner working directory. Internal use;
+      bumped. For `verify-bundle-cli` (#595), also forwarded as
+      `--path` — the package directory whose built wheel lives under
+      `<path>/dist`. Defaults to the runner working directory. Internal use;
       the reusable workflow supplies this when invoked against a
       non-root tree (e.g. e2e fixtures materialized into a subdir,
       or a per-package `matrix.path`).
@@ -32,6 +34,32 @@ inputs:
       entries; when set, change detection is bypassed and exactly the
       named packages are released. Empty => normal change-detected
       planning. Ignored for other commands.
+    required: false
+    default: ''
+  stage_to:
+    description: >-
+      The `[package.bundle_cli].stage_to` directory the cross-compiled
+      binary was staged into, forwarded to `verify-bundle-cli` as
+      `--stage-to` (#595). Any `[tool.maturin].python-source` prefix is
+      subtracted from it before the in-wheel path is built, because
+      maturin strips that directory from the wheel layout. Required
+      when `command: verify-bundle-cli`; ignored otherwise.
+    required: false
+    default: ''
+  bin:
+    description: >-
+      The `[package.bundle_cli].bin` name, forwarded to
+      `verify-bundle-cli` as `--bin` (#595). Gains a `.exe` suffix on a
+      Windows `target`. Required when `command: verify-bundle-cli`;
+      ignored otherwise.
+    required: false
+    default: ''
+  target:
+    description: >-
+      The build matrix row's target triple, forwarded to
+      `verify-bundle-cli` as `--target` (#595). A triple containing
+      `windows` selects the `.exe` binary suffix. Required when
+      `command: verify-bundle-cli`; ignored otherwise.
     required: false
     default: ''
   fail_on_error:

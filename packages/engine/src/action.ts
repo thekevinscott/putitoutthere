@@ -17,6 +17,9 @@ export async function main(): Promise<void> {
   const workingDirectory = process.env.INPUT_WORKING_DIRECTORY ?? '';
   const versionInput = process.env.INPUT_VERSION ?? '';
   const releasePackages = process.env.INPUT_RELEASE_PACKAGES ?? '';
+  const stageTo = process.env.INPUT_STAGE_TO ?? '';
+  const bin = process.env.INPUT_BIN ?? '';
+  const target = process.env.INPUT_TARGET ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
@@ -36,14 +39,27 @@ export async function main(): Promise<void> {
   // sourced from `working_directory`) and reads `--cwd` from
   // process.cwd() — the runner working dir is the repo root, where
   // `putitoutthere.toml` lives.
+  // #595: verify-bundle-cli takes `--path` (the matrix row's package dir,
+  // sourced from `working_directory`) plus `--stage-to` / `--bin` /
+  // `--target`. It is the one input whose CLI form is two argv tokens
+  // (`verify bundle-cli`), because `verify` is a command with
+  // subcommands; Actions inputs are flat, so the hyphenated spelling is
+  // the input and the split happens here.
   // No `--json` on any of them: these subcommands emit a single human
   // line; there's no structured output to consume.
-  const argv = ['node', 'putitoutthere', command];
+  const argv = command === 'verify-bundle-cli'
+    ? ['node', 'putitoutthere', 'verify', 'bundle-cli']
+    : ['node', 'putitoutthere', command];
   if (command === 'write-version' || command === 'write-crate-version') {
     if (workingDirectory) {argv.push('--path', workingDirectory);}
     if (versionInput) {argv.push('--version', versionInput);}
   } else if (command === 'write-launcher') {
     if (workingDirectory) {argv.push('--path', workingDirectory);}
+  } else if (command === 'verify-bundle-cli') {
+    if (workingDirectory) {argv.push('--path', workingDirectory);}
+    if (stageTo) {argv.push('--stage-to', stageTo);}
+    if (bin) {argv.push('--bin', bin);}
+    if (target) {argv.push('--target', target);}
   } else {
     argv.push('--json');
     if (workingDirectory) {argv.push('--cwd', workingDirectory);}
