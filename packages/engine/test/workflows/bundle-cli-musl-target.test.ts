@@ -1,36 +1,48 @@
 /**
- * Workflow-YAML contract: every `bundle_cli` cargo-build path in the
+ * Workflow-YAML contract: the **npm bundled-cli** cargo-build paths in the
  * reusable workflow (and its e2e mirror) must compile the binary against
  * a musl target on Linux, regardless of the gnu triple the package
- * declares.
+ * declares — while the **pypi maturin bundle_cli** path must compile the
+ * declared gnu triple directly.
  *
- * Why this exists (#381): `cargo build --target $TARGET` runs directly
- * on the GitHub-hosted runner. `ubuntu-latest` resolves to Ubuntu 24.04
- * (glibc 2.39), so the produced binary carries a GLIBC_2.39 symbol
- * requirement and fails at runtime on any older Linux:
+ * Why the npm split exists (#381): `cargo build --target $TARGET` runs
+ * directly on the GitHub-hosted runner. `ubuntu-latest` resolves to
+ * Ubuntu 24.04 (glibc 2.39), so the produced binary carries a GLIBC_2.39
+ * symbol requirement and fails at runtime on any older Linux:
  *
  *   ./bin: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
  *
- * The fix: derive a `BINARY_TARGET` from `TARGET` that swaps
+ * npm has no install-time glibc gate, so its Linux binaries stay static
+ * musl: derive a `BINARY_TARGET` from the Rust triple that swaps
  * `-linux-gnu*` to `-linux-musl*`, and use `BINARY_TARGET` for the
  * three bundle_cli steps that compile and locate the binary
  * (`rustup target add`, `cargo build --target`, and the stage step's
  * `src=…/target/<triple>/…` path). `TARGET` itself stays unchanged
- * everywhere else (npm package naming, napi build, wheel tag, artifact
- * name), so the package's declared triple and the bundled binary's
- * compile triple become independent concerns. Static musl binaries
- * have no glibc floor and run on any Linux ≥ kernel 3.2.
+ * everywhere else (npm package naming, napi build, artifact name), so
+ * the package's declared triple and the bundled binary's compile triple
+ * are independent concerns. Static musl binaries have no glibc floor and
+ * run on any Linux ≥ kernel 3.2.
  *
- * The contract this test enforces is the *visible substitution*: in
+ * Why the pypi lane must NOT musl-map (#603): a statically-linked
+ * (static-pie) binary cannot `dlopen`, so a consumer CLI that loads
+ * SQLite extensions fails with `Dynamic loading not supported` (hit in
+ * the wild on dirsql#755). And unlike npm, the wheel's manylinux
+ * platform tag already encodes the glibc floor of everything built on
+ * the runner — pip refuses to install the wheel anywhere older — so a
+ * dynamically linked gnu binary has exactly the wheel's own reach and
+ * the musl mapping buys nothing there. The pypi steps therefore consume
+ * `$TARGET` directly and carry no musl toolchain.
+ *
+ * The npm contract this test enforces is the *visible substitution*: in
  * each of the three steps per bundle_cli path, the `run:` block must
  * reference `linux-gnu` and `linux-musl` together (a substitution
- * pattern between them, e.g. `${TARGET//-linux-gnu/-linux-musl}`),
+ * pattern between them, e.g. `${RUST_TARGET//-linux-gnu/-linux-musl}`),
  * and the cargo / rustup / stage operations must consume the derived
- * binary triple rather than `$TARGET` directly. The test deliberately
- * does not pin the exact shell syntax — a future refactor that uses
- * `case`, `sed`, or another mechanism for the swap stays passing as
- * long as the substitution is visible and the derived variable is the
- * one passed downstream.
+ * binary triple rather than the raw triple directly. The test
+ * deliberately does not pin the exact shell syntax — a future refactor
+ * that uses `case`, `sed`, or another mechanism for the swap stays
+ * passing as long as the substitution is visible and the derived
+ * variable is the one passed downstream.
  */
 
 import { readFileSync } from 'node:fs';
@@ -124,14 +136,8 @@ function expectDerivedTripleUsed(
   ).toMatch(consumerPattern);
 }
 
-describe('reusable workflow: bundle_cli Linux binaries are compiled as static musl (#381)', () => {
+describe('reusable workflow: npm bundle_cli Linux binaries are compiled as static musl (#381)', () => {
   const paths = [
-    {
-      label: '_matrix.yml pypi maturin bundle_cli',
-      file: '_matrix.yml',
-      job: 'build',
-      kind: 'pypi' as Kind,
-    },
     {
       label: '_matrix.yml npm bundled-cli',
       file: '_matrix.yml',
@@ -330,19 +336,13 @@ describe('reusable workflow: _matrix.yml bundle_cli verify step asserts static l
   );
 });
 
-describe('reusable workflow: bundle_cli musl builds install musl-tools C compiler', () => {
+describe('reusable workflow: npm bundle_cli musl builds install musl-tools C compiler', () => {
   // `rustup target add` installs the Rust musl target but not the C cross-compiler.
   // Crates that compile C source (libsqlite3-sys --bundled, openssl-sys, etc.) invoke
   // x86_64-linux-musl-gcc at cargo build time. That binary lives in the musl-tools apt
   // package, which is absent on ubuntu-latest. Without it, cargo fails with:
   //   failed to find tool "x86_64-linux-musl-gcc": No such file or directory
   const paths = [
-    {
-      label: '_matrix.yml pypi maturin bundle_cli',
-      file: '_matrix.yml',
-      job: 'build',
-      kind: 'pypi' as Kind,
-    },
     {
       label: '_matrix.yml npm bundled-cli',
       file: '_matrix.yml',
@@ -386,6 +386,84 @@ describe('reusable workflow: bundle_cli musl builds install musl-tools C compile
           `before cargo build (index ${cargoBuildIdx}).`,
       ).toBeLessThan(cargoBuildIdx);
     }
+  });
+});
+
+describe('reusable workflow: pypi bundle_cli binaries are compiled against the declared gnu triple (#603)', () => {
+  // A statically-linked musl binary cannot `dlopen`, so a consumer CLI that
+  // loads SQLite extensions fails at runtime with `Dynamic loading not
+  // supported` (dirsql#755). Unlike npm, the pypi lane needs no musl
+  // mapping for portability: everything compiled on the runner shares the
+  // runner's glibc, the wheel's manylinux platform tag encodes that floor,
+  // and pip refuses to install the wheel on any older system — so a
+  // dynamically-linked gnu binary has exactly the wheel's own reach. The
+  // pypi bundle_cli steps must therefore consume `$TARGET` directly, with
+  // no gnu→musl substitution and no musl toolchain step.
+  const label = '_matrix.yml pypi maturin bundle_cli';
+
+  function expectNoMuslMapping(run: string, contextMsg: string): void {
+    expect(
+      run,
+      `${contextMsg}: the pypi bundle_cli step must not derive a musl-mapped ` +
+        'triple. A musl build is statically linked, and a static binary cannot ' +
+        'dlopen — SQLite extension loading in the shipped wheel fails with ' +
+        '`Dynamic loading not supported` (#603, dirsql#755). The wheel\'s ' +
+        'manylinux tag already gates the glibc floor, so compile the declared ' +
+        'gnu triple directly.',
+    ).not.toMatch(/linux-musl/);
+  }
+
+  it(`${label}: \`rustup target add\` registers the declared triple`, () => {
+    const steps = loadSteps('_matrix.yml', 'build');
+    const step = findStep(steps, 'pypi', /add Rust target/i, /rustup\s+target\s+add/);
+    expect(step, `${label}: \`bundle_cli — add Rust target\` step not found`).toBeDefined();
+    const run = step!.run!;
+    expectNoMuslMapping(run, `${label}: rustup-target-add`);
+    expect(
+      run,
+      `${label}: rustup-target-add must consume \`$TARGET\` directly (#603)`,
+    ).toMatch(/rustup\s+target\s+add\s+"\$\{?TARGET\}?"/);
+  });
+
+  it(`${label}: \`cargo build --target\` compiles the declared triple`, () => {
+    const steps = loadSteps('_matrix.yml', 'build');
+    const step = findStep(steps, 'pypi', /cargo build/i);
+    expect(step, `${label}: \`bundle_cli — cargo build\` step not found`).toBeDefined();
+    const run = step!.run!;
+    expectNoMuslMapping(run, `${label}: cargo-build`);
+    expect(
+      run,
+      `${label}: cargo-build must consume \`$TARGET\` directly (#603)`,
+    ).toMatch(/--target\s+"\$\{?TARGET\}?"/);
+  });
+
+  it(`${label}: stage step reads from the declared triple's target dir`, () => {
+    const steps = loadSteps('_matrix.yml', 'build');
+    const step = findStep(steps, 'pypi', /stage binary/i, /src=/);
+    expect(step, `${label}: \`bundle_cli — stage binary\` step not found`).toBeDefined();
+    const run = step!.run!;
+    expectNoMuslMapping(run, `${label}: stage-binary`);
+    expect(
+      run,
+      `${label}: stage-binary must read from \`target/$TARGET/release\` (#603)`,
+    ).toMatch(/target\/"?\$\{?TARGET\}?"?\/release/);
+  });
+
+  it(`${label}: no pypi-gated step installs the musl C toolchain`, () => {
+    const steps = loadSteps('_matrix.yml', 'build');
+    const muslToolchainStep = steps.find(
+      (s) =>
+        gatesOnBundleCliKind(s, 'pypi') &&
+        typeof s.run === 'string' &&
+        /musl.?tools/.test(s.run),
+    );
+    expect(
+      muslToolchainStep,
+      `${label}: found a pypi-gated step installing musl-tools ` +
+        `(${muslToolchainStep?.name ?? 'unnamed'}). The pypi lane compiles the ` +
+        'declared gnu triple (#603), so the musl C cross-compiler step must be ' +
+        'removed along with the gnu→musl mapping.',
+    ).toBeUndefined();
   });
 });
 
