@@ -20,7 +20,12 @@ globs = [
   "packages/engine/tsconfig.json",
   "packages/engine/tsconfig.build.json",
   "action.yml",
-  "dist-action/**",
+  # dist-action/ must NOT be globbed: it is gitignored on main and
+  # exists only on fold-shaped tag commits (release-npm.yml's
+  # fold-bundle), so a glob on it can only ever match phantom
+  # *deletions* in plan-time diffs — cascading a release the publish
+  # job's post-fold re-plan won't reproduce (PIOT_PUBLISH_EMPTY_PLAN,
+  # #607). Real bundle changes cascade via packages/engine/src/**.
   # The reusable workflow IS public surface — consumer release runs
   # use it directly. A fix landing in `release.yml` is a consumer-
   # observable change and must trigger a putitoutthere release so
