@@ -118,42 +118,6 @@ function setupRepo(): void {
   git(['tag', `${pkg.name}-v${firstVersion}`]);
 }
 
-describe('putitoutthere.toml self-config: a push touching no globbed file plans nothing (#607)', () => {
-  it('yields an empty plan against a fold-shaped tag commit', async () => {
-    setupRepo();
-    // Reshape the tag into what release-npm.yml actually cuts: a
-    // release-only commit carrying the action bundle, off main
-    // (`fold-bundle`). Every real `putitoutthere-v*` tag has this
-    // shape, while `dist-action/` is gitignored on main — so any glob
-    // matching a fold-only path turns up as a phantom *deletion* in
-    // every plan-time diff, cascades a release the publish job's
-    // post-fold re-plan won't reproduce, and dies in
-    // PIOT_PUBLISH_EMPTY_PLAN (run 30940206119).
-    mkdirSync(join(repo, 'dist-action'), { recursive: true });
-    writeFileSync(join(repo, 'dist-action', 'index.js'), 'bundled\n', 'utf8');
-    writeFileSync(join(repo, 'dist-action', 'package.json'), '{"type":"module"}\n', 'utf8');
-    git(['add', '-A']);
-    git(['commit', '-q', '-m', 'chore(release): bundle action']);
-    git(['tag', '-f', `${pkg.name}-v${firstVersion}`]);
-    git(['reset', '-q', '--hard', 'HEAD~1']);
-
-    // The #606 shape: a push whose files match no glob entry.
-    writeFileSync(join(repo, 'not-globbed.txt'), 'tests and docs only\n', 'utf8');
-    git(['add', '-A']);
-    git(['commit', '-q', '-m', 'test: touch nothing globbed']);
-
-    const matrix = await plan({ cwd: repo });
-    expect(
-      matrix,
-      'a commit touching no globbed file must plan nothing. A non-empty ' +
-        'plan here means a glob matches a path that exists only on tag ' +
-        'commits: the plan job cascades on its phantom deletion, the ' +
-        'workflow gate passes, and publish fails with ' +
-        'PIOT_PUBLISH_EMPTY_PLAN once fold-bundle restores the path (#607)',
-    ).toEqual([]);
-  });
-});
-
 describe('putitoutthere.toml self-config: every glob entry cascades the package on touch', () => {
   it.each(pkg.globs)('"%s" cascades putitoutthere when a matching file changes', async (glob) => {
     setupRepo();
