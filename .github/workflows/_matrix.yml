@@ -209,8 +209,9 @@ jobs:
       # darwin on macos-latest, windows on windows-2022 (pinned; see #354).
       # Rust is pre-installed on all GHA runners; we only `rustup target add`
       # to make the triple known.
-      # #603: compile the DECLARED triple — no gnu→musl mapping here,
-      # unlike the npm bundled-cli lane below. A musl build is statically
+      # #603: compile the DECLARED triple — no gnu→musl mapping (the npm
+      # bundled-cli lane below reaches the same property via zigbuild,
+      # #605). A musl build is statically
       # linked (static-pie), and a static binary cannot dlopen: consumer
       # CLIs that load SQLite extensions fail at runtime with `Dynamic
       # loading not supported` (dirsql#755). The #381 portability concern
@@ -439,8 +440,9 @@ jobs:
       # `src/plan.ts`, so cargo cross-compile linkers are not needed.
       # The `main` target row is the noarch top-level package — it has
       # no per-target binary to compile.
-      # #381: see the pypi/maturin `add Rust target` step's banner above
-      # for the gnu→musl mapping rationale. Same rule applies here.
+      # #605: like the pypi lane, the DECLARED triple is compiled — but via
+      # cargo-zigbuild with a pinned glibc floor, since npm has no
+      # install-time glibc gate (see the add-target step below).
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — add Rust target
         shell: bash
@@ -448,33 +450,29 @@ jobs:
           RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           set -euo pipefail
-          # #387: matrix.rust_target is the engine-resolved Rust triple.
-          # plan.ts maps the npm-flavor matrix.target (linux-x64-gnu, …) to
-          # its Rust form via toRustTriple, so no inline napi→rust lookup is
-          # needed here. A bare ${matrix.target//-linux-gnu/-linux-musl}
-          # would be a no-op on npm triples (linux-x64-gnu lacks the
-          # -linux-gnu suffix); the swap below runs on the Rust triple.
-          # #381: cross-compile against the musl-mapped triple on Linux.
-          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
-          rustup target add "$BINARY_TARGET"
+          # #387: matrix.rust_target is the engine-resolved Rust triple
+          # (plan.ts maps the npm-flavor matrix.target via toRustTriple).
+          # #605: register the DECLARED triple — no gnu→musl mapping. Linux
+          # rows compile via cargo-zigbuild pinned to GLIBC_FLOOR, so the
+          # binary stays dynamically linked (dlopen works, dirsql#762)
+          # without inheriting the runner's glibc (#381).
+          rustup target add "$RUST_TARGET"
 
-      # Mirror of the pypi path above: musl-tools + CC export so crates
-      # with C source deps can cross-compile to the musl target.
+      # #605: cargo-zigbuild links Linux binaries against a *chosen* glibc
+      # (GLIBC_FLOOR) regardless of the runner's, replacing the #381
+      # static-musl mapping — dynamic linking keeps dlopen working
+      # (dirsql#762), the pinned floor keeps #381's portability. The
+      # ziglang wheel supplies zig; cargo-zigbuild discovers it via
+      # `python3 -m ziglang`. zig is a C cross-compiler too, so crates
+      # with C source deps (libsqlite3-sys bundled, …) need no extra
+      # toolchain.
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main' && contains(matrix.target, 'linux')
-        name: bundle_cli — install musl C toolchain
+        name: bundle_cli — install zigbuild toolchain
         shell: bash
-        env:
-          RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           set -euo pipefail
-          # #387: derive the CC_ env var from the engine-resolved Rust
-          # triple (matrix.rust_target); the npm-flavor matrix.target would
-          # yield CC_linux_x64_musl instead of the Rust-triple name cargo
-          # looks up, and the C compiler would not be found.
-          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
-          sudo apt-get install -y musl-tools
-          triple_under="${BINARY_TARGET//-/_}"
-          echo "CC_${triple_under}=musl-gcc" >> "$GITHUB_ENV"
+          pip3 install cargo-zigbuild ziglang
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # #366: bump the crate's `[package].version` to matrix.version
       # before `cargo build` runs. `cargo build` bakes CARGO_PKG_VERSION
@@ -501,6 +499,7 @@ jobs:
         env:
           RUST_TARGET: ${{ matrix.rust_target }}
           BIN: ${{ matrix.bundle_cli.bin }}
+          GLIBC_FLOOR: "2.17"
           # Mirror of the pypi shape (#300). Empty `features` and
           # `no_default_features = false` (schema defaults) leave the
           # cargo invocation byte-identical to its `--features`-less form.
@@ -522,9 +521,20 @@ jobs:
           set -euo pipefail
           # #387: matrix.rust_target is the engine-resolved Rust triple
           # (plan.ts maps the npm-flavor matrix.target via toRustTriple).
-          # #381: cross-compile against the musl-mapped triple on Linux.
-          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
-          cmd=(cargo build --release --target "$BINARY_TARGET" --bin "$BIN" --target-dir target)
+          # #605: Linux rows build via cargo-zigbuild with the glibc floor
+          # pinned in the target suffix, so the binary is dynamically
+          # linked (dlopen works — dirsql#762) yet floors at GLIBC_FLOOR
+          # instead of the runner's glibc (#381). zigbuild strips the
+          # suffix from the output dir, so artifacts land at
+          # target/<triple>/release/ either way.
+          case "$RUST_TARGET" in
+            *-linux-gnu*)
+              cmd=(cargo zigbuild --release --target "${RUST_TARGET}.${GLIBC_FLOOR}" --bin "$BIN" --target-dir target)
+              ;;
+            *)
+              cmd=(cargo build --release --target "$RUST_TARGET" --bin "$BIN" --target-dir target)
+              ;;
+          esac
           if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
@@ -620,9 +630,9 @@ jobs:
           fi
           npm run build --if-present
 
-      # #384: stage the musl binary AFTER npm run build so the engine's
-      # statically-linked binary always wins over any glibc-linked binary
-      # a consumer build script stages to `build/<triple>/` first.
+      # #384: stage the engine-built binary AFTER npm run build so it
+      # always wins over anything a consumer build script stages to
+      # `build/<triple>/` first.
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — stage binary into ${{ matrix.artifact_path }}
         shell: bash
@@ -635,13 +645,13 @@ jobs:
           set -euo pipefail
           # #387: matrix.rust_target is the engine-resolved Rust triple
           # (plan.ts maps the npm-flavor matrix.target via toRustTriple).
-          # #381: read from the musl-mapped target dir cargo built into.
-          BINARY_TARGET="${RUST_TARGET//-linux-gnu/-linux-musl}"
+          # #605: read from the declared triple's dir — zigbuild strips
+          # the `.GLIBC_FLOOR` suffix from the output path.
           if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
-          src="${CRATE_PATH}/target/${BINARY_TARGET}/release/${BIN}${ext}"
+          src="${CRATE_PATH}/target/${RUST_TARGET}/release/${BIN}${ext}"
           if [ ! -f "$src" ]; then
             echo "::error::cross-compile did not produce ${src}"
-            ls -la "${CRATE_PATH}/target/${BINARY_TARGET}/release/" || true
+            ls -la "${CRATE_PATH}/target/${RUST_TARGET}/release/" || true
             exit 1
           fi
           mkdir -p "$DEST_DIR"
@@ -666,6 +676,7 @@ jobs:
         env:
           DEST_DIR: ${{ matrix.artifact_path }}
           BIN: ${{ matrix.bundle_cli.bin }}
+          GLIBC_FLOOR: "2.17"
         run: |
           set -euo pipefail
           if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
@@ -676,24 +687,31 @@ jobs:
             exit 1
           fi
           echo "ok bundle_cli: ${expected} present"
-          # #384: verify the Linux binary is statically linked (musl), not
-          # dynamically linked against the build runner's glibc. A glibc-linked
-          # binary passes the existence check above but fails at runtime on any
-          # Linux with glibc < 2.39. The `file` command outputs "dynamically
-          # linked" for glibc binaries and "statically linked" / "static-pie
-          # linked" for musl static builds.
-          if [ "$RUNNER_OS" != "Windows" ]; then
+          # #605: the Linux binary must be DYNAMICALLY linked — a static
+          # (static-pie) binary has no dynamic loader, so consumer dlopen
+          # (SQLite extension loading) fails at runtime with `Dynamic
+          # loading not supported` (dirsql#762). The portability property
+          # the old #384 static assert guarded is enforced directly
+          # instead: the binary's max versioned GLIBC_* requirement must
+          # stay within the GLIBC_FLOOR the zigbuild linked against, else
+          # it would fail at runtime on older distros (#381).
+          if [ "$RUNNER_OS" = "Linux" ]; then
             command -v file >/dev/null 2>&1 || {
-              echo "::error::required command 'file' not found on this runner — cannot assert static linking"
+              echo "::error::required command 'file' not found on this runner — cannot assert linkage"
               exit 1
             }
-            if file "$expected" | grep -q 'dynamically linked'; then
-              echo "::error::bundle_cli binary ${expected} is dynamically linked — expected statically-linked musl build (#384)"
+            if file "$expected" | grep -Eq 'statically linked|static-pie linked'; then
+              echo "::error::bundle_cli binary ${expected} is statically linked — a static binary cannot dlopen, so SQLite extension loading fails at runtime (#605, dirsql#762). Expected a dynamically-linked gnu build pinned to GLIBC_${GLIBC_FLOOR} via cargo-zigbuild."
               file "$expected"
-              ldd "$expected" 2>&1 || true
               exit 1
             fi
-            echo "ok bundle_cli: ${expected} is statically linked"
+            max_glibc=$(objdump -T "$expected" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -uV | tail -1)
+            ceiling="GLIBC_${GLIBC_FLOOR}"
+            if [ -n "$max_glibc" ] && [ "$(printf '%s\n' "$max_glibc" "$ceiling" | sort -V | tail -1)" != "$ceiling" ]; then
+              echo "::error::bundle_cli binary ${expected} requires ${max_glibc}, exceeding the ${ceiling} portability floor — it would fail at runtime on distros older than the runner (#381, #605)."
+              exit 1
+            fi
+            echo "ok bundle_cli: ${expected} is dynamically linked, glibc ceiling ${max_glibc:-none} within ${ceiling}"
           fi
 
       - if: matrix.kind != 'crates'
