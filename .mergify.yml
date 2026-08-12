@@ -1,0 +1,48 @@
+# Mergify reads this file from the default branch only. Edits on a feature
+# branch are inert until they land on main.
+#
+# This replaces the pr-monitor `CI Gate` aggregator (the deleted
+# `.github/workflows/ci-gate.yml`), mirroring dirsql's migration. Branch
+# protection's single required check becomes `Mergify Merge Protections`
+# instead of `CI Gate`; as before, adding/renaming/removing a workflow
+# needs no branch-protection edit.
+
+# No summary comment on PRs -- the Required check run carries the same
+# condition breakdown and stays current, while the comment is a stale
+# point-in-time snapshot cluttering the thread.
+merge_protections_settings:
+  post_comment: false
+
+merge_protections:
+  - name: All CI green
+    description: No check on this PR reported a failure.
+    if:
+      - base = main
+    success_conditions:
+      # Do NOT add `#check-pending = 0` here. Mergify counts its own
+      # in-progress check toward that total, so it can never reach zero and
+      # the gate deadlocks: Mergify stays running because the count is
+      # non-zero, and the count is non-zero because Mergify is running
+      # (learned on dirsql#832).
+      #
+      # This condition is blind to a workflow that dies before emitting any
+      # check-run, and is vacuously true before CI has started. Naming each
+      # workflow's checks would close those holes, but couples the gate to
+      # the trigger filters: a path-filtered workflow (actionlint,
+      # link-check) that does not run reports no check, so an anchor naming
+      # it pends forever. dirsql tried the anchor design and backed it out
+      # (dirsql#881); the accepted cost is the same here.
+      - "#check-failure = 0"
+
+pull_request_rules:
+  - name: Auto-merge labelled PRs once every check is green
+    conditions:
+      - base = main
+      - label = auto-merge
+      - "#approved-reviews-by >= 1"
+      - "#check-failure = 0"
+      - "#check-pending = 0"
+    actions:
+      merge:
+        # Squash, not merge: branch protection requires linear history.
+        method: squash

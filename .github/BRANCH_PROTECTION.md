@@ -16,11 +16,16 @@ at `Settings → Branches → Add rule` (branch pattern: `main`).
 **Require status checks to pass before merging** ✓
 - Require branches to be up to date before merging ✓
 - Required status checks:
-  - `CI Gate` (only this one — aggregates every other check via `thekevinscott/pr-monitor`)
+  - `Mergify Merge Protections` (only this one — the `.mergify.yml`
+    merge-protections gate goes green only when no other check on the
+    PR has failed)
 
 Do **not** enumerate each workflow individually. The aggregator turns
-green only when every other required check passes, so adding a new
-workflow doesn't require editing branch protection.
+green only when no other check reports a failure, so adding a new
+workflow doesn't require editing branch protection. Requires the
+[Mergify GitHub App](https://github.com/apps/mergify) installed on the
+repo; Mergify reads `.mergify.yml` from `main` only, so config edits on
+a feature branch are inert until merged.
 
 **Require conversation resolution before merging** ✓
 
@@ -50,7 +55,7 @@ version or break OIDC trust chains on crates.io / PyPI.
 ## Required workflows in practice
 
 With the rule above in place, these workflows all run on every PR and
-must pass for CI Gate to go green:
+must pass for `Mergify Merge Protections` to go green:
 
 | Workflow | File | Blocks merge |
 |---|---|---|
@@ -72,6 +77,6 @@ gate merge.
 ## Why require-up-to-date
 
 Forces every PR to rebase onto main before merge. This matters for the
-`CI Gate` aggregator: a PR's checks need to have run against the full
-merged state, not a behind-main snapshot. Otherwise a benign-looking
-merge can land a regression CI never saw.
+`Mergify Merge Protections` aggregator: a PR's checks need to have run
+against the full merged state, not a behind-main snapshot. Otherwise a
+benign-looking merge can land a regression CI never saw.

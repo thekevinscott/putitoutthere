@@ -15,8 +15,9 @@ name: Patch coverage
 # the `piot-ci patch-coverage` command), not authored `.mjs` in `.github/` —
 # see AGENTS.md > "Repo-internal CI gates" (#468, epic #442).
 #
-# Aggregator (CI Gate) automatically requires this job once it appears, so
-# branch protection doesn't need updating to make it a merge prerequisite.
+# The Mergify merge-protections aggregator (`.mergify.yml`) automatically
+# requires this job once it appears, so branch protection doesn't need
+# updating to make it a merge prerequisite.
 
 on:
   pull_request:
