@@ -9,7 +9,12 @@ at `Settings → Branches → Add rule` (branch pattern: `main`).
 **Rule name:** `main`
 
 **Require a pull request before merging** ✓
-- Require approvals: 1 (or 0 if truly solo — the bot approves itself otherwise)
+- Require approvals: **0** — this is a solo repo, so an approval
+  requirement has no second party to satisfy; it would only park every PR
+  (and every Mergify auto-merge) waiting on a review that never comes.
+  `.mergify.yml`'s auto-merge rule carries no `#approved-reviews-by`
+  condition for the same reason; keep the two consistent, because a
+  non-zero setting here silently overrides that rule.
 - Dismiss stale pull request approvals when new commits are pushed ✓
 - Require review from Code Owners: optional
 
