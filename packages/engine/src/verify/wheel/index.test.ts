@@ -149,6 +149,26 @@ describe('verifyWheel: manylinux platform tag (#610)', () => {
     expect(code).toBe(0);
   });
 
+  it("joins alias patterns with ' or ' in the full mismatch diagnostic", async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-linux_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue(['manylinux2014_', 'manylinux_2_17_']);
+    const code = await verifyWheel(opts({ manylinux: '2014' }));
+    expect(out.join('')).toContain(
+      "::error::wheel 'demo-1.2.3-cp312-cp312-linux_x86_64.whl' does not carry the requested manylinux baseline '2014' (expected a platform tag containing 'manylinux2014_' or 'manylinux_2_17_')\n",
+    );
+    expect(code).toBe(1);
+  });
+
+  it("prints an empty baseline ('') when the option is absent yet patterns exist", async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-linux_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue(['manylinux_2_28_']);
+    const code = await verifyWheel(opts());
+    expect(out.join('')).toContain("does not carry the requested manylinux baseline ''");
+    expect(code).toBe(1);
+  });
+
   it('skips the tag assertion when no patterns are requested', async () => {
     findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-manylinux_2_39_x86_64.whl');
     readMock.mockResolvedValue('1.2.3');

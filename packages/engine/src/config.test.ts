@@ -1473,11 +1473,24 @@ ${extra}
   });
 
   it('accepts auto, legacy aliases, and musllinux tags', () => {
-    for (const v of ['auto', '1', '2010', '2014', 'musllinux_1_2']) {
+    // musllinux_12_34: both segments multi-digit, so a regex that only
+    // matched a single digit in either position would wrongly reject it.
+    for (const v of ['auto', '1', '2010', '2014', 'musllinux_1_2', 'musllinux_12_34']) {
       const cfg = parseConfig(
         pypi(`build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "${v}"`),
       );
       expect((cfg.packages[0] as Record<string, unknown>)['manylinux']).toBe(v);
+    }
+  });
+
+  it('rejects values that merely contain a valid tag (anchoring)', () => {
+    // "x2_28" would slip through without the ^ anchor; "2_28x" without $.
+    for (const v of ['x2_28', '2_28x']) {
+      expect(() =>
+        parseConfig(
+          pypi(`build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "${v}"`),
+        ),
+      ).toThrow(/manylinux must be/);
     }
   });
 

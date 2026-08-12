@@ -1367,22 +1367,25 @@ targets = [
 
   const ml = (r: unknown): string | undefined =>
     (r as Record<string, unknown>)['manylinux'] as string | undefined;
+  // Own-property (not value) checks: an unstamped row must not carry the
+  // key at all — `manylinux: undefined` would still serialize differently.
+  const has = (r: unknown): boolean => Object.hasOwn(r as object, 'manylinux');
 
   it('stamps matching linux rows and leaves everything else unstamped', async () => {
     useToml(`${TOML}manylinux = "2_28"\n`);
     const matrix = await plan({ cwd: CWD });
     const byTarget = (t: string) => matrix.find((r) => r.kind === 'pypi' && r.target === t)!;
     expect(ml(byTarget('x86_64-unknown-linux-gnu'))).toBe('2_28');
-    expect(ml(byTarget('x86_64-unknown-linux-musl'))).toBeUndefined();
-    expect(ml(byTarget('x86_64-apple-darwin'))).toBeUndefined();
-    expect(ml(byTarget('sdist'))).toBeUndefined();
+    expect(has(byTarget('x86_64-unknown-linux-musl'))).toBe(false);
+    expect(has(byTarget('x86_64-apple-darwin'))).toBe(false);
+    expect(has(byTarget('sdist'))).toBe(false);
   });
 
   it('omits the field everywhere when the key is absent', async () => {
     useToml(TOML);
     const matrix = await plan({ cwd: CWD });
     for (const row of matrix) {
-      expect(ml(row), `row ${row.target}`).toBeUndefined();
+      expect(has(row), `row ${row.target}`).toBe(false);
     }
   });
 });
