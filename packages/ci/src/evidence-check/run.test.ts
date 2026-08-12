@@ -259,7 +259,7 @@ describe('runEvidenceCheck: injected poll dependencies', () => {
       'api',
       '-X',
       'GET',
-      'repos/owner/repo/actions/runs/9/jobs?per_page=100',
+      'repos/owner/repo/actions/runs/9/jobs?per_page=100&page=1',
     ]);
     const after = jobsQueryCount();
     expect(deps.jobsForRun(9)).toEqual([{ name: 'integration' }]);
