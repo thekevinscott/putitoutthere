@@ -1344,6 +1344,52 @@ globs   = ["pkg/**"]
   });
 });
 
+describe('plan: pypi manylinux baseline stamping (#610)', () => {
+  // `manylinuxForTriple` is a pure helper (pinned by its own colocated
+  // test), so it runs for real here — same treatment as config.js /
+  // cascade.js above.
+  const TOML = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name    = "py-lib"
+kind    = "pypi"
+path    = "pkg"
+build   = "maturin"
+globs   = ["pkg/**"]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "x86_64-apple-darwin",
+]
+`;
+
+  const ml = (r: unknown): string | undefined =>
+    (r as Record<string, unknown>)['manylinux'] as string | undefined;
+  // Own-property (not value) checks: an unstamped row must not carry the
+  // key at all — `manylinux: undefined` would still serialize differently.
+  const has = (r: unknown): boolean => Object.hasOwn(r as object, 'manylinux');
+
+  it('stamps matching linux rows and leaves everything else unstamped', async () => {
+    useToml(`${TOML}manylinux = "2_28"\n`);
+    const matrix = await plan({ cwd: CWD });
+    const byTarget = (t: string) => matrix.find((r) => r.kind === 'pypi' && r.target === t)!;
+    expect(ml(byTarget('x86_64-unknown-linux-gnu'))).toBe('2_28');
+    expect(has(byTarget('x86_64-unknown-linux-musl'))).toBe(false);
+    expect(has(byTarget('x86_64-apple-darwin'))).toBe(false);
+    expect(has(byTarget('sdist'))).toBe(false);
+  });
+
+  it('omits the field everywhere when the key is absent', async () => {
+    useToml(TOML);
+    const matrix = await plan({ cwd: CWD });
+    for (const row of matrix) {
+      expect(has(row), `row ${row.target}`).toBe(false);
+    }
+  });
+});
+
 describe('plan: version-independent maturin wheels collapse the fan (#401)', () => {
   // `isVersionIndependentWheel` is driven per case here (only its return
   // value matters to the planner): the two collapsing cases set it `true`

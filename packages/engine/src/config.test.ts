@@ -1453,6 +1453,62 @@ python_versions = ["3.x"]
   });
 });
 
+describe('parseConfig: manylinux baseline (#610)', () => {
+  const pypi = (extra: string) => `
+[putitoutthere]
+version = 1
+[[package]]
+name    = "x"
+kind    = "pypi"
+path    = "."
+globs   = ["**"]
+${extra}
+`;
+
+  it('accepts a glibc baseline on a maturin package', () => {
+    const cfg = parseConfig(
+      pypi('build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "2_28"'),
+    );
+    expect((cfg.packages[0] as Record<string, unknown>)['manylinux']).toBe('2_28');
+  });
+
+  it('accepts auto, legacy aliases, and musllinux tags', () => {
+    // musllinux_12_34: both segments multi-digit, so a regex that only
+    // matched a single digit in either position would wrongly reject it.
+    for (const v of ['auto', '1', '2010', '2014', 'musllinux_1_2', 'musllinux_12_34']) {
+      const cfg = parseConfig(
+        pypi(`build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "${v}"`),
+      );
+      expect((cfg.packages[0] as Record<string, unknown>)['manylinux']).toBe(v);
+    }
+  });
+
+  it('rejects values that merely contain a valid tag (anchoring)', () => {
+    // "x2_28" would slip through without the ^ anchor; "2_28x" without $.
+    for (const v of ['x2_28', '2_28x']) {
+      expect(() =>
+        parseConfig(
+          pypi(`build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "${v}"`),
+        ),
+      ).toThrow(/manylinux must be/);
+    }
+  });
+
+  it('rejects manylinux on a non-maturin pypi package', () => {
+    expect(() => parseConfig(pypi('build = "hatch"\nmanylinux = "2_28"'))).toThrow(
+      /manylinux is only valid when build = "maturin"/,
+    );
+  });
+
+  it('rejects a malformed manylinux value', () => {
+    expect(() =>
+      parseConfig(
+        pypi('build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "glibc-2.28"'),
+      ),
+    ).toThrow(/manylinux must be/);
+  });
+});
+
 describe('detectCommonMistakes (internal): non-object / non-object-entry guards', () => {
   // `parseConfig` only ever calls this with a parsed-TOML object root, so the
   // non-object early-return and the per-entry non-object skip never fire

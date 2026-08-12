@@ -184,6 +184,14 @@ describe('cli: top-level dispatch', () => {
     expect(usage).not.toMatch(/--json[^\n]*plan only/);
   });
 
+  it('--help documents --manylinux for verify wheel (#610)', async () => {
+    const code = await run(argv('--help'));
+    expect(code).toBe(0);
+    expect(stderr.join('')).toMatch(
+      /--manylinux <m>\s+manylinux baseline the wheel filename must carry \(verify wheel; #610\)/,
+    );
+  });
+
   it('prints version from package.json for `version` and its --version / -v aliases', async () => {
     // `version` is dispatched by the early guard, ahead of (and no longer a
     // member of) the command `switch`. Pin that all three spellings resolve
@@ -269,6 +277,7 @@ describe('parseFlags', () => {
       '--registry', 'https://reg',
       '--registry-root', '/root',
       '--target', 'sdist',
+      '--manylinux', '2_28',
       '--subject', 'chore: bundle',
       '--stage-to', 'wheel/dir',
       '--bin', 'demo',
@@ -279,10 +288,15 @@ describe('parseFlags', () => {
     expect(flags.registry).toBe('https://reg');
     expect(flags.registryRoot).toBe('/root');
     expect(flags.target).toBe('sdist');
+    expect(flags.manylinux).toBe('2_28');
     expect(flags.subject).toBe('chore: bundle');
     expect(flags.stageTo).toBe('wheel/dir');
     expect(flags.bin).toBe('demo');
     expect(flags.perTriple).toBe(true);
+  });
+
+  it('leaves manylinux undefined when --manylinux is absent (#610)', () => {
+    expect(parseFlags(['--target', 'sdist']).manylinux).toBeUndefined();
   });
 });
 

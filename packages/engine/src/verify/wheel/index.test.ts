@@ -12,14 +12,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { verifyWheel } from './index.js';
 import { findDistFile } from './find-dist-file.js';
+import { manylinuxTagPatterns } from './manylinux-tag-patterns.js';
 import { readWheelVersion } from './read-wheel-version.js';
 
 vi.mock('node:fs/promises');
 vi.mock('./find-dist-file.js');
+vi.mock('./manylinux-tag-patterns.js');
 vi.mock('./read-wheel-version.js');
 
 const statMock = vi.mocked(stat);
 const findMock = vi.mocked(findDistFile);
+const patternsMock = vi.mocked(manylinuxTagPatterns);
 const readMock = vi.mocked(readWheelVersion);
 
 // `pathExists` returns false when `stat` rejects; ENOENT drives the
@@ -35,6 +38,8 @@ beforeEach(() => {
   // `stat` serves both `pathExists` (resolves ⇒ present) and the
   // `isDirectory` check; the default is a present directory.
   statMock.mockResolvedValue({ isDirectory: () => true } as never);
+  // No baseline configured by default — the tag assertion is skipped.
+  patternsMock.mockReturnValue([]);
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
     return true;
@@ -45,7 +50,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const opts = (over: Partial<{ path: string; version: string; target: string }> = {}) => ({
+const opts = (
+  over: Partial<{ path: string; version: string; target: string; manylinux: string }> = {},
+) => ({
   cwd: '/unused', path: pkg, version: '1.2.3', target: 'x86_64-unknown-linux-gnu', ...over,
 });
 
@@ -108,6 +115,66 @@ describe('verifyWheel: wheel METADATA', () => {
     const code = await verifyWheel(opts());
     expect(out.join('')).toContain('no wheel produced in');
     expect(code).toBe(1);
+  });
+});
+
+describe('verifyWheel: manylinux platform tag (#610)', () => {
+  it('passes when the wheel filename carries a requested tag pattern', async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-manylinux_2_28_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue(['manylinux_2_28_']);
+    const code = await verifyWheel(opts({ manylinux: '2_28' }));
+    expect(patternsMock).toHaveBeenCalledWith('2_28');
+    expect(out.join('')).toContain('ok wheel:');
+    expect(code).toBe(0);
+  });
+
+  it('fails when the wheel filename lacks every requested tag pattern', async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-manylinux_2_39_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue(['manylinux_2_28_']);
+    const code = await verifyWheel(opts({ manylinux: '2_28' }));
+    expect(out.join('')).toContain(
+      "does not carry the requested manylinux baseline '2_28'",
+    );
+    expect(out.join('')).toContain("'manylinux_2_28_'");
+    expect(code).toBe(1);
+  });
+
+  it('passes when any of several alias patterns matches', async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-manylinux2014_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue(['manylinux2014_', 'manylinux_2_17_']);
+    const code = await verifyWheel(opts({ manylinux: '2014' }));
+    expect(code).toBe(0);
+  });
+
+  it("joins alias patterns with ' or ' in the full mismatch diagnostic", async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-linux_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue(['manylinux2014_', 'manylinux_2_17_']);
+    const code = await verifyWheel(opts({ manylinux: '2014' }));
+    expect(out.join('')).toContain(
+      "::error::wheel 'demo-1.2.3-cp312-cp312-linux_x86_64.whl' does not carry the requested manylinux baseline '2014' (expected a platform tag containing 'manylinux2014_' or 'manylinux_2_17_')\n",
+    );
+    expect(code).toBe(1);
+  });
+
+  it("prints an empty baseline ('') when the option is absent yet patterns exist", async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-linux_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue(['manylinux_2_28_']);
+    const code = await verifyWheel(opts());
+    expect(out.join('')).toContain("does not carry the requested manylinux baseline ''");
+    expect(code).toBe(1);
+  });
+
+  it('skips the tag assertion when no patterns are requested', async () => {
+    findMock.mockResolvedValue('/pkg/dist/demo-1.2.3-cp312-cp312-manylinux_2_39_x86_64.whl');
+    readMock.mockResolvedValue('1.2.3');
+    patternsMock.mockReturnValue([]);
+    const code = await verifyWheel(opts());
+    expect(code).toBe(0);
   });
 });
 

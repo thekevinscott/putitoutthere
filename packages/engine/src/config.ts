@@ -167,12 +167,30 @@ const PYPI_PKG = z
       .array(z.string().regex(/^3\.\d+$/, 'python_versions entries must be `3.<minor>` strings'))
       .min(1)
       .optional(),
+    // #610: linux wheel platform-tag baseline, forwarded to
+    // maturin-action's `manylinux` input (which builds inside the
+    // matching manylinux/musllinux container). When omitted, wheels are
+    // built on the host runner and tagged with its glibc — e.g.
+    // manylinux_2_39 on ubuntu-24.04 (thekevinscott/dirsql#818).
+    manylinux: z
+      .string()
+      .regex(
+        /^(auto|1|2010|2014|2_\d+|musllinux_\d+_\d+)$/,
+        'manylinux must be "auto", a glibc baseline ("1", "2010", "2014", or "2_XX" like "2_28"), or a musllinux tag ("musllinux_X_Y")',
+      )
+      .optional(),
   })
   .strict()
   .refine(
     (p) => p.targets === undefined || p.build === 'maturin',
     // §12.2: targets only for maturin on pypi.
     { message: 'targets is only valid when build = "maturin" on pypi packages' },
+  )
+  .refine(
+    (p) => p.manylinux === undefined || p.build === 'maturin',
+    // #610: the baseline is a maturin-action input; setuptools/hatch
+    // builds never go through it.
+    { message: 'manylinux is only valid when build = "maturin" on pypi packages' },
   )
   .refine(
     (p) => p.bundle_cli === undefined || p.build === 'maturin',
