@@ -39,7 +39,10 @@ pull_request_rules:
     conditions:
       - base = main
       - label = auto-merge
-      - "#approved-reviews-by >= 1"
+      # No `#approved-reviews-by` condition: the `auto-merge` label is the
+      # authorization. Only someone with write access can apply it, so
+      # requiring an approval on top would just block every PR on a solo
+      # repo waiting for a second party that does not exist.
       - "#check-failure = 0"
       - "#check-pending = 0"
     actions:
