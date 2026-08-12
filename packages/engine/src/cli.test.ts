@@ -269,6 +269,7 @@ describe('parseFlags', () => {
       '--registry', 'https://reg',
       '--registry-root', '/root',
       '--target', 'sdist',
+      '--manylinux', '2_28',
       '--subject', 'chore: bundle',
       '--stage-to', 'wheel/dir',
       '--bin', 'demo',
@@ -279,10 +280,15 @@ describe('parseFlags', () => {
     expect(flags.registry).toBe('https://reg');
     expect(flags.registryRoot).toBe('/root');
     expect(flags.target).toBe('sdist');
+    expect(flags.manylinux).toBe('2_28');
     expect(flags.subject).toBe('chore: bundle');
     expect(flags.stageTo).toBe('wheel/dir');
     expect(flags.bin).toBe('demo');
     expect(flags.perTriple).toBe(true);
+  });
+
+  it('leaves manylinux undefined when --manylinux is absent (#610)', () => {
+    expect(parseFlags(['--target', 'sdist']).manylinux).toBeUndefined();
   });
 });
 

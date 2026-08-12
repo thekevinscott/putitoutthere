@@ -22,6 +22,7 @@ import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { findDistFile } from './find-dist-file.js';
+import { manylinuxTagPatterns } from './manylinux-tag-patterns.js';
 import { readWheelVersion } from './read-wheel-version.js';
 import { pathExists } from '../../utils/path-exists.js';
 import type { VerifyWheelOptions } from './types.js';
@@ -60,6 +61,17 @@ export async function verifyWheel(opts: VerifyWheelOptions): Promise<number> {
   if (actual !== opts.version) {
     process.stdout.write(
       `::error::wheel METADATA Version='${actual ?? ''}' but plan='${opts.version}' (wheel: ${basename(wheel)})\n`,
+    );
+    return 1;
+  }
+  // #610: when the row carries a manylinux baseline, the produced
+  // wheel's filename must carry the matching platform tag — this is
+  // exactly the regression dirsql#818 shipped (host-glibc-tagged
+  // wheels), so verify it against the artifact, not the build config.
+  const patterns = manylinuxTagPatterns(opts.manylinux);
+  if (patterns.length > 0 && !patterns.some((p) => basename(wheel).includes(p))) {
+    process.stdout.write(
+      `::error::wheel '${basename(wheel)}' does not carry the requested manylinux baseline '${opts.manylinux ?? ''}' (expected a platform tag containing ${patterns.map((p) => `'${p}'`).join(' or ')})\n`,
     );
     return 1;
   }

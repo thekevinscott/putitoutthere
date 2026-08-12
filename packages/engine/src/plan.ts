@@ -21,6 +21,7 @@ import {
   toRustTriple,
   type NpmBuildField,
 } from './handlers/npm-platform.js';
+import { manylinuxForTriple } from './manylinux-for-triple.js';
 import { resolvePythonVersions } from './python-versions.js';
 import { isVersionIndependentWheel } from './wheel-abi.js';
 import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
@@ -74,6 +75,16 @@ export interface MatrixRow {
   // on napi rows, the npm main row, and pypi/crates rows (pypi `targets`
   // are already Rust triples — the workflow uses `matrix.target` there).
   rust_target?: string;
+  // #610 (pypi): linux wheel platform-tag baseline, forwarded verbatim
+  // to maturin-action's `manylinux` input so the wheel builds inside the
+  // matching manylinux/musllinux container instead of on the host (whose
+  // glibc would tag the wheel, e.g. manylinux_2_39 on ubuntu-24.04 —
+  // thekevinscott/dirsql#818). Set ONLY on maturin per-target linux
+  // wheel rows whose libc family matches the value (manylinux* ↔ -gnu
+  // triples, musllinux* ↔ -musl triples). Absent everywhere else, so an
+  // empty `matrix.manylinux` in the workflow preserves today's
+  // host-build behavior exactly.
+  manylinux?: string;
 }
 
 export interface PlanOptions {
@@ -285,6 +296,7 @@ async function rowsForPackage(pkg: Package, version: string, cwd: string): Promi
       const build = pkg.build;
       const targets = (pkg as { targets?: TargetEntry[] }).targets ?? [];
       const bundleCli = (pkg as { bundle_cli?: MatrixRow['bundle_cli'] }).bundle_cli;
+      const manylinux = (pkg as { manylinux?: string }).manylinux;
       // #369: every wheel is built for a specific CPython version.
       // Resolve the set — config `python_versions` override, else
       // `requires-python` inference, else a single default — and fan
@@ -331,6 +343,10 @@ async function rowsForPackage(pkg: Package, version: string, cwd: string): Promi
             };
             // #217: per-target wheels carry bundle_cli; sdist does not.
             if (bundleCli !== undefined) {row.bundle_cli = bundleCli;}
+            // #610: per-target linux wheels of the matching libc family
+            // carry the manylinux baseline; sdist/darwin/windows do not.
+            const rowManylinux = manylinuxForTriple(triple, manylinux);
+            if (rowManylinux !== undefined) {row.manylinux = rowManylinux;}
             out.push(row);
           }
         }

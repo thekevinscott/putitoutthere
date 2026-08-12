@@ -47,7 +47,19 @@ describe('run: verify wheel dispatch', () => {
       'node', 'piot', 'verify', 'wheel', '--path', 'pkg', '--version', '1.2.3', '--target', 'sdist', '--cwd', '/x',
     ]);
     expect(code).toBe(0);
-    expect(wheelMock).toHaveBeenCalledWith({ cwd: '/x', path: 'pkg', version: '1.2.3', target: 'sdist' });
+    expect(wheelMock).toHaveBeenCalledWith({ cwd: '/x', path: 'pkg', version: '1.2.3', target: 'sdist', manylinux: undefined });
+  });
+
+  it('threads --manylinux through to the engine (#610)', async () => {
+    const { run } = await import('./cli.js');
+    const code = await run([
+      'node', 'piot', 'verify', 'wheel', '--path', 'pkg', '--version', '1.2.3',
+      '--target', 'x86_64-unknown-linux-gnu', '--manylinux', '2_28', '--cwd', '/x',
+    ]);
+    expect(code).toBe(0);
+    expect(wheelMock).toHaveBeenCalledWith({
+      cwd: '/x', path: 'pkg', version: '1.2.3', target: 'x86_64-unknown-linux-gnu', manylinux: '2_28',
+    });
   });
 
   it('errors when --path is missing', async () => {

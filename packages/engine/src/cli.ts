@@ -126,6 +126,7 @@ function printUsage(): void {
       '  --registry <url>  registry to read from (verify npm-tarball); default real npm',
       '  --registry-root <dir>  cargo-http-registry disk root to read .crate files from (verify crate)',
       '  --target <t>      matrix target: `sdist` or a wheel triple (verify wheel / bundle-cli)',
+      '  --manylinux <m>   manylinux baseline the wheel filename must carry (verify wheel; #610)',
       '  --stage-to <dir>  wheel-relative dir the bundle_cli binary is staged into (verify bundle-cli)',
       '  --bin <name>      bundle_cli binary name (verify bundle-cli)',
       '  --per-triple      verify synthesized per-triple tarballs (verify npm-tarball)',
@@ -170,6 +171,11 @@ interface ParsedFlags {
   // triple), selecting the sdist-filename vs wheel-METADATA check.
   // `verify bundle-cli` (#451) reuses it to pick the `.exe` suffix.
   target?: string | undefined;
+  // `verify wheel` (#610): the row's manylinux baseline; the wheel
+  // filename must carry the matching platform tag. Empty/absent: no
+  // tag assertion (the workflow passes `matrix.manylinux` verbatim,
+  // which is empty on rows without a baseline).
+  manylinux?: string | undefined;
   // `verify bundle-cli` (#451): the `bundle_cli.stage_to` dir and `bin`
   // name; the wheel must contain the binary at `<stage_to>/<bin>`.
   stageTo?: string | undefined;
@@ -204,6 +210,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--registry') {out.registry = argv[++i];}
     else if (a === '--registry-root') {out.registryRoot = argv[++i];}
     else if (a === '--target') {out.target = argv[++i];}
+    else if (a === '--manylinux') {out.manylinux = argv[++i];}
     else if (a === '--subject') {out.subject = argv[++i];}
     else if (a === '--stage-to') {out.stageTo = argv[++i];}
     else if (a === '--bin') {out.bin = argv[++i];}
@@ -416,6 +423,7 @@ export async function run(argv: readonly string[]): Promise<number> {
             path: flags.path,
             version: flags.version,
             target: flags.target,
+            manylinux: flags.manylinux,
           });
         }
         if (sub === 'bundle-cli') {

@@ -188,11 +188,16 @@ jobs:
           command: sdist
           args: --out dist
 
+      # #610: `manylinux` mirrors the passthrough in _matrix.yml — empty
+      # when the fixture sets no baseline (host build, unchanged),
+      # otherwise the build runs inside the matching manylinux container
+      # and the wheel gets the requested platform tag.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
         uses: PyO3/maturin-action@v1
         with:
           working-directory: fixture-tree/${{ matrix.path }}
           command: build
+          manylinux: ${{ matrix.manylinux }}
           args: --release --out dist --target ${{ matrix.target }}
 
       # #276: post-build assertion. The contract is "the build artifact
@@ -211,7 +216,8 @@ jobs:
           pnpm exec putitoutthere verify wheel \
             --path "fixture-tree/${{ matrix.path }}" \
             --version "${{ matrix.version }}" \
-            --target "${{ matrix.target }}"
+            --target "${{ matrix.target }}" \
+            --manylinux "${{ matrix.manylinux }}"
 
       - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
         working-directory: fixture-tree/${{ matrix.path }}

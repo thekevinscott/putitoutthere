@@ -298,19 +298,30 @@ jobs:
           echo "staged: $src -> $dst_dir/${BIN}${ext}"
 
       # #369: build the wheel for this row's specific CPython version.
-      # maturin's linux builds run inside a manylinux container that
-      # ships every CPython, so the interpreter has to be selected
-      # explicitly — `-i <version>` (a bare `3.12`) is resolved by
-      # maturin's manylinux interpreter scan. macOS uses the host
-      # `python<version>` that setup-python provisioned. Windows omits
-      # `-i` entirely: maturin's non-container build there already uses
-      # the single host interpreter setup-python pinned to this row's
-      # version.
+      # When a manylinux container is in play it ships every CPython, so
+      # the interpreter has to be selected explicitly — `-i <version>`
+      # (a bare `3.12`) is resolved by maturin's interpreter scan (which
+      # also finds the setup-python host interpreter on containerless
+      # linux builds). macOS uses the host `python<version>` that
+      # setup-python provisioned. Windows omits `-i` entirely: maturin's
+      # non-container build there already uses the single host
+      # interpreter setup-python pinned to this row's version.
+      #
+      # #610: `manylinux` forwards the row's platform-tag baseline (set
+      # by `plan` from the package's `manylinux` config key, linux rows
+      # only). Non-empty, maturin-action builds inside the matching
+      # quay.io/pypa manylinux/musllinux container and passes
+      # `--manylinux <value>`, so the wheel is tagged with the requested
+      # baseline instead of the host's glibc (ubuntu-24.04 = 2.39 —
+      # thekevinscott/dirsql#818). Empty (the default when the key is
+      # absent), the input is a no-op and the build stays on the host,
+      # byte-identical to the pre-#610 behavior.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
         uses: PyO3/maturin-action@v1
         with:
           working-directory: ${{ matrix.path }}
           command: build
+          manylinux: ${{ matrix.manylinux }}
           args: >-
             --release --out dist --target ${{ matrix.target }}
             ${{ runner.os == 'Linux' && format('--interpreter {0}', matrix.python_version)

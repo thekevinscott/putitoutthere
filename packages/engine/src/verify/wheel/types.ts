@@ -14,4 +14,10 @@ export interface VerifyWheelOptions {
    * other value (a wheel triple) selects the wheel-METADATA check.
    */
   target: string;
+  /**
+   * #610: the matrix row's `manylinux` baseline, when the package
+   * configured one. The wheel filename must carry the matching
+   * platform tag. Absent / empty / `auto`: no tag assertion.
+   */
+  manylinux?: string | undefined;
 }

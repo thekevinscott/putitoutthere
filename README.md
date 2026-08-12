@@ -267,6 +267,26 @@ version = 1   # required; only 1 is valid today
 | `targets`    | (string \| object)[]   | Required when `build = "maturin"`. Triples or `{ triple, runner }` objects. |
 | `bundle_cli` | table                  | Opt-in: cross-compile a Rust CLI per target and stage it into each wheel. Only valid with `build = "maturin"`. See [Recipes → Rust CLI inside a PyPI wheel](#rust-cli-inside-a-pypi-wheel). |
 | `python_versions` | string[]          | Optional override for the CPython versions wheels are built for, e.g. `["3.12", "3.13"]`. When omitted, the set is inferred from `[project].requires-python` and putitoutthere's checked-in released-CPython list (see below). |
+| `manylinux`  | string                 | Optional linux platform-tag baseline; only valid with `build = "maturin"`. `"2_28"`, `"2014"`, `"auto"`, or `"musllinux_X_Y"`. See the note below. |
+
+> [!NOTE]
+> **`manylinux` pins the glibc floor of your linux wheels.** Without it,
+> linux wheels build directly on the runner and are tagged with *its*
+> glibc — `manylinux_2_39` on `ubuntu-24.04` — so `pip` on any
+> older-glibc host silently falls back to the sdist. Setting
+> `manylinux = "2_28"` builds each linux wheel inside the matching
+> `quay.io/pypa/manylinux_2_28_*` container (via `maturin-action`'s
+> `manylinux` input) and maturin's built-in auditwheel check fails the
+> build loudly if the result doesn't comply. Values: `auto` (container
+> default), legacy aliases `1` / `2010` / `2014`, PEP 600 baselines like
+> `2_28`, or `musllinux_X_Y` for `*-musl` targets. The value applies to
+> targets of the matching libc family only (`manylinux*` → `-gnu`
+> triples, `musllinux_*` → `-musl` triples); other targets and the sdist
+> are untouched. Omitting the key keeps the host-build behavior exactly.
+> If you also use `bundle_cli`, note the staged binary is still compiled
+> on the host runner — its glibc floor is the runner's, not the
+> container's, so pair `manylinux` + `bundle_cli` only when the binary's
+> build is compatible with the tag you request.
 
 > [!NOTE]
 > **`kind = "pypi"` builds a wheel for every supported Python version.**
