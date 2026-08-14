@@ -259,7 +259,7 @@ describe('runEvidenceCheck: injected poll dependencies', () => {
       'api',
       '-X',
       'GET',
-      'repos/owner/repo/actions/runs/9/jobs?per_page=100',
+      'repos/owner/repo/actions/runs/9/jobs?per_page=100&page=1',
     ]);
     const after = jobsQueryCount();
     expect(deps.jobsForRun(9)).toEqual([{ name: 'integration' }]);
@@ -299,6 +299,88 @@ describe('runEvidenceCheck: injected poll dependencies', () => {
     deps.resetCaches();
     await deps.loadRuns();
     expect(runsQueryCount()).toBe(before + 1);
+  });
+});
+
+describe('runEvidenceCheck: transient gh api failures (#613)', () => {
+  const transient = new ExecError('gh failed', '', 'gh: Server Error (HTTP 502)', 1);
+
+  /** gh rejects `failures` times, then serves empty runs/jobs payloads. */
+  function routeExecFlaky(failures: number): () => number {
+    let remaining = failures;
+    let ghCalls = 0;
+    exec.mockImplementation((cmd, args) => {
+      if (cmd === 'git') {
+        return Promise.resolve({ stdout: '', stderr: '' });
+      }
+      ghCalls += 1;
+      if (remaining > 0) {
+        remaining -= 1;
+        return Promise.reject(transient);
+      }
+      const path = (args ?? [])[3] ?? '';
+      const stdout = path.includes('/jobs') ? '{"jobs":[]}' : '{"workflow_runs":[]}';
+      return Promise.resolve({ stdout, stderr: '' });
+    });
+    return () => ghCalls;
+  }
+
+  it('retries a query that fails once with a 5xx and succeeds, backing off 2s', async () => {
+    routeExecFlaky(1);
+    await expect(runEvidenceCheck()).resolves.toBe(0);
+    expect(sleepMock).toHaveBeenCalledWith(2000);
+  });
+
+  it('doubles the backoff between consecutive 5xx retries', async () => {
+    routeExecFlaky(2);
+    await expect(runEvidenceCheck()).resolves.toBe(0);
+    expect(sleepMock.mock.calls.map(([ms]) => ms)).toEqual([2000, 4000]);
+  });
+
+  it('gives up after 4 attempts, surfacing the last 5xx stderr', async () => {
+    const ghCalls = routeExecFlaky(Number.POSITIVE_INFINITY);
+    await expect(runEvidenceCheck()).rejects.toThrow(/failed: gh: Server Error \(HTTP 502\)/);
+    expect(ghCalls()).toBe(4);
+    expect(sleepMock.mock.calls.map(([ms]) => ms)).toEqual([2000, 4000, 8000]);
+  });
+});
+
+describe('runEvidenceCheck: jobs pagination (#613)', () => {
+  it('follows the jobs listing past a full first page', async () => {
+    // A run with 101 jobs: page 1 returns a full 100-job page, so the
+    // prefetch must request page 2 to see the 101st job — the shape of the
+    // 116-job e2e run that made a citation invisible under per_page=100.
+    const fullPage = JSON.stringify({
+      jobs: Array.from({ length: 100 }, (_, i) => ({ name: `job-${String(i)}` })),
+    });
+    exec.mockImplementation((cmd, args) => {
+      if (cmd !== 'gh') {
+        return Promise.resolve({ stdout: '', stderr: '' });
+      }
+      const path = (args ?? [])[3] ?? '';
+      if (path.includes('/jobs')) {
+        const stdout = path.includes('page=2') ? '{"jobs":[{"name":"job-100"}]}' : fullPage;
+        return Promise.resolve({ stdout, stderr: '' });
+      }
+      return Promise.resolve({ stdout: '{"workflow_runs":[{"id":9}]}', stderr: '' });
+    });
+
+    await runEvidenceCheck();
+    const deps = poll.mock.calls[0]?.[0];
+    if (deps === undefined) {
+      throw new Error('pollUntilResolved was not called');
+    }
+    await deps.loadRuns();
+
+    expect(deps.jobsForRun(9)).toHaveLength(101);
+    expect(deps.jobsForRun(9)[100]).toEqual({ name: 'job-100' });
+    expect(jobsQueryCount()).toBe(2);
+  });
+
+  it('stops at a short page without requesting another', async () => {
+    routeExec({ runs: '{"workflow_runs":[{"id":9}]}', jobs: '{"jobs":[{"name":"integration"}]}' });
+    await runEvidenceCheck();
+    expect(jobsQueryCount()).toBe(1);
   });
 });
 

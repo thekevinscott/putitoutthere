@@ -11,6 +11,8 @@ import { readFile } from 'node:fs/promises';
 
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+import { isTransientGhError } from '../utils/is-transient-gh-error.js';
+import { retryTransient } from '../utils/retry-transient.js';
 import { sleep } from '../utils/sleep.js';
 import { addedUnreleasedBullets } from './added-bullets.js';
 import { citedRunNeedles } from './cited-needles.js';
@@ -24,6 +26,14 @@ import { pollUntilResolved } from './poll.js';
 // their exact values via the recorded call.
 const POLL_DEADLINE_MS = 20 * 60 * 1000;
 const POLL_INTERVAL_SECONDS = 30;
+
+// GitHub intermittently 502s single `gh api` calls (#613); ride through with
+// a few doubling backoffs instead of failing the gate on the first hiccup.
+const GH_API_ATTEMPTS = 4;
+const GH_API_BACKOFF_MS = 2000;
+// GitHub's per_page ceiling; a run can carry more jobs than one page (#613
+// hit 116), so the jobs listing pages until a batch comes back short.
+const GH_API_PAGE_SIZE = 100;
 
 export async function runEvidenceCheck(): Promise<number> {
   const base = process.env.BASE_SHA;
@@ -44,12 +54,31 @@ export async function runEvidenceCheck(): Promise<number> {
   const ghApi = async (path: string): Promise<unknown> => {
     let stdout: string;
     try {
-      ({ stdout } = await execCapture('gh', ['api', '-X', 'GET', path]));
+      ({ stdout } = await retryTransient(() => execCapture('gh', ['api', '-X', 'GET', path]), {
+        attempts: GH_API_ATTEMPTS,
+        backoffMs: GH_API_BACKOFF_MS,
+        isTransient: isTransientGhError,
+        sleep,
+      }));
     } catch (err) {
       const stderr = err instanceof ExecError ? err.stderr : '';
       throw new Error(`gh api ${path} failed: ${stderr}`, { cause: err });
     }
     return JSON.parse(stdout);
+  };
+
+  const jobsForRunId = async (runId: number): Promise<WorkflowJob[]> => {
+    const jobs: WorkflowJob[] = [];
+    for (let page = 1; ; page += 1) {
+      const response = (await ghApi(
+        `repos/${repository}/actions/runs/${runId}/jobs?per_page=${GH_API_PAGE_SIZE}&page=${page}`,
+      )) as { jobs?: WorkflowJob[] };
+      const batch = response.jobs ?? [];
+      jobs.push(...batch);
+      if (batch.length < GH_API_PAGE_SIZE) {
+        return jobs;
+      }
+    }
   };
 
   const jobsByRun = new Map<number, WorkflowJob[]>();
@@ -71,10 +100,7 @@ export async function runEvidenceCheck(): Promise<number> {
     // Prefetch each run's jobs so the sync `jobsForRun` reader is I/O-free.
     for (const run of cachedRuns) {
       if (!jobsByRun.has(run.id)) {
-        const jobsResponse = (await ghApi(`repos/${repository}/actions/runs/${run.id}/jobs?per_page=100`)) as {
-          jobs?: WorkflowJob[];
-        };
-        jobsByRun.set(run.id, jobsResponse.jobs ?? []);
+        jobsByRun.set(run.id, await jobsForRunId(run.id));
       }
     }
     return cachedRuns;
