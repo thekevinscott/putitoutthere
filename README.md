@@ -611,6 +611,50 @@ see "How auth flows" below for the why.
    Publishing is registered; subsequent publishes are zero-secret on
    the OIDC path.
 
+### First npm publish failed?
+
+The very first publish of a brand-new npm package is where most
+registry-side surprises live, and npm reports several unrelated causes
+with the same auth-shaped error — usually `E403 Forbidden`, sometimes
+`E404 Not Found` (npm answers an unauthorized publish with not-found,
+because confirming that a package exists but is not writable by you
+would itself leak information). Work down this list before touching
+anything else:
+
+1. **Is the name registrable at all?** npm's moniker rule compares
+   names with punctuation stripped and case folded, so an existing
+   `foo-bar` blocks a new `foobar` — and vice versa. **Scoped names
+   (`@your-scope/foobar`) are exempt.** When this is the cause, npm's
+   stderr says `Package name too similar to existing package …` and
+   putitoutthere surfaces
+   [`PIOT_NPM_NAME_TOO_SIMILAR`](#error-codes). No token can fix it:
+   rename the package or scope it, and update both
+   `[[package]].name` (or the `npm` override) in `putitoutthere.toml`
+   and the `name` in `package.json`.
+2. **Does the token have write access to *new* packages?** A granular
+   token must be **read and write**, and scoped to *all* packages —
+   a token restricted to a list of named packages cannot create one
+   that does not exist yet.
+3. **Has the token expired?** Granular tokens default to a short
+   lifetime, and an expired one fails exactly like a wrong one.
+4. **Is 2FA set to require an OTP for publishing?** An account
+   configured for "two-factor authentication for write actions"
+   rejects automation tokens on publish. Use a granular automation
+   token, or relax the setting to authorization-only.
+5. **Is this the bootstrap paradox?** Trusted publishing binds to an
+   already-published package, so a genuinely new name has no OIDC
+   path at all — that's what step 1 of [npm](#npm) above is for.
+   putitoutthere detects this case and says so by name, and it quotes
+   npm's own stderr underneath, so you can check its reasoning rather
+   than take it on faith.
+
+A worked example ([#617](https://github.com/thekevinscott/putitoutthere/issues/617)):
+a package named `willrun` failed four release runs with the bootstrap
+hint. Two fresh granular tokens — read-write, all packages, unexpired
+— changed nothing. The cause was cause 1: `will-run` already existed,
+so `willrun` was unregistrable. Renaming the package published it on
+the first try, with the same token that had "failed" three times.
+
 ### How auth flows
 
 `crates.io` and `npm` validate OIDC tokens that are minted by the
@@ -1097,6 +1141,7 @@ line. Grep the run log for the code, then look it up here.
 |------|---------------|----------------|
 | `PIOT_NPM_MISSING_REPOSITORY` | An npm package's `package.json` is missing a non-empty `repository` field. Required by `npm publish --provenance`. | PR-time (`check.yml`) and publish-time preflight. See [`kind = "npm"`](#kind--npm). |
 | `PIOT_NPM_NAME_MISMATCH` | `package.json`'s `name` disagrees with the configured `[[package]].name` (or `npm` override). `npm publish` packs the manifest name while piot's idempotency/tag bookkeeping uses the configured name. | PR-time and publish-time. See [`kind = "npm"`](#kind--npm). |
+| `PIOT_NPM_NAME_TOO_SIMILAR` | The registry refused to create the package name: npm's moniker rule blocks a new name that differs from an existing one only by punctuation or case (`foo-bar` blocks `foobar`; scoped names are exempt). Rename or scope the package — no token can create it. | Publish-time only — the registry's response is the signal. See [First npm publish failed?](#first-npm-publish-failed). |
 | `PIOT_CRATES_NAME_MISMATCH` | `Cargo.toml`'s `[package].name` disagrees with the configured `[[package]].name` (or `crate` override). | PR-time and publish-time. See [`kind = "crates"`](#kind--crates). |
 | `PIOT_CRATES_MISSING_METADATA` | `Cargo.toml` lacks `[package].description` and/or `license` (or `license-file`). crates.io 400s without it. | PR-time and publish-time. |
 | `PIOT_CRATES_FEATURE_NOT_DECLARED` | A `features` entry (on the package or in `bundle_cli.features`) is not declared in the crate's `[features]` table. | PR-time and publish-time. |

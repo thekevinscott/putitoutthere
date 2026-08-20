@@ -70,6 +70,8 @@ describe('execInherit', () => {
     expect(message).toContain('Command failed:');
     expect(message).toContain(process.execPath);
     expect(message).toContain('-e process.exit(2)');
+    // …and the argv unjoined, for the failure dump. #617.
+    expect((caught as ExecError).command).toEqual([process.execPath, '-e', 'process.exit(2)']);
   });
 
   it('rejects with status null when the binary is missing', async () => {
@@ -85,5 +87,7 @@ describe('execInherit', () => {
     // The spawn-error ExecError also carries `''` for stdout and stderr.
     expect((caught as ExecError).stdout).toBe('');
     expect((caught as ExecError).stderr).toBe('');
+    // The argv is all a spawn failure has left to report. #617.
+    expect((caught as ExecError).command).toEqual(['definitely-not-a-real-binary-469']);
   });
 });

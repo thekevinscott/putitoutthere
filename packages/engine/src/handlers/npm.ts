@@ -22,6 +22,7 @@ import {
   type NpmBuildField,
   type PlatformPkg,
 } from './npm-platform.js';
+import { matchNpmNameTooSimilar } from './match-npm-name-too-similar.js';
 import { matchTlogDuplicate } from './match-tlog-duplicate.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { ErrorCodes } from '../error-codes.js';
@@ -197,6 +198,29 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
         { cause: err },
       );
     }
+    // npm's moniker rule: the registry compares names with punctuation
+    // stripped and case folded, so an existing `will-run` makes a new
+    // `willrun` unregistrable (scoped names are exempt). This must be
+    // checked BEFORE the bootstrap hint below, because on a first publish
+    // it wears the hint's exact shape — auth-shaped stderr, OIDC in play,
+    // package genuinely absent from the registry — and the hint is a lie
+    // here: no token can create this name. #617.
+    //
+    // Gated on neither OIDC nor the registry override: an unregistrable
+    // name is a naming problem on any auth path and any registry that
+    // enforces the rule.
+    const tooSimilarStderr = matchNpmNameTooSimilar(stderr);
+    if (tooSimilarStderr !== null) {
+      throw new Error(
+        [
+          `[${ErrorCodes.NPM_NAME_TOO_SIMILAR}] npm refused to create "${name}": the registry rejected the name as too similar to a package that already exists.`,
+          "This is a naming problem, not an auth problem — npm's moniker rule blocks a new name that differs from an existing one only by punctuation (`-`, `_`, `.`) or letter case, so no token and no trusted publisher can create it.",
+          `Fix: rename the package, or scope it (\`@your-scope/${name}\`) — scoped names are exempt — then update \`[[package]].name\` (or the \`npm\` override) in putitoutthere.toml and the \`name\` in package.json to match.`,
+          tooSimilarStderr,
+        ].join('\n'),
+        { cause: err },
+      );
+    }
     // npm trusted publishing (OIDC) requires the package to already
     // exist on the registry; the first-ever publish must go through a
     // token. Detect that exact shape — auth failure + OIDC in play +
@@ -209,6 +233,14 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
             `npm publish: package "${name}" does not exist on registry.npmjs.org yet.`,
             'npm trusted publishing requires the package to exist first.',
             'Bootstrap by setting NODE_AUTH_TOKEN for the first publish; you can migrate to trusted publishing afterwards.',
+            // Keep the evidence. The hint reads the registry's *absence*
+            // of the package, not its reason for refusing, so it is a
+            // guess — an accurate one for the shape it was written for,
+            // and wrong for anything else that 404s the same way. Without
+            // npm's own words attached, a wrong guess is unfalsifiable:
+            // #617 cost four runs and two fresh tokens precisely because
+            // this Error replaced the stderr that said why.
+            stderr,
           ].join('\n'),
           { cause: err },
         );
@@ -274,8 +306,13 @@ async function assertRepositoryField(path: string): Promise<void> {
  * and telling that operator "the package does not exist, bootstrap with
  * NODE_AUTH_TOKEN" would send them to abandon trusted publishing over a
  * blip. #598.
+ *
+ * Typed as a predicate (`stderr is string`) because it already returns false
+ * for absent or empty stderr: the caller appends that stderr to the hint it
+ * raises (#617), and narrowing here is what keeps that append from needing a
+ * second, unreachable emptiness check of its own.
  */
-function looksLikeAuthFailure(stderr: string | undefined): boolean {
+function looksLikeAuthFailure(stderr: string | undefined): stderr is string {
   if (!stderr) {return false;}
   return /\b(E401|E403|E404|ENEEDAUTH|EAUTH|need auth|not authori[sz]ed|unauthorized|forbidden)\b/i.test(
     stderr,
