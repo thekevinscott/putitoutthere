@@ -562,6 +562,19 @@ export async function run(argv: readonly string[]): Promise<number> {
             process.stdout.write(
               `published: ${p.package}@${p.version}  status=${p.result.status}\n`,
             );
+            // #625: a napi / bundled-cli package ships a platform package
+            // per target alongside the umbrella. Name them here too, or a
+            // local run reports one line for a six-package release —
+            // the same blindness the `--json` report had.
+            const platforms = p.result.platforms;
+            if (platforms !== undefined) {
+              for (const name of platforms.published) {
+                process.stdout.write(`  platform: ${name}  status=published\n`);
+              }
+              for (const name of platforms.skipped) {
+                process.stdout.write(`  platform: ${name}  status=already-published\n`);
+              }
+            }
           }
         }
         // #461: surface what actually shipped so the reusable workflow

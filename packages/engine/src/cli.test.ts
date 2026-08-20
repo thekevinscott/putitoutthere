@@ -606,6 +606,48 @@ describe('cli: publish dispatch', () => {
     expect(stdout.join('')).toContain('published: demo@1.2.3  status=published');
   });
 
+  it('names the platform packages under their umbrella in the human render (#625)', async () => {
+    // A local `putitoutthere publish` (no --json) had the same blindness
+    // the JSON report did: one line for a three-package release. Each
+    // platform package gets its own line, published and skipped alike,
+    // so the two are distinguishable without re-reading the registry.
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        {
+          package: 'demo',
+          version: '1.2.3',
+          result: {
+            status: 'published',
+            platforms: {
+              published: ['demo-x86_64-unknown-linux-gnu'],
+              skipped: ['demo-aarch64-apple-darwin'],
+            },
+          },
+          tag: 'demo-v1.2.3',
+        },
+      ],
+    });
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const out = stdout.join('');
+    expect(out).toContain('published: demo@1.2.3  status=published');
+    expect(out).toContain('  platform: demo-x86_64-unknown-linux-gnu  status=published');
+    expect(out).toContain('  platform: demo-aarch64-apple-darwin  status=already-published');
+  });
+
+  it('renders no platform lines for a package with no family (#625)', async () => {
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'demo', version: '1.2.3', result: { status: 'published' }, tag: 'demo-v1.2.3' },
+      ],
+    });
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(stdout.join('')).not.toContain('platform:');
+  });
+
   it('forwards --config to the publish engine', async () => {
     publishMock.mockResolvedValue({ ok: true, published: [] });
     const code = await run(argv('publish', '--cwd', '/x', '--config', '/x/piot.toml'));
