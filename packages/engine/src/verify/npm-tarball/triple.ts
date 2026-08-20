@@ -10,18 +10,28 @@
  * synthesis. Extracted verbatim from the "Verify published per-triple npm
  * tarballs honor expected files" bash block.
  *
+ * The count is RECURSIVE (#633). A consumer whose build stages the binary
+ * nested — `artifacts/<name>-<triple>/bin/<binary>` rather than flat —
+ * publishes a tarball whose top level is `package.json` plus the `bin/`
+ * directory, and a top-level file count discards that directory along with
+ * the payload inside it. The nested layout is legal all the way to publish
+ * (`checkCompleteness` lists recursively, so it accepts either shape), so
+ * this check has to see it too. Paths are reported relative to `package/`,
+ * which is what makes a nested payload legible in the log.
+ *
  * The platform package name is reconstructed as `{name}-{triple}` — the
  * default template every fixture uses — because the matrix row carries the
  * main package name (synthesis is a publish-time concern). Returns the
  * process exit code (0 ok, 1 on any metadata-only tarball).
  */
 
-import { readdir, rm } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { rm } from 'node:fs/promises';
+import { relative } from 'node:path';
 
 import { downloadNpmTarball } from './download.js';
 import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 import { resolveNpmTarballUrl } from './resolve-url.js';
+import { toPosixPath } from '../../utils/to-posix-path.js';
 import type { TarballRow, VerifyNpmTarballOptions } from './types.js';
 
 export async function verifyNpmTarballTriple(
@@ -51,15 +61,20 @@ export async function verifyNpmTarballTriple(
     }
 
     const { root, packageDir } = await downloadNpmTarball(url, 2);
-    const topLevel = (await readdir(packageDir, { withFileTypes: true }))
-      .filter((e) => e.isFile() && e.name !== 'package.json')
-      .map((e) => e.name);
-    if (topLevel.length > 0) {
-      process.stdout.write(`  ok: ${topLevel.length} non-metadata file(s): ${topLevel.join(' ')} \n`);
+    // One listing feeds both arms, so the diagnostic can no longer contradict
+    // the verdict by naming a file the count didn't see. Only the tarball's
+    // own `package.json` is metadata — a nested one is payload like any other
+    // file, and excluding it by basename would make "contains only
+    // package.json" a false statement about a tarball holding two files.
+    const contents = (await listFilesRecursive(packageDir)).map((f) =>
+      toPosixPath(relative(packageDir, f)),
+    );
+    const payload = contents.filter((f) => f !== 'package.json');
+    if (payload.length > 0) {
+      process.stdout.write(`  ok: ${payload.length} non-metadata file(s): ${payload.join(' ')} \n`);
     } else {
-      const listing = (await listFilesRecursive(packageDir)).map((p) => basename(p)).join(' ');
       process.stdout.write(
-        `::error::[${platformName}@${version}] tarball contains only package.json (no synthesized binary/.node staged). Tarball contents: ${listing} \n`,
+        `::error::[${platformName}@${version}] tarball contains only package.json (no synthesized binary/.node staged). Tarball contents: ${contents.join(' ')} \n`,
       );
       fail = 1;
     }
