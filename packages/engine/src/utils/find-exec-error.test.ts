@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ExecError } from './exec-error.js';
 import { findExecError } from './find-exec-error.js';
+
+// `ExecError` is the shape this module recognises, and it recognises it by
+// `instanceof` — a substitute class would make every assertion here vacuous.
+// Declared as a mock that resolves to the real module, matching the seams'
+// own tests, so the isolation rule is satisfied without faking identity.
+vi.mock('./exec-error.js', async () => await vi.importActual<typeof import('./exec-error.js')>('./exec-error.js'));
 
 describe('findExecError (#617)', () => {
   it('returns the error itself when it is already an ExecError', () => {
@@ -45,13 +51,24 @@ describe('findExecError (#617)', () => {
     expect(findExecError(a)).toBeNull();
   });
 
-  it('gives up past the depth bound rather than walking forever', () => {
-    // Pins the bound as a real limit: an ExecError buried deeper than the
-    // walk goes is reported as absent, not found.
-    let deepest: Error = new ExecError('Command failed', '', 'boom', 1);
-    for (let i = 0; i < 12; i++) {
-      deepest = new Error(`wrap-${i}`, { cause: deepest });
+  /** An ExecError wrapped `depth` times, so it sits at chain index `depth`. */
+  function buried(depth: number): Error {
+    let err: Error = new ExecError('Command failed', '', 'boom', 1);
+    for (let i = 0; i < depth; i++) {
+      err = new Error(`wrap-${i}`, { cause: err });
     }
-    expect(findExecError(deepest)).toBeNull();
+    return err;
+  }
+
+  // The two halves of the bound, asserted at the boundary rather than far
+  // from it. The walk inspects indices 0..9, so index 9 is the last one it
+  // reaches and index 10 is the first it does not — an off-by-one in either
+  // direction flips exactly one of these.
+  it('finds an ExecError at the last index the walk reaches', () => {
+    expect(findExecError(buried(9))).toBeInstanceOf(ExecError);
+  });
+
+  it('gives up one link past the bound rather than walking forever', () => {
+    expect(findExecError(buried(10))).toBeNull();
   });
 });

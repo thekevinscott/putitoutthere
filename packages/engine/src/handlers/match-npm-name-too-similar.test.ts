@@ -59,12 +59,19 @@ describe('matchNpmNameTooSimilar (#617)', () => {
     expect(matchNpmNameTooSimilar('')).toBeNull();
   });
 
-  // Whitespace near-misses: the anchor's inter-token gaps require
-  // one-or-more whitespace (`\s+`). Feeding a matching shape with *two*
-  // spaces at a gap, and with a newline at another, proves the regex needs
-  // `\s+` rather than a literal space — npm wraps long lines.
-  it('matches across multi-space and wrapped gaps (pins each gap as \\s+)', () => {
-    const stderr = 'npm error 403 Package  name too\nsimilar  to existing package demo-pkg';
+  // Whitespace near-misses. Every inter-token gap in the anchor is `\s+`
+  // (one-or-more), and npm wraps long lines, so each gap has to survive
+  // more than a single space. Feeding *two* spaces at **every** gap is
+  // what pins that: collapse any one `\s+` to `\s` and this stops
+  // matching. One gap at a time would leave the other five unpinned.
+  it('matches with two spaces at every gap (pins all six gaps as \\s+)', () => {
+    const stderr =
+      'npm error 403 Package  name  too  similar  to  existing  packages';
+    expect(matchNpmNameTooSimilar(stderr)).toBe(stderr);
+  });
+
+  it('matches across a line wrap, which is what npm actually emits', () => {
+    const stderr = 'npm error 403 Package name too\nsimilar to existing\npackage demo-pkg';
     expect(matchNpmNameTooSimilar(stderr)).toBe(stderr);
   });
 

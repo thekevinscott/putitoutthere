@@ -39,6 +39,7 @@ import {
 } from './preflight.js';
 import { publish } from './publish.js';
 import { readHandlerMeta, type Ctx, type Handler } from './types.js';
+import { ExecError } from './utils/exec-error.js';
 import { dumpFailure } from './verbose.js';
 
 vi.mock('./config.js');
@@ -49,6 +50,10 @@ vi.mock('./normalize-artifacts.js');
 vi.mock('./ensure-tag.js');
 vi.mock('./git.js');
 vi.mock('./verbose.js');
+// The dump recognises the seam's error by `instanceof`, so a substitute
+// class would make the assertions below vacuous — declare the mock, resolve
+// it to the real module.
+vi.mock('./utils/exec-error.js', async () => await vi.importActual<typeof import('./utils/exec-error.js')>('./utils/exec-error.js'));
 vi.mock('./types.js');
 
 const CWD = '/repo';
@@ -537,6 +542,77 @@ describe('publish: additional branch coverage', () => {
     // stub that always returns true.
     expect(gotPath).toMatch(/[/\\]repo[/\\]artifacts[/\\]my-artifact$/);
     expect(hasResult).toBe(true);
+  });
+});
+
+describe('publish: the failure dump describes the subprocess (#617)', () => {
+  // A handler catches the process seam's ExecError and rethrows a rendered
+  // message with it as `cause`. The dump used to be reconstructed from that
+  // message, so it reported an empty command, an empty stdout and exit code
+  // -1 — and replaced the tool's own stderr with our paraphrase of it. That
+  // is what made #617 a four-run diagnosis: the evidence that would have
+  // shown the paraphrase was wrong had already been thrown away.
+
+  /** The FailureContext `publish` handed `dumpFailure`. */
+  function dumpedContext(): Record<string, unknown> {
+    const [, ctx] = vi.mocked(dumpFailure).mock.calls[0]!;
+    return ctx as unknown as Record<string, unknown>;
+  }
+
+  async function failWith(err: Error): Promise<void> {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+    const handler = makeHandler({ publish: vi.fn().mockRejectedValue(err) });
+    await expect(publish({ cwd: CWD, handlerFor: () => handler })).rejects.toThrow();
+  }
+
+  const execError = (): ExecError =>
+    new ExecError('Command failed: npm publish', 'packed 12 files', 'npm error code E403', 7, {
+      command: ['npm', 'publish', '--access=public'],
+    });
+
+  it('reports the argv, exit status, stdout and stderr of the failing command', async () => {
+    await failWith(new Error('npm publish failed', { cause: execError() }));
+    expect(dumpedContext()).toMatchObject({
+      command: ['npm', 'publish', '--access=public'],
+      stdout: 'packed 12 files',
+      stderr: 'npm error code E403',
+      exitCode: 7,
+    });
+  });
+
+  it('finds the ExecError however deep the handler wrapped it', async () => {
+    // Handlers wrap once today; a future one that adds context around its
+    // own error must not silently drop the dump back to placeholders.
+    const inner = new Error('npm publish failed', { cause: execError() });
+    await failWith(new Error('publishing lib-js failed', { cause: inner }));
+    expect(dumpedContext()).toMatchObject({ exitCode: 7, stderr: 'npm error code E403' });
+  });
+
+  it('falls back to the rendered message when no subprocess is behind the failure', async () => {
+    // A preflight rejection or a config error has no argv, no streams and no
+    // exit status. The sentinel is the honest answer there — and it must be
+    // -1, the value the renderer and every log consumer already reads as
+    // "not a process exit".
+    await failWith(new Error('PIOT_NPM_MISSING_REPOSITORY: package.json has no repository'));
+    expect(dumpedContext()).toEqual(
+      expect.objectContaining({
+        command: [],
+        stdout: '',
+        stderr: 'PIOT_NPM_MISSING_REPOSITORY: package.json has no repository',
+        exitCode: -1,
+      }),
+    );
+  });
+
+  it('reports an empty exit status as the sentinel, not as a zero', async () => {
+    // `status` is null when the child was killed by a signal or never
+    // spawned. Zero would read as success in a run log.
+    const spawnFailure = new ExecError('spawn npm ENOENT', '', '', null, { command: ['npm'] });
+    await failWith(new Error('npm publish failed', { cause: spawnFailure }));
+    expect(dumpedContext()).toMatchObject({ command: ['npm'], exitCode: -1 });
   });
 });
 

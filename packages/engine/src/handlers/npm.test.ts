@@ -1263,6 +1263,36 @@ describe('npm.publish', () => {
     expect(err?.message).toMatch(/rename/i);
     expect(err?.message).toMatch(/@your-scope\/demo-npm/);
     expect(err?.message).toContain('Package name too similar to existing package demo-pkg');
+    // The sentence that redirects the operator away from credentials. It is
+    // the whole point of the message: everything else here they could have
+    // guessed from npm's line.
+    expect(err?.message).toMatch(/not an auth problem/);
+  });
+
+  it('keeps the diagnosis on its own line, above npm\'s output (#617)', async () => {
+    // The parts are newline-joined, not run together: the first line is the
+    // headline an operator (and the `::error::` annotation, which takes the
+    // first non-empty line) reads.
+    wirePublishFailure(MONIKER_STDERR);
+    const err = await npm
+      .publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .then(() => null, (e: unknown) => e as Error);
+    const [headline] = (err?.message ?? '').split('\n');
+    expect(headline).toBe(
+      '[PIOT_NPM_NAME_TOO_SIMILAR] npm refused to create "demo-npm": the registry rejected the name as too similar to a package that already exists.',
+    );
+  });
+
+  it('keeps the npm ExecError as the cause (#617)', async () => {
+    // The failure dump walks the `cause` chain back to the ExecError to
+    // report the real argv and exit status. Dropping the cause here would
+    // silently put the dump back to `command: ""` / `exitCode: -1`.
+    wirePublishFailure(MONIKER_STDERR);
+    const err = await npm
+      .publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.cause).toBeInstanceOf(ExecError);
+    expect((err?.cause as ExecError).stderr).toBe(MONIKER_STDERR);
   });
 
   it('fires with no OIDC and makes no packument probe (#617)', async () => {
