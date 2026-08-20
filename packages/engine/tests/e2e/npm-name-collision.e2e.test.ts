@@ -44,6 +44,9 @@ const CLI = join(fileURLToPath(import.meta.url), '..', '..', '..', 'dist', 'cli-
 // idempotency probe — a real, unmocked GET against the live registry —
 // correctly reports "never published" and the run reaches the publish
 // attempt this test is about.
+// Stand-in credential for both the pre-flight and npm's `.npmrc`. Low
+// Shannon entropy on purpose — see `runCli`.
+const NOT_A_TOKEN = 'not-a-token';
 const NAME = 'piotfixturezzzmoniker';
 const BLOCKED_BY = 'piot-fixture-zzz-moniker';
 const VERSION = '0.0.1';
@@ -106,10 +109,14 @@ async function runCli(args: string[]): Promise<{ code: number; stdout: string; s
   // A throwaway token clears the auth pre-flight and rides through to npm,
   // which sends it to the local registry that never checks it. The point of
   // the test is that a perfectly good token changes nothing here.
+  //
+  // Kept deliberately low-entropy: the secret-scan gate's generic-api-key
+  // rule fires on any high-entropy string sitting next to the word "token",
+  // and a placeholder is not worth an allowlist entry.
   const env = {
     ...process.env,
     PIOT_NPM_REGISTRY: registry,
-    NODE_AUTH_TOKEN: 'piot-e2e-moniker-placeholder',
+    NODE_AUTH_TOKEN: NOT_A_TOKEN,
   };
   // Drop the GitHub vars so the repo-visibility / URL-match pre-flight
   // no-ops (it skips when GITHUB_REPOSITORY is unset).
@@ -168,7 +175,7 @@ globs = ["packages/js/**"]
   // the local server never checks it.
   writeRepoFile(
     'packages/js/.npmrc',
-    `registry=${registry}\n${registry.replace(/^https?:/, '')}:_authToken=piot-e2e-placeholder\n`,
+    `registry=${registry}\n${registry.replace(/^https?:/, '')}:_authToken=${NOT_A_TOKEN}\n`,
   );
   git(['add', '-A']);
   git(['commit', '-q', '-m', 'feat: initial\n\nrelease: patch']);
