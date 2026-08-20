@@ -1428,6 +1428,57 @@ describe('npm.publish', () => {
     expect(result.url).toBe('https://www.npmjs.com/package/demo-npm/v/0.1.0');
   });
 
+  it('carries the platform summary through the tlog-duplicate re-probe (#625)', async () => {
+    // The other arm that reports already-published after the family has
+    // shipped. Same reasoning as the E403 publish-over test: the platform
+    // packages went to the registry on this run, so the summary has to
+    // survive the arm — an operator reading a run that ended in a Rekor
+    // 409 most needs to know what actually landed.
+    const artifactsRoot = `${dir}/artifacts`;
+    mkdirSync(`${artifactsRoot}/demo-js-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-js-linux-x64-gnu/demo.node`, Buffer.from('x'));
+
+    let mainViews = 0;
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        if (!String(a[1]).startsWith('demo-npm@')) {
+          return Promise.reject(new ExecError('E404', '', '404', 1)); // platform: absent
+        }
+        mainViews += 1;
+        // 1st: the pre-publish probe, absent. 2nd: the catch-block re-probe
+        // — the attestation's first submit landed the package.
+        return mainViews === 1
+          ? Promise.reject(new ExecError('E404', '', '404', 1))
+          : Promise.resolve(ok('0.1.0\n'));
+      }
+      // Platform publishes pass the staging dir as a trailing positional;
+      // the main publish's last arg is a flag.
+      if (!a.at(-1)!.startsWith('--')) {return Promise.resolve(ok(''));}
+      return Promise.reject(
+        new ExecError(
+          'publish failed',
+          '',
+          'npm error code TLOG_CREATE_ENTRY_ERROR\n' +
+            'npm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+          1,
+        ),
+      );
+    });
+
+    const result = await npm.publish(
+      { ...basePkg(), path: dir, build: 'napi', targets: ['linux-x64-gnu'] },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot, env: { NODE_AUTH_TOKEN: 'tok' } }),
+    );
+
+    expect(result.status).toBe('already-published');
+    expect(result.platforms).toEqual({
+      published: ['demo-npm-linux-x64-gnu'],
+      skipped: [],
+    });
+  });
+
   it('throws an actionable re-run error on TLOG_CREATE_ENTRY_ERROR (409) when the package is NOT on the registry (#399)', async () => {
     execMock.mockImplementation((_cmd, args) => {
       const a = args as string[];
