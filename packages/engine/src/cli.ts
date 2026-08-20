@@ -51,7 +51,6 @@ import { emitReleaseOutputs } from './emit-release-outputs.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
-import type { PublishOutput } from './publish-types.js';
 import { reconcile } from './reconcile.js';
 import { releaseGithub } from './release-github/index.js';
 import { formatStatusRow } from './status-format.js';
@@ -551,23 +550,20 @@ export async function run(argv: readonly string[]): Promise<number> {
         return 0;
       }
       case 'publish': {
-        let result: PublishOutput;
-        try {
-          result = await publish({
-            cwd: flags.cwd,
-            ...(flags.config !== undefined ? { configPath: flags.config } : {}),
-            releasePackages: flags.releasePackages,
-          });
-        } catch (err) {
-          // #623: a run that died on one registry may already have handed
-          // PyPI's upload to the caller-side job. Emit the facts for the
-          // packages that got that far before rethrowing, so the caller's
-          // job can gate on "PyPI's own path succeeded" rather than on
-          // whole-job success — a missing npm scope must not be able to
-          // skip an unrelated registry's upload.
+        // #623: a run that dies on one registry may already have handed
+        // PyPI's upload to the caller-side job, so the `.catch` below
+        // emits the facts for the packages that got that far before
+        // rethrowing. That is what lets the caller's job gate on "PyPI's
+        // own path succeeded" rather than on whole-job success — a
+        // missing npm scope must not skip an unrelated registry's upload.
+        const result = await publish({
+          cwd: flags.cwd,
+          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+          releasePackages: flags.releasePackages,
+        }).catch(async (err: unknown) => {
           await emitReleaseOutputs(readPublishProgress(err), process.env.GITHUB_OUTPUT);
           throw err;
-        }
+        });
         if (flags.json) {
           process.stdout.write(JSON.stringify(result) + '\n');
         } else if (result.published.length === 0) {

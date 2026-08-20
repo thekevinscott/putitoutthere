@@ -20,7 +20,7 @@
 
 import { appendFile } from 'node:fs/promises';
 
-import type { PublishOutput } from './publish-types.js';
+import type { PublishOutput } from './publish.js';
 
 export async function emitReleaseOutputs(
   published: PublishOutput['published'],

@@ -18,7 +18,7 @@
  * unchanged.
  */
 
-import type { PublishOutput } from './publish-types.js';
+import type { PublishOutput } from './publish.js';
 
 const PROGRESS_KEY = '__piotPublishProgress';
 

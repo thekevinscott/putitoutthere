@@ -23,8 +23,8 @@ import { parseFlags, run } from './cli.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
 import { computePlanStatus } from './plan-status.js';
-import { attachPublishProgress } from './publish-progress.js';
 import { publish } from './publish.js';
+import { readPublishProgress } from './publish-progress.js';
 import { reconcile } from './reconcile.js';
 import { releaseGithub } from './release-github/index.js';
 import { computeStatus } from './status.js';
@@ -48,6 +48,7 @@ vi.mock('./check.js');
 vi.mock('./fold-action-bundle.js');
 vi.mock('./plan-status.js');
 vi.mock('./publish.js');
+vi.mock('./publish-progress.js');
 vi.mock('./reconcile.js');
 vi.mock('./release-github/index.js');
 vi.mock('./status.js');
@@ -630,16 +631,19 @@ describe('cli: publish dispatch', () => {
     // caller-side upload job gates on `delegated`, so the facts have to
     // survive the throw — otherwise a broken npm scope silently skips
     // an unrelated registry's upload.
-    publishMock.mockRejectedValue(
-      attachPublishProgress(new Error('npm publish failed: E404 Scope not found'), [
-        { package: 'demo-py', version: '1.2.3', result: { status: 'delegated' }, tag: 'demo-py-v1.2.3' },
-      ]),
-    );
+    const failure = new Error('npm publish failed: E404 Scope not found');
+    publishMock.mockRejectedValue(failure);
+    vi.mocked(readPublishProgress).mockReturnValue([
+      { package: 'demo-py', version: '1.2.3', result: { status: 'delegated' }, tag: 'demo-py-v1.2.3' },
+    ]);
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
 
     const code = await run(argv('publish', '--cwd', '/x'));
 
     expect(code).toBe(1);
+    // It reads the progress off the error it caught, not off some other
+    // source — a run that failed before any package must stay empty.
+    expect(readPublishProgress).toHaveBeenCalledWith(failure);
     const written = appendFileMock.mock.calls.map((c) => String(c[1] as string)).join('');
     expect(written).toMatch(/(^|\n)delegated=true\n/);
     expect(written).toContain(
@@ -654,6 +658,7 @@ describe('cli: publish dispatch', () => {
     // there would run the caller-side upload for a run that never
     // validated the package.
     publishMock.mockRejectedValue(new Error('Pre-flight auth check failed'));
+    vi.mocked(readPublishProgress).mockReturnValue([]);
     process.env.GITHUB_OUTPUT = '/gha/output.txt';
 
     const code = await run(argv('publish', '--cwd', '/x'));

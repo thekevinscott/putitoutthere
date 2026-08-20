@@ -452,11 +452,19 @@ describe('pypi.publish (caller-side upload architecture)', () => {
         },
       }),
     );
-    expect(infoLines.some((m) => /caller-side|pypi-publish|gh-action-pypi-publish/i.test(m))).toBe(true);
-    // #623: and that the tag comes from that same job, not from here —
-    // the hint is the only place a reader learns why the publish job
-    // finished without cutting a pypi tag.
-    expect(infoLines.some((m) => /tag is cut there too/i.test(m))).toBe(true);
+    // Pinned whole: each line carries a distinct fact a reader needs —
+    // that the upload was handed off, which job performs it, which action
+    // it uses, that the tag is cut there too (#623: the only place a
+    // reader learns why a green publish job cut no pypi tag), and where
+    // the recipe lives.
+    expect(infoLines).toEqual([
+      [
+        'pypi: demo-python@0.1.0 delegated to caller-side upload step.',
+        '  The upload runs in your `pypi-publish` job via `pypa/gh-action-pypi-publish`;',
+        '  the git tag is cut there too, after PyPI confirms the version is live.',
+        '  See README → "Publishing to PyPI" for the recipe.',
+      ].join('\n'),
+    ]);
     fetchSpy.mockRestore();
   });
 

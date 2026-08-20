@@ -32,7 +32,6 @@ import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
 import { attachPublishProgress } from './publish-progress.js';
-import type { PublishOptions, PublishOutput } from './publish-types.js';
 import { ensureTag } from './ensure-tag.js';
 import { formatTag } from './tag-template.js';
 import {
@@ -47,11 +46,39 @@ import {
   requireRepoUrlMatch,
 } from './preflight.js';
 import { withRetry } from './retry.js';
-import { readHandlerMeta, type Ctx } from './types.js';
+import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
 import { findExecError } from './utils/find-exec-error.js';
 
-export type { PublishOptions, PublishOutput } from './publish-types.js';
+export interface PublishOptions {
+  cwd: string;
+  configPath?: string;
+  /**
+   * Manual-release spec, forwarded verbatim to the internal `plan()`
+   * re-run. Must match what the plan job was given so plan and publish
+   * agree on the matrix — see the `release_packages` plumbing in
+   * `.github/workflows/release.yml`.
+   */
+  releasePackages?: string | undefined;
+  /** Override for tests. */
+  handlerFor?: (kind: Handler['kind']) => Handler;
+}
+
+export interface PublishOutput {
+  ok: boolean;
+  published: Array<{
+    package: string;
+    version: string;
+    result: PublishResult;
+    /**
+     * The git tag cut for this package — the canonical `formatTag`
+     * render of its `tag_format` template (#461). Surfaced so the CLI
+     * can emit release facts to `$GITHUB_OUTPUT` without reconstructing
+     * the tag caller-side.
+     */
+    tag: string;
+  }>;
+}
 
 export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   const cwd = opts.cwd;

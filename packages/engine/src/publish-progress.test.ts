@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { attachPublishProgress, readPublishProgress } from './publish-progress.js';
-import type { PublishOutput } from './publish-types.js';
+import type { PublishOutput } from './publish.js';
 
 const entry = (
   name: string,
@@ -34,6 +34,28 @@ describe('publish progress carried through a throw (#623)', () => {
     attachPublishProgress(err, [entry('lib-py', 'delegated')]);
     expect(err.message).toBe('npm publish failed');
     expect(err.cause).toBe(cause);
+  });
+
+  it('rides on a namespaced own property and adds nothing else', () => {
+    // The Error it annotates is not ours: it is the handler's, and it
+    // goes on to be rendered into the job summary, serialized, and read
+    // by whoever debugs the failure. So the annotation has to be exactly
+    // one property, attributable to piot on sight, and it must not
+    // collide with what anything else puts on the same Error —
+    // `attachHandlerMeta` in types.ts already annotates these errors,
+    // and its key is mirrored here as the stand-in for "someone else's".
+    const err = new Error('npm publish failed') as Error & { __piotHandlerMeta?: unknown };
+    err.__piotHandlerMeta = { toolVersions: { npm: '12.0.0' } };
+
+    attachPublishProgress(err, [entry('lib-py', 'delegated')]);
+
+    const annotations = Object.getOwnPropertyNames(err)
+      .filter((k) => k !== 'message' && k !== 'stack')
+      .sort();
+    expect(annotations).toEqual(['__piotHandlerMeta', '__piotPublishProgress']);
+    // Neither annotation clobbers the other.
+    expect(err.__piotHandlerMeta).toEqual({ toolVersions: { npm: '12.0.0' } });
+    expect(readPublishProgress(err)).toEqual([entry('lib-py', 'delegated')]);
   });
 
   it('reports no progress for an Error that was never annotated', () => {
