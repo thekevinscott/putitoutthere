@@ -21,6 +21,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { writeEmbeddedCrateVersions } from './write-embedded-crate-versions.js';
 import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
 
 /**
@@ -48,5 +49,10 @@ export async function writeCrateVersionForBuild(crateDir: string, version: strin
     }
     throw err;
   }
-  return await writeResolvedCargoVersion(crateDir, original, version);
+  const written = await writeResolvedCargoVersion(crateDir, original, version);
+  // #621: the compiled binary also embeds every in-repo crate this one
+  // pulls in by path, and it is often the *dependency* that owns the
+  // version-bearing symbol. Bumping only this crate ships a stale literal.
+  const embedded = await writeEmbeddedCrateVersions(crateDir, version);
+  return [...new Set([...written, ...embedded])];
 }

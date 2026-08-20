@@ -24,6 +24,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import { ErrorCodes } from './error-codes.js';
 import { toError } from './to-error.js';
+import { writeEmbeddedCrateVersions } from './write-embedded-crate-versions.js';
 import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
 
 const DYNAMIC_VERSION_DOC_POINTER =
@@ -94,7 +95,12 @@ export async function writeVersionForBuild(pkgDir: string, version: string): Pro
     }
     throw toError(err);
   }
-  return await writeResolvedCargoVersion(pkgDir, cargoOriginal, version);
+  const written = await writeResolvedCargoVersion(pkgDir, cargoOriginal, version);
+  // #621: the wheel embeds every in-repo crate the extension module pulls
+  // in by path. When the CLI lives in one of those (a Rust core wrapped by
+  // this pyo3 crate), its `CARGO_PKG_VERSION` is what `--version` prints.
+  const embedded = await writeEmbeddedCrateVersions(pkgDir, version);
+  return [...new Set([...written, ...embedded])];
 }
 
 function isDynamicVersion(project: { dynamic?: unknown }): boolean {
