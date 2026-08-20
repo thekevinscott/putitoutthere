@@ -535,6 +535,31 @@ describe('publish: delegated uploads (#623)', () => {
     expect(logged.join('')).not.toContain('delegated');
   });
 
+  it('says nothing about a deferred tag when the handler reports already-published', async () => {
+    // `handler.publish()` reports `already-published` on its own when the
+    // version turned up on the registry between the pre-check and the
+    // upload — the pypi handler re-checks right before delegating. That
+    // row is neither tagged here nor owed to anyone, so claiming a
+    // deferred tag would point the operator at an upload job with
+    // nothing to do.
+    const py = pypiPkg('lib-py', 'packages/py');
+    configWith(py);
+    vi.mocked(plan).mockResolvedValue([row(py)]);
+    allComplete(py);
+
+    await publish({
+      cwd: CWD,
+      handlerFor: () =>
+        makeHandler({
+          kind: 'pypi',
+          publish: vi.fn().mockResolvedValue({ status: 'already-published' }),
+        }),
+    });
+
+    expect(ensureTag).not.toHaveBeenCalled();
+    expect(logged.join('')).not.toContain('delegated');
+  });
+
   it('carries an earlier delegation out through a later handler failure', async () => {
     // The #623 repro: pypi delegates, npm then dies on a missing scope.
     // The delegation has to reach the CLI so the caller-side upload job
