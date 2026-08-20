@@ -140,6 +140,20 @@ describe('writeEmbeddedCrateVersions', () => {
     expect(await writeEmbeddedCrateVersions(HOST, '0.4.2')).toEqual([]);
   });
 
+  it('recognises the starting crate when it is reached back by a different spelling', async () => {
+    manifests({
+      [HOST]: pkg('host', '\n[dependencies]\na = { path = "../a" }\n'),
+      [A]: pkg('a', '\n[dependencies]\nhost = { path = "../host" }\n'),
+    });
+    // Every discovered directory arrives canonicalized, so an uncanonical
+    // starting path would not compare equal to its own resolved form when
+    // the cycle points back at it -- and the start would be bumped twice.
+    // On Windows that happens for a plain "/r/host" (no drive letter).
+    const out = await writeEmbeddedCrateVersions(`${HOST}/./`, '0.4.2');
+    expect(reported(out, A)).toBe(true);
+    expect(reported(out, HOST)).toBe(false);
+  });
+
   it('skips a virtual manifest that declares no package', async () => {
     manifests({
       [HOST]: pkg('host', '\n[dependencies]\nc = { path = "../virt" }\n'),

@@ -31,7 +31,7 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
@@ -63,14 +63,22 @@ export async function writeEmbeddedCrateVersions(
   startDir: string,
   version: string,
 ): Promise<string[]> {
+  // Canonicalize before anything is compared. Every directory discovered
+  // below arrives via `resolve`, so a caller-supplied `startDir` that is
+  // relative, trailing-separated, or (on Windows) drive-letter-less would
+  // never equal its own resolved form — and the identity checks that keep
+  // the walk finite and stop the starting crate being re-bumped are all
+  // string equality on these paths.
+  const start = resolve(startDir);
+
   // Any non-string stands for "no workspace above this crate" — the walk
   // legitimately returns null at the filesystem root.
-  const found = await findWorkspaceRoot(startDir);
+  const found = await findWorkspaceRoot(start);
   const workspaceRoot = typeof found === 'string' ? found : null;
   const workspaceParsed =
     workspaceRoot === null ? null : (await readManifest(workspaceRoot))?.parsed;
 
-  const embedded = await collectEmbedded(startDir, workspaceParsed, workspaceRoot);
+  const embedded = await collectEmbedded(start, workspaceParsed, workspaceRoot);
   const written = new Set<string>();
 
   // 1. Bump each embedded crate. `writeResolvedCargoVersion` follows
@@ -87,8 +95,8 @@ export async function writeEmbeddedCrateVersions(
   // 2. Rewrite requirements pointing at anything bumped. The workspace
   //    root is included because an inheriting member's requirement lives
   //    there, in a file no member's own rewrite would touch.
-  const bumped = new Set<string>([...embedded, startDir]);
-  const manifestDirs = new Set<string>([...embedded, startDir]);
+  const bumped = new Set<string>([...embedded, start]);
+  const manifestDirs = new Set<string>([...embedded, start]);
   if (workspaceRoot !== null) {manifestDirs.add(workspaceRoot);}
 
   for (const dir of manifestDirs) {
@@ -167,6 +175,11 @@ async function readManifest(dir: string): Promise<Manifest | null> {
   }
 }
 
+/**
+ * A virtual manifest declares `[workspace]` but no crate to version.
+ * `parsed` always comes from `readManifest`, which yields a parsed TOML
+ * document or null, so the null case never reaches here.
+ */
 function hasPackageTable(parsed: unknown): boolean {
-  return typeof (parsed as { package?: unknown } | null)?.package === 'object';
+  return typeof (parsed as { package?: unknown }).package === 'object';
 }
