@@ -46,6 +46,16 @@ export const ErrorCodes = {
    *  name. The npm analogue of PIOT_PYPI_NAME_MISMATCH /
    *  PIOT_CRATES_NAME_MISMATCH. #301. */
   NPM_NAME_MISMATCH: 'PIOT_NPM_NAME_MISMATCH',
+  /** The npm registry refused to create the package name at all. npm's
+   *  moniker rule compares names with punctuation stripped and case
+   *  folded, so an existing `will-run` blocks a new `willrun` (scoped
+   *  names are exempt). The refusal arrives auth-shaped — E403
+   *  "Forbidden", the same shape a permission failure has — and on a
+   *  first publish every condition the NODE_AUTH_TOKEN bootstrap hint
+   *  checks also holds, so the engine used to send operators after a
+   *  credential that could never work. Only the stderr prose tells the
+   *  two apart. The fix is a rename or a scope, never a token. #617. */
+  NPM_NAME_TOO_SIMILAR: 'PIOT_NPM_NAME_TOO_SIMILAR',
   /** A crates package's `Cargo.toml` is missing one or more
    *  required `[package]` metadata fields (`description` and
    *  `license`/`license-file`). crates.io rejects the publish with
@@ -157,6 +167,7 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.PUBLISH_EMPTY_PLAN,
   ErrorCodes.NPM_MISSING_REPOSITORY,
   ErrorCodes.NPM_NAME_MISMATCH,
+  ErrorCodes.NPM_NAME_TOO_SIMILAR,
   ErrorCodes.CRATES_MISSING_METADATA,
   ErrorCodes.PYPI_STATIC_VERSION,
   ErrorCodes.PYPI_NAME_MISMATCH,

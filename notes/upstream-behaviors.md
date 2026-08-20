@@ -124,6 +124,64 @@ bypassed; it is not parsed at runtime.
 **Test.** `npm: provenance requires non-empty repository (#281)` —
 asserts the preflight throws and that `npm publish` is never invoked.
 
+#### `npm/publish-e403-name-too-similar.txt` — #617
+
+**Shape.** `npm publish` exits non-zero with stderr containing:
+
+```
+npm error code E403
+npm error 403 403 Forbidden - PUT https://registry.npmjs.org/<name> -
+  Package name too similar to existing package <other>; try renaming
+  your package to '@<scope>/<name>' instead.
+npm error 403 In most cases, you or one of your dependencies are
+  requesting a package version that is forbidden by your security
+  policy, or on a server you do not have access to.
+```
+
+npm also ships a plural variant that discloses no blocking package
+("too similar to existing packages; try renaming … and publishing with
+'--access public' instead"); the two differ only after the prose the
+engine anchors on.
+
+Captured from a real `npm publish` (npm 11.17.0) against a registry
+returning npmjs.org's documented moniker body — the reporting run's own
+stderr was never observed, because the thrown bootstrap error replaced
+it. That is the second half of what #617 fixes.
+
+**Trigger.** npm's registry refuses to *create* a name that collapses
+onto an existing one: it compares names with punctuation (`-`, `_`, `.`)
+stripped and case folded, so a live `will-run` makes `willrun`
+unregistrable. Scoped names are exempt. The refusal is a property of the
+name, not of the caller — no token and no trusted publisher can get past
+it.
+
+Note what is *absent*: the word "name" never appears in the response
+code, only in the prose. The refusal is byte-for-byte an ordinary
+permission failure as far as any status-code matcher can tell, which is
+why the engine misfiled it as one.
+
+**Engine reaction.** `matchNpmNameTooSimilar` in
+[`src/handlers/match-npm-name-too-similar.ts`](../packages/engine/src/handlers/match-npm-name-too-similar.ts)
+anchors on the prose alone — one anchor, unlike the crates matcher's
+pair, because this wording is already unique to the refusal. It is
+checked in `publish` **before** the `E404` bootstrap hint below and is
+gated on neither OIDC nor the `PIOT_NPM_REGISTRY` override, since an
+unregistrable name is a naming problem on any auth path. When it fires
+the handler throws `PIOT_NPM_NAME_TOO_SIMILAR` with the rename/scope
+remedy and npm's stderr appended.
+
+Ordering is load-bearing. On a first publish this failure satisfies
+every condition the bootstrap hint checks — auth-shaped stderr, OIDC in
+play, package genuinely absent from the packument — so whichever branch
+runs first wins, and the bootstrap hint's advice ("set NODE_AUTH_TOKEN")
+is unachievable here.
+
+**Test.** `npm: E403 name-too-similar (the moniker rule) on a first
+publish (#617)`, plus the CLI e2e
+`tests/e2e/npm-name-collision.e2e.test.ts`, which drives the real npm
+binary so the parsed text is npm's own rendering rather than a fixture
+string.
+
 #### `npm/publish-e404-unauthorized.txt` — #598
 
 **Shape.** `npm publish` exits non-zero with stderr containing:
@@ -163,6 +221,12 @@ cause 1, and the engine surfaces the bootstrap hint naming
 `NODE_AUTH_TOKEN`. Present => cause 2, and the raw stderr is surfaced
 unchanged; claiming "the package does not exist" there would send a
 consumer to migrate off trusted publishing for no reason.
+
+Since #617 the hint carries npm's stderr underneath it. The hint reads
+the *absence* of the package, never the registry's stated reason, so it
+is an inference — and an inference a reader cannot check is one they
+cannot correct. The moniker row above is the third cause this same
+stderr shape can carry, and it is matched before the hint is reached.
 
 **Test.** `npm: E404 masks unauthorized on a first publish (#598)`.
 

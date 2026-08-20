@@ -414,6 +414,185 @@ describe('npm: E404 masks unauthorized on a first publish (#598)', () => {
   });
 });
 
+describe('npm: E403 name-too-similar (the moniker rule) on a first publish (#617)', () => {
+  // The bug: npm's registry refuses to *create* a name that collapses onto
+  // an existing one under its moniker rule (`will-run` exists => `willrun`
+  // is unregistrable). The refusal arrives auth-shaped — E403 / "Forbidden"
+  // — so `looksLikeAuthFailure` matches it, `isBootstrapPublish` confirms
+  // the package is genuinely absent, and the engine emits the
+  // NODE_AUTH_TOKEN bootstrap hint. Every precondition the hint checks is
+  // true and the hint is still wrong: no token can create this name. The
+  // reporter burned four runs and two fresh granular tokens before renaming
+  // the package fixed it on the first try.
+  //
+  // The fix has to read the stderr, because that is the only place the
+  // registry says *why*. Same shape as the crates-side
+  // `matchFirstPublishTpRejection`.
+
+  // Literal pinned here rather than imported from ErrorCodes so the test
+  // commit can land before the constant exists in src/error-codes.ts.
+  // The impl commit adds the constant; this literal must stay in sync.
+  const NPM_NAME_TOO_SIMILAR = 'PIOT_NPM_NAME_TOO_SIMILAR';
+
+  function wireNpm(stderrFixture: string): void {
+    execMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+      const a = args as string[];
+      if (cmd === 'npm' && a[0] === 'view') {
+        // isPublished probe: not on the registry, so the handler publishes.
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', '404');
+        return fakeChild(1);
+      }
+      if (cmd === 'npm' && a[0] === 'publish') {
+        cb(Object.assign(new Error('E403'), { code: 1 }), '', stderrFixture);
+        return fakeChild(1);
+      }
+      /* v8 ignore next */
+      cb(Object.assign(new Error(`unexpected subprocess: ${cmd} ${a.join(' ')}`), { code: 1 }), '', '');
+      return fakeChild(1);
+    }) as unknown as typeof execFile);
+  }
+
+  /** package.json with the `repository` field the OIDC path asserts on. */
+  function writeManifest(): void {
+    writeAt(workdir, 'package.json', JSON.stringify({
+      name: 'demopkg',
+      version: '0.1.0',
+      repository: { type: 'git', url: 'git+https://github.com/acme/demo.git' },
+    }));
+  }
+
+  /** The exact conditions the bootstrap hint fires under: OIDC + absent. */
+  function bootstrapConditions(): void {
+    writeManifest();
+    wireNpm(loadFixture('npm', 'publish-e403-name-too-similar.txt'));
+    server.use(
+      http.get('https://registry.npmjs.org/demopkg', () => new HttpResponse(null, { status: 404 })),
+    );
+  }
+
+  const pkgUnderTest = () => ({ name: 'demopkg', path: workdir });
+
+  it('does NOT send the operator after a token — the bootstrap hint must not fire', async () => {
+    // The whole issue in one assertion. OIDC is in play and the packument
+    // probe genuinely 404s, so both of `isBootstrapPublish`'s conditions
+    // hold; only reading the stderr can tell this apart from a real
+    // first-publish bootstrap.
+    bootstrapConditions();
+    await expect(
+      npm.publish(pkgUnderTest(), '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' })),
+    ).rejects.not.toThrow(/NODE_AUTH_TOKEN/);
+  });
+
+  it('surfaces PIOT_NPM_NAME_TOO_SIMILAR so the failure is greppable', async () => {
+    bootstrapConditions();
+    await expect(
+      npm.publish(pkgUnderTest(), '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' })),
+    ).rejects.toThrow(new RegExp(NPM_NAME_TOO_SIMILAR));
+  });
+
+  it('names the remedy: rename or scope the package, not rotate a credential', async () => {
+    // Actionability is the point. "Publish failed" plus a stderr dump is
+    // what the reporter already had.
+    bootstrapConditions();
+    const err = await npm
+      .publish(pkgUnderTest(), '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' }))
+      .then(() => null, (e: Error) => e);
+    expect(err?.message).toMatch(/scope/i);
+    expect(err?.message).toMatch(/rename/i);
+  });
+
+  it('carries npm\'s raw stderr, which names the package that blocks the name', async () => {
+    // The engine does not re-derive the colliding name — npm already said
+    // it. Losing that line is what made this a four-run diagnosis.
+    bootstrapConditions();
+    const err = await npm
+      .publish(pkgUnderTest(), '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' }))
+      .then(() => null, (e: Error) => e);
+    expect(err?.message).toContain('Package name too similar to existing package demo-pkg');
+  });
+
+  it('fires on the token path too — an unregistrable name is not an auth problem', async () => {
+    // No ACTIONS_ID_TOKEN_REQUEST_TOKEN: this is the consumer who already
+    // followed the old hint and wired NPM_TOKEN. They get the identical
+    // 403, and the diagnosis must not depend on which auth path they took.
+    writeManifest();
+    wireNpm(loadFixture('npm', 'publish-e403-name-too-similar.txt'));
+    await expect(
+      npm.publish(pkgUnderTest(), '0.1.0', ctx({ NODE_AUTH_TOKEN: 'tok' })),
+    ).rejects.toThrow(new RegExp(NPM_NAME_TOO_SIMILAR));
+  });
+
+  it('does NOT claim a name collision for an ordinary E403 (guards the widening)', async () => {
+    // The over-publish race is also an E403 "Forbidden". Matching on the
+    // status code rather than the prose would swallow it — and that path
+    // must still short-circuit to already-published, not raise a naming
+    // error.
+    writeManifest();
+    wireNpm(loadFixture('npm', 'publish-e403-over-publish.txt'));
+    await expect(
+      npm.publish(pkgUnderTest(), '0.1.0', ctx({ NODE_AUTH_TOKEN: 'tok' })),
+    ).resolves.toMatchObject({ status: 'already-published' });
+  });
+
+  it('fixture captures the real npm E403 moniker shape, not an assumed one', () => {
+    // Captured from a real `npm publish` (npm 11.17.0) against a registry
+    // returning npmjs.org's documented moniker body; only the package
+    // names and the log path are genericised. The engine anchors on the
+    // prose, so a drift in npm's wording surfaces here first.
+    const fixture = loadFixture('npm', 'publish-e403-name-too-similar.txt');
+    expect(fixture).toMatch(/npm error code E403/);
+    expect(fixture).toMatch(/Package name too similar to existing package demo-pkg/);
+    expect(fixture).toMatch(/try renaming your package to '@demo-scope\/demopkg' instead/);
+    // The trap: nothing in here says "name". It reads like every other
+    // permission error npm emits, which is why it was misfiled as one.
+    expect(fixture).toMatch(/forbidden by your security policy/i);
+  });
+});
+
+describe('npm: the bootstrap hint keeps npm\'s stderr (#617)', () => {
+  // Second half of the same report. Even when the bootstrap hint IS the
+  // right diagnosis, throwing it discards npm's stderr — the thrown Error
+  // replaces it and the `cause` chain is not rendered. Had the raw 403 body
+  // been visible, #617 would have been a one-run diagnosis instead of four.
+
+  function wireNpm(stderrFixture: string): void {
+    execMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+      const a = args as string[];
+      if (cmd === 'npm' && a[0] === 'view') {
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', '404');
+        return fakeChild(1);
+      }
+      if (cmd === 'npm' && a[0] === 'publish') {
+        cb(Object.assign(new Error('E404'), { code: 1 }), '', stderrFixture);
+        return fakeChild(1);
+      }
+      /* v8 ignore next */
+      cb(Object.assign(new Error(`unexpected subprocess: ${cmd} ${a.join(' ')}`), { code: 1 }), '', '');
+      return fakeChild(1);
+    }) as unknown as typeof execFile);
+  }
+
+  it('appends the raw npm stderr to the NODE_AUTH_TOKEN hint', async () => {
+    writeAt(workdir, 'package.json', JSON.stringify({
+      name: 'demo-pkg',
+      version: '0.1.0',
+      repository: { type: 'git', url: 'git+https://github.com/acme/demo.git' },
+    }));
+    wireNpm(loadFixture('npm', 'publish-e404-unauthorized.txt'));
+    server.use(
+      http.get('https://registry.npmjs.org/demo-pkg', () => new HttpResponse(null, { status: 404 })),
+    );
+
+    const err = await npm
+      .publish({ name: 'demo-pkg', path: workdir }, '0.1.0', ctx({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' }))
+      .then(() => null, (e: Error) => e);
+    // The hint still leads — it is the actionable part.
+    expect(err?.message).toMatch(/NODE_AUTH_TOKEN/);
+    // …and the evidence rides along, so a wrong hint is falsifiable.
+    expect(err?.message).toContain('npm error code E404');
+  });
+});
+
 /* ------------------------------------------------------------------- pypi */
 
 describe('pypi: OIDC TP filter rejection for reusable-workflow callers (#252)', () => {

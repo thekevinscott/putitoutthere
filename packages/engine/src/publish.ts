@@ -44,6 +44,7 @@ import {
 import { withRetry } from './retry.js';
 import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
+import { findExecError } from './utils/find-exec-error.js';
 
 export interface PublishOptions {
   cwd: string;
@@ -250,15 +251,26 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       // Phase 2 / Idea 9: handler-attached metadata (tool versions, etc.)
       // rides through to the failure renderer.
       const meta = readHandlerMeta(error);
+      // #617: describe the subprocess, not the sentence we wrapped it in.
+      // Handlers rethrow a rendered message with the seam's ExecError as
+      // `cause`, so reading `error.message` here reported an empty command,
+      // an empty stdout and exit code -1 — and dropped the tool's own words
+      // about why it failed. Walk back to the ExecError when there is one.
+      const exec = findExecError(error);
       await dumpFailure(
         error,
         {
           package: name,
           handler: pkg.kind,
-          command: [],
-          stdout: '',
-          stderr: error.message,
-          exitCode: -1,
+          command: exec?.command ?? [],
+          stdout: exec?.stdout ?? '',
+          // No ExecError (a preflight throw, a config error) means there is
+          // no subprocess output to show; the rendered message is the whole
+          // diagnostic, so keep the old behaviour there. `status` is null
+          // when a spawn failed or a signal killed the child — nothing
+          // truthful to report but the sentinel.
+          stderr: exec?.stderr ?? error.message,
+          exitCode: exec?.status ?? -1,
           ...(meta?.toolVersions ? { toolVersions: meta.toolVersions } : {}),
         },
         // Thread ctx.env through so handler-injected credentials (OIDC-
