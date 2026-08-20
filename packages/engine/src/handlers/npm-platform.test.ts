@@ -16,7 +16,7 @@
  * Issue #19. Plan: §13.7.
  */
 
-import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture, type ExecResult } from '../utils/exec-capture.js';
@@ -52,7 +52,7 @@ function ok(stdout: string): ExecResult {
 // A minimal `node:fs/promises` substitute keyed by normalized (forward-slash)
 // path, so the source's real-`node:path` joins (back-slashed on Windows)
 // resolve to the same entries the test seeds. Covers exactly the calls
-// crossing the mocked boundary: write/read/readdir/chmod/cp/mkdtemp/rm. The
+// crossing the mocked boundary: write/read/readdir/stat/chmod/cp/mkdtemp/rm. The
 // `*Sync` names below are module-local store helpers used to seed the tree
 // and assert on it in test bodies — they are not the source's I/O.
 
@@ -153,6 +153,20 @@ function installFs(): void {
     if (!node || node.type !== 'dir') {return Promise.reject(enoent(np));}
     return Promise.resolve(readdirStore(np));
   }) as unknown as typeof readdir);
+
+  // #626: `pickMainFile` stats each candidate to tell a nested payload
+  // directory from the binary itself, so the in-memory tree must answer
+  // `isDirectory()` the way a real staged artifact would.
+  vi.mocked(stat).mockImplementation(((p: string) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node) {return Promise.reject(enoent(np));}
+    return Promise.resolve({
+      mode: node.mode,
+      isDirectory: () => node.type === 'dir',
+      isFile: () => node.type === 'file',
+    });
+  }) as unknown as typeof stat);
 
   vi.mocked(chmod).mockImplementation(((p: string, mode: number) => {
     const np = norm(p);
@@ -1034,24 +1048,42 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
 });
 
 describe('pickMainFile', () => {
-  it('napi: picks the .node file when present', () => {
-    expect(pickMainFile(['README.md', 'demo.linux-x64-gnu.node'], 'napi')).toBe(
-      'demo.linux-x64-gnu.node',
-    );
+  // The staged tree the entry names are read from. `pickMainFile` resolves
+  // against it (#626), so each case seeds what it lists.
+  const stage = '/stage';
+  function seedStage(paths: readonly string[]): string[] {
+    mkdirSync(stage, { recursive: true });
+    for (const rel of paths) {writeFileSync(`${stage}/${rel}`, 'x');}
+    return readdirStore(stage);
+  }
+
+  it('napi: picks the .node file when present', async () => {
+    const files = seedStage(['README.md', 'demo.linux-x64-gnu.node']);
+    expect(await pickMainFile(stage, files, 'napi')).toBe('demo.linux-x64-gnu.node');
   });
 
-  it('napi: falls back to the first file when no .node is present', () => {
+  it('napi: falls back to the first file when no .node is present', async () => {
     // Defensive fallback for a napi artifact missing its .node payload.
-    expect(pickMainFile(['only-file.txt'], 'napi')).toBe('only-file.txt');
+    const files = seedStage(['only-file.txt']);
+    expect(await pickMainFile(stage, files, 'napi')).toBe('only-file.txt');
   });
 
-  it('bundled-cli: picks the first non-package.json file', () => {
-    expect(pickMainFile(['package.json', 'demo-cli'], 'bundled-cli')).toBe('demo-cli');
+  it('bundled-cli: picks the first non-package.json file', async () => {
+    const files = seedStage(['package.json', 'demo-cli']);
+    expect(await pickMainFile(stage, files, 'bundled-cli')).toBe('demo-cli');
   });
 
-  it('bundled-cli: falls back to the first file when only package.json is present', () => {
+  it('bundled-cli: descends into a directory to name the binary itself', async () => {
+    // #626: the nested layout. `readdir` lists only `bin`, and naming that
+    // directory as `main` is what sent the #365 chmod to the wrong inode.
+    const files = seedStage(['package.json', 'bin/demo-cli']);
+    expect(await pickMainFile(stage, files, 'bundled-cli')).toBe('bin/demo-cli');
+  });
+
+  it('bundled-cli: falls back to the first file when only package.json is present', async () => {
     // Defensive fallback for a bundled-cli artifact with no payload file.
-    expect(pickMainFile(['package.json'], 'bundled-cli')).toBe('package.json');
+    const files = seedStage(['package.json']);
+    expect(await pickMainFile(stage, files, 'bundled-cli')).toBe('package.json');
   });
 });
 
