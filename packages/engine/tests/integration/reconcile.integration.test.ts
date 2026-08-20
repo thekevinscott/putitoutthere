@@ -196,6 +196,46 @@ describe('piot reconcile: backfill missing tags (#410)', () => {
     expect(code).toBe(0);
   });
 
+  it("backfills the registry's latest version when an older tag already exists (#623)", async () => {
+    // A delegated PyPI package (#623) is uploaded by the caller-side
+    // `pypi-publish` job, not by the publish job that plans it — so the
+    // tag for the newly uploaded version has to be cut afterwards, from
+    // the job that performed the upload. In steady state the package
+    // already carries the PREVIOUS release's tag, which is the case
+    // "published, untagged" does not describe: there are tags, they just
+    // don't cover the version now on the registry.
+    writeConfigAndCommit();
+    tagAtHead('mycrate-py-v0.0.1');
+    const releaseCommit = commit('py 0.0.2 release');
+    latest.pypi.set('mycrate-py', '0.0.2');
+
+    const code = await run(['node', 'piot', 'reconcile', '--cwd', repo]);
+    const out = stdoutChunks.join('');
+
+    expect(hasTag('mycrate-py-v0.0.2'), out).toBe(true);
+    expect(tagCommitSha('mycrate-py-v0.0.2')).toBe(releaseCommit);
+    // The older tag is left exactly where it was.
+    expect(hasTag('mycrate-py-v0.0.1')).toBe(true);
+    expect(code).toBe(0);
+  });
+
+  it('leaves a package alone when the registry version is already tagged', async () => {
+    // The complement: a tag AHEAD of the registry (a version cut but not
+    // yet live) is not something a backfill can fix, and the registry's
+    // own latest version already carries its tag — so reconcile writes
+    // nothing rather than re-tagging on every drift state.
+    writeConfigAndCommit();
+    tagAtHead('mycrate-py-v0.0.1');
+    tagAtHead('mycrate-py-v0.0.2');
+    latest.pypi.set('mycrate-py', '0.0.1');
+
+    const code = await run(['node', 'piot', 'reconcile', '--json', '--cwd', repo]);
+
+    const result = JSON.parse(stdoutChunks.join('')) as { actions: Array<{ package: string }> };
+    expect(result.actions).toEqual([]);
+    expect(code).toBe(0);
+  });
+
   it('--dry-run reports the heal but creates no tag', async () => {
     writeConfigAndCommit();
     latest.crates.set('mycrate', '0.0.1');
