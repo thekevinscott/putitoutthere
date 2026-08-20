@@ -5,6 +5,8 @@ import {
   attachHandlerMeta,
   normalizeTarget,
   readHandlerMeta,
+  type PlatformPublishSummary,
+  type PublishResult,
 } from './types.js';
 
 describe('error classes', () => {
@@ -71,5 +73,44 @@ describe('normalizeTarget (#159)', () => {
     const n = normalizeTarget({ triple: 'x86_64-pc-windows-msvc' });
     expect(n.triple).toBe('x86_64-pc-windows-msvc');
     expect('runner' in n).toBe(false);
+  });
+});
+
+describe('PublishResult platform summary (#625)', () => {
+  it('is satisfiable without mentioning a platform family at all', () => {
+    // The load-bearing property of the #625 design: `platforms` is
+    // OPTIONAL. Every crates / pypi / vanilla-npm publish returns a result
+    // with no platform family, and if the field ever became required the
+    // natural way to satisfy it would be an empty
+    // `{published: [], skipped: []}` — which reads as a family that shipped
+    // nothing, the exact misreport #625 removed. This assignment is the
+    // guard: it stops compiling under `tsc --noEmit` the moment `platforms`
+    // stops being optional. The runtime half pins the consequence that
+    // matters — the key is absent from the JSON report, not present as
+    // `null`/`undefined`.
+    const noFamily: PublishResult = { status: 'published', url: 'https://npm/x' };
+
+    expect(Object.hasOwn(noFamily, 'platforms')).toBe(false);
+    expect(JSON.parse(JSON.stringify(noFamily))).toEqual({
+      status: 'published',
+      url: 'https://npm/x',
+    });
+  });
+
+  it('carries both lists into the JSON report when a family shipped', () => {
+    // `published` and `skipped` are both reported, and both survive the
+    // `JSON.stringify` the CLI runs — an empty `skipped` must serialize as
+    // `[]` rather than vanishing, since "nothing was skipped" and "we did
+    // not look" are different answers to the operator's question.
+    const summary: PlatformPublishSummary = {
+      published: ['demo-x86_64-unknown-linux-gnu'],
+      skipped: [],
+    };
+    const shipped: PublishResult = { status: 'published', platforms: summary };
+
+    expect(JSON.parse(JSON.stringify(shipped))).toEqual({
+      status: 'published',
+      platforms: { published: ['demo-x86_64-unknown-linux-gnu'], skipped: [] },
+    });
   });
 });
