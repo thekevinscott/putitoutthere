@@ -32,6 +32,14 @@ function entry(name: string): { isFile: () => boolean; name: string } {
   return { isFile: () => true, name };
 }
 
+/**
+ * The same, for a subdirectory — `isFile()` is false, so a top-level-only
+ * count discards it along with whatever it holds.
+ */
+function dirEntry(name: string): { isFile: () => boolean; name: string } {
+  return { isFile: () => false, name };
+}
+
 const row = { name: '@scope/pkg', kind: 'npm', version: '1.0.0', target: 'linux-x64-gnu', path: 'packages/npm' };
 const opts = { cwd: '/unused', matrix: '', registry: 'http://localhost:4873' };
 
@@ -71,6 +79,29 @@ describe('verifyNpmTarballTriple', () => {
     expect(readdirMock).toHaveBeenCalledWith(expect.anything(), { withFileTypes: true });
     // The downloaded tarball's temp root is cleaned up recursively/forcefully.
     expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
+  });
+
+  it('counts a payload nested below the top level (#633)', async () => {
+    // A bundled-cli consumer stages `artifacts/<name>-<triple>/bin/<binary>`
+    // rather than flat, so the tarball's top level is `package.json` plus a
+    // `bin/` DIRECTORY. Counting only top-level files reads that as
+    // metadata-only and fails a tarball whose binary is right there at
+    // `package/bin/` — the recursive listing is the one that sees it.
+    resolveMock.mockResolvedValue('https://reg/triple.tgz');
+    downloadMock.mockResolvedValue(TARBALL);
+    // Top level is metadata plus a DIRECTORY; the payload is one level down.
+    readdirMock.mockResolvedValue([entry('package.json'), dirEntry('bin')] as never);
+    listMock.mockResolvedValue([
+      'tarball-root/package/package.json',
+      'tarball-root/package/bin/pkg-linux-x64-gnu',
+    ]);
+
+    const code = await verifyNpmTarballTriple([row], opts);
+    const text = out.join('');
+    // Reported relative to `package/`, so the nested path is legible —
+    // a basename alone wouldn't say where the binary landed.
+    expect(text).toContain('ok: 1 non-metadata file(s): bin/pkg-linux-x64-gnu');
+    expect(code).toBe(0);
   });
 
   it('fails when the tarball carries only package.json', async () => {

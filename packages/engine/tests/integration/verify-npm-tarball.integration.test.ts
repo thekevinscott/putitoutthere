@@ -72,6 +72,13 @@ beforeAll(() => {
     'package.json': '{"name":"@scope/pkg-linux-x64-gnu","version":"1.0.0"}',
     'pkg.linux-x64-gnu.node': 'ELF...\n',
   });
+  // A bundled-cli consumer whose build stages `bin/<binary>` rather than
+  // flat: the tarball's top level is `package.json` plus the `bin/`
+  // DIRECTORY, with the binary one level down (#633).
+  tgz.nestedBinary = buildTgz('nested-binary', {
+    'package.json': '{"name":"@scope/pkg-linux-x64-gnu","version":"1.0.0"}',
+    'bin/pkg-linux-x64-gnu': '#!/bin/sh\necho hi\n',
+  });
   tgz.onlyMeta = buildTgz('only-meta', {
     'package.json': '{"name":"@scope/pkg-linux-x64-gnu","version":"1.0.0"}',
   });
@@ -284,6 +291,25 @@ describe('piot verify npm-tarball --per-triple: synthesized binary presence (#44
 
     const text = out.join('');
     expect(text).toContain('ok: 1 non-metadata file(s):');
+    expect(code).toBe(0);
+  });
+
+  it('passes when the per-triple tarball stages its binary nested under bin/ (#633)', async () => {
+    // The nested layout is legal all the way to publish — `checkCompleteness`
+    // lists recursively, so it accepts either shape — but this verify step
+    // counted only top-level FILES, so `bin/` (a directory) didn't count and
+    // the step failed a tarball whose binary is right there at `package/bin/`.
+    wire({ '@scope/pkg-linux-x64-gnu@1.0.0': 'https://reg/nested.tgz' }, { 'https://reg/nested.tgz': tgz.nestedBinary! });
+
+    const code = await run([
+      'node', 'piot', 'verify', 'npm-tarball', '--per-triple',
+      '--registry', 'http://localhost:4873',
+      '--matrix', JSON.stringify([mainRow({ target: 'linux-x64-gnu' })]),
+      '--cwd', repo,
+    ]);
+
+    const text = out.join('');
+    expect(text, `output:\n${text}`).toContain('ok: 1 non-metadata file(s): bin/pkg-linux-x64-gnu');
     expect(code).toBe(0);
   });
 
