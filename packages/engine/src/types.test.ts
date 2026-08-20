@@ -5,6 +5,7 @@ import {
   attachHandlerMeta,
   normalizeTarget,
   readHandlerMeta,
+  type PublishResult,
 } from './types.js';
 
 describe('error classes', () => {
@@ -71,5 +72,24 @@ describe('normalizeTarget (#159)', () => {
     const n = normalizeTarget({ triple: 'x86_64-pc-windows-msvc' });
     expect(n.triple).toBe('x86_64-pc-windows-msvc');
     expect('runner' in n).toBe(false);
+  });
+});
+
+describe('PublishResult.status (#623)', () => {
+  it('admits `delegated`, distinct from `published`', () => {
+    // A handler that uploaded nothing must be able to say so: `publish()`
+    // cuts the git tag on `published` and deliberately does not on
+    // `delegated`, which is what keeps a tag off the remote for a PyPI
+    // version the caller-side job has not uploaded yet. The assignment
+    // below is the compile-time half — `tsc` rejects it if the union ever
+    // loses the member — and the literal is what the branch keys on.
+    const delegated: PublishResult = {
+      status: 'delegated',
+      url: 'https://pypi.org/project/demo/1.0.0/',
+    };
+    const published: PublishResult = { status: 'published' };
+
+    expect(delegated.status).toBe('delegated');
+    expect(delegated.status).not.toBe(published.status);
   });
 });

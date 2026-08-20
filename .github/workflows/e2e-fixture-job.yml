@@ -529,7 +529,10 @@ jobs:
 
       # PyPI: upload step runs in the caller-side `pypi-publish` job
       # (mirrors release.yml). No twine / setup-python in the publish
-      # job — engine creates the tag, caller's job uploads.
+      # job — the caller's job uploads, and since #623 cuts the tag too.
+      # Fixture repos are throwaway git trees with no remote, so neither
+      # half is observable here; the tag contract is pinned at the unit /
+      # integration / CLI-e2e tiers instead.
 
       - uses: ./.github/actions/setup-pnpm
 

@@ -34,10 +34,12 @@ jobs:
   # PyPI Trusted Publishers can't validate OIDC tokens minted from a
   # cross-repo reusable workflow (pypi/warehouse#11096). The `if:`
   # gate skips this job for non-PyPI repos — paste verbatim regardless
-  # of what you publish.
+  # of what you publish. `pypi_pending` is only 'true' when the release
+  # job actually handed this job an upload, and `!cancelled()` lets that
+  # upload proceed even if the release job failed on some other registry.
   pypi-publish:
     needs: release
-    if: needs.release.outputs.has_pypi == 'true'
+    if: ${{ !cancelled() && needs.release.outputs.pypi_pending == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -53,6 +55,15 @@ jobs:
           path: dist/
           merge-multiple: true
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Cuts the git tag for what the job above just uploaded. The release
+  # job deliberately does not tag a PyPI package: a tag records what
+  # shipped, and until this upload lands, nothing has. Paste verbatim.
+  pypi-tag:
+    needs: pypi-publish
+    uses: thekevinscott/putitoutthere/.github/workflows/pypi-tag.yml@v0
+    permissions:
+      contents: write
 ```
 
 Pinned action versions, `plan → build → publish` orchestration, and GitHub
@@ -66,7 +77,11 @@ Trusted Publisher feature filters OIDC tokens by `repository_owner` /
 TP registered against `thekevinscott/putitoutthere` is filtered out
 before `job_workflow_ref` is even checked. Running `pypa/gh-action-pypi-publish`
 in your workflow context aligns the claims with your TP registration.
-The job is skipped automatically for repos that don't publish to PyPI.
+`pypi-tag` cuts the git tag for what that upload published — the release
+job deliberately leaves a PyPI package untagged until its upload lands,
+so a run that fails on some other registry can't leave behind a tag for
+a version nobody uploaded. Both jobs are skipped automatically for repos
+that don't publish to PyPI.
 
 > [!IMPORTANT]
 > **Don't run anything else on `push: branches: [main]`.** If you have
@@ -674,9 +689,32 @@ a Trusted Publisher.](https://docs.pypi.org/trusted-publishers/troubleshooting/)
 Tracked at [pypi/warehouse#11096](https://github.com/pypi/warehouse/issues/11096).
 
 That's why the canonical template puts the PyPI upload step
-(`pypa/gh-action-pypi-publish`) directly in *your* workflow,
-gated on `needs.release.outputs.has_pypi`. In your workflow context
-both claims resolve to your repo, so your TP registration matches.
+(`pypa/gh-action-pypi-publish`) directly in *your* workflow. In your
+workflow context both claims resolve to your repo, so your TP
+registration matches.
+
+Two consequences of the upload living out there, both handled by the
+template you pasted:
+
+- **The git tag goes with it.** The release job cuts tags for crates.io
+  and npm as it publishes them, but a PyPI package is only *handed* to
+  your `pypi-publish` job at that point — nothing is on PyPI yet. Tagging
+  then would put `<pkg>-v<version>` on your remote naming a distribution
+  that a failed run never uploaded, and a tag pointing at nothing has to
+  be deleted by hand before a re-run does the right thing. So the
+  `pypi-tag` job cuts it afterwards, and cuts it from *registry* truth:
+  it tags the version PyPI reports as live, so an upload that silently
+  uploaded nothing is not recorded as a release.
+- **The gate is `pypi_pending`, not `has_pypi`.** `has_pypi` is
+  plan-time — "this repo has a PyPI package" — so a failure on npm or
+  crates.io used to skip the PyPI upload entirely, even though the
+  registries are independent. `pypi_pending` is publish-time: `'true'`
+  only when the engine actually reached your PyPI package and handed
+  over its upload. Paired with `!cancelled()`, your upload proceeds when
+  an unrelated registry fails, and is skipped when the run never got far
+  enough to validate the package — or when the version is already live,
+  which also stops an idempotent re-run from re-uploading files PyPI
+  already has ([#623](https://github.com/thekevinscott/putitoutthere/issues/623)).
 
 ## Post-release bookkeeping
 
@@ -687,12 +725,17 @@ an announcement. putitoutthere does not run that logic for you (it runs no
 consumer-supplied code in its pipeline), but it tells you the moment and
 the facts through two reusable-workflow outputs, so you compose a
 downstream job on them exactly like the `pypi-publish` job composes on
-`has_pypi`:
+`pypi_pending`:
 
 | output | value |
 | --- | --- |
 | `released` | `'true'` when this run **newly** published ≥ 1 package, else `'false'`. Idempotent re-runs (versions already live) report `'false'`. |
 | `released_packages` | JSON array of what newly shipped — `[{"name","version","tag"}, …]` — in publish order. `[]` when nothing shipped. |
+
+A **PyPI** package is not in either until its upload lands, because the
+release job doesn't perform that upload — see [Publishing to PyPI](#how-auth-flows).
+If your bookkeeping needs to run after a PyPI release, hang it off
+`pypi-tag` (`needs: pypi-tag`) rather than off `released`.
 
 `released` is **publish-time** ("did we ship?"), not plan-time ("did we
 plan?") — so a push that re-runs the pipeline without new versions won't

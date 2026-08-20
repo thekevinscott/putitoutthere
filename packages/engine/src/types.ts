@@ -97,7 +97,16 @@ export interface ArtifactStore {
 }
 
 export interface PublishResult {
-  status: 'published' | 'already-published' | 'skipped';
+  /**
+   * `delegated` (#623) means the handler did NOT upload: the artifact's
+   * upload runs somewhere the engine isn't. Only pypi uses it — PyPI
+   * Trusted Publishers cannot validate an OIDC token minted inside a
+   * cross-repo reusable workflow (warehouse#11096), so the upload happens
+   * in a caller-side job. It is deliberately distinct from `published`:
+   * nothing is on the registry yet, so the publish path must not cut the
+   * package's git tag, which is the record of what shipped.
+   */
+  status: 'published' | 'already-published' | 'skipped' | 'delegated';
   url?: string;
   bytes?: number;
 }

@@ -23,6 +23,7 @@ import { parseFlags, run } from './cli.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
 import { computePlanStatus } from './plan-status.js';
+import { attachPublishProgress } from './publish-progress.js';
 import { publish } from './publish.js';
 import { reconcile } from './reconcile.js';
 import { releaseGithub } from './release-github/index.js';
@@ -604,6 +605,63 @@ describe('cli: publish dispatch', () => {
     const code = await run(argv('publish', '--cwd', '/x'));
     expect(code).toBe(0);
     expect(stdout.join('')).toContain('published: demo@1.2.3  status=published');
+  });
+
+  it('names a delegated row as a handoff, not a publish (#623)', async () => {
+    // pypi uploads from the caller's job, so "published: …" in the run
+    // log would be the same lie the tag used to tell. Say who does what.
+    publishMock.mockResolvedValue({
+      ok: true,
+      published: [
+        { package: 'demo-py', version: '1.2.3', result: { status: 'delegated' }, tag: 'demo-py-v1.2.3' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof publish>>);
+    const code = await run(argv('publish', '--cwd', '/x'));
+    expect(code).toBe(0);
+    const out = stdout.join('');
+    expect(out).toContain(
+      'delegated: demo-py@1.2.3  upload + tag demo-py-v1.2.3 run in your pypi-publish job',
+    );
+    expect(out).not.toContain('published: demo-py');
+  });
+
+  it('emits the delegation facts even when publish throws (#623)', async () => {
+    // The #623 repro: pypi delegated, then npm failed the run. The
+    // caller-side upload job gates on `delegated`, so the facts have to
+    // survive the throw — otherwise a broken npm scope silently skips
+    // an unrelated registry's upload.
+    publishMock.mockRejectedValue(
+      attachPublishProgress(new Error('npm publish failed: E404 Scope not found'), [
+        { package: 'demo-py', version: '1.2.3', result: { status: 'delegated' }, tag: 'demo-py-v1.2.3' },
+      ]),
+    );
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+
+    const code = await run(argv('publish', '--cwd', '/x'));
+
+    expect(code).toBe(1);
+    const written = appendFileMock.mock.calls.map((c) => String(c[1] as string)).join('');
+    expect(written).toMatch(/(^|\n)delegated=true\n/);
+    expect(written).toContain(
+      'delegated_packages=[{"name":"demo-py","version":"1.2.3","tag":"demo-py-v1.2.3"}]',
+    );
+    // The failure itself still reaches the operator.
+    expect(stderr.join('')).toMatch(/E404 Scope not found/);
+  });
+
+  it('writes no delegation facts when the failure happened before any package (#623)', async () => {
+    // A preflight abort carries no progress; emitting `delegated=true`
+    // there would run the caller-side upload for a run that never
+    // validated the package.
+    publishMock.mockRejectedValue(new Error('Pre-flight auth check failed'));
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+
+    const code = await run(argv('publish', '--cwd', '/x'));
+
+    expect(code).toBe(1);
+    const written = appendFileMock.mock.calls.map((c) => String(c[1] as string)).join('');
+    expect(written).toMatch(/(^|\n)delegated=false\n/);
+    expect(written).toMatch(/(^|\n)delegated_packages=\[\]\n/);
   });
 
   it('forwards --config to the publish engine', async () => {

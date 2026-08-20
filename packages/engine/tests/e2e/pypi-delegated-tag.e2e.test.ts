@@ -49,10 +49,12 @@ function writeRepoFile(rel: string, body: string): void {
 
 /** Shell out to the real CLI; capture exit + stdout/stderr either way. */
 function runCli(args: string[]): { code: number; stdout: string; stderr: string } {
-  // A throwaway token clears the auth pre-flight (never used — the
-  // delegation path uploads nothing). Drop the GitHub vars so the
-  // repo-visibility / URL-match pre-flights no-op.
-  const env = { ...process.env, PYPI_API_TOKEN: 'piot-e2e-delegated-placeholder' };
+  // A throwaway value clears the auth pre-flight (never used — the
+  // delegation path uploads nothing). Deliberately low-entropy: a
+  // `piot-e2e-*-placeholder` string clears generic-api-key's 3.5 entropy
+  // threshold and trips the secret scan (see `.gitleaksignore`). Drop the
+  // GitHub vars so the repo-visibility / URL-match pre-flights no-op.
+  const env = { ...process.env, PYPI_API_TOKEN: 'not-a-token' };
   delete env.GITHUB_REPOSITORY;
   delete env.GITHUB_TOKEN;
   delete env.GITHUB_OUTPUT;

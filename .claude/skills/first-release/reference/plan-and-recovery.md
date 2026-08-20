@@ -78,18 +78,23 @@ normal, not bad luck. Work it methodically:
 
 ## The PyPI partial-tag trap (the most repeated friction)
 
-PyPI publishes in **two phases that can disagree**:
+PyPI publishes in **two phases**:
 
-1. The engine's `publish` job builds the wheels/sdist **and creates the git
-   tag**.
-2. Your caller-side `pypi-publish` job uploads to PyPI **afterward**
-   (`needs: release`).
+1. The engine's `publish` job builds the wheels/sdist and hands the upload off.
+2. Your caller-side `pypi-publish` job uploads to PyPI **afterward**, and the
+   `pypi-tag` job cuts the git tag once PyPI reports the version live.
 
-If phase 2 fails (a bad wheel, a `twine` error) after phase 1 has tagged, you
-get a **tag with no artifact on PyPI**. The next run then sees the package
-already tagged, finds no new glob changes, and **excludes it from the plan** →
-`has_pypi=false` → `pypi-publish` is skipped → the package is stuck empty while
-its tag claims success.
+Since [#623](https://github.com/thekevinscott/putitoutthere/issues/623) the tag
+belongs to phase 2, so a failed upload leaves the package **untagged** — which
+the next run re-plans and re-attempts. Nothing to recover by hand.
+
+On a repo whose `release.yml` predates that change — its `pypi-publish` gates on
+`has_pypi` and it has no `pypi-tag` job — phase 1 tagged before phase 2 ran, so
+a phase-2 failure left a **tag with no artifact on PyPI**. The next run then saw
+the package already tagged, found no new glob changes, and **excluded it from
+the plan** → `has_pypi=false` → `pypi-publish` skipped → the package stuck empty
+while its tag claimed success. Fix the workflow file first (re-paste the current
+template), then recover the stuck version as below.
 
 Recognize it: **`npx putitoutthere status` reports the package
 `tagged, unpublished`** — the git tag (and GitHub Release) exist, but `pip

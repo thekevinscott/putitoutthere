@@ -18,21 +18,24 @@
  * `pypa/gh-action-pypi-publish` from the consumer's own workflow
  * context (where both `repository` and `job_workflow_ref` align with
  * the consumer's repo + their TP registration). The reusable workflow
- * still emits the matrix, builds artifacts, and creates+pushes git
- * tags; only the upload step moves.
+ * still emits the matrix and builds artifacts; the upload moves, and
+ * with it the package's git tag (#623) — a tag records what shipped, so
+ * it belongs to the job that actually ships it.
  *
  * The handler therefore:
  *  - `isPublished`: unchanged. Public PyPI HEAD; no auth needed.
  *  - `writeVersion`: unchanged. Rewrites `[project].version` in-place
  *    or logs a SETUPTOOLS_SCM hint for dynamic-version projects.
- *  - `publish`: NO upload. Returns `{ status: 'published' }` so
- *    `publish.ts` creates+pushes the git tag. The tag is the engine's
- *    record-of-intent; the caller's `pypi-publish` job performs the
- *    actual upload using `pypa/gh-action-pypi-publish` (which is
- *    idempotent, so a transient caller-side failure is recoverable
- *    by re-triggering).
+ *  - `publish`: NO upload. Returns `{ status: 'delegated' }`, which
+ *    `publish.ts` deliberately does NOT tag (#623). The upload runs in
+ *    the caller's `pypi-publish` job via `pypa/gh-action-pypi-publish`;
+ *    the tag is cut afterwards, from that same job, once PyPI confirms
+ *    the version is live. Reporting `published` here used to cut the tag
+ *    at the moment of delegation, so any later failure in the run — a
+ *    different registry, a different package — left a tag on the remote
+ *    naming a distribution nobody had uploaded.
  *
- * Issue #17. Plan: §6.4, §12.2, §12.3, §13.1, §14.5, §16.1.
+ * Issue #17, #623. Plan: §6.4, §12.2, §12.3, §13.1, §14.5, §16.1.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -152,23 +155,22 @@ async function publishImpl(
   }
 
   // No upload from here. The engine's role for PyPI is plan + build +
-  // version-rewrite + tag — the actual `pypa/gh-action-pypi-publish`
-  // call lives in the caller's `pypi-publish` job, where the OIDC
-  // claims align with their TP registration. Returning 'published'
-  // triggers `publish.ts` to create + push the git tag, which is the
-  // engine's record-of-intent and the signal the caller's job uses to
-  // know there's work to do.
+  // version-rewrite — the actual `pypa/gh-action-pypi-publish` call
+  // lives in the caller's `pypi-publish` job, where the OIDC claims
+  // align with their TP registration. `delegated` is what tells
+  // `publish.ts` to hold the tag (#623): nothing is on PyPI yet, and a
+  // tag cut here would outlive a run that never reached the upload.
   ctx.log.info(
     [
       `pypi: ${pkg.name}@${version} delegated to caller-side upload step.`,
-      '  The engine creates and pushes the git tag from this job; the actual',
-      '  upload runs in your `pypi-publish` job via `pypa/gh-action-pypi-publish`.',
+      '  The upload runs in your `pypi-publish` job via `pypa/gh-action-pypi-publish`;',
+      '  the git tag is cut there too, after PyPI confirms the version is live.',
       '  See README → "Publishing to PyPI" for the recipe.',
     ].join('\n'),
   );
 
   return {
-    status: 'published',
+    status: 'delegated',
     url: `${REGISTRY}/project/${pypiNameFor(pkg)}/${version}/`,
   };
 }

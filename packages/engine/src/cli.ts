@@ -47,8 +47,11 @@ import { advanceFloatingMajor } from './advance-floating-major.js';
 import { advanceV0 } from './advance-v0.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
+import { emitReleaseOutputs } from './emit-release-outputs.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
+import { readPublishProgress } from './publish-progress.js';
+import type { PublishOutput } from './publish-types.js';
 import { reconcile } from './reconcile.js';
 import { releaseGithub } from './release-github/index.js';
 import { formatStatusRow } from './status-format.js';
@@ -548,48 +551,47 @@ export async function run(argv: readonly string[]): Promise<number> {
         return 0;
       }
       case 'publish': {
-        const result = await publish({
-          cwd: flags.cwd,
-          ...(flags.config !== undefined ? { configPath: flags.config } : {}),
-          releasePackages: flags.releasePackages,
-        });
+        let result: PublishOutput;
+        try {
+          result = await publish({
+            cwd: flags.cwd,
+            ...(flags.config !== undefined ? { configPath: flags.config } : {}),
+            releasePackages: flags.releasePackages,
+          });
+        } catch (err) {
+          // #623: a run that died on one registry may already have handed
+          // PyPI's upload to the caller-side job. Emit the facts for the
+          // packages that got that far before rethrowing, so the caller's
+          // job can gate on "PyPI's own path succeeded" rather than on
+          // whole-job success — a missing npm scope must not be able to
+          // skip an unrelated registry's upload.
+          await emitReleaseOutputs(readPublishProgress(err), process.env.GITHUB_OUTPUT);
+          throw err;
+        }
         if (flags.json) {
           process.stdout.write(JSON.stringify(result) + '\n');
         } else if (result.published.length === 0) {
           process.stdout.write('published: (nothing)\n');
         } else {
           for (const p of result.published) {
+            // A delegated row uploaded nothing (#623) — calling it
+            // "published" in the run log is the same lie the tag used to
+            // tell. Name the handoff instead.
             process.stdout.write(
-              `published: ${p.package}@${p.version}  status=${p.result.status}\n`,
+              p.result.status === 'delegated'
+                ? `delegated: ${p.package}@${p.version}  upload + tag ${p.tag} run in your pypi-publish job\n`
+                : `published: ${p.package}@${p.version}  status=${p.result.status}\n`,
             );
           }
         }
-        // #461: surface what actually shipped so the reusable workflow
-        // can propagate `released` / `released_packages` outputs a
-        // consumer gates a post-release job on (changelog assembly,
-        // docs stamping, announcements). This is a publish-time signal
-        // ("did we ship?"), unlike the plan-time `has_pypi`: only
-        // packages the handler *newly* published this run count, so an
-        // idempotent re-run reports `released=false` with an empty list.
-        // The tag rides through from the publish path's canonical
-        // `formatTag` render — no caller-side reconstruction.
-        const publishGithubOutput = process.env.GITHUB_OUTPUT;
-        if (publishGithubOutput) {
-          const shipped = result.published.filter(
-            (p) => p.result.status === 'published',
-          );
-          const releasedPackages = shipped.map((p) => ({
-            name: p.package,
-            version: p.version,
-            tag: p.tag,
-          }));
-          await appendFile(
-            publishGithubOutput,
-            `released=${shipped.length > 0}\n` +
-              `released_packages=${JSON.stringify(releasedPackages)}\n`,
-            'utf8',
-          );
-        }
+        // #461 / #623: surface what actually shipped, and what was handed
+        // off, so the reusable workflow can propagate them as outputs a
+        // consumer gates downstream jobs on. Publish-time signals, unlike
+        // the plan-time `has_pypi`: an idempotent re-run whose versions
+        // are already live reports both as false. The tag rides through
+        // from the publish path's canonical `formatTag` render — no
+        // caller-side reconstruction.
+        await emitReleaseOutputs(result.published, process.env.GITHUB_OUTPUT);
         return 0;
       }
     }

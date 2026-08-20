@@ -264,15 +264,19 @@ First-release failures are almost always real, not flakes. Work them per
   release run automatically, and **`npx putitoutthere reconcile`** backfills it
   on demand with no release (it creates the tag at the sibling packages'
   release commit). `status` (Step 10) flags this as `published, untagged`.
-- **The PyPI partial-tag trap is the *opposite* drift and still needs a manual
-  recovery.** The engine tags a pypi package in its publish job, but the
-  *upload* runs in your caller-side `pypi-publish` job afterward. If that upload
-  fails, the **tag exists but PyPI is empty** — `status` shows
-  `tagged, unpublished` — and the next run excludes the now-tagged package from
-  the plan (`has_pypi=false`) → stuck. `reconcile` does **not** fix this (the
-  tag is already there; the *publish* is what's missing). Recover with the
-  **`release_packages` override at a bumped version** (`my-py@0.0.2`) — the
-  clean path, and the general tool for re-releasing after any pipeline fix.
+- **The PyPI partial-tag trap is closed (#623), as long as the template is
+  current.** A pypi package's upload runs in your caller-side `pypi-publish`
+  job, so the engine no longer tags it in the publish job — the `pypi-tag` job
+  cuts the tag after the upload, from the version PyPI reports as live. A
+  failed upload therefore leaves the package *untagged*, which the next run
+  re-plans and re-attempts. If you are looking at a repo whose `release.yml`
+  predates this (its `pypi-publish` gates on `has_pypi` and there is no
+  `pypi-tag` job), the old trap still applies: the **tag exists but PyPI is
+  empty** — `status` shows `tagged, unpublished` — and the next run excludes
+  the now-tagged package from the plan → stuck. `reconcile` does **not** fix
+  that (the tag is already there; the *publish* is what's missing). Recover
+  with the **`release_packages` override at a bumped version** (`my-py@0.0.2`),
+  and re-paste the current template so it can't recur.
 - **Scoped-env limits:** git access may be branch-scoped (`403` on tag pushes
   or other branches). `reconcile` belongs in CI with the release job's
   permissions; from a scoped agent, route tag backfills to the user or sidestep

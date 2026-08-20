@@ -1,10 +1,21 @@
 /**
  * `putitoutthere reconcile` — backfill the missing git tag for every
- * package that is live on its registry but untagged (`status`'s
- * `published, untagged` drift). The on-demand companion to the
- * publish-path auto-heal (#407): auto-heal only fires for a package
- * already in a publish run, so a package whose globs never change again
- * stays stuck forever; `reconcile` heals it without a release.
+ * package whose live registry version has no tag. The on-demand
+ * companion to the publish-path auto-heal (#407): auto-heal only fires
+ * for a package already in a publish run, so a package whose globs never
+ * change again stays stuck forever; `reconcile` heals it without a
+ * release.
+ *
+ * The healable condition is stated in terms of the registry, not the
+ * drift label (#623): the version that IS live must have a tag. That
+ * covers `status`'s `published, untagged` (no tags at all) and the
+ * steady-state `version mismatch` a delegated PyPI upload leaves behind
+ * — the previous release is tagged, the version the caller-side
+ * `pypi-publish` job just uploaded is not. It is also why this is the
+ * command that job runs after uploading: the tag then follows registry
+ * truth rather than a step's exit code. A tag *ahead* of the registry
+ * (cut but not yet published) is a different drift class and is left
+ * alone — its registry version already carries its own, older tag.
  *
  * Thin reader, no parallel logic (design-commitments #7): `computeStatus`
  * (#403) finds the drift, `resolveTagCommit` picks the commit, and
@@ -14,13 +25,14 @@
  * `ensureTag` no-ops when the tag already exists, so a re-run does
  * nothing.
  *
- * Issue #410, #403 slice 3.
+ * Issue #410, #403 slice 3, #623.
  */
 
 import { join } from 'node:path';
 
 import { loadConfig, type Package } from './config.js';
 import { ensureTag } from './ensure-tag.js';
+import { tagList } from './git.js';
 import { createLogger } from './log.js';
 import { resolveTagCommit } from './resolve-tag-commit.js';
 import { computeStatus } from './status.js';
@@ -39,15 +51,21 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
 
   const actions: ReconcileAction[] = [];
   for (const row of rows) {
-    // Only published-but-untagged is healable by writing a tag.
-    // version-mismatch and tagged-unpublished are different drift classes
-    // a missing tag would not fix.
-    if (row.state !== 'published, untagged') {continue;}
+    // Nothing to back-fill without a live version to back-fill to:
+    // `unreleased` and `tagged, unpublished` name versions that are not
+    // on the registry, and an unreachable registry is not evidence of
+    // anything. A missing tag would not fix either.
+    if (row.registryUnreachable || row.registry === null) {continue;}
     const pkg = byName.get(row.package)!;
-    const version = row.registry!;
+    const version = row.registry;
+    const tag = formatTag(pkg.tag_format, { name: pkg.name, version });
+    // Already tagged => nothing to do. This is what keeps the widened
+    // condition (#623) from re-tagging on every drift state: a package
+    // whose newest tag is *ahead* of the registry still has a tag for the
+    // registry's own version, so it lands here and is skipped.
+    if ((await tagList(tag, { cwd })).length > 0) {continue;}
     const siblings = config.packages.filter((p) => p.name !== row.package);
     const { commit, source } = await resolveTagCommit(version, siblings, { cwd });
-    const tag = formatTag(pkg.tag_format, { name: pkg.name, version });
     if (!dryRun) {
       await ensureTag(pkg.tag_format, pkg.name, version, commit, { cwd }, log);
     }
