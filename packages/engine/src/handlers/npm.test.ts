@@ -673,6 +673,13 @@ describe('npm.publish', () => {
     );
 
     expect(result.status).toBe('published');
+    // Key ABSENT, not present-and-undefined. `toBeUndefined()` alone cannot
+    // tell those apart, and the difference is the contract: the engine's
+    // promise is that a package with no family reports nothing here. A
+    // `{ ...result, platforms: undefined }` would serialize identically
+    // through `JSON.stringify` yet change `Object.keys`, so the absence is
+    // what has to be pinned.
+    expect(Object.hasOwn(result, 'platforms')).toBe(false);
     expect(result.platforms).toBeUndefined();
   });
 
