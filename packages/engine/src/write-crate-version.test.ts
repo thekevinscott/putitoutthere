@@ -111,4 +111,32 @@ describe('writeCrateVersionForBuild (#366)', () => {
     expect(contents).toContain('version = "0.3.5"');
     expect(contents).not.toContain('version.workspace = true');
   });
+
+  // #621: the compiled binary embeds every in-repo crate this one pulls in
+  // by path, and it is often the *dependency* that owns the version-bearing
+  // symbol. The command now reports those manifests alongside its own.
+  it('also reports crates bumped through the embedded path-dependency walk', async () => {
+    const crateCargo = [
+      '[package]',
+      'name = "cli"',
+      'version = "0.2.7"',
+      '',
+      '[dependencies]',
+      'core = { path = "../core", version = "0.2" }',
+      '',
+    ].join('\n');
+    const coreCargo = ['[package]', 'name = "core"', 'version = "0.2.7"', ''].join('\n');
+    readFileMock.mockImplementation((p) =>
+      Promise.resolve((p as string).includes('core') ? coreCargo : crateCargo),
+    );
+
+    const written = await writeCrateVersionForBuild('crate', '0.3.5');
+
+    // Both the crate itself and the embedded dependency are reported.
+    expect(written.some((f) => f.includes('core'))).toBe(true);
+    expect(written.length).toBeGreaterThan(1);
+    // …and each manifest appears once, even though the crate's own path is
+    // produced by both the direct write and the requirement rewrite.
+    expect(new Set(written).size).toBe(written.length);
+  });
 });

@@ -49,7 +49,13 @@ export function resolveDepDirs(
   workspaceParsed: unknown,
   workspaceRoot: string | null,
 ): ResolvedDepDir[] {
-  const inherited = workspaceDepPaths(workspaceParsed);
+  // Only consult the workspace table when there is a root to resolve its
+  // relative paths against; an empty map then makes every inherited lookup
+  // miss, so no separate null check is needed per entry.
+  const inherited =
+    workspaceRoot === null
+      ? new Map<string, { dir: string; hasVersionReq: boolean }>()
+      : workspaceDepDirs(workspaceParsed, workspaceRoot);
   const out: ResolvedDepDir[] = [];
 
   for (const entry of cargoDepEntries(parsed)) {
@@ -62,13 +68,12 @@ export function resolveDepDirs(
       });
       continue;
     }
-    if (!entry.inheritsFromWorkspace || workspaceRoot === null) {continue;}
+    if (!entry.inheritsFromWorkspace) {continue;}
     const ws = inherited.get(entry.key);
     if (ws === undefined) {continue;}
     out.push({
       key: entry.key,
-      // Relative to the workspace root, which declared it.
-      dir: absolute(ws.path, workspaceRoot),
+      dir: ws.dir,
       hasVersionReq: ws.hasVersionReq,
       inheritsFromWorkspace: true,
     });
@@ -76,23 +81,27 @@ export function resolveDepDirs(
   return out;
 }
 
-/** `[workspace.dependencies]` entries that carry a `path`, keyed by name. */
-function workspaceDepPaths(
+/**
+ * `[workspace.dependencies]` entries that carry a `path`, keyed by name and
+ * already resolved against `workspaceRoot` — the manifest that declared
+ * them, and therefore the base those relative paths are written against.
+ */
+function workspaceDepDirs(
   workspaceParsed: unknown,
-): Map<string, { path: string; hasVersionReq: boolean }> {
-  const map = new Map<string, { path: string; hasVersionReq: boolean }>();
-  if (workspaceParsed === null || typeof workspaceParsed !== 'object') {return map;}
-  const workspace = (workspaceParsed as { workspace?: unknown }).workspace;
-  if (workspace === null || typeof workspace !== 'object') {return map;}
-  const deps = (workspace as { dependencies?: unknown }).dependencies;
-  if (deps === null || typeof deps !== 'object') {return map;}
+  workspaceRoot: string,
+): Map<string, { dir: string; hasVersionReq: boolean }> {
+  const map = new Map<string, { dir: string; hasVersionReq: boolean }>();
+  // Optional chaining rather than a guard per level: a primitive yields
+  // `undefined` for the next lookup anyway, so only null/undefined need
+  // handling and each `typeof` arm would be unobservable.
+  const workspace = (workspaceParsed as { workspace?: unknown } | null)?.workspace;
+  const deps = (workspace as { dependencies?: unknown } | null)?.dependencies;
 
-  for (const [key, value] of Object.entries(deps as Record<string, unknown>)) {
-    if (value === null || typeof value !== 'object') {continue;}
-    const obj = value as Record<string, unknown>;
+  for (const [key, value] of Object.entries((deps ?? {}) as Record<string, unknown>)) {
+    const obj = (value ?? {}) as Record<string, unknown>;
     if (typeof obj['path'] !== 'string') {continue;}
     map.set(key, {
-      path: obj['path'],
+      dir: absolute(obj['path'], workspaceRoot),
       hasVersionReq: typeof obj['version'] === 'string',
     });
   }

@@ -40,6 +40,12 @@ import { replaceDepVersionReq } from './replace-dep-version-req.js';
 import { resolveDepDirs } from './resolve-dep-dirs.js';
 import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
 
+/** A manifest that exists and parses. Missing or malformed reads as null. */
+interface Manifest {
+  source: string;
+  parsed: unknown;
+}
+
 /**
  * Walk the path-dependency graph out of `startDir`, bump every crate
  * reached to `version`, and rewrite every in-repo version requirement
@@ -62,7 +68,7 @@ export async function writeEmbeddedCrateVersions(
   const found = await findWorkspaceRoot(startDir);
   const workspaceRoot = typeof found === 'string' ? found : null;
   const workspaceParsed =
-    workspaceRoot === null ? null : await readManifest(join(workspaceRoot, 'Cargo.toml'));
+    workspaceRoot === null ? null : (await readManifest(workspaceRoot))?.parsed;
 
   const embedded = await collectEmbedded(startDir, workspaceParsed, workspaceRoot);
   const written = new Set<string>();
@@ -70,10 +76,12 @@ export async function writeEmbeddedCrateVersions(
   // 1. Bump each embedded crate. `writeResolvedCargoVersion` follows
   //    `version.workspace = true` up to the workspace root (#428).
   for (const dir of embedded) {
-    const cargoPath = join(dir, 'Cargo.toml');
-    const source = await readFileOrNull(cargoPath);
-    if (source === null || !hasPackageTable(source)) {continue;}
-    for (const p of await writeResolvedCargoVersion(dir, source, version)) {written.add(p);}
+    const manifest = await readManifest(dir);
+    // A virtual manifest declares `[workspace]` but no crate to version.
+    if (manifest === null || !hasPackageTable(manifest.parsed)) {continue;}
+    for (const p of await writeResolvedCargoVersion(dir, manifest.source, version)) {
+      written.add(p);
+    }
   }
 
   // 2. Rewrite requirements pointing at anything bumped. The workspace
@@ -84,22 +92,20 @@ export async function writeEmbeddedCrateVersions(
   if (workspaceRoot !== null) {manifestDirs.add(workspaceRoot);}
 
   for (const dir of manifestDirs) {
-    const cargoPath = join(dir, 'Cargo.toml');
-    const source = await readFileOrNull(cargoPath);
-    if (source === null) {continue;}
-    const parsed = safeParse(source);
-    if (parsed === null) {continue;}
+    const manifest = await readManifest(dir);
+    if (manifest === null) {continue;}
 
-    let updated = source;
-    for (const dep of resolveDepDirs(parsed, dir, workspaceParsed, workspaceRoot)) {
-      // An inherited entry's requirement lives in the root, and the root
-      // is visited in its own right — rewriting it from the member would
-      // target a `version` key the member does not have.
-      if (dep.inheritsFromWorkspace) {continue;}
+    let updated = manifest.source;
+    for (const dep of resolveDepDirs(manifest.parsed, dir, workspaceParsed, workspaceRoot)) {
+      // A requirement is rewritten only when it points at a crate this run
+      // actually bumped. The workspace root routinely declares members the
+      // artifact never compiles; pinning those to the release version would
+      // name a version nothing produced.
       if (!dep.hasVersionReq || !bumped.has(dep.dir)) {continue;}
       updated = replaceDepVersionReq(updated, dep.key, version);
     }
-    if (updated !== source) {
+    if (updated !== manifest.source) {
+      const cargoPath = join(dir, 'Cargo.toml');
       await writeFile(cargoPath, updated, 'utf8');
       written.add(cargoPath);
     }
@@ -110,7 +116,8 @@ export async function writeEmbeddedCrateVersions(
 
 /**
  * Breadth-first walk of path dependencies out of `startDir`. Returns the
- * crates reached, excluding `startDir`.
+ * crates reached, excluding `startDir` — seeding `seen` with it also keeps
+ * a dependency cycle back to the start from re-queueing forever.
  */
 async function collectEmbedded(
   startDir: string,
@@ -123,12 +130,10 @@ async function collectEmbedded(
 
   while (queue.length > 0) {
     const dir = queue.shift() as string;
-    const source = await readFileOrNull(join(dir, 'Cargo.toml'));
-    if (source === null) {continue;}
-    const parsed = safeParse(source);
-    if (parsed === null) {continue;}
+    const manifest = await readManifest(dir);
+    if (manifest === null) {continue;}
 
-    for (const dep of resolveDepDirs(parsed, dir, workspaceParsed, workspaceRoot)) {
+    for (const dep of resolveDepDirs(manifest.parsed, dir, workspaceParsed, workspaceRoot)) {
       if (seen.has(dep.dir)) {continue;}
       seen.add(dep.dir);
       found.add(dep.dir);
@@ -138,31 +143,30 @@ async function collectEmbedded(
   return found;
 }
 
-async function readManifest(path: string): Promise<unknown> {
-  const source = await readFileOrNull(path);
-  return source === null ? null : safeParse(source);
-}
-
-/** Read a file, or `null` when it does not exist. */
-async function readFileOrNull(path: string): Promise<string | null> {
+/**
+ * Read and parse `<dir>/Cargo.toml`. Returns null when the file is absent
+ * or unparseable — a path dependency can point at a directory that is not
+ * a crate, and an odd-but-writable manifest should not abort the release.
+ *
+ * ENOENT is caught rather than pre-checked with `existsSync` to avoid the
+ * TOCTOU shape CodeQL flags, matching the rest of the version-write path.
+ * Any other read failure surfaces unmodified.
+ */
+async function readManifest(dir: string): Promise<Manifest | null> {
+  let source: string;
   try {
-    return await readFile(path, 'utf8');
+    source = await readFile(join(dir, 'Cargo.toml'), 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {return null;}
     throw err;
   }
-}
-
-/** A virtual manifest declares `[workspace]` but no crate to version. */
-function hasPackageTable(source: string): boolean {
-  const parsed = safeParse(source);
-  return parsed !== null && typeof (parsed as { package?: unknown }).package === 'object';
-}
-
-function safeParse(source: string): unknown {
   try {
-    return parseToml(source);
+    return { source, parsed: parseToml(source) };
   } catch {
     return null;
   }
+}
+
+function hasPackageTable(parsed: unknown): boolean {
+  return typeof (parsed as { package?: unknown } | null)?.package === 'object';
 }

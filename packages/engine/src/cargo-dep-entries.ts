@@ -38,8 +38,10 @@ interface DepTable {
  * `path` and would otherwise have to re-derive that fact.
  */
 export function cargoDepEntries(parsed: unknown): CargoDepEntry[] {
-  if (parsed === null || typeof parsed !== 'object') {return [];}
-  const root = parsed as Record<string, unknown>;
+  // `?? {}` rather than a type guard: a primitive yields `undefined` for
+  // every lookup below, so only null/undefined need substituting, and the
+  // extra `typeof` arm a guard would carry could never change an outcome.
+  const root = (parsed ?? {}) as Record<string, unknown>;
   const out: CargoDepEntry[] = [];
 
   for (const table of collectTables(root)) {
@@ -67,9 +69,9 @@ function collectTables(root: Record<string, unknown>): DepTable[] {
   const target = root['target'];
   if (target !== null && typeof target === 'object') {
     for (const perTarget of Object.values(target as Record<string, unknown>)) {
-      if (perTarget === null || typeof perTarget !== 'object') {continue;}
+      const tables_ = (perTarget ?? {}) as Record<string, unknown>;
       for (const name of DEP_TABLE_NAMES) {
-        push((perTarget as Record<string, unknown>)[name]);
+        push(tables_[name]);
       }
     }
   }
@@ -89,10 +91,7 @@ function toEntry(key: string, value: unknown): CargoDepEntry {
   if (typeof value === 'string') {
     return { key, hasVersionReq: true, inheritsFromWorkspace: false };
   }
-  if (value === null || typeof value !== 'object') {
-    return { key, hasVersionReq: false, inheritsFromWorkspace: false };
-  }
-  const obj = value as Record<string, unknown>;
+  const obj = (value ?? {}) as Record<string, unknown>;
   const path = typeof obj['path'] === 'string' ? obj['path'] : undefined;
   return {
     key,
