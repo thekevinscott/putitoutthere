@@ -792,33 +792,47 @@ crate_path = "crates/my-cli"     # `cargo build` runs from here; defaults to `.`
 ```
 
 For every per-target row the workflow runs `rustup target add
-<triple>`, then `cargo build --release --target <triple> --bin
-<bin>` from `crate_path`, and copies the resulting binary
-(with `.exe` suffix on Windows) into the per-target staging
-directory. The engine then packages that directory as the
-platform sub-package's artifact. The `main` row carries no
-per-target binary (the launcher above is committed source).
+<triple>`, builds the binary from `crate_path` (`cargo build
+--release --target <triple> --bin <bin>` on macOS and Windows;
+Linux rows go through `cargo zigbuild` — see the note below),
+and copies the result (with `.exe` suffix on Windows) into the
+per-target staging directory. The engine then packages that
+directory as the platform sub-package's artifact. The `main`
+row carries no per-target binary (the launcher above is
+committed source).
 
 > [!NOTE]
-> **Constraint.** The binary must build with a vanilla
-> `cargo build --release --target <triple> --bin <bin>` from
-> `crate_path`, optionally with `--features` /
-> `--no-default-features`. Crates that need env vars, alternate
-> manifests, Zig-cc cross toolchains, or other cargo flags
-> don't fit the recipe — write your own release workflow
-> instead.
+> **Constraint.** The binary must build from `crate_path` with
+> nothing but `--release --target <triple> --bin <bin>`,
+> optionally plus `--features` / `--no-default-features`.
+> Crates that need env vars, alternate manifests, or other
+> cargo flags don't fit the recipe — write your own release
+> workflow instead. (The Linux rows swap the `cargo build`
+> driver for `cargo zigbuild` and the workflow installs zig
+> itself; that is transparent to your crate, and is not an
+> escape hatch you can point at a toolchain of your own.)
 
 > [!NOTE]
-> **Linux binaries are statically linked against musl.** A
-> binary compiled directly against the GitHub-hosted runner's
-> glibc carries that glibc's version as a hard runtime
-> requirement, so the package would break on any older Linux.
-> The reusable workflow sidesteps that by swapping the Linux
-> compile triple from `*-linux-gnu*` to `*-linux-musl*` before
-> `cargo build` runs (the package's declared triple, the npm
-> platform-package name, and everything else consumer-visible
-> stay on the original `*-linux-gnu*`; only the binary inside
-> switches). Your CLI crate must be musl-compatible:
+> **Linux binaries are dynamically linked gnu, pinned to glibc
+> 2.17.** A binary compiled directly against the GitHub-hosted
+> runner's glibc carries that glibc's version as a hard runtime
+> requirement, so the package would break on any older Linux —
+> and npm, unlike pip, has no install-time libc gate to catch
+> that, so the failure lands at exec time on your user's
+> machine. The reusable workflow pins the floor at *link* time
+> instead: Linux rows build with `cargo zigbuild --target
+> "<triple>.2.17"`, which links against a chosen old glibc
+> regardless of the runner's. 2.17 is the manylinux2014
+> baseline (2012), so the binary runs on every glibc distro of
+> the last decade — and, being dynamically linked, it can still
+> `dlopen`, which a static binary cannot (SQLite extension
+> loading is the usual casualty).
+>
+> The workflow installs zig for you on those rows. zig is a C
+> cross-compiler too, so crates that *compile* C sources are
+> fine. What has no toolchain is a crate that links the
+> **runner's** system shared libraries, since those are objects
+> built against the runner's newer glibc. Vendor them instead:
 >
 > - If it makes HTTPS calls, prefer `reqwest` with `rustls-tls`
 >   features (the default since reqwest v0.13).
@@ -831,22 +845,40 @@ per-target binary (the launcher above is committed source).
 > - If it uses `libpq-sys` / `mysqlclient-sys` (Postgres /
 >   MySQL clients), prefer a pure-Rust alternative
 >   (`sqlx` with `rustls`, `postgres-native-tls` swapped for
->   `postgres-rustls`) — these crates have no clean static path.
+>   `postgres-rustls`) — these have no clean vendored path.
 >
-> The musl build fails loudly at release time with a linker
-> error if any of the above is missed, so a forgotten feature
-> never produces a broken release — only a blocked one.
+> The build fails loudly at release time with a linker error if
+> any of the above is missed, so a forgotten feature never
+> produces a broken release — only a blocked one. The verify
+> step is the backstop: the row fails if the staged Linux
+> binary came out static, or if its highest versioned `GLIBC_*`
+> symbol exceeds the pinned floor.
+
+> [!NOTE]
+> **Declaring a `*-musl` target still works.** Nothing above
+> forces you onto gnu — list `linux-x64-musl` (or
+> `x86_64-unknown-linux-musl`) in `targets` and that row builds
+> against musl, statically, as musl always does. It gets zig as
+> its C cross-compiler like the gnu rows do, and it is exempt
+> from the dynamic-linkage and glibc-ceiling checks, which are
+> gnu-lane contracts: a musl binary has no glibc to floor, and
+> nothing to `dlopen` on the musl-libc distros it ships to. The
+> engine synthesizes npm's `libc` field per platform package,
+> so a `-gnu` package never installs on Alpine and a `-musl`
+> one never installs on Debian — declaring both is how you
+> cover both.
 
 > [!WARNING]
 > **Do not run `cargo build` in `npm run build` when `[package.bundle_cli]` is configured.**
 > The reusable workflow compiles the Rust binary and stages it **after**
-> your `npm run build` step, so the engine's musl binary always overwrites
-> whatever `npm run build` staged. A build script that also runs cargo with
-> the raw `-linux-gnu` triple and copies to `build/<triple>/` does wasted
-> work silently. If you migrated from a hand-authored `scripts/build.cjs`
-> to `[package.bundle_cli]`, remove the cargo invocation; keep only steps
-> that compile or generate genuinely separate artifacts (TypeScript, assets,
-> etc.).
+> your `npm run build` step, so the engine's binary always overwrites
+> whatever `npm run build` staged. A build script that also runs cargo and
+> copies to `build/<triple>/` does wasted work silently — and its binary
+> would be floored at the runner's glibc, which is the breakage the
+> zigbuild pin above exists to prevent. If you migrated from a
+> hand-authored `scripts/build.cjs` to `[package.bundle_cli]`, remove the
+> cargo invocation; keep only steps that compile or generate genuinely
+> separate artifacts (TypeScript, assets, etc.).
 
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover
@@ -934,7 +966,8 @@ no-op for the `.node` and compiles only your TypeScript / JS.
 > x86_64 macOS build on the arm64 runner), your build script owns
 > `rustup target add <triple>` and any linker / C-toolchain setup. This
 > is the one place napi differs from `bundled-cli`, where the engine
-> performs the gnu→musl mapping and installs the musl toolchain for you.
+> registers the triple and installs the zig cross-toolchain for you on
+> the Linux rows.
 
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-addon` does not cover
@@ -1047,11 +1080,16 @@ no_default_features = false
 ```
 
 The reusable workflow cross-compiles the binary per target and stages it
-into the package source tree before maturin runs. The same musl
-compatibility requirement that applies to bundled-cli npm packages
-applies here — see [Linux binaries are statically linked against
-musl](#bundled-cli-npm-family) above for the list of Cargo features to
-flip when the build fails on a system-library dependency.
+into the package source tree before maturin runs. Linux rows here compile
+the declared gnu triple with a plain `cargo build` — no zigbuild, no
+pinned floor — because the wheel's own manylinux platform tag already
+records the glibc floor of anything built on the runner and `pip` refuses
+to install the wheel on anything older, so the binary has exactly the
+wheel's reach. Set the [`manylinux`](#configuration) key to choose that
+floor. The same vendoring advice applies as for [bundled-cli npm
+packages](#bundled-cli-npm-family) — see that section for the list of
+Cargo features to flip when the build fails on a system-library
+dependency.
 
 Your `pyproject.toml` ties the staged binary into a `console_scripts`
 entry:
