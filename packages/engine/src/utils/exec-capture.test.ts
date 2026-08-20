@@ -26,6 +26,18 @@ describe('execCapture', () => {
     ).rejects.toMatchObject({ name: 'ExecError', status: 3 });
   });
 
+  it('records the argv on the ExecError so the failure dump can report it', async () => {
+    // #617. Without this the dump renders an empty command block for every
+    // failed subprocess.
+    let caught: unknown;
+    try {
+      await execCapture(process.execPath, ['-e', 'process.exit(3)']);
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as ExecError).command).toEqual([process.execPath, '-e', 'process.exit(3)']);
+  });
+
   it('rejects with status null and a cause when the binary is missing', async () => {
     let caught: unknown;
     try {
@@ -36,6 +48,9 @@ describe('execCapture', () => {
     expect(caught).toBeInstanceOf(ExecError);
     expect((caught as ExecError).status).toBeNull();
     expect((caught as ExecError).cause).toBeDefined();
+    // A spawn failure has no output and no exit code; the argv is the only
+    // thing left to say what was attempted.
+    expect((caught as ExecError).command).toEqual(['definitely-not-a-real-binary-469']);
   });
 
   describe('with a temp cwd', () => {

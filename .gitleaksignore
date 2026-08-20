@@ -1,0 +1,19 @@
+# Findings gitleaks has already adjudicated, one fingerprint per line
+# (`<commit>:<path>:<rule>:<line>`). Fingerprints are pinned to a specific
+# commit, so an entry here suppresses exactly one historical finding and can
+# never blind the scanner on a future diff — unlike a path or regex
+# allowlist in `.gitleaks.toml`.
+#
+# #617 / PR #631. The e2e added in 6f6b4cd passes a stand-in credential to
+# the auth pre-flight and writes another into a fixture `.npmrc`; the local
+# stand-in registry the test spawns never reads either. Both were
+# `piot-e2e-*-placeholder` strings, whose Shannon entropy (3.77 / 3.52)
+# clears generic-api-key's 3.5 threshold when they sit next to the word
+# "token". d1e1eff replaced them with a low-entropy `not-a-token`, but
+# gitleaks scans every commit in a PR, not just its head, so the original
+# commit still trips it.
+#
+# These two entries die with the squash-merge that collapses this branch —
+# the commit they name will not exist on main.
+6f6b4cde587a01a576fc87ac6e05ea1a832cc9e8:packages/engine/tests/e2e/npm-name-collision.e2e.test.ts:generic-api-key:112
+6f6b4cde587a01a576fc87ac6e05ea1a832cc9e8:packages/engine/tests/e2e/npm-name-collision.e2e.test.ts:generic-api-key:171

@@ -18,4 +18,20 @@ describe('ExecError', () => {
     expect(err.status).toBeNull();
     expect(err.cause).toBe(cause);
   });
+
+  it('carries the argv the seam recorded', () => {
+    // #617: the failure dump reads this to report what actually ran. The
+    // message a handler wraps this error in never holds the argv.
+    const err = new ExecError('Command failed', '', '', 1, {
+      command: ['npm', 'publish', '--access=public'],
+    });
+    expect(err.command).toEqual(['npm', 'publish', '--access=public']);
+  });
+
+  it('defaults command to empty when the seam did not record one', () => {
+    // Every pre-#617 call site omits it; those must not produce
+    // `undefined.join(...)` in the renderer.
+    expect(new ExecError('boom', '', '', 1).command).toEqual([]);
+    expect(new ExecError('boom', '', '', 1, { cause: new Error('x') }).command).toEqual([]);
+  });
 });

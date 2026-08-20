@@ -23,14 +23,18 @@ export function execInherit(
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, [...args], { stdio: 'inherit', cwd: opts.cwd, env: opts.env });
     child.on('error', (err) => {
-      reject(new ExecError(err.message, '', '', null, { cause: err }));
+      reject(new ExecError(err.message, '', '', null, { cause: err, command: [cmd, ...args] }));
     });
     child.on('close', (code) => {
       if (code === 0) {
         resolve();
         return;
       }
-      reject(new ExecError(`Command failed: ${cmd} ${args.join(' ')}`, '', '', code));
+      reject(
+        new ExecError(`Command failed: ${cmd} ${args.join(' ')}`, '', '', code, {
+          command: [cmd, ...args],
+        }),
+      );
     });
   });
 }
