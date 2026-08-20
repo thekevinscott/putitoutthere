@@ -571,6 +571,151 @@ describe('npm.publish', () => {
     expect(publishCwds[1]).toBe(dir);
   });
 
+  it('reports the platform packages it published on the result (#625)', async () => {
+    // The umbrella result is the only channel `publishPlatforms`'
+    // `{ published, skipped }` has to reach the run report. Without it a
+    // three-package publish and a one-package publish are byte-identical
+    // downstream.
+    const artifactsRoot = `${dir}/artifacts`;
+    for (const triple of ['linux-x64-gnu', 'darwin-arm64']) {
+      mkdirSync(`${artifactsRoot}/demo-js-${triple}`, { recursive: true });
+      writeFileSync(`${artifactsRoot}/demo-js-${triple}/demo.node`, Buffer.from('x'));
+    }
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
+    });
+
+    const result = await npm.publish(
+      { ...basePkg(), path: dir, build: 'napi', targets: ['linux-x64-gnu', 'darwin-arm64'] },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot }),
+    );
+
+    expect(result.status).toBe('published');
+    expect(result.platforms).toEqual({
+      published: ['demo-npm-linux-x64-gnu', 'demo-npm-darwin-arm64'],
+      skipped: [],
+    });
+  });
+
+  it('reports the platform packages it skipped as already published (#625)', async () => {
+    // Re-run after a partial failure: the platform packages are live, the
+    // umbrella is not. "These were already published" is the operator's
+    // confirmation that nothing was lost, and it has to be visible.
+    const artifactsRoot = `${dir}/artifacts`;
+    mkdirSync(`${artifactsRoot}/demo-js-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-js-linux-x64-gnu/demo.node`, Buffer.from('x'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {
+        // The umbrella is absent; the platform package is live.
+        return String(a[1]).startsWith('demo-npm@')
+          ? Promise.reject(new ExecError('E404', '', '404', 1))
+          : Promise.resolve(ok('0.1.0'));
+      }
+      return Promise.resolve(ok(''));
+    });
+
+    const result = await npm.publish(
+      { ...basePkg(), path: dir, build: 'napi', targets: ['linux-x64-gnu'] },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot }),
+    );
+
+    expect(result.platforms).toEqual({
+      published: [],
+      skipped: ['demo-npm-linux-x64-gnu'],
+    });
+  });
+
+  it('logs the platform-family summary as the family lands (#625)', async () => {
+    // The final report only exists at the end of the run; an operator
+    // watching a live log needs the family named while it happens.
+    const artifactsRoot = `${dir}/artifacts`;
+    mkdirSync(`${artifactsRoot}/demo-js-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-js-linux-x64-gnu/demo.node`, Buffer.from('x'));
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
+    });
+    const info = vi.fn();
+
+    await npm.publish(
+      { ...basePkg(), path: dir, build: 'napi', targets: ['linux-x64-gnu'] },
+      '0.1.0',
+      makeCtx({
+        cwd: dir,
+        artifactsRoot,
+        log: { debug: () => {}, info, warn: () => {}, error: () => {} },
+      }),
+    );
+
+    expect(info).toHaveBeenCalledWith(
+      'npm: demo-npm@0.1.0 platform packages: 1 published, 0 already published',
+      { published: ['demo-npm-linux-x64-gnu'], skipped: [] },
+    );
+  });
+
+  it('reports no platform summary for a vanilla package with no family (#625)', async () => {
+    // An empty `{published: [], skipped: []}` would read as a platform
+    // family that shipped nothing; absent is the honest answer.
+    execMock
+      .mockImplementationOnce(() => Promise.reject(new ExecError('404', '', '', 1)))
+      .mockResolvedValueOnce(ok(''));
+
+    const result = await npm.publish(
+      { ...basePkg(), path: dir },
+      '0.1.0',
+      makeCtx({ cwd: dir }),
+    );
+
+    expect(result.status).toBe('published');
+    expect(result.platforms).toBeUndefined();
+  });
+
+  it('carries the platform summary through the publish-over race (#625)', async () => {
+    // npm's own retry can turn a landed publish into an E403 "cannot
+    // publish over"; the handler reports already-published. The platform
+    // packages still went out on this run, so the summary must survive
+    // that arm too — it is the arm where an operator most needs to know
+    // what actually shipped.
+    const artifactsRoot = `${dir}/artifacts`;
+    mkdirSync(`${artifactsRoot}/demo-js-linux-x64-gnu`, { recursive: true });
+    writeFileSync(`${artifactsRoot}/demo-js-linux-x64-gnu/demo.node`, Buffer.from('x'));
+    let mainPublishSeen = false;
+    execMock.mockImplementation((_cmd, args, opts) => {
+      const a = args as string[];
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      // The main publish runs with cwd === pkg.path; platform publishes
+      // pass the staging dir as a positional and run there too, so
+      // distinguish on the absence of a trailing folder argument.
+      const isMain = (opts as { cwd?: string } | undefined)?.cwd === dir && a.at(-1)!.startsWith('--');
+      if (isMain) {
+        mainPublishSeen = true;
+        return Promise.reject(
+          new ExecError('E403', '', 'cannot publish over the previously published versions: 0.1.0', 1),
+        );
+      }
+      return Promise.resolve(ok(''));
+    });
+
+    const result = await npm.publish(
+      { ...basePkg(), path: dir, build: 'napi', targets: ['linux-x64-gnu'] },
+      '0.1.0',
+      makeCtx({ cwd: dir, artifactsRoot }),
+    );
+
+    expect(mainPublishSeen).toBe(true);
+    expect(result.status).toBe('already-published');
+    expect(result.platforms).toEqual({
+      published: ['demo-npm-linux-x64-gnu'],
+      skipped: [],
+    });
+  });
+
   it('dispatches to platform publish for array-form build (#dirsql)', async () => {
     // Two artifact families on disk — one per mode — each in its own
     // mode-infixed directory. Match what plan.ts emits for array-form.

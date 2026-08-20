@@ -11,7 +11,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { normalizeTarget, TransientError, type Ctx, type Handler, type PublishResult, type TargetEntry, type TrustPosture } from '../types.js';
+import { normalizeTarget, TransientError, type Ctx, type Handler, type PlatformPublishSummary, type PublishResult, type TargetEntry, type TrustPosture } from '../types.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
 import { detectIndent } from './detect-indent.js';
@@ -102,6 +102,16 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
   // napi / bundled-cli: publish platform packages first, then rewrite
   // the main package.json to add optionalDependencies, then fall through
   // to the normal main-package publish path below. §13.7.
+  //
+  // #625: `publishPlatforms` reports which platform packages it
+  // published and which were already live, and that has to reach the
+  // caller. Discarding it made a six-package release indistinguishable
+  // from a one-package one in the run report — and on a re-run after a
+  // partial failure, hid the fact that the missing packages were already
+  // safely on the registry. `platforms` stays undefined for a package
+  // with no family so a vanilla publish reports nothing rather than an
+  // empty summary.
+  let platforms: PlatformPublishSummary | undefined;
   const buildEntries = normalizeBuild(pkg.build);
   if (buildEntries.length > 0 && pkg.targets !== undefined && pkg.targets.length > 0) {
     const platformPkg: PlatformPkg = {
@@ -116,8 +126,23 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
       // so npm-platform.ts keeps its `readonly string[]` contract.
       targets: pkg.targets.map((t) => normalizeTarget(t).triple),
     };
-    await publishPlatforms(platformPkg, version, ctx);
+    platforms = await publishPlatforms(platformPkg, version, ctx);
+    // Emitted here rather than only in the final report so a live run
+    // log shows the family as it lands, not just at the end.
+    ctx.log.info(
+      `npm: ${npmNameFor(pkg)}@${version} platform packages: ` +
+        `${platforms.published.length} published, ` +
+        `${platforms.skipped.length} already published`,
+      { published: platforms.published, skipped: platforms.skipped },
+    );
   }
+
+  // Attach the family summary to whichever outcome this publish reaches.
+  // Every return below this point is downstream of the platform publish,
+  // so all of them carry it; the already-published early return above is
+  // not, and correctly reports no family (nothing was touched).
+  const withPlatforms = (result: PublishResult): PublishResult =>
+    platforms === undefined ? result : { ...result, platforms };
 
   // Internal e2e seam: PIOT_NPM_REGISTRY routes publish at a non-default
   // registry (Verdaccio in the first-publish e2e variant; #304). Not a
@@ -169,10 +194,10 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     // E403 "cannot publish over the previously published versions". The
     // first attempt actually succeeded — treat as already-published.
     if (looksLikePublishOverRace(stderr)) {
-      return {
+      return withPlatforms({
         status: 'already-published',
         url: `https://www.npmjs.com/package/${name}/v/${version}`,
-      };
+      });
     }
     // Attestation edition of the publish-over race: npm's retry re-submits
     // an identical --provenance attestation and Sigstore/Rekor rejects the
@@ -183,10 +208,10 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     const tlogStderr = matchTlogDuplicate(stderr);
     if (tlogStderr !== null) {
       if (await isPublishedImpl(pkg, version, ctx)) {
-        return {
+        return withPlatforms({
           status: 'already-published',
           url: `https://www.npmjs.com/package/${name}/v/${version}`,
-        };
+        });
       }
       throw new Error(
         `npm publish failed: Sigstore transparency-log dedupe ` +
@@ -217,12 +242,12 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     throw new Error(`npm publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
   }
 
-  return {
+  return withPlatforms({
     status: 'published',
     url: registryOverride
       ? `${registryOverride.replace(/\/$/, '')}/${npmNameFor(pkg)}/-/${version}`
       : `https://www.npmjs.com/package/${npmNameFor(pkg)}/v/${version}`,
-  };
+  });
 }
 
 /* ------------------------------ internals ------------------------------ */
