@@ -96,6 +96,28 @@ export interface ArtifactStore {
   has(artifactName: string): boolean;
 }
 
+/**
+ * What a platform-package family did during one publish (#625).
+ *
+ * `napi` and `bundled-cli` npm packages ship a synthesized package per
+ * target alongside the umbrella package — a six-package release is one
+ * umbrella and five platform packages. `publishPlatforms` has always
+ * known which of them it published and which were already live; this is
+ * how that reaches the run report, which is the only record an operator
+ * has of what a release actually did. Without it a complete
+ * multi-package publish and a partial one that shipped the umbrella and
+ * stopped produce byte-identical output.
+ *
+ * Registry names (`@scope/pkg-<triple>`), not config names, so they can
+ * be pasted straight at a registry.
+ */
+export interface PlatformPublishSummary {
+  /** Published during this run, in publish order. */
+  published: readonly string[];
+  /** Already live at this version, so left untouched. */
+  skipped: readonly string[];
+}
+
 export interface PublishResult {
   /**
    * `delegated` (#623) means the handler did NOT upload: the artifact's
@@ -109,6 +131,14 @@ export interface PublishResult {
   status: 'published' | 'already-published' | 'skipped' | 'delegated';
   url?: string;
   bytes?: number;
+  /**
+   * Present only for a package that actually has a platform-package
+   * family, and only once that family has been processed. A vanilla npm
+   * package (and every crates / pypi package) reports nothing here
+   * rather than an empty summary, which would read as a family that
+   * shipped nothing.
+   */
+  platforms?: PlatformPublishSummary;
 }
 
 export interface SmokeResult {
