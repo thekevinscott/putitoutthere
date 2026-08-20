@@ -7,11 +7,24 @@ name: Link check
 on:
   pull_request:
     paths:
+      # `**/*.md` alone is correct for GitHub — it reads a leading `**/` as
+      # *zero or more* directories, so it matches root-level `CHANGELOG.md`
+      # too. The redundant-looking `*.md` is for the CI Gate: pr-monitor's
+      # willfire (0.1.2) translates `**/*.md` to `^.*\/[^/]*\.md$`, which
+      # requires a literal `/`, so it predicts this workflow will NOT fire on
+      # a root-level markdown change. GitHub fires it anyway, and the gate
+      # then fails the PR with `Unpredicted workflow runs: [link-check.yml]`.
+      # Because the changelog policy puts `CHANGELOG.md` + `MIGRATIONS.md`
+      # (both root-level) in every public-surface PR, that made the gate red
+      # on essentially every feature PR. Drop this line once willfire renders
+      # a leading `**/` as `(?:.*/)?`.
       - '**/*.md'
+      - '*.md'
   push:
     branches: [main]
     paths:
       - '**/*.md'
+      - '*.md'
   schedule:
     - cron: '0 5 * * 1' # 05:00 UTC Monday
 
