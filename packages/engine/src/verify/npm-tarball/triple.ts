@@ -17,7 +17,9 @@
  * the payload inside it. The nested layout is legal all the way to publish
  * (`checkCompleteness` lists recursively, so it accepts either shape), so
  * this check has to see it too. Paths are reported relative to `package/`,
- * which is what makes a nested payload legible in the log.
+ * which is what makes a nested payload legible in the log. One walk decides
+ * the verdict, so the failure message can no longer name a file the verdict
+ * called absent.
  *
  * The platform package name is reconstructed as `{name}-{triple}` — the
  * default template every fixture uses — because the matrix row carries the
@@ -61,20 +63,23 @@ export async function verifyNpmTarballTriple(
     }
 
     const { root, packageDir } = await downloadNpmTarball(url, 2);
-    // One listing feeds both arms, so the diagnostic can no longer contradict
-    // the verdict by naming a file the count didn't see. Only the tarball's
-    // own `package.json` is metadata — a nested one is payload like any other
-    // file, and excluding it by basename would make "contains only
-    // package.json" a false statement about a tarball holding two files.
-    const contents = (await listFilesRecursive(packageDir)).map((f) =>
-      toPosixPath(relative(packageDir, f)),
-    );
-    const payload = contents.filter((f) => f !== 'package.json');
+    // Only the tarball's own root `package.json` is metadata — a nested one
+    // is payload like any other file, and excluding it by basename would
+    // make "contains only package.json" a false statement about a tarball
+    // holding two of them.
+    const payload = (await listFilesRecursive(packageDir))
+      .map((f) => toPosixPath(relative(packageDir, f)))
+      .filter((f) => f !== 'package.json');
     if (payload.length > 0) {
       process.stdout.write(`  ok: ${payload.length} non-metadata file(s): ${payload.join(' ')} \n`);
     } else {
+      // No listing to print: reaching here means the recursive walk found
+      // nothing but the root `package.json`, so any listing would restate
+      // the sentence. The old message appended one built from a SECOND,
+      // recursive walk while the verdict came from a top-level count — which
+      // is how it came to name the very binary it called absent (#633).
       process.stdout.write(
-        `::error::[${platformName}@${version}] tarball contains only package.json (no synthesized binary/.node staged). Tarball contents: ${contents.join(' ')} \n`,
+        `::error::[${platformName}@${version}] tarball contains only package.json (no synthesized binary/.node staged).\n`,
       );
       fail = 1;
     }

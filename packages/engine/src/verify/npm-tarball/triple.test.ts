@@ -98,15 +98,19 @@ describe('verifyNpmTarballTriple', () => {
     resolveMock.mockResolvedValue('https://reg/triple.tgz');
     downloadMock.mockResolvedValue(TARBALL);
     // Genuinely metadata-only: an empty `bin/` contributes no files, so the
-    // recursive listing is the `package.json` and nothing else. The
-    // diagnostic now agrees with the verdict rather than naming a payload
-    // the count claimed was absent.
+    // recursive walk finds the `package.json` and nothing else.
     listMock.mockResolvedValue(['tarball-root/package/package.json']);
 
     const code = await verifyNpmTarballTriple([row], opts);
     const text = out.join('');
-    expect(text).toContain('tarball contains only package.json (no synthesized binary/.node staged)');
-    expect(text).toContain('Tarball contents: package.json');
+    expect(text).toContain(
+      '::error::[@scope/pkg-linux-x64-gnu@1.0.0] tarball contains only package.json (no synthesized binary/.node staged).\n',
+    );
+    // No trailing listing: one walk decides the verdict, and reaching here
+    // means it found nothing a listing could add. The pre-#633 message
+    // appended one from a second walk and so named the binary it had just
+    // called absent.
+    expect(text).not.toContain('Tarball contents');
     expect(code).toBe(1);
   });
 

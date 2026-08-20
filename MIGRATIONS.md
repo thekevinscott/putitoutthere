@@ -46,7 +46,7 @@ else in the pipeline.
 
 **Deprecations removed.** None.
 
-**Behavior changes without code changes.** Two, both in the per-triple
+**Behavior changes without code changes.** Three, all in the per-triple
 verify step:
 
 1. A platform tarball whose only payload is nested now passes. The
@@ -57,12 +57,16 @@ verify step:
    is still a failure.
 2. The step's log lines name paths relative to `package/` rather than
    bare filenames: `ok: 2 non-metadata file(s): README.md bin/esbuild`
-   where a flat listing previously printed only `README.md`. The
-   `::error::` line's `Tarball contents:` listing is now drawn from the
-   same recursive listing that decides the verdict, so it can no longer
-   name a file the verdict claimed was missing. Anyone grepping this
-   step's output for a bare filename should match on the trailing
-   segment.
+   where a flat listing previously printed only `README.md`. Anyone
+   grepping this step's output for a bare filename should match on the
+   trailing segment.
+3. The `::error::` line no longer carries a trailing
+   `Tarball contents: …` listing. It was built from a second, recursive
+   walk while the verdict came from a top-level count, which is how it
+   came to name the very binary the same line called absent; now that one
+   walk decides, reaching the failure arm means there is nothing left for
+   a listing to add. Anyone grepping for `Tarball contents:` on a failed
+   per-triple verify should match the sentence instead.
 
 **Verification.** For a package whose platform build stages nested, the
 `Verify published per-triple npm tarballs` step reports
