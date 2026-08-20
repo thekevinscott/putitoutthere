@@ -63,6 +63,21 @@ describe('error-codes', () => {
     expect(ErrorCodes.NPM_NAME_MISMATCH).toBe('PIOT_NPM_NAME_MISMATCH');
   });
 
+  it('exposes the npm moniker-refusal code the publish path surfaces (#617)', () => {
+    // Distinct from NPM_NAME_MISMATCH above, which is a *local* manifest
+    // disagreement caught at preflight. This one is the registry refusing
+    // to create the name at all, and it is only knowable at publish time.
+    expect(ErrorCodes.NPM_NAME_TOO_SIMILAR).toBe('PIOT_NPM_NAME_TOO_SIMILAR');
+    expect(ErrorCodes.NPM_NAME_TOO_SIMILAR).not.toBe(ErrorCodes.NPM_NAME_MISMATCH);
+  });
+
+  it('every code in the object is also iterable via ALL_ERROR_CODES', () => {
+    // The parity test above compares two Sets, which stays green if a code
+    // is added to neither. Pin the count so a code added to `ErrorCodes`
+    // alone — the easy half to remember — cannot slip through.
+    expect(ALL_ERROR_CODES).toHaveLength(Object.keys(ErrorCodes).length);
+  });
+
   it('ErrorCode type alias resolves to the union of literal strings', () => {
     // Compile-time assertion that every value passes the type check.
     const sample: ErrorCode = ErrorCodes.AUTH_NO_TOKEN;

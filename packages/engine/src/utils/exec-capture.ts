@@ -37,7 +37,7 @@ export function execCapture(
         if (err) {
           const code: unknown = (err as { code?: unknown }).code;
           const status = typeof code === 'number' ? code : null;
-          reject(new ExecError(err.message, stdout, stderr, status, { cause: err }));
+          reject(new ExecError(err.message, stdout, stderr, status, { cause: err, command: [cmd, ...args] }));
           return;
         }
         resolve({ stdout, stderr });

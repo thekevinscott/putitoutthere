@@ -1,0 +1,4 @@
+npm error code E403
+npm error 403 403 Forbidden - PUT https://registry.npmjs.org/demopkg - Package name too similar to existing package demo-pkg; try renaming your package to '@demo-scope/demopkg' instead.
+npm error 403 In most cases, you or one of your dependencies are requesting a package version that is forbidden by your security policy, or on a server you do not have access to.
+npm error A complete log of this run can be found in: /home/runner/.npm/_logs/2026-08-19T14_10_02_113Z-debug-0.log

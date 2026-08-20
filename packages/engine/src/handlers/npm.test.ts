@@ -1225,6 +1225,170 @@ describe('npm.publish', () => {
     },
   );
 
+  /* ------------------------ moniker rule (#617) ------------------------ */
+
+  /**
+   * Wire the two `execCapture` calls a failing publish makes: the
+   * `npm view` idempotency probe (not published), then `npm publish`
+   * rejecting with the given stderr.
+   */
+  function wirePublishFailure(stderr: string): void {
+    execMock
+      .mockImplementationOnce(() => Promise.reject(new ExecError('404', '', '', 1)))
+      .mockImplementationOnce(() => Promise.reject(new ExecError('npm exit 1', '', stderr, 1)));
+  }
+
+  const MONIKER_STDERR =
+    "npm error code E403\n" +
+    "npm error 403 403 Forbidden - PUT https://registry.npmjs.org/demo-npm - Package name too similar to existing package demo-pkg; try renaming your package to '@demo-scope/demo-npm' instead.";
+
+  it('on the moniker refusal, raises the name error instead of the bootstrap hint (#617)', async () => {
+    // The refusal wears the bootstrap hint's exact shape — auth-shaped
+    // stderr, OIDC in play, packument 404 — so both branches are live and
+    // only ordering decides. If the bootstrap branch wins, the operator is
+    // sent after a token for a name no token can create.
+    wirePublishFailure(MONIKER_STDERR);
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    const err = await npm
+      .publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      )
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toMatch(/PIOT_NPM_NAME_TOO_SIMILAR/);
+    expect(err?.message).not.toMatch(/NODE_AUTH_TOKEN/);
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
+  it('names the package, the rename and the scope remedy, and quotes npm (#617)', async () => {
+    // Actionability: the operator has to be able to act without a second
+    // run, and npm's own line is the only place the blocking package
+    // (`demo-pkg`) is named.
+    wirePublishFailure(MONIKER_STDERR);
+    const err = await npm
+      .publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toContain('demo-npm');
+    expect(err?.message).toMatch(/rename/i);
+    expect(err?.message).toMatch(/@your-scope\/demo-npm/);
+    expect(err?.message).toContain('Package name too similar to existing package demo-pkg');
+    // The sentence that redirects the operator away from credentials. It is
+    // the whole point of the message: everything else here they could have
+    // guessed from npm's line.
+    expect(err?.message).toMatch(/not an auth problem/);
+  });
+
+  it('keeps the diagnosis on its own line, above npm\'s output (#617)', async () => {
+    // The parts are newline-joined, not run together: the first line is the
+    // headline an operator (and the `::error::` annotation, which takes the
+    // first non-empty line) reads.
+    wirePublishFailure(MONIKER_STDERR);
+    const err = await npm
+      .publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .then(() => null, (e: unknown) => e as Error);
+    const [headline] = (err?.message ?? '').split('\n');
+    expect(headline).toBe(
+      '[PIOT_NPM_NAME_TOO_SIMILAR] npm refused to create "demo-npm": the registry rejected the name as too similar to a package that already exists.',
+    );
+  });
+
+  it('keeps the npm ExecError as the cause (#617)', async () => {
+    // The failure dump walks the `cause` chain back to the ExecError to
+    // report the real argv and exit status. Dropping the cause here would
+    // silently put the dump back to `command: ""` / `exitCode: -1`.
+    wirePublishFailure(MONIKER_STDERR);
+    const err = await npm
+      .publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.cause).toBeInstanceOf(ExecError);
+    expect((err?.cause as ExecError).stderr).toBe(MONIKER_STDERR);
+  });
+
+  it('fires with no OIDC and makes no packument probe (#617)', async () => {
+    // The token path: same refusal, same diagnosis. The probe is the
+    // bootstrap branch's business, and reaching it at all would mean the
+    // name error came second.
+    wirePublishFailure(MONIKER_STDERR);
+    const fetchSpy = vi.spyOn(global, 'fetch');
+    await expect(
+      npm.publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
+    ).rejects.toThrow(/PIOT_NPM_NAME_TOO_SIMILAR/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('matches the plural wording that names no blocking package (#617)', async () => {
+    wirePublishFailure(
+      "npm error code E403\nnpm error 403 Package name too similar to existing packages; try renaming your package to '@user/demo-npm' and publishing with '--access public' instead",
+    );
+    await expect(
+      npm.publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir })),
+    ).rejects.toThrow(/PIOT_NPM_NAME_TOO_SIMILAR/);
+  });
+
+  it('leaves an ordinary E403 alone — no name error on a plain refusal (#617)', async () => {
+    // Guards the widening. An E403 without the prose is somebody else's
+    // failure mode and must fall through to the raw stderr.
+    wirePublishFailure('npm error code E403\nnpm error 403 403 Forbidden - PUT https://registry.npmjs.org/demo-npm - Forbidden');
+    const err = await npm
+      .publish({ ...basePkg(), path: dir }, '0.1.0', makeCtx({ cwd: dir }))
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toMatch(/npm publish failed/);
+    expect(err?.message).not.toMatch(/PIOT_NPM_NAME_TOO_SIMILAR/);
+  });
+
+  it('the bootstrap hint keeps npm\'s stderr underneath it (#617)', async () => {
+    // The hint infers its diagnosis from the *absence* of the package, not
+    // from anything the registry said. Without the registry's own words
+    // attached, a wrong inference is unfalsifiable — which is how #617
+    // survived four runs.
+    wirePublishFailure('npm error code E404\nnpm error 404 Not Found - PUT https://registry.npmjs.org/demo-npm - Not found');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    const err = await npm
+      .publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      )
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toMatch(/NODE_AUTH_TOKEN/);
+    expect(err?.message).toContain('npm error code E404');
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
+  it('the bootstrap hint stays intact when npm gave no stderr (#617)', async () => {
+    // Nothing to append; the hint must not grow a trailing blank line or
+    // an "undefined".
+    execMock
+      .mockImplementationOnce(() => Promise.reject(new ExecError('404', '', '', 1)))
+      .mockImplementationOnce(() => Promise.reject(new ExecError('npm error not authorized', '', '', 1)));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'oidc-present';
+    const err = await npm
+      .publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-present' } }),
+      )
+      .then(() => null, (e: unknown) => e as Error);
+    // Empty stderr never reaches `looksLikeAuthFailure`, so this is the
+    // plain failure path — and it must stay free of a dangling separator.
+    expect(err?.message).toBe('npm publish failed: npm error not authorized');
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    fetchSpy.mockRestore();
+  });
+
   it('treats E403 "cannot publish over previously published versions" as already-published (#dirsql)', async () => {
     // npm CLI's retry-on-transient-network-error: the first PUT succeeded
     // (the package + provenance landed on the registry) but came back
