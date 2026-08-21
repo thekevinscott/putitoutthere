@@ -651,6 +651,10 @@ jobs:
           # `build/<triple>/` artifacts.
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
+          # #627: the planned version. No engine-side writer runs on the
+          # roll-your-own path, so a Rust build script must stamp its
+          # Cargo.toml from $VERSION before cargo bakes CARGO_PKG_VERSION in.
+          VERSION: ${{ matrix.version }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci || {
