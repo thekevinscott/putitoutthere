@@ -13,7 +13,7 @@
  * (tests/integration/npm.integration.test.ts).
  */
 
-import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture, type ExecResult } from '../utils/exec-capture.js';
@@ -37,7 +37,7 @@ function ok(stdout: string): ExecResult {
 // A minimal `node:fs/promises` substitute keyed by normalized (forward-slash)
 // path, so the source's real-`node:path` joins (back-slashed on Windows)
 // resolve to the same entries the test seeds. Covers exactly the calls
-// crossing the mocked boundary: write/read/readdir/chmod/cp/mkdtemp/rm. The
+// crossing the mocked boundary: write/read/readdir/stat/chmod/cp/mkdtemp/rm. The
 // `*Sync` names below are module-local store helpers used to seed the tree
 // and assert on it in test bodies — they are not the source's I/O.
 
@@ -123,6 +123,20 @@ function installFs(): void {
     if (!node || node.type !== 'dir') {return Promise.reject(enoent(np));}
     return Promise.resolve(readdirStore(np));
   }) as unknown as typeof readdir);
+
+  // #626: the platform-package path stats each staged candidate to tell a
+  // nested payload directory from the binary itself, so the in-memory tree
+  // must answer `isDirectory()` the way a real staged artifact would.
+  vi.mocked(stat).mockImplementation(((p: string) => {
+    const np = norm(p);
+    const node = store.get(np);
+    if (!node) {return Promise.reject(enoent(np));}
+    return Promise.resolve({
+      mode: node.mode,
+      isDirectory: () => node.type === 'dir',
+      isFile: () => node.type === 'file',
+    });
+  }) as unknown as typeof stat);
 
   vi.mocked(chmod).mockImplementation(((p: string, mode: number) => {
     const np = norm(p);

@@ -56,8 +56,11 @@ describe('writeVersionForBuild (#276, #428)', () => {
     // Both manifests are read as utf8 text, from their respective filenames.
     expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
     expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
-    // No workspace walk on the literal path.
-    expect(findRootMock).not.toHaveBeenCalled();
+    // #621: the workspace walk now runs on the literal path too, because
+    // `[workspace.dependencies]` is where an inheriting path dependency's
+    // version requirement lives. What must not change is where the version
+    // LANDS -- the crate's own manifest, never `[workspace.package].version`
+    // -- which the single write below pins.
     expect(writeMock).toHaveBeenCalledTimes(1);
     const [path, contents] = writeMock.mock.calls[0]!;
     expect((path as string).endsWith('Cargo.toml')).toBe(true);
