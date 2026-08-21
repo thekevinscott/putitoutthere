@@ -24,7 +24,8 @@
 # replaced it with a low-entropy `not-a-token`; this entry covers the
 # already-pushed commit the scanner still walks. It dies with the squash-merge.
 278dd97af08f0618406d10f19b125988b1ecf844:packages/engine/tests/e2e/pypi-delegated-tag.e2e.test.ts:generic-api-key:55
-# #639. The e2e's crates auth pre-flight takes a stand-in credential that
+
+# #639 / #640. The e2e's crates auth pre-flight takes a stand-in credential that
 # nothing ever sends — CARGO_NET_OFFLINE stops cargo before it can reach a
 # registry. The original commit spelled it `piot-e2e-*-placeholder`, whose
 # Shannon entropy clears generic-api-key's 3.5 threshold when it sits next to
@@ -32,6 +33,7 @@
 # repo settled on in d1e1eff, but gitleaks scans every commit in a PR, not
 # just its head, so the original still trips it.
 #
-# This entry dies with the squash-merge that collapses the branch — the
-# commit it names will not exist on main.
+# These entries die with the squash-merge that collapses the branch — the
+# commits they name will not exist on main.
 9062d1b638e0500641d73ed45306f940a066af4e:packages/engine/tests/e2e/crates-write-version.e2e.test.ts:generic-api-key:77
+ed0c37a92105cd570e493d2ca6493e9a46aff4e0:packages/engine/tests/e2e/crates-path-dep-version-req.e2e.test.ts:generic-api-key:80
