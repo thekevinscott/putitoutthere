@@ -1199,6 +1199,55 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     expect(result).not.toContain('crate/Cargo.toml');
   });
 
+  it('allows nothing when git names no path for the managed Cargo.toml', async () => {
+    // `ls-files` succeeding with empty output means the manifest is untracked
+    // — git will never name it in porcelain either, so there is no managed
+    // path to whitelist and every dirty file is unexpected. Distinct from the
+    // `ls-files` *throwing* case below, which takes the catch arm.
+    mockGit({ managedRel: '', porcelain: ' M crate/Cargo.toml\n' });
+    expect(await scanDirtyOutsideManifest('/repo', '/repo/crate')).toEqual(['crate/Cargo.toml']);
+  });
+
+  it('tolerates a manifest writeVersion wrote outside the package dir (#639)', async () => {
+    // A crate inheriting `version.workspace = true` has its bump land in the
+    // workspace root's Cargo.toml. That file is outside the package
+    // directory, so without being told, the guard reads the engine's own
+    // managed write as a stray edit and refuses the publish.
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M crate/Cargo.toml\n M Cargo.toml\n',
+    });
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate', undefined, undefined, [
+      '/repo/Cargo.toml',
+    ]);
+    expect(result).toEqual([]);
+  });
+
+  it('still flags a stray edit that is not one of the managed manifests', async () => {
+    // The whitelist is exactly the files the engine wrote — everything else
+    // is still refused, which is the point of the guard.
+    mockGit({
+      managedRel: 'crate/Cargo.toml',
+      porcelain: ' M Cargo.toml\n M README.md\n',
+    });
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate', undefined, undefined, [
+      '/repo/Cargo.toml',
+    ]);
+    expect(result).toEqual(['README.md']);
+  });
+
+  it('ignores a managed path that does not sit under the working tree', async () => {
+    // git names dirty files relative to the repo root, so a path outside it
+    // could never match one. Admitting it would put a `../…` string in the
+    // whitelist that only ever fails to match — silently useless rather than
+    // wrong, but worth not carrying.
+    mockGit({ managedRel: 'crate/Cargo.toml', porcelain: ' M README.md\n' });
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate', undefined, undefined, [
+      '/elsewhere/Cargo.toml',
+    ]);
+    expect(result).toEqual(['README.md']);
+  });
+
   it('flags a dirty sibling file inside the package dir that is not Cargo.toml', async () => {
     // Only src/lib.rs dirty -- the managed Cargo.toml is unchanged. Still
     // a surprise: our writeVersion didn't produce this edit.

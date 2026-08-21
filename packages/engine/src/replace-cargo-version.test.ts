@@ -30,6 +30,57 @@ describe('replaceCargoVersion', () => {
     expect(replaceCargoVersion(src, '1.0.0')).toBe(src);
   });
 
+  it('rewrites an indented version line', () => {
+    // Indentation is legal TOML and appears in hand-formatted manifests. A
+    // pattern that cannot cross leading whitespace would report the field
+    // missing and abort the release on a perfectly valid file.
+    expect(replaceCargoVersion('[package]\n  version = "0.1.0"\n', '0.4.2')).toBe(
+      '[package]\n  version = "0.4.2"\n',
+    );
+  });
+
+  it('rewrites a version line with no spaces around the `=`', () => {
+    // `version="0.1.0"` is the same assignment to TOML; spacing is the
+    // author's choice, not part of the grammar.
+    expect(replaceCargoVersion('[package]\nversion="0.1.0"\n', '0.4.2')).toBe(
+      '[package]\nversion="0.4.2"\n',
+    );
+  });
+
+  it('rewrites a version line with extra spaces around the `=`', () => {
+    expect(replaceCargoVersion('[package]\nversion  =  "0.1.0"\n', '0.4.2')).toBe(
+      '[package]\nversion  =  "0.4.2"\n',
+    );
+  });
+
+  it('finds the table when its header line carries a trailing comment', () => {
+    // `[package]   # crate metadata` is still the table header; a pattern
+    // that demanded a newline immediately after `]` would miss it entirely.
+    expect(
+      replaceCargoVersion('[package]   # crate metadata\nversion = "0.1.0"\n', '0.4.2'),
+    ).toBe('[package]   # crate metadata\nversion = "0.4.2"\n');
+  });
+
+  it('ignores a `[package]` mentioned in a comment before the real table', () => {
+    // Unanchored, the match would start inside the comment and its body
+    // would end at the real header — reporting the version missing on a file
+    // that plainly has one.
+    const src = '# see the [package] table below\n[package]\nversion = "0.1.0"\n';
+    expect(replaceCargoVersion(src, '0.4.2')).toBe(
+      '# see the [package] table below\n[package]\nversion = "0.4.2"\n',
+    );
+  });
+
+  it('ignores a `version = "..."` inside a comment above the real assignment', () => {
+    // The comment is not an assignment. Rewriting it would leave the crate's
+    // actual version untouched while editing prose — the #639 failure mode in
+    // miniature.
+    const src = '[package]\n# version = "9.9.9" once we ship\nversion = "0.1.0"\n';
+    expect(replaceCargoVersion(src, '0.4.2')).toBe(
+      '[package]\n# version = "9.9.9" once we ship\nversion = "0.4.2"\n',
+    );
+  });
+
   it('refuses a manifest that inherits its version instead of rewriting a dependency', () => {
     // #639. The `[package]` table has no literal version; the next
     // `version = "…"` in the file is pyo3's requirement. Rewriting that
