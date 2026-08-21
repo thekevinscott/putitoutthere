@@ -16,7 +16,7 @@ import { findSdistHref } from './find-sdist-href.js';
 import { normalizeIndexUrl } from './normalize-index-url.js';
 import { parseRequirement } from './parse-requirement.js';
 import { parseSimpleIndexHrefs } from './parse-simple-index.js';
-import { retrySleepSeconds } from './retry-sleep.js';
+import { MAX_ATTEMPTS, retrySleepSeconds } from './retry-sleep.js';
 import { sdistFilenameFromHref } from './sdist-filename.js';
 
 vi.mock('../utils/exec-capture.js');
@@ -109,7 +109,7 @@ describe('downloadSdists', () => {
     expect(sleepMock).toHaveBeenCalledTimes(2);
   });
 
-  it('raises the exact no-sdist error and fails after six attempts', async () => {
+  it('raises the exact no-sdist error and fails after MAX_ATTEMPTS attempts', async () => {
     stubCurl(0);
     vi.mocked(findSdistHref).mockReturnValue(null);
     await expect(downloadSdists(['pkg==1.0'], 'IDX')).resolves.toBe(1);
@@ -117,8 +117,10 @@ describe('downloadSdists', () => {
     expect(errorMessage).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'no sdist ending -1.0.tar.gz on https://norm/pkg/' }),
     );
-    expect(sleepMock).toHaveBeenCalledTimes(5);
-    expect(retrySleepSeconds).toHaveBeenNthCalledWith(5, 5);
+    // No sleep after the final attempt — the loop gives up rather than
+    // waiting out a back-off it will never use.
+    expect(sleepMock).toHaveBeenCalledTimes(MAX_ATTEMPTS - 1);
+    expect(retrySleepSeconds).toHaveBeenNthCalledWith(MAX_ATTEMPTS - 1, MAX_ATTEMPTS - 1);
   });
 });
 

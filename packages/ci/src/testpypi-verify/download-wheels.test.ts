@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execInherit } from '../utils/exec-inherit.js';
 import { sleep } from '../utils/sleep.js';
 import { downloadWheels } from './download-wheels.js';
-import { retrySleepSeconds } from './retry-sleep.js';
+import { MAX_ATTEMPTS, retrySleepSeconds } from './retry-sleep.js';
 
 vi.mock('../utils/exec-inherit.js');
 vi.mock('../utils/sleep.js');
@@ -76,18 +76,20 @@ describe('downloadWheels', () => {
     expect(sleepMock).toHaveBeenCalledTimes(2);
   });
 
-  it('fails after six attempts with the error line and five sleeps', async () => {
-    stubPip(6);
+  it('fails after MAX_ATTEMPTS attempts with the error line and one sleep fewer', async () => {
+    stubPip(MAX_ATTEMPTS);
     await expect(downloadWheels(['a==1'], 'https://idx/')).resolves.toBe(1);
     expect(out.join('')).toContain('::error::failed to download wheel for a==1 from TestPyPI\n');
-    expect(sleepMock).toHaveBeenCalledTimes(5);
-    expect(sleepSecs).toHaveBeenNthCalledWith(5, 5);
+    // No sleep after the final attempt — the loop gives up rather than
+    // waiting out a back-off it will never use.
+    expect(sleepMock).toHaveBeenCalledTimes(MAX_ATTEMPTS - 1);
+    expect(sleepSecs).toHaveBeenNthCalledWith(MAX_ATTEMPTS - 1, MAX_ATTEMPTS - 1);
   });
 
-  it('succeeds on the sixth and final attempt (six pip invocations)', async () => {
-    stubPip(5);
+  it('succeeds on the last attempt (MAX_ATTEMPTS pip invocations)', async () => {
+    stubPip(MAX_ATTEMPTS - 1);
     await expect(downloadWheels(['a==1'], 'https://idx/')).resolves.toBe(0);
-    expect(exec.mock.calls.filter((call) => call[0] === 'python')).toHaveLength(6);
+    expect(exec.mock.calls.filter((call) => call[0] === 'python')).toHaveLength(MAX_ATTEMPTS);
   });
 
   it('downloads each requirement in turn', async () => {
@@ -99,7 +101,7 @@ describe('downloadWheels', () => {
   });
 
   it('stops at the first requirement that cannot be downloaded', async () => {
-    stubPip(6);
+    stubPip(MAX_ATTEMPTS);
     await expect(downloadWheels(['a==1', 'b==2'], 'https://idx/')).resolves.toBe(1);
     expect(out.join('')).not.toContain('b==2');
   });

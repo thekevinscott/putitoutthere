@@ -1,8 +1,9 @@
 /**
  * Composition root for the wheel-download phase of `testpypi-verify metadata`.
  * Reproduces the bash `while read req … python -m pip download …` loop: for
- * each requirement, announce it, then try `pip download` up to six times,
- * sleeping `attempt*10`s between failures, and fail with the exact
+ * each requirement, announce it, then try `pip download` up to
+ * `MAX_ATTEMPTS` times, sleeping `attempt*10`s between failures, and fail
+ * with the exact
  * `::error::failed to download wheel …` line if all attempts fail. pip/sleep
  * run through the same subprocess boundary the bash used. Returns the exit
  * code (0 = all wheels downloaded).
@@ -10,10 +11,9 @@
 
 import { execInherit } from '../utils/exec-inherit.js';
 import { sleep } from '../utils/sleep.js';
-import { retrySleepSeconds } from './retry-sleep.js';
+import { MAX_ATTEMPTS, retrySleepSeconds } from './retry-sleep.js';
 
 const WHEELS_DIR = 'downloaded-wheels';
-const MAX_ATTEMPTS = 6;
 
 export async function downloadWheels(requirements: readonly string[], indexUrl: string): Promise<number> {
   for (const requirement of requirements) {
