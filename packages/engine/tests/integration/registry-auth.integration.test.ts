@@ -606,7 +606,8 @@ describe('pypi: OIDC TP filter rejection for reusable-workflow callers (#252)', 
   // does NOT call PyPI's mint endpoint or upload endpoint from inside
   // the reusable workflow at all. Upload moves to a caller-side
   // `pypi-publish` job (audit: 2026-04-28-pypi-tp-reusable-workflow-
-  // constraint.md). The engine just tags-and-records.
+  // constraint.md). The engine just records the handoff — since #623 it
+  // does not even tag: a tag records what shipped, and nothing has.
 
   it('pypi.publish() makes no HTTP calls beyond the isPublished GET', async () => {
     // msw's onUnhandledRequest: 'error' guarantees that any unmocked
@@ -625,7 +626,7 @@ describe('pypi: OIDC TP filter rejection for reusable-workflow callers (#252)', 
     ].join('\n'));
 
     const result = await pypi.publish(pkg, '0.1.0', ctx());
-    expect(result.status).toBe('published');
+    expect(result.status).toBe('delegated');
     // Exactly one request, and it was the isPublished GET.
     expect(state.requests).toHaveLength(1);
     expect(state.requests[0]!.url).toContain('/pypi/demo-py/0.1.0/json');

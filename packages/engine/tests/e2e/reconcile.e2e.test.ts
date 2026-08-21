@@ -15,7 +15,17 @@
  * local tag is the observable contract. With a single package there is
  * no sibling tag to borrow, so the tag lands at HEAD.
  *
+ * The second scenario is #623's: a package whose registry version is
+ * AHEAD of its newest tag. A delegated PyPI upload runs in the caller's
+ * `pypi-publish` job, so the tag for the version it uploads has to be
+ * backfilled after the fact — and in steady state the package already
+ * carries the previous release's tag, so "no tags at all" never
+ * describes it. Pointed at the live fixture project
+ * `piot-fixture-zzz-python-sdist`, whose published version is far ahead
+ * of the 0.0.1 tag the test plants.
+ *
  * Red before the command exists: `reconcile` is an unknown subcommand.
+ * Red before #623: the registry-ahead scenario heals nothing.
  *
  * Run via `pnpm test:e2e` (which builds `dist/` first). Issues #403, #410.
  */
@@ -29,6 +39,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const CLI = join(fileURLToPath(import.meta.url), '..', '..', '..', 'dist', 'cli-bin.js');
 const CRATE = 'piot-fixture-zzz-poly-rust';
+const PYPI_PROJECT = 'piot-fixture-zzz-python-sdist';
 
 let repo: string;
 
@@ -43,6 +54,15 @@ async function liveVersion(): Promise<string> {
   });
   const body = (await res.json()) as { crate: { newest_version: string } };
   return body.crate.newest_version;
+}
+
+/** The fixture project's current newest published version on PyPI. */
+async function livePypiVersion(): Promise<string> {
+  const res = await fetch(`https://pypi.org/pypi/${PYPI_PROJECT}/json`, {
+    headers: { 'user-agent': 'piot-e2e-reconcile' },
+  });
+  const body = (await res.json()) as { info: { version: string } };
+  return body.info.version;
 }
 
 /** Shell out to the real CLI; capture exit + stdout/stderr either way. */
@@ -116,5 +136,39 @@ describe('piot reconcile against crates.io (#410)', () => {
       .split('\n')
       .filter((t) => t === `fixture-rust-v${version}`);
     expect(tags).toHaveLength(1);
+  });
+});
+
+describe('piot reconcile against pypi.org: registry ahead of the newest tag (#623)', () => {
+  it('backfills the tag for the live version when an older tag already exists', async () => {
+    const version = await livePypiVersion();
+
+    // A pypi-only repo whose previous release (0.0.1) is tagged, while
+    // the version actually on PyPI — uploaded by a caller-side
+    // `pypi-publish` job — is not. reconcile reads the live version and
+    // cuts the tag that upload never got.
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `[putitoutthere]
+version = 1
+
+[[package]]
+name  = "fixture-py"
+kind  = "pypi"
+pypi  = "${PYPI_PROJECT}"
+path  = "packages/py"
+globs = ["packages/py/**"]
+`,
+      'utf8',
+    );
+    git(['add', '-A']);
+    git(['commit', '-q', '-m', 'pypi config']);
+    git(['tag', '-a', '-m', 'fixture-py-v0.0.1', 'fixture-py-v0.0.1']);
+
+    const { code, stdout, stderr } = runCli(['reconcile', '--cwd', repo]);
+    const output = `${stdout}\n${stderr}`;
+
+    expect(code, output).toBe(0);
+    expect(git(['tag', '-l']), output).toContain(`fixture-py-v${version}`);
   });
 });

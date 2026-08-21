@@ -77,6 +77,25 @@ describe('normalizeTarget (#159)', () => {
   });
 });
 
+describe('PublishResult.status (#623)', () => {
+  it('admits `delegated`, distinct from `published`', () => {
+    // A handler that uploaded nothing must be able to say so: `publish()`
+    // cuts the git tag on `published` and deliberately does not on
+    // `delegated`, which is what keeps a tag off the remote for a PyPI
+    // version the caller-side job has not uploaded yet. The assignment
+    // below is the compile-time half — `tsc` rejects it if the union ever
+    // loses the member — and the literal is what the branch keys on.
+    const delegated: PublishResult = {
+      status: 'delegated',
+      url: 'https://pypi.org/project/demo/1.0.0/',
+    };
+    const published: PublishResult = { status: 'published' };
+
+    expect(delegated.status).toBe('delegated');
+    expect(delegated.status).not.toBe(published.status);
+  });
+});
+
 describe('PublishResult platform summary (#625)', () => {
   it('is satisfiable without mentioning a platform family at all', () => {
     // The load-bearing property of the #625 design: `platforms` is

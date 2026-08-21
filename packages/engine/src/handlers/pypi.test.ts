@@ -398,7 +398,7 @@ describe('pypi.publish (caller-side upload architecture)', () => {
     fetchSpy.mockRestore();
   });
 
-  it('returns status=published without shelling out to twine', async () => {
+  it('returns status=delegated without shelling out to twine (#623)', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
     );
@@ -407,7 +407,11 @@ describe('pypi.publish (caller-side upload architecture)', () => {
       '0.1.0',
       makeCtx(),
     );
-    expect(result.status).toBe('published');
+    // `delegated`, not `published`: nothing has been uploaded, so the
+    // publish path must not cut this package's git tag (#623). Reporting
+    // `published` here is what left tags on the remote naming versions
+    // that were never uploaded.
+    expect(result.status).toBe('delegated');
     // Critical: the engine must NOT shell out to twine. The caller's
     // pypi-publish job runs `pypa/gh-action-pypi-publish` instead.
     expect(execMock).not.toHaveBeenCalled();
@@ -448,7 +452,19 @@ describe('pypi.publish (caller-side upload architecture)', () => {
         },
       }),
     );
-    expect(infoLines.some((m) => /caller-side|pypi-publish|gh-action-pypi-publish/i.test(m))).toBe(true);
+    // Pinned whole: each line carries a distinct fact a reader needs —
+    // that the upload was handed off, which job performs it, which action
+    // it uses, that the tag is cut there too (#623: the only place a
+    // reader learns why a green publish job cut no pypi tag), and where
+    // the recipe lives.
+    expect(infoLines).toEqual([
+      [
+        'pypi: demo-python@0.1.0 delegated to caller-side upload step.',
+        '  The upload runs in your `pypi-publish` job via `pypa/gh-action-pypi-publish`;',
+        '  the git tag is cut there too, after PyPI confirms the version is live.',
+        '  See README → "Publishing to PyPI" for the recipe.',
+      ].join('\n'),
+    ]);
     fetchSpy.mockRestore();
   });
 
@@ -467,7 +483,7 @@ describe('pypi.publish (caller-side upload architecture)', () => {
       '0.1.0',
       makeCtx({ env: {} }),
     );
-    expect(result.status).toBe('published');
+    expect(result.status).toBe('delegated');
     fetchSpy.mockRestore();
   });
 });

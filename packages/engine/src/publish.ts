@@ -8,7 +8,10 @@
  *     targets.
  *  4. For each package (in cascade / depends-on order):
  *       writeVersion → handler.publish → git tag + push.
- *  5. On handler failure: verbose dump (#15); re-throw and stop.
+ *     A handler that reports `delegated` (pypi, #623) uploaded nothing,
+ *     so it is deliberately NOT tagged here — see the branch below.
+ *  5. On handler failure: verbose dump (#15); attach the partial
+ *     progress to the error (#623); re-throw and stop.
  *
  * No-push tag model (§13.6): tag points at the merge commit; no bump
  * commit is pushed to main.
@@ -28,6 +31,7 @@ import { headCommit } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
+import { attachPublishProgress } from './publish-progress.js';
 import { ensureTag } from './ensure-tag.js';
 import { formatTag } from './tag-template.js';
 import {
@@ -260,9 +264,25 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         // GitHub Release creation is the reusable workflow's job
         // (`gh release create --generate-notes` after this step). The
         // engine cuts the tag and stops.
+      } else if (result.status === 'delegated') {
+        // #623: no tag. The handler did not upload — pypi's upload runs
+        // in the caller's `pypi-publish` job — so nothing is on the
+        // registry to record yet. Tagging here would survive a run that
+        // never reached the upload, and a tag naming a version that was
+        // never published is only removable by hand. The caller-side job
+        // cuts it once the registry confirms the version is live.
+        log.info(
+          `publish: ${name}@${version} delegated; tag ${formatTag(pkg.tag_format, { name, version })} ` +
+          `is cut by the job that performs the upload, not here.`,
+        );
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+      // #623: carry what the earlier packages did out through the throw.
+      // A delegated PyPI upload announced by a run that later failed on
+      // an unrelated registry is exactly the fact the caller-side upload
+      // job needs; losing it is what let a missing npm scope skip PyPI.
+      attachPublishProgress(error, published);
       // Phase 2 / Idea 9: handler-attached metadata (tool versions, etc.)
       // rides through to the failure renderer.
       const meta = readHandlerMeta(error);

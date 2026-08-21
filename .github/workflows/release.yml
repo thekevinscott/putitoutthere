@@ -109,6 +109,21 @@ on:
           README → "Publishing to PyPI". Always a string ("true"/"false")
           per `workflow_call` output rules.
         value: ${{ jobs.build.outputs.has_pypi }}
+      pypi_pending:
+        description: >-
+          `'true'` when this run handed ≥ 1 PyPI upload to the caller-side
+          `pypi-publish` job and that upload has not happened yet. Publish-
+          time and narrower than `has_pypi` in both directions: it is
+          `'false'` on an idempotent re-run whose PyPI versions are already
+          live (nothing to upload), and it is only `'true'` for packages the
+          engine actually reached, so a run that died in pre-flight cannot
+          trigger an upload of something it never validated (#623). Gate the
+          `pypi-publish` job on this with `!cancelled()` so a failure on an
+          unrelated registry no longer skips PyPI — see README →
+          "Publishing to PyPI". Empty string when the publish job is
+          skipped, and (per GitHub's output propagation) possibly empty when
+          it failed, in which case the gate simply skips as it did before.
+        value: ${{ jobs.publish.outputs.delegated }}
       released:
         description: >-
           `'true'` when this run newly published ≥ 1 package, else
@@ -158,6 +173,12 @@ jobs:
       # writes these to $GITHUB_OUTPUT only when a package newly ships.
       released: ${{ steps.publish.outputs.released }}
       released_packages: ${{ steps.publish.outputs.released_packages }}
+      # #623: PyPI's upload is delegated to the caller's `pypi-publish`
+      # job, so this run has NOT published those packages and has NOT
+      # tagged them. The engine writes this key even when a later package
+      # fails, which is what lets the caller's job gate on "PyPI's own
+      # path succeeded" rather than on this job's exit code.
+      delegated: ${{ steps.publish.outputs.delegated }}
     env:
       # Promote the optional caller-provided crates.io token to a job-
       # level env var so step `if:` conditions can gate on it. The
@@ -180,8 +201,10 @@ jobs:
 
       # PyPI: the upload step is owned by the caller's `pypi-publish`
       # job (see README → "Publishing to PyPI"). The engine's role
-      # here is plan + build artifact discovery + version-rewrite +
-      # tag creation; no twine, no setup-python.
+      # here is plan + build artifact discovery + version-rewrite; no
+      # twine, no setup-python. The git tag is owned by that job too
+      # (#623) — a tag records what shipped, and until the caller
+      # uploads, nothing has.
 
       - uses: actions/download-artifact@v8
         with:
@@ -321,9 +344,13 @@ jobs:
           # disagree on the matrix.
           release_packages: ${{ inputs.release_packages }}
 
-      # The engine creates annotated git tags + pushes to PyPI / npm /
+      # The engine creates annotated git tags + publishes to npm /
       # crates.io but does NOT cut GitHub Releases. Backfill that here so
-      # the project's /releases page tracks the tag history.
+      # the project's /releases page tracks the tag history. A pypi
+      # package is absent from both halves at this point: its upload and
+      # its tag both belong to the caller's jobs (#623), so its GitHub
+      # Release is cut by the next run of this step (the tag exists by
+      # then) — same idempotent backfill this step already performs.
       #
       # The no-fetch / ref-scoped-push / idempotent-create contract (#436,
       # #437) now lives in the `release-github` engine command as tested

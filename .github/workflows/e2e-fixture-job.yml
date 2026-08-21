@@ -326,6 +326,17 @@ jobs:
             *-linux-gnu*)
               cmd=(cargo zigbuild --release --target "${RUST_TARGET}.${GLIBC_FLOOR}" --bin "$BIN" --target-dir target)
               ;;
+            *-linux-musl*)
+              # A consumer that DECLARES a musl triple gets zigbuild too, with
+              # no floor to pin — musl has no glibc, and `<triple>.2.17` is not
+              # a target zig accepts. It still needs zig: zig ships musl, so it
+              # is the C cross-compiler these rows used to get from the apt
+              # `CC_<triple>=musl-gcc` step this one replaced. Falling through
+              # to a plain `cargo build` leaves them with no C toolchain at
+              # all, and every crate with C sources — the ones a musl consumer
+              # is told to vendor — fails to link.
+              cmd=(cargo zigbuild --release --target "$RUST_TARGET" --bin "$BIN" --target-dir target)
+              ;;
             *)
               cmd=(cargo build --release --target "$RUST_TARGET" --bin "$BIN" --target-dir target)
               ;;
@@ -433,6 +444,7 @@ jobs:
         env:
           DEST_DIR: fixture-tree/${{ matrix.artifact_path }}
           BIN: ${{ matrix.bundle_cli.bin }}
+          RUST_TARGET: ${{ matrix.rust_target }}
           GLIBC_FLOOR: "2.17"
         run: |
           set -euo pipefail
@@ -444,31 +456,47 @@ jobs:
             exit 1
           fi
           echo "ok bundle_cli: ${expected} present"
-          # #605: the Linux binary must be DYNAMICALLY linked — a static
+          # #605: a Linux *gnu* binary must be DYNAMICALLY linked — a static
           # (static-pie) binary has no dynamic loader, so consumer dlopen
           # (SQLite extension loading) fails at runtime with `Dynamic
           # loading not supported` (dirsql#762). The portability property
           # the old #384 static assert guarded is enforced directly
           # instead: the binary's max versioned GLIBC_* requirement must
           # stay within the GLIBC_FLOOR the zigbuild linked against, else
-          # it would fail at runtime on older distros (#381).
+          # it would fail at runtime on older distros (#381). Both are
+          # gnu-lane contracts, hence the triple check — a consumer who
+          # DECLARES a musl triple gets a static binary on purpose, and npm
+          # ships it only where `libc: ["musl"]` matches.
           if [ "$RUNNER_OS" = "Linux" ]; then
-            command -v file >/dev/null 2>&1 || {
-              echo "::error::required command 'file' not found on this runner — cannot assert linkage"
-              exit 1
-            }
-            if file "$expected" | grep -Eq 'statically linked|static-pie linked'; then
-              echo "::error::bundle_cli binary ${expected} is statically linked — a static binary cannot dlopen, so SQLite extension loading fails at runtime (#605, dirsql#762). Expected a dynamically-linked gnu build pinned to GLIBC_${GLIBC_FLOOR} via cargo-zigbuild."
-              file "$expected"
-              exit 1
-            fi
-            max_glibc=$(objdump -T "$expected" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -uV | tail -1)
-            ceiling="GLIBC_${GLIBC_FLOOR}"
-            if [ -n "$max_glibc" ] && [ "$(printf '%s\n' "$max_glibc" "$ceiling" | sort -V | tail -1)" != "$ceiling" ]; then
-              echo "::error::bundle_cli binary ${expected} requires ${max_glibc}, exceeding the ${ceiling} portability floor — it would fail at runtime on distros older than the runner (#381, #605)."
-              exit 1
-            fi
-            echo "ok bundle_cli: ${expected} is dynamically linked, glibc ceiling ${max_glibc:-none} within ${ceiling}"
+            case "$RUST_TARGET" in
+              *-linux-musl*)
+                # A consumer that DECLARES a musl triple asked for a static
+                # binary, and npm only ever installs that sub-package where the
+                # synthesized `libc: ["musl"]` matches — a distro with no glibc
+                # to dlopen against in the first place. The gnu-lane assertions
+                # below would fail the row for being what it was configured to
+                # be, and the ceiling check has no GLIBC_ symbols to read.
+                echo "ok bundle_cli: ${expected} targets musl — static linkage is expected here; the dlopen / glibc-ceiling checks are gnu-lane only"
+                ;;
+              *)
+                command -v file >/dev/null 2>&1 || {
+                  echo "::error::required command 'file' not found on this runner — cannot assert linkage"
+                  exit 1
+                }
+                if file "$expected" | grep -Eq 'statically linked|static-pie linked'; then
+                  echo "::error::bundle_cli binary ${expected} is statically linked — a static binary cannot dlopen, so SQLite extension loading fails at runtime (#605, dirsql#762). Expected a dynamically-linked gnu build pinned to GLIBC_${GLIBC_FLOOR} via cargo-zigbuild."
+                  file "$expected"
+                  exit 1
+                fi
+                max_glibc=$(objdump -T "$expected" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -uV | tail -1)
+                ceiling="GLIBC_${GLIBC_FLOOR}"
+                if [ -n "$max_glibc" ] && [ "$(printf '%s\n' "$max_glibc" "$ceiling" | sort -V | tail -1)" != "$ceiling" ]; then
+                  echo "::error::bundle_cli binary ${expected} requires ${max_glibc}, exceeding the ${ceiling} portability floor — it would fail at runtime on distros older than the runner (#381, #605)."
+                  exit 1
+                fi
+                echo "ok bundle_cli: ${expected} is dynamically linked, glibc ceiling ${max_glibc:-none} within ${ceiling}"
+                ;;
+            esac
           fi
 
       # ---- crates ----
@@ -529,7 +557,10 @@ jobs:
 
       # PyPI: upload step runs in the caller-side `pypi-publish` job
       # (mirrors release.yml). No twine / setup-python in the publish
-      # job — engine creates the tag, caller's job uploads.
+      # job — the caller's job uploads, and since #623 cuts the tag too.
+      # Fixture repos are throwaway git trees with no remote, so neither
+      # half is observable here; the tag contract is pinned at the unit /
+      # integration / CLI-e2e tiers instead.
 
       - uses: ./.github/actions/setup-pnpm
 

@@ -1,0 +1,72 @@
+name: putitoutthere pypi tag
+
+# Cuts the git tag for each PyPI package the release run delegated, AFTER
+# the caller's `pypi-publish` job has uploaded it. Issue #623.
+#
+# Why this is a separate job in the consumer's workflow rather than a step
+# inside the reusable `release.yml`:
+#
+#   PyPI's upload cannot run inside a cross-repo reusable workflow —
+#   Trusted Publisher matching filters candidates by repository_owner /
+#   repository_name before checking job_workflow_ref, so a token minted in
+#   here never matches the consumer's TP record (pypi/warehouse#11096; see
+#   notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md). The
+#   upload therefore lives in the caller's own `pypi-publish` job.
+#
+#   A git tag is the record of what shipped. Cutting it in the release job
+#   — before the caller's job has run, or when a failure on an unrelated
+#   registry means it never will — put tags on consumers' remotes naming
+#   versions that were never uploaded, recoverable only by deleting the
+#   tag by hand (#623). So the tag follows the upload.
+#
+# Consumers compose with this workflow, not with the CLI-wrapping action
+# (design-commitments non-goal #10): all the wiring — checkout, committer
+# identity, the engine invocation — lives here, where it is versioned with
+# the engine that it runs.
+#
+# The tag follows REGISTRY truth, not a step's exit code: `reconcile` reads
+# each package's live version and writes the tag only for a version that is
+# actually on the registry and has none. That makes it idempotent (a
+# re-run is a no-op), self-healing (it also backfills any tag an earlier
+# run failed to push), and incapable of recording an upload that silently
+# uploaded nothing.
+#
+# Consumer usage (their own .github/workflows/release.yml) — see
+# README → "Publishing to PyPI":
+#
+#   pypi-tag:
+#     needs: pypi-publish
+#     uses: thekevinscott/putitoutthere/.github/workflows/pypi-tag.yml@v0
+#     permissions:
+#       contents: write
+
+on:
+  workflow_call:
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Full history + tags: the engine compares each package's live
+      # registry version against the tags that already exist, and a
+      # shallow clone carries none of them.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity for tagging
+        # Annotated tags require committer identity; hosted runners have
+        # none by default.
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # No setup-node: the action is a `node24` action (GitHub supplies
+      # the runtime) and `reconcile` reads every registry over `fetch` —
+      # no `npm` / `cargo` / `twine` subprocess to provision.
+      - name: Tag every published version that has no tag
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: reconcile
