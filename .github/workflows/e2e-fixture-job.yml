@@ -383,6 +383,11 @@ jobs:
           # BUILD so the same script can stage either family.
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
+          # #627: mirror `_matrix.yml`'s VERSION so the harness and the
+          # consumer-facing workflow cannot drift. A fixture that goes
+          # green on an env contract real consumers never receive is
+          # exactly how #287 stayed invisible until a first publish.
+          VERSION: ${{ matrix.version }}
         # #305: mirror the #288 strict-install fallback from _matrix.yml
         # (the consumer-facing reusable workflow) into the e2e harness.
         # Without this, the e2e job's install step diverges from what

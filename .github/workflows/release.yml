@@ -342,7 +342,16 @@ jobs:
             # BUILD is left empty because there is no single matrix-row
             # `build` mode at this point: a multi-mode package is both
             # napi and bundled-cli; the rebuild is the union view.
-            TARGET=main BUILD='' npm run build --if-present
+            #
+            # #627: VERSION carries the planned version, same key the
+            # build matrix sets. Unlike TARGET / BUILD it is a real value
+            # rather than a sentinel — every row of a given npm package
+            # shares one version, so the first match for this path is it.
+            # Leaving it unset here would hand the script an `undefined`
+            # at publish time for a value it saw defined at build time,
+            # the same asymmetry #287 fixed for the other two.
+            version=$(printf '%s' "$MATRIX" | jq -r --arg p "$path" 'first(.[] | select(.kind == "npm" and .path == $p) | .version)')
+            TARGET=main BUILD='' VERSION="$version" npm run build --if-present
             popd > /dev/null
             echo "::endgroup::"
           done
