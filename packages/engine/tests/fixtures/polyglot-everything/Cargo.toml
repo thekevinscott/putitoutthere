@@ -1,0 +1,11 @@
+# Cargo workspace root. #641.
+#
+# The fixture claims to mirror the dirsql shape — a Rust core wrapped by a
+# pyo3 extension module — and that shape is one build unit or it is nothing:
+# without a workspace root the two crates never share a lockfile, the
+# `version.workspace = true` inheritance path (#428) has nothing to inherit
+# from, and the embedded-crate version bug this fixture exists to catch
+# (#374, then #621) has no structure here to reproduce against.
+[workspace]
+members = ["packages/rust", "packages/python"]
+resolver = "2"

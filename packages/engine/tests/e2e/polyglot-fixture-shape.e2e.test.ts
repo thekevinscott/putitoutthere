@@ -158,13 +158,30 @@ describe('polyglot-everything mirrors the shape it claims (#641)', () => {
     expect(dep?.req).toBe(`^${RELEASE}`);
   });
 
-  it('exposes the core crate version through a real symbol', () => {
-    // `main.rs` printing a literal "canary" is why no e2e could assert on
-    // what the artifact reports: there was no version-bearing symbol whose
-    // value could ever be wrong. `env!("CARGO_PKG_VERSION")` is the shape
-    // clap's `#[command(version)]` expands to, in the crate where it is
-    // written — which is the whole reason the bug exists.
-    const core = readFileSync(join(repo, 'packages/rust/src/main.rs'), 'utf8');
-    expect(core).toContain('CARGO_PKG_VERSION');
-  });
+  it(
+    'builds a real binary that reports the release version',
+    () => {
+      // The assertion the fixture could not previously support. `main.rs`
+      // printed a literal "canary": nothing in the tree had a
+      // `CARGO_PKG_VERSION` whose value could ever be wrong, so "the
+      // artifact reports the release version" was untestable here — which
+      // is how the same bug shipped twice.
+      //
+      // This compiles the core for real and executes it. Cargo bakes
+      // `CARGO_PKG_VERSION` in at compile time from the crate's on-disk
+      // manifest, with no env override, so a binary printing 0.4.2 is proof
+      // the rewrite reached the crate the compiler actually read — the one
+      // claim no manifest assertion can make.
+      writeVersion('packages/python', RELEASE);
+      const printed = execFileSync('cargo', ['run', '-q', '-p', CORE_CRATE], {
+        cwd: repo,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+      expect(printed).toBe(RELEASE);
+    },
+    // A cold runner downloads and compiles the pyo3 tree the workspace
+    // resolves before it can build the core; well outside the 60s default.
+    180_000,
+  );
 });

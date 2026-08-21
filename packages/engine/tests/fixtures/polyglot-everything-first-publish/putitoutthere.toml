@@ -28,7 +28,10 @@ version = 1
 name = "piot-fixture-zzz-poly-rust-placeholder"
 kind = "crates"
 path = "packages/rust"
-globs = ["packages/rust/**"]
+# The workspace root is part of this crate's build unit, so a change to
+# it is a change to this package (mirrors
+# python-rust-maturin-workspace-first-publish). #641.
+globs = ["packages/rust/**", "Cargo.toml"]
 first_version = "__VERSION__"
 
 [[package]]

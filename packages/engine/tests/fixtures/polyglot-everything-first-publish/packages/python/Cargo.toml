@@ -9,3 +9,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py38"] }
+# The path-dependency that makes this the dirsql shape: the wheel embeds
+# the core crate, and the core owns the version-bearing symbol. The
+# `version` key alongside `path` is mandatory for any crate that also
+# publishes to crates.io, and it is the half of #621 that turns a stale
+# bump into a hard cargo resolution failure rather than a cosmetic
+# mismatch — so the fixture carries it deliberately. #641.
+piot-fixture-zzz-poly-rust-placeholder = { path = "../rust", version = "__VERSION__" }
