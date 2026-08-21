@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import { findWorkspaceRoot } from './find-workspace-root.js';
-import { replaceCargoVersion } from './handlers/crates.js';
+import { replaceCargoVersion } from './replace-cargo-version.js';
 import { replaceWorkspacePackageVersion } from './replace-workspace-package-version.js';
 
 /**
