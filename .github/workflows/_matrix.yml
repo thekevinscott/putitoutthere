@@ -651,20 +651,9 @@ jobs:
           # `build/<triple>/` artifacts.
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
-          # #627: the version this run is *planning to publish*. Nothing
-          # else in the build job supplies it, so a roll-your-own
-          # bundled-cli script had no reachable source of truth for it:
-          # `write-crate-version` is gated on `matrix.bundle_cli` (and,
-          # for napi, on a colocated Cargo.toml), and `write-version` is
-          # gated on pypi/maturin — so an npm row's `package.json` is
-          # still at the committed literal here too, the rewrite happening
-          # later in the publish job. A Rust build script must stamp its
-          # `Cargo.toml` from $VERSION *before* `cargo build`, which bakes
-          # CARGO_PKG_VERSION in at compile time and honors no env
-          # override. Without it the shipped binary reports the previously
-          # committed version, silently, all the way through publish
-          # (thekevinscott/agent-transcripts 0.0.2 shipped a 0.0.1
-          # binary). Scripts that ignore it are unaffected.
+          # #627: the planned version. No engine-side writer runs on the
+          # roll-your-own path, so a Rust build script must stamp its
+          # Cargo.toml from $VERSION before cargo bakes CARGO_PKG_VERSION in.
           VERSION: ${{ matrix.version }}
         run: |
           if [ -f package-lock.json ]; then
