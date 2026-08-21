@@ -64,6 +64,22 @@ on:
           output so consumers can gate their caller-side `pypi-publish`
           job; build.yml does not (pass/fail gate, no caller jobs).
         value: ${{ jobs.plan.outputs.has_pypi }}
+      unpublished_kinds:
+        description: >-
+          JSON array of the registry kinds this run still has something to
+          publish — `["crates","npm"]` — computed by `plan` from the same
+          `handler.isPublished` the publish path dispatches through, so a
+          package whose planned version is already live is absent. A kind
+          whose registry could not be reached stays listed: "we could not
+          tell" must not drop a credential the publish may still need.
+          `release.yml` gates its crates.io OIDC exchange on this rather
+          than on the matrix carrying a crates row — a row is present
+          whenever the repo has a crate, published or not, which made
+          idempotent re-runs demand a working trusted publisher for work
+          they would skip (#622). `'[]'` when nothing is left to publish;
+          empty string when the plan itself is empty (the publish job is
+          skipped then, so there is no gate to answer).
+        value: ${{ jobs.plan.outputs.unpublished_kinds }}
 
 permissions:
   contents: read
@@ -74,6 +90,10 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       has_pypi: ${{ steps.has-pypi.outputs.has_pypi }}
+      # #622: written by the same `plan` step that writes `matrix`. The
+      # publish/skip determination is the engine's — see
+      # `src/unpublished-kinds.ts`, not a `grep` over the matrix here.
+      unpublished_kinds: ${{ steps.plan.outputs.unpublished_kinds }}
     steps:
       - uses: actions/checkout@v7
         with:

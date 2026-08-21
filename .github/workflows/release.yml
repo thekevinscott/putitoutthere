@@ -218,14 +218,25 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       # crates.io OIDC trusted publisher exchange: ID-token -> short-
-      # lived CARGO_REGISTRY_TOKEN. Only fires when the plan contains a
-      # crates row AND the caller did not supply CARGO_REGISTRY_TOKEN
-      # via `secrets:` (issue #283). Pure JS/Python repos skip the
-      # action entirely so they don't need a configured trusted
-      # publisher on crates.io; callers passing a long-lived token
+      # lived CARGO_REGISTRY_TOKEN. Only fires when the plan still has a
+      # crates version to publish AND the caller did not supply
+      # CARGO_REGISTRY_TOKEN via `secrets:` (issue #283). Pure JS/Python
+      # repos skip the action entirely so they don't need a configured
+      # trusted publisher on crates.io; callers passing a long-lived token
       # also skip it so the OIDC-minted token doesn't clobber theirs.
+      #
+      # #622: the gate reads `unpublished_kinds`, not the matrix. A crates
+      # row is in the matrix whenever the repo has a crate — published or
+      # not — so gating on the matrix ran the exchange on idempotent re-runs
+      # the crates handler would skip via `isPublished`, and a failing
+      # exchange (trusted publisher not registered yet, or a record that
+      # hasn't propagated) killed the whole publish job before the engine
+      # action ran, taking npm and PyPI with it. `unpublished_kinds` is the
+      # same publish/skip determination the handler makes, hoisted ahead of
+      # auth by `plan`; a kind whose registry was unreachable stays listed,
+      # so a blip never silently drops a credential the publish needs.
       - name: Authenticate with crates.io (OIDC)
-        if: contains(needs.build.outputs.matrix, '"kind":"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN == ''
+        if: contains(needs.build.outputs.unpublished_kinds, '"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN == ''
         id: crates-auth
         uses: rust-lang/crates-io-auth-action@v1.0.5
 
@@ -243,6 +254,12 @@ jobs:
       # exactly as it would the OIDC-minted one. The secret is read
       # through the job-level `CALLER_CARGO_REGISTRY_TOKEN` env var
       # because step-level `if:` cannot reference the `secrets` context.
+      #
+      # Deliberately still gated on the matrix, not on `unpublished_kinds`
+      # (#622): this step only writes an env var, so running it with
+      # nothing to publish costs nothing and cannot fail the job — the
+      # narrowing above exists because a *failing OIDC exchange* took the
+      # run down, and there is no exchange here to fail.
       - name: Export CARGO_REGISTRY_TOKEN (caller-provided)
         if: contains(needs.build.outputs.matrix, '"kind":"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN != ''
         run: echo "CARGO_REGISTRY_TOKEN=$CALLER_CARGO_REGISTRY_TOKEN" >> "$GITHUB_ENV"

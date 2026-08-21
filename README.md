@@ -586,6 +586,16 @@ see "How auth flows" below for the why.
    Trusted Publishing is registered; subsequent publishes are
    zero-secret on the OIDC path.
 
+The OIDC exchange only runs when the release actually has a crates.io
+version left to publish. A re-run whose crates versions are already live
+skips it entirely, so a repo whose crate is current can re-run to finish
+an unrelated registry (npm, PyPI) without a working crates.io trusted
+publisher — and the token → OIDC handover in step 4 is not order-sensitive
+([#622](https://github.com/thekevinscott/putitoutthere/issues/622)). If
+crates.io can't be reached while the plan is computed, the exchange runs
+anyway: an unreachable registry is not evidence that there is nothing to
+publish.
+
 ### PyPI
 
 1. Go to `https://pypi.org/manage/project/<name>/settings/publishing/` (or
