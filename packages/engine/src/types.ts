@@ -90,7 +90,10 @@ export interface Ctx {
    * That stopped being true once `writeVersion` learned to follow workspace
    * inheritance (#639): a crate declaring `version.workspace = true` has its
    * version bumped at the workspace root, a file outside the package
-   * directory that the guard would otherwise refuse on.
+   * directory that the guard would otherwise refuse on. #640 widened it
+   * again: moving the in-repo requirements that point at the bumped crate
+   * writes other crates' manifests, which cargo needs updated or it
+   * refuses to resolve the workspace at all.
    *
    * Optional so local/test flows can omit; absent => the guard falls back to
    * allowing only the package's own manifest.
