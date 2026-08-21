@@ -26,6 +26,34 @@ beforeEach(() => {
 });
 
 describe('writeResolvedCargoVersion (#428)', () => {
+  it('refuses a manifest with no version source rather than rewriting a dependency', async () => {
+    // #639. `[package]` is present but carries no version and declares no
+    // inheritance, so neither branch has anything legitimate to rewrite. The
+    // literal rewriter used to walk past the table and land on the next
+    // `version = "…"` in the file — pyo3's requirement — and report success.
+    // The resolver's literal arm now surfaces that as an error instead.
+    findRootMock.mockResolvedValue(null);
+    const source =
+      '[package]\nname = "demo"\nedition = "2021"\n\n[dependencies.pyo3]\nversion = "0.22"\n';
+    await expect(writeResolvedCargoVersion('/c', source, '0.4.2')).rejects.toThrow(
+      /no \[package\]\.version/,
+    );
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it('rewrites the package version without touching a later dependency requirement', async () => {
+    // The other half: a manifest that DOES carry a literal version still has
+    // exactly that line rewritten, and the dependency requirement below it
+    // is left alone.
+    findRootMock.mockResolvedValue(null);
+    const source =
+      '[package]\nname = "demo"\nversion = "0.1.0"\n\n[dependencies.pyo3]\nversion = "0.22"\n';
+    await writeResolvedCargoVersion('/c', source, '0.4.2');
+    const written = writeMock.mock.calls[0]![1] as string;
+    expect(written).toContain('version = "0.4.2"');
+    expect(written).toContain('version = "0.22"');
+  });
+
   it('falls back to the literal path when the manifest does not cleanly parse', async () => {
     // Invalid TOML (an unclosed table trails a regex-matchable
     // [package].version): inheritance detection can't parse it, so the

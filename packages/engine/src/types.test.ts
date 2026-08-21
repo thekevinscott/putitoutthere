@@ -5,6 +5,7 @@ import {
   attachHandlerMeta,
   normalizeTarget,
   readHandlerMeta,
+  type Ctx,
   type PlatformPublishSummary,
   type PublishResult,
 } from './types.js';
@@ -112,5 +113,38 @@ describe('PublishResult platform summary (#625)', () => {
       status: 'published',
       platforms: { published: ['demo-x86_64-unknown-linux-gnu'], skipped: [] },
     });
+  });
+});
+
+describe('Ctx.managedManifestPaths (#639)', () => {
+  /** A Ctx with only the fields every flow must supply. */
+  const base = (): Ctx => ({
+    cwd: '/repo',
+    log: { debug() {}, info() {}, warn() {}, error() {} },
+    env: {},
+    artifacts: { get: (n) => n, has: () => true },
+  });
+
+  it('is optional, so local and doctor flows can omit it', () => {
+    // The crates dirty-tree guard falls back to allowing only the package's
+    // own manifest when it is absent; making it required would force every
+    // caller that never publishes to invent a value.
+    const ctx = base();
+    expect(ctx.managedManifestPaths).toBeUndefined();
+  });
+
+  it('carries the manifests a writeVersion wrote, in order', () => {
+    // `publish` fills this from `writeVersion`'s return value. For a crate
+    // that inherits its version that includes the workspace root — a file
+    // outside the package directory, which is exactly why the guard needs
+    // to be told about it.
+    const ctx: Ctx = {
+      ...base(),
+      managedManifestPaths: ['/repo/Cargo.toml', '/repo/packages/rust/Cargo.toml'],
+    };
+    expect(ctx.managedManifestPaths).toEqual([
+      '/repo/Cargo.toml',
+      '/repo/packages/rust/Cargo.toml',
+    ]);
   });
 });
