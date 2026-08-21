@@ -238,11 +238,9 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         await ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
         continue;
       }
-      // #639/#640: the crates handler's dirty-tree guard needs to know
-      // which manifests the bump landed in. For a crate that inherits its
-      // version that is the workspace root; for one that others path-dep,
-      // it is every sibling whose requirement moved. Both sit outside the
-      // package directory.
+      // #639: the crates handler's dirty-tree guard needs to know which
+      // manifests the bump landed in — for a crate that inherits its
+      // version that is the workspace root, outside the package directory.
       //
       // Accumulated across the whole run, not per package: two crates
       // inheriting from the same root both bump that one file, so the root

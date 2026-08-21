@@ -66,7 +66,7 @@ describe('writeDependentVersionReqs', () => {
       [CORE]: '[package]\nname = "core"\nversion = "0.4.2"\n',
       [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
     });
-    const written = await writeDependentVersionReqs(CORE, '0.4.2');
+    const written = await writeDependentVersionReqs(CORE, '0.4.2', []);
     expect(writtenTo(HOST)).toContain('version = "0.4.2"');
     expect(written).toHaveLength(1);
   });
@@ -77,7 +77,7 @@ describe('writeDependentVersionReqs', () => {
       [CORE]: '[package]\nname = "core"\n',
       [HOST]: '[package]\nname = "host"\n\n[dependencies.core]\npath = "../core"\nversion = "0.2"\n',
     });
-    await writeDependentVersionReqs(CORE, '0.4.2');
+    await writeDependentVersionReqs(CORE, '0.4.2', []);
     expect(writtenTo(HOST)).toContain('version = "0.4.2"');
   });
 
@@ -89,7 +89,7 @@ describe('writeDependentVersionReqs', () => {
       [CORE]: '[package]\nname = "core"\n',
       [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore.workspace = true\n',
     });
-    await writeDependentVersionReqs(CORE, '0.4.2');
+    await writeDependentVersionReqs(CORE, '0.4.2', []);
     expect(writtenTo(ROOT)).toContain('version = "0.4.2"');
     expect(writtenTo(HOST)).toBeUndefined();
   });
@@ -102,7 +102,7 @@ describe('writeDependentVersionReqs', () => {
       [CORE]: '[package]\nname = "core"\n',
       [HOST]: '[package]\nname = "host"\n\n[dependencies]\npyo3 = { version = "0.22" }\n',
     });
-    expect(await writeDependentVersionReqs(CORE, '0.4.2')).toEqual([]);
+    expect(await writeDependentVersionReqs(CORE, '0.4.2', [])).toEqual([]);
     expect(writeMock).not.toHaveBeenCalled();
   });
 
@@ -113,7 +113,7 @@ describe('writeDependentVersionReqs', () => {
       [OTHER]: '[package]\nname = "other"\n',
       [HOST]: '[package]\nname = "host"\n\n[dependencies]\nother = { path = "../other", version = "0.2" }\n',
     });
-    expect(await writeDependentVersionReqs(CORE, '0.4.2')).toEqual([]);
+    expect(await writeDependentVersionReqs(CORE, '0.4.2', [])).toEqual([]);
   });
 
   it('leaves a path dependency that declares no version requirement alone', async () => {
@@ -124,7 +124,7 @@ describe('writeDependentVersionReqs', () => {
       [CORE]: '[package]\nname = "core"\n',
       [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core" }\n',
     });
-    expect(await writeDependentVersionReqs(CORE, '0.4.2')).toEqual([]);
+    expect(await writeDependentVersionReqs(CORE, '0.4.2', [])).toEqual([]);
   });
 
   it('never rewrites the released crate\'s own manifest', async () => {
@@ -134,7 +134,7 @@ describe('writeDependentVersionReqs', () => {
       [ROOT]: workspace(['core']),
       [CORE]: '[package]\nname = "core"\nversion = "0.4.2"\n',
     });
-    await writeDependentVersionReqs(CORE, '0.4.2');
+    await writeDependentVersionReqs(CORE, '0.4.2', []);
     expect(writtenTo(CORE)).toBeUndefined();
   });
 
@@ -148,6 +148,43 @@ describe('writeDependentVersionReqs', () => {
     });
     await writeDependentVersionReqs(CORE, '0.4.2', [OTHER]);
     expect(writtenTo(OTHER)).toContain('version = "0.4.2"');
+  });
+
+  it('still scans siblings when the workspace root manifest cannot be read', async () => {
+    // `findWorkspaceRoot` found a root, but its Cargo.toml is gone or
+    // unparseable by the time we read it. That must not abort the release —
+    // the declared packages are still scannable and still need their
+    // requirements moved.
+    manifests({
+      [CORE]: '[package]\nname = "core"\n',
+      [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
+    });
+    await writeDependentVersionReqs(CORE, '0.4.2', [HOST]);
+    expect(writtenTo(HOST)).toContain('version = "0.4.2"');
+  });
+
+  it('rewrites the workspace root even when it lists no members', async () => {
+    // A root that declares only `[workspace.dependencies]` is legal, and it
+    // is exactly where an inherited requirement lives — dropping it because
+    // there is no `members` array would miss the one file that matters.
+    manifests({
+      [ROOT]: '[workspace]\n\n[workspace.dependencies]\ncore = { path = "core", version = "0.2" }\n',
+      [CORE]: '[package]\nname = "core"\n',
+    });
+    await writeDependentVersionReqs(CORE, '0.4.2', []);
+    expect(writtenTo(ROOT)).toContain('version = "0.4.2"');
+  });
+
+  it('ignores a non-string entry in the members list', async () => {
+    // Malformed input should not abort a release: a numeric member has no
+    // path to expand, and the well-formed members around it still resolve.
+    manifests({
+      [ROOT]: '[workspace]\nmembers = [42, "host"]\nresolver = "2"\n',
+      [CORE]: '[package]\nname = "core"\n',
+      [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
+    });
+    await writeDependentVersionReqs(CORE, '0.4.2', []);
+    expect(writtenTo(HOST)).toContain('version = "0.4.2"');
   });
 
   it('skips a candidate directory that holds no Cargo.toml', async () => {
@@ -165,13 +202,56 @@ describe('writeDependentVersionReqs', () => {
       [CORE]: '[package]\nname = "core"\n',
       [HOST]: 'this is not = = toml [[[',
     });
-    expect(await writeDependentVersionReqs(CORE, '0.4.2')).toEqual([]);
+    expect(await writeDependentVersionReqs(CORE, '0.4.2', [])).toEqual([]);
+  });
+
+  it('reads and writes manifests as utf8 text', async () => {
+    // A Cargo.toml is text the consumer wrote; reading or writing it as a
+    // Buffer would corrupt any non-ASCII byte in a description or author
+    // field on the way through.
+    manifests({
+      [ROOT]: workspace(['core', 'host']),
+      [CORE]: '[package]\nname = "core"\n',
+      [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
+    });
+    await writeDependentVersionReqs(CORE, '0.4.2', []);
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('Cargo.toml'), 'utf8');
+    expect(writeMock).toHaveBeenCalledWith(
+      expect.stringContaining('Cargo.toml'),
+      expect.any(String),
+      'utf8',
+    );
+  });
+
+  it('tolerates a workspace root whose manifest declares no [workspace] table', async () => {
+    // `findWorkspaceRoot` reports a directory; by the time the manifest is
+    // read it may not look like a workspace at all. The members lookup has to
+    // cope with each level of that shape being absent, not just the file.
+    manifests({
+      [ROOT]: '[package]\nname = "not-a-workspace"\n',
+      [CORE]: '[package]\nname = "core"\n',
+      [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
+    });
+    await writeDependentVersionReqs(CORE, '0.4.2', [HOST]);
+    expect(writtenTo(HOST)).toContain('version = "0.4.2"');
+  });
+
+  it('scans the workspace when told of no sibling packages at all', async () => {
+    // The caller's field is optional; omitting it must mean "no siblings",
+    // not "skip the walk".
+    manifests({
+      [ROOT]: workspace(['core', 'host']),
+      [CORE]: '[package]\nname = "core"\n',
+      [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
+    });
+    await writeDependentVersionReqs(CORE, '0.4.2');
+    expect(writtenTo(HOST)).toContain('version = "0.4.2"');
   });
 
   it('surfaces a non-ENOENT read failure rather than silently skipping', async () => {
     // A permissions error is not "this directory is not a crate"; swallowing
     // it would ship a tree with a requirement left behind.
     readFileMock.mockRejectedValue(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
-    await expect(writeDependentVersionReqs(CORE, '0.4.2')).rejects.toThrow(/EACCES/);
+    await expect(writeDependentVersionReqs(CORE, '0.4.2', [])).rejects.toThrow(/EACCES/);
   });
 });

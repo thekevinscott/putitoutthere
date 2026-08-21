@@ -116,7 +116,7 @@ async function writeVersionImpl(
   // one. The build-time writers learned this in #621; the publish path is
   // the other half.
   written.push(
-    ...(await writeDependentVersionReqs(pkg.path, version, ctx.siblingPackagePaths ?? [])),
+    ...(await writeDependentVersionReqs(pkg.path, version, ctx.siblingPackagePaths)),
   );
   return written;
 }

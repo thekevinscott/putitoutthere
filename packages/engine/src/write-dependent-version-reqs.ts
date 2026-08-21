@@ -60,31 +60,34 @@ import { resolveDepDirs } from './resolve-dep-dirs.js';
 export async function writeDependentVersionReqs(
   crateDir: string,
   version: string,
-  siblingDirs: readonly string[] = [],
+  siblingDirs?: readonly string[],
 ): Promise<string[]> {
   // Canonicalize first: every candidate directory below arrives via
   // `resolve`, and the check that decides whether a dependency points at
   // this crate is string equality on those paths.
   const target = resolve(crateDir);
 
-  const found = await findWorkspaceRoot(target);
-  const workspaceRoot = typeof found === 'string' ? found : null;
+  const workspaceRoot = await findWorkspaceRoot(target);
   const workspaceParsed =
-    workspaceRoot === null ? null : (await readManifest(workspaceRoot))?.parsed ?? null;
+    workspaceRoot === null ? null : (await readManifest(workspaceRoot))?.parsed;
 
   const written: string[] = [];
+  // The released crate's own manifest is scanned like any other and simply
+  // never matches: cargo has no way to express a dependency on yourself, so
+  // no entry in it can resolve back to `target`.
+  //
+  // A member that inherits its requirement (`core.workspace = true`) is
+  // likewise a no-op here rather than a special case — the entry carries no
+  // `path` of its own, and `replaceDepVersionReq` only rewrites entries that
+  // do. The requirement it inherits lives in the workspace root, which is a
+  // candidate in its own right, so rewriting it there covers every member.
   for (const dir of await candidateDirs(workspaceRoot, workspaceParsed, siblingDirs)) {
-    // The crate's own manifest cannot declare a requirement on itself.
-    if (dir === target) {continue;}
     const manifest = await readManifest(dir);
     if (manifest === null) {continue;}
 
     let updated = manifest.source;
     for (const dep of resolveDepDirs(manifest.parsed, dir, workspaceParsed, workspaceRoot)) {
-      // `inheritsFromWorkspace` entries carry no `path` of their own — the
-      // requirement lives in the workspace root, which is itself a candidate
-      // here, so rewriting it there covers every member that inherits it.
-      if (dep.inheritsFromWorkspace || !dep.hasVersionReq || dep.dir !== target) {continue;}
+      if (!dep.hasVersionReq || dep.dir !== target) {continue;}
       updated = replaceDepVersionReq(updated, dep.key, version);
     }
     if (updated !== manifest.source) {
@@ -110,10 +113,15 @@ export async function writeDependentVersionReqs(
 async function candidateDirs(
   workspaceRoot: string | null,
   workspaceParsed: unknown,
-  siblingDirs: readonly string[],
+  siblingDirs: readonly string[] | undefined,
 ): Promise<Set<string>> {
   const dirs = new Set<string>();
-  for (const d of siblingDirs) {dirs.add(resolve(d));}
+  // An explicit guard rather than a `?? []` default: the caller holds an
+  // optional field, and "no sibling packages" and "an empty list of them"
+  // are the same thing to this walk.
+  if (siblingDirs !== undefined) {
+    for (const d of siblingDirs) {dirs.add(resolve(d));}
+  }
   if (workspaceRoot === null) {return dirs;}
 
   dirs.add(resolve(workspaceRoot));
