@@ -74,7 +74,7 @@ function git(args: string[]): void {
 function runCli(args: string[]): { code: number; stdout: string; stderr: string } {
   const env = {
     ...process.env,
-    CARGO_REGISTRY_TOKEN: 'piot-e2e-639-placeholder',
+    CARGO_REGISTRY_TOKEN: 'not-a-token',
     CARGO_NET_OFFLINE: 'true',
   };
   delete env.GITHUB_REPOSITORY;

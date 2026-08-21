@@ -17,3 +17,15 @@
 # the commit they name will not exist on main.
 6f6b4cde587a01a576fc87ac6e05ea1a832cc9e8:packages/engine/tests/e2e/npm-name-collision.e2e.test.ts:generic-api-key:112
 6f6b4cde587a01a576fc87ac6e05ea1a832cc9e8:packages/engine/tests/e2e/npm-name-collision.e2e.test.ts:generic-api-key:171
+
+# #639. The e2e's crates auth pre-flight takes a stand-in credential that
+# nothing ever sends — CARGO_NET_OFFLINE stops cargo before it can reach a
+# registry. The original commit spelled it `piot-e2e-*-placeholder`, whose
+# Shannon entropy clears generic-api-key's 3.5 threshold when it sits next to
+# the word "token"; the head commit uses the low-entropy `not-a-token` this
+# repo settled on in d1e1eff, but gitleaks scans every commit in a PR, not
+# just its head, so the original still trips it.
+#
+# This entry dies with the squash-merge that collapses the branch — the
+# commit it names will not exist on main.
+9062d1b638e0500641d73ed45306f940a066af4e:packages/engine/tests/e2e/crates-write-version.e2e.test.ts:generic-api-key:77
