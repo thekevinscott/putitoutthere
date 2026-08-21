@@ -10,6 +10,14 @@
  * `tar` pipeline actually downloads and inspects a live tarball — a mock
  * that returns the shape we assumed cannot.
  *
+ * The `--per-triple` case (#633) needs a live platform tarball whose payload
+ * sits NESTED under `package/`, and no `piot-fixture-zzz-*` package ships one
+ * — piot's own synthesis has only ever staged flat, which is why the bug went
+ * unnoticed. `@esbuild/linux-x64` is the stand-in: a real, version-pinned
+ * (hence byte-immutable) published platform package whose binary lives at
+ * `package/bin/esbuild`, exactly the layout the issue describes. `npm view` →
+ * `curl` → `tar` run for real against it.
+ *
  * Red before the feature: `verify npm-tarball` is an unrecognized
  * subcommand, so no `ok: package/dist/` line is emitted.
  *
@@ -25,6 +33,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const CLI = join(fileURLToPath(import.meta.url), '..', '..', '..', 'dist', 'cli-bin.js');
 const PKG = '@putitoutthere/piot-fixture-zzz-js-vanilla';
+
+// `verifyNpmTarballTriple` reconstructs the platform package name as
+// `{name}-{triple}` (the default synthesis template), so the row splits
+// `@esbuild/linux-x64` at the last dash. Pinned to a version that predates
+// this test and is depended on by `esbuild` itself, so it can neither change
+// nor be unpublished.
+const NESTED_BASE = '@esbuild/linux';
+const NESTED_TRIPLE = 'x64';
+const NESTED_VERSION = '0.25.0';
 
 let repo: string;
 
@@ -74,6 +91,32 @@ describe('piot verify npm-tarball against the live npm registry (#443)', () => {
     ]);
 
     expect(stdout, `output:\n${stdout}\n${stderr}`).toContain('ok: package/dist/');
+    expect(code).toBe(0);
+  });
+
+  it('counts a nested payload in a live per-triple tarball (#633)', () => {
+    // `@esbuild/linux-x64`'s tarball is `package/package.json`,
+    // `package/README.md`, and the binary one level down at
+    // `package/bin/esbuild`. Counting only top-level FILES sees the README
+    // and stops there — it never counts the binary, which is the whole point
+    // of the check. The listing must name the nested path.
+    const matrix = JSON.stringify([
+      {
+        name: NESTED_BASE,
+        kind: 'npm',
+        version: NESTED_VERSION,
+        target: NESTED_TRIPLE,
+        path: 'packages/npm',
+      },
+    ]);
+
+    const { code, stdout, stderr } = runCli([
+      'verify', 'npm-tarball', '--per-triple',
+      '--registry', 'https://registry.npmjs.org',
+      '--matrix', matrix, '--cwd', repo,
+    ]);
+
+    expect(stdout, `output:\n${stdout}\n${stderr}`).toContain('bin/esbuild');
     expect(code).toBe(0);
   });
 });
