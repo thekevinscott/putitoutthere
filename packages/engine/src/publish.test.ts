@@ -391,6 +391,50 @@ describe('publish: writeVersion hands its manifests to publish (#639)', () => {
     );
   });
 
+  it('accumulates across the run so a later package still recognizes them', async () => {
+    // Two crates inheriting from the same workspace root both bump that one
+    // file, so it is still dirty from the first package when the second
+    // publishes. Per-package scoping refuses the cascade at its second
+    // package.
+    const core = npmPkg('lib-core', 'packages/core');
+    const host = npmPkg('lib-host', 'packages/host');
+    configWith(core, host);
+    vi.mocked(plan).mockResolvedValue([row(core), row(host)]);
+    allComplete(core, host);
+
+    const writeVersion = vi
+      .fn()
+      .mockResolvedValueOnce(['/repo/Cargo.toml'])
+      .mockResolvedValueOnce(['/repo/packages/host/Cargo.toml']);
+    const handler = makeHandler({ writeVersion });
+    await publish({ cwd: CWD, handlerFor: () => handler });
+
+    const second = vi.mocked(handler.publish).mock.calls[1]![2];
+    expect(second.managedManifestPaths).toEqual([
+      '/repo/Cargo.toml',
+      '/repo/packages/host/Cargo.toml',
+    ]);
+  });
+
+  it('deduplicates a manifest rewritten for more than one package', async () => {
+    // A shared workspace root is written by every inheriting package that
+    // releases; reporting it twice would make the guard's diagnostics
+    // misleading.
+    const core = npmPkg('lib-core', 'packages/core');
+    const host = npmPkg('lib-host', 'packages/host');
+    configWith(core, host);
+    vi.mocked(plan).mockResolvedValue([row(core), row(host)]);
+    allComplete(core, host);
+
+    const handler = makeHandler({
+      writeVersion: vi.fn().mockResolvedValue(['/repo/Cargo.toml']),
+    });
+    await publish({ cwd: CWD, handlerFor: () => handler });
+
+    const second = vi.mocked(handler.publish).mock.calls[1]![2];
+    expect(second.managedManifestPaths).toEqual(['/repo/Cargo.toml']);
+  });
+
   it('leaves the rest of the ctx intact alongside the added key', async () => {
     // `publish` builds the publish-time ctx by spreading the original; a
     // rebuild that forgot a field would strip the artifacts root or the
