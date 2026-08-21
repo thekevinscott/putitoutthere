@@ -29,6 +29,7 @@ import { join } from 'node:path';
 
 import { sanitizeArtifactName } from '../config.js';
 import { detectIndent } from './detect-indent.js';
+import { firstFileUnder } from './first-file-under.js';
 import type { Ctx } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { execCapture } from '../utils/exec-capture.js';
@@ -252,7 +253,7 @@ async function synthesizePlatformPackage(
 
   const { os, cpu, libc } = targetToOsCpu(target);
   const fileList = await readdir(staging);
-  const mainFile = pickMainFile(fileList, entry.mode);
+  const mainFile = await pickMainFile(staging, fileList, entry.mode);
 
   // #365: bundled-cli binaries ship as package data referenced via
   // `main`, not as a `bin` entry, so npm never sets the executable bit —
@@ -260,6 +261,10 @@ async function synthesizePlatformPackage(
   // boundary regardless of the mode `cargo build` produced. Restore +x
   // on the staged binary for non-Windows targets; without it the
   // launcher's spawn of the resolved binary EACCESes at runtime.
+  // #626: this chmods exactly what `main` names, which is why
+  // `pickMainFile` must resolve to a file — when it returned the `bin`
+  // directory of a nested artifact, the +x landed on the directory and
+  // the tarball shipped the binary at 0644.
   if (entry.mode === 'bundled-cli' && !os.includes('win32')) {
     await chmod(join(staging, mainFile), 0o755);
   }
@@ -576,12 +581,38 @@ export function toRustTriple(target: string): string {
   );
 }
 
-export function pickMainFile(files: readonly string[], mode: NpmBuildMode): string {
+/**
+ * The package-relative path `package.json#main` should name, given the
+ * entries of a staged platform artifact (`dir`, its `files` listing) and
+ * the build mode that produced it.
+ *
+ * `bundled-cli` resolves through directories to an actual file: consumers
+ * stage the cross-compiled binary either flat (`<artifact>/<bin>`) or
+ * nested (`<artifact>/bin/<bin>`), and both layouts clear the completeness
+ * check, which lists files recursively. Taking `readdir`'s first
+ * non-`package.json` entry as-is named the `bin` **directory** on the
+ * nested layout — so the manifest pointed `main` at a directory and the
+ * #365 executable-bit restore chmodded that directory instead of the
+ * binary, publishing it at 0644 (#626).
+ *
+ * `napi` is unaffected: it looks up the `.node` payload by extension.
+ */
+export async function pickMainFile(
+  dir: string,
+  files: readonly string[],
+  mode: NpmBuildMode,
+): Promise<string> {
   if (mode === 'napi') {
     const node = files.find((f) => f.endsWith('.node'));
     return node ?? files[0]!;
   }
-  // bundled-cli: first non-package.json file.
-  const first = files.find((f) => f !== 'package.json');
-  return first ?? files[0]!;
+  // bundled-cli: the first non-package.json entry that resolves to a file,
+  // descending into directories. The `files[0]` fallback keeps the
+  // defensive shape for a payload-less artifact (an empty one is already
+  // rejected upstream) — there is nothing better to name.
+  const binary = await firstFileUnder(
+    dir,
+    files.filter((f) => f !== 'package.json'),
+  );
+  return binary ?? files[0]!;
 }

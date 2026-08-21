@@ -4,6 +4,61 @@ This file is the primary instruction set for any LLM (Claude, Codex, Cursor,
 etc.) working in this repo. `CLAUDE.md` exists as a Claude-specific entry
 point that `@`-includes this file, so edit here — not there.
 
+## Verify the toolchain before running anything
+
+This repo requires **Node >= 24** and **pnpm >= 11** (`engines` in the root
+`package.json`; CI pins Node 24 via `.github/actions/setup-node`). Nothing in
+the tree corrects a mismatched host — there is no `.nvmrc` and no
+`packageManager` field — and hosted agent containers routinely ship older
+defaults. The Claude Code web image has been observed shipping **Node 22 /
+pnpm 10**, which cannot run a single command in this repo.
+
+Run this **first, in every session**, before `install`, `build`, `lint`,
+`typecheck`, or any test command:
+
+```bash
+node --version && pnpm --version   # need >=24 and >=11
+```
+
+If either falls short, provision Node 24 and let corepack supply pnpm. On an
+image carrying nvm at `/opt/nvm`:
+
+```bash
+export NVM_DIR=/opt/nvm; . "$NVM_DIR/nvm.sh"; nvm install 24 && nvm use 24
+```
+
+Elsewhere use whatever version manager the image ships (`fnm use 24`,
+`volta install node@24`, a `node24` under `/opt`). Do not proceed on an
+unsupported runtime and do not work around the gate — every result you
+collect on it is void.
+
+Shell state does not persist between Bash tool calls, so **re-source the
+toolchain in every invocation** that runs a pnpm command, not just the first.
+
+### Never let a pipe swallow an exit code
+
+pnpm fails loudly on an engine mismatch — `ERR_PNPM_UNSUPPORTED_ENGINE`,
+exit **1**. What hides it is the agent habit of trimming output:
+
+```bash
+pnpm test:unit 2>&1 | tail -20     # $? is tail's status: 0. The failure vanishes.
+```
+
+A pipeline's exit status is its **last** command's. Piping a failing command
+into `tail` / `head` / `grep` reports success, which silently converts *"the
+suite never ran"* into *"the suite passed"* — and a fabricated green baseline
+is worse than no baseline, because everything after it is built on a result
+nobody observed. Always pipefail when trimming:
+
+```bash
+set -o pipefail
+pnpm test:unit 2>&1 | tail -20
+```
+
+This is not pnpm-specific. Apply it to `cargo`, `git`, and every gate whose
+output you trim. When a command's exit code is the thing you are asserting on,
+prefer capturing to a file and echoing `$?` over reading a truncated tail.
+
 ## Standing authorization
 
 Agents working an issue branch (`claude/issue-*`, `codex/issue-*`, or
