@@ -118,10 +118,24 @@ describe('polyglot-everything mirrors the shape it claims (#641)', () => {
   });
 
   it('exposes the core crate version through a real symbol', () => {
-    // A `main.rs` printing a literal is why no test could assert on what
-    // the artifact reports — there was no value that could ever be wrong.
-    expect(readFileSync(join(repo, 'packages/rust/src/main.rs'), 'utf8')).toContain(
-      'CARGO_PKG_VERSION',
-    );
+    // A core printing a literal is why no test could assert on what the
+    // artifact reports — there was no value that could ever be wrong.
+    // `env!("CARGO_PKG_VERSION")` is the shape clap's `#[command(version)]`
+    // expands to, in the crate where the attribute is written, which is the
+    // whole reason the bug exists. The e2e twin compiles and runs it; here
+    // the check is that the symbol is present at all.
+    const sources = readdirSync(join(repo, 'packages/rust/src'))
+      .map((f) => readFileSync(join(repo, 'packages/rust/src', f), 'utf8'))
+      .join('\n');
+    expect(sources).toContain('env!("CARGO_PKG_VERSION")');
+  });
+
+  it('has the core binary print that symbol rather than a literal', () => {
+    // The binary is the surface a user reads a version off. Printing a
+    // constant string is exactly the state that made #374 and #621
+    // invisible here.
+    const main = readFileSync(join(repo, 'packages/rust/src/main.rs'), 'utf8');
+    expect(main).toContain('version()');
+    expect(main).not.toContain('"canary"');
   });
 });
