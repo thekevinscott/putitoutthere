@@ -42,6 +42,7 @@ import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 import { execCapture } from '../utils/exec-capture.js';
+import { repoRelativePaths } from '../repo-relative-paths.js';
 import { writeResolvedCargoVersion } from '../write-resolved-cargo-version.js';
 import { ExecError } from '../utils/exec-error.js';
 import { matchFirstPublishTpRejection } from './match-first-publish-tp-rejection.js';
@@ -316,21 +317,18 @@ export async function scanDirtyOutsideManifest(
     const rel = (await execCapture('git', ['ls-files', '--full-name', '--', 'Cargo.toml'], {
       cwd: pkgPath,
     })).stdout.trim();
-    if (rel !== '') {managedRels.add(rel);}
+    managedRels.add(rel);
   } catch {
     // Cargo.toml not tracked (e.g. first release on a fresh tree).
-    // Fall through; an empty set means nothing is allowed dirty.
+    // Fall through; an empty set means nothing is allowed dirty. (An
+    // untracked manifest yields an empty `rel`, which porcelain can never
+    // name either, so it is harmless in the set.)
   }
   // #639: whatever writeVersion actually wrote. For a crate that inherits
   // its version the bump lands in the workspace root's Cargo.toml, which is
   // outside the package directory and would otherwise read as a stray edit
-  // and refuse the publish. Normalized with `relative()` the same way
-  // `artifactsRoot` and the sibling paths below are.
-  for (const p of managedManifestPaths ?? []) {
-    const r = relative(cwd, p);
-    if (r === '' || r.startsWith('..')) {continue;}
-    managedRels.add(r.replace(/\\/g, '/'));
-  }
+  // and refuse the publish.
+  for (const rel of repoRelativePaths(cwd, managedManifestPaths)) {managedRels.add(rel);}
   let porcelain: string;
   try {
     porcelain = (await execCapture('git', ['status', '--porcelain'], {
@@ -353,12 +351,7 @@ export async function scanDirtyOutsideManifest(
   // + dist/ from the npm `Build npm packages` step). cargo only packs
   // files inside its own package dir, so these can't end up in the
   // crate tarball regardless of whether they're "dirty" by git's view.
-  const siblingRels: string[] = [];
-  for (const p of siblingPackagePaths ?? []) {
-    const r = relative(cwd, p);
-    if (r === '' || r.startsWith('..')) {continue;}
-    siblingRels.push(r.replace(/\\/g, '/'));
-  }
+  const siblingRels = repoRelativePaths(cwd, siblingPackagePaths);
   const unexpected: string[] = [];
   for (const raw of porcelain.split('\n')) {
     if (raw.length < 4) {continue;}
