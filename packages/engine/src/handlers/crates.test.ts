@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture, type ExecResult } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+import { writeDependentVersionReqs } from '../write-dependent-version-reqs.js';
 
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import {
@@ -28,9 +29,14 @@ import type { Ctx } from '../types.js';
 
 vi.mock('../utils/exec-capture.js');
 vi.mock('node:fs/promises');
+vi.mock('../write-dependent-version-reqs.js', async () => ({
+  ...await vi.importActual<typeof import('../write-dependent-version-reqs.js')>('../write-dependent-version-reqs.js'),
+  writeDependentVersionReqs: vi.fn((): Promise<string[]> => Promise.resolve([])),
+}));
 
 const execMock = vi.mocked(execCapture);
 const readMock = vi.mocked(readFile);
+const depsMock = vi.mocked(writeDependentVersionReqs);
 const writeMock = vi.mocked(writeFile);
 
 /** A resolved `execCapture` result carrying `stdout`. */
@@ -82,6 +88,10 @@ beforeEach(() => {
   execMock.mockReset();
   readMock.mockReset();
   writeMock.mockReset();
+  // Reset the implementation too, not just the calls: a case that stubs a
+  // rewritten dependent would otherwise leak it into the next one.
+  depsMock.mockReset();
+  depsMock.mockResolvedValue([]);
   delete process.env.CARGO_REGISTRY_TOKEN;
 });
 
@@ -284,6 +294,30 @@ describe('crates.writeVersion', () => {
     // The rewritten path is the package's Cargo.toml (separator-agnostic).
     expect(paths).toHaveLength(1);
     expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
+  });
+
+  it("appends the dependents' manifests to its own, and passes the siblings through (#640)", async () => {
+    // `writeVersion` composes two writes: this crate's own version, through
+    // the #428 resolver, and the in-repo requirements pointing at it. The
+    // pre-publish dirty-tree guard consumes the union, so the second has to
+    // be APPENDED to the first — returning either alone leaves the guard
+    // refusing a file the engine itself wrote. `ctx.siblingPackagePaths`
+    // must reach the walk too, or a sibling that path-deps this crate from
+    // outside the workspace is never visited and its requirement is left
+    // stranded below the released version.
+    readMock.mockResolvedValue(`[package]\nname = "core"\nversion = "0.1.0"\n`);
+    depsMock.mockResolvedValue(['/repo/packages/host/Cargo.toml']);
+
+    const paths = await crates.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.4.2',
+      makeCtx({ cwd: dir, siblingPackagePaths: ['/repo/packages/host'] }),
+    );
+
+    expect(depsMock).toHaveBeenCalledWith(dir, '0.4.2', ['/repo/packages/host']);
+    expect(paths).toHaveLength(2);
+    expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
+    expect(paths[1]).toBe('/repo/packages/host/Cargo.toml');
   });
 
   it('is idempotent when version already matches', async () => {
