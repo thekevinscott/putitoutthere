@@ -29,18 +29,10 @@ jobs:
     # backstop. If a predicted run never dispatches, the gate waits here
     # until the job is killed.
     #
-    # Sized against the slowest thing the gate legitimately waits on: an
-    # `E2E` fixture run (15-25 min of real OIDC publishes across 15
-    # fixtures, 116 jobs) plus the queue ahead of it. e2e-fixture.yml sets
-    # `cancel-in-progress: false`, so pushes in quick succession leave E2E
-    # runs queued serially while each new push starts a *fresh* gate whose
-    # clock begins immediately. On #631 the gate started 24 minutes before
-    # the E2E run for its own SHA began its matrix, so the old 30-minute
-    # backstop cancelled the required check ~11 minutes before that run went
-    # green -- every other check already passing, auto-merge unable to fire,
-    # and nothing wrong but the clock. Do not lower this below a full E2E
-    # run plus a realistic queue wait. If queue depth ever outgrows 60 too,
-    # fix the concurrency mismatch rather than the number again (#634).
+    # 60 covers a full E2E fixture run (~25 min) plus queue wait: E2E runs
+    # queue serially while the gate's own clock restarts on every push, so
+    # the gate can burn its budget before the run it's waiting on even
+    # starts (#631, #634). Don't lower this without fixing that mismatch.
     timeout-minutes: 60
     steps:
       # Floating-major-tag pinned to pr-monitor's @v1. A bare `@main` ref is
