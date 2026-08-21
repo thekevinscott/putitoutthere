@@ -15,10 +15,12 @@ jobs:
   # PyPI Trusted Publishers can't validate OIDC tokens minted from a
   # cross-repo reusable workflow (pypi/warehouse#11096). The `if:`
   # gate skips this job for non-PyPI repos — paste verbatim regardless
-  # of what you publish.
+  # of what you publish. `pypi_pending` is only 'true' when the release
+  # job actually handed this job an upload, and `!cancelled()` lets that
+  # upload proceed even if the release job failed on some other registry.
   pypi-publish:
     needs: release
-    if: needs.release.outputs.has_pypi == 'true'
+    if: ${{ !cancelled() && needs.release.outputs.pypi_pending == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -34,3 +36,12 @@ jobs:
           path: dist/
           merge-multiple: true
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Cuts the git tag for what the job above just uploaded. The release
+  # job deliberately does not tag a PyPI package: a tag records what
+  # shipped, and until this upload lands, nothing has. Paste verbatim.
+  pypi-tag:
+    needs: pypi-publish
+    uses: thekevinscott/putitoutthere/.github/workflows/pypi-tag.yml@v0
+    permissions:
+      contents: write

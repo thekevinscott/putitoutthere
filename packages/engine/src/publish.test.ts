@@ -17,7 +17,7 @@
  * Issue #22.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
 import { loadConfig } from './config.js';
@@ -37,6 +37,7 @@ import {
   requireRepoPublic,
   requireRepoUrlMatch,
 } from './preflight.js';
+import { attachPublishProgress } from './publish-progress.js';
 import { publish } from './publish.js';
 import { readHandlerMeta, type Ctx, type Handler } from './types.js';
 import { ExecError } from './utils/exec-error.js';
@@ -48,6 +49,7 @@ vi.mock('./preflight.js');
 vi.mock('./completeness.js');
 vi.mock('./normalize-artifacts.js');
 vi.mock('./ensure-tag.js');
+vi.mock('./publish-progress.js');
 vi.mock('./git.js');
 vi.mock('./verbose.js');
 // The dump recognises the seam's error by `instanceof`, so a substitute
@@ -438,6 +440,159 @@ describe('publish: handler failure', () => {
       }),
       expect.anything(),
     );
+  });
+});
+
+describe('publish: delegated uploads (#623)', () => {
+  // The logger is the only observable effect of the delegated branch —
+  // the whole point is that it does NOT tag — so these cases read it.
+  let logged: string[];
+
+  beforeEach(() => {
+    logged = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      logged.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(process.stderr.write).mockRestore();
+  });
+
+  it('does not tag a package whose handler delegated the upload', async () => {
+    // pypi uploads from the caller's `pypi-publish` job, so at this point
+    // nothing is on the registry. A tag here would name a version that a
+    // failed run never uploaded — and only a manual deletion undoes it.
+    const p = pypiPkg('lib-py', 'packages/py');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const handler = makeHandler({
+      kind: 'pypi',
+      publish: vi.fn().mockResolvedValue({ status: 'delegated', url: 'https://pypi/lib-py/0.1.0/' }),
+    });
+    const result = await publish({ cwd: CWD, handlerFor: () => handler });
+
+    expect(ensureTag).not.toHaveBeenCalled();
+    // The run log has to say why nothing was tagged, and name the tag the
+    // caller-side job will cut — otherwise a reader of a green publish job
+    // is left wondering where their pypi tag went.
+    expect(logged.join('')).toContain(
+      'publish: lib-py@0.1.0 delegated; tag lib-py-v0.1.0 is cut by the job that performs the upload, not here.',
+    );
+    // It is still reported, with the tag the caller-side job will cut.
+    expect(result.published).toEqual([
+      {
+        package: 'lib-py',
+        version: '0.1.0',
+        tag: 'lib-py-v0.1.0',
+        result: { status: 'delegated', url: 'https://pypi/lib-py/0.1.0/' },
+      },
+    ]);
+  });
+
+  it('tags the packages that did publish alongside a delegated one', async () => {
+    // Delegation suppresses one package's tag, not the run's tagging.
+    const py = pypiPkg('lib-py', 'packages/py');
+    const js = npmPkg('lib-js', 'packages/ts');
+    configWith(py, js);
+    vi.mocked(plan).mockResolvedValue([row(py), row(js)]);
+    allComplete(py, js);
+
+    await publish({
+      cwd: CWD,
+      handlerFor: (kind) =>
+        kind === 'pypi'
+          ? makeHandler({ kind: 'pypi', publish: vi.fn().mockResolvedValue({ status: 'delegated' }) })
+          : makeHandler(),
+    });
+
+    expect(ensureTag).toHaveBeenCalledTimes(1);
+    expect(ensureTag).toHaveBeenCalledWith(
+      '{name}-v{version}',
+      'lib-js',
+      '0.1.0',
+      'HEAD-SHA',
+      { cwd: CWD },
+      expect.anything(),
+    );
+  });
+
+  it('says nothing about a deferred tag for a package that really published', async () => {
+    // The complement: `published` must not take the delegated branch, or
+    // every crates/npm release would claim its tag was deferred to a job
+    // the consumer does not run.
+    const js = npmPkg('lib-js', 'packages/ts');
+    configWith(js);
+    vi.mocked(plan).mockResolvedValue([row(js)]);
+    allComplete(js);
+
+    await publish({ cwd: CWD, handlerFor: () => makeHandler() });
+
+    expect(ensureTag).toHaveBeenCalledTimes(1);
+    expect(logged.join('')).not.toContain('delegated');
+  });
+
+  it('says nothing about a deferred tag when the handler reports already-published', async () => {
+    // `handler.publish()` reports `already-published` on its own when the
+    // version turned up on the registry between the pre-check and the
+    // upload — the pypi handler re-checks right before delegating. That
+    // row is neither tagged here nor owed to anyone, so claiming a
+    // deferred tag would point the operator at an upload job with
+    // nothing to do.
+    const py = pypiPkg('lib-py', 'packages/py');
+    configWith(py);
+    vi.mocked(plan).mockResolvedValue([row(py)]);
+    allComplete(py);
+
+    await publish({
+      cwd: CWD,
+      handlerFor: () =>
+        makeHandler({
+          kind: 'pypi',
+          publish: vi.fn().mockResolvedValue({ status: 'already-published' }),
+        }),
+    });
+
+    expect(ensureTag).not.toHaveBeenCalled();
+    expect(logged.join('')).not.toContain('delegated');
+  });
+
+  it('carries an earlier delegation out through a later handler failure', async () => {
+    // The #623 repro: pypi delegates, npm then dies on a missing scope.
+    // The delegation has to reach the CLI so the caller-side upload job
+    // can gate on "PyPI's own path succeeded" rather than on the job's
+    // exit code — otherwise a broken npm scope silently skips PyPI.
+    const py = pypiPkg('lib-py', 'packages/py');
+    const js = npmPkg('lib-js', 'packages/ts');
+    configWith(py, js);
+    vi.mocked(plan).mockResolvedValue([row(py), row(js)]);
+    allComplete(py, js);
+
+    const failure = new Error('npm publish failed: E404 Scope not found');
+    const caught = await publish({
+      cwd: CWD,
+      handlerFor: (kind) =>
+        kind === 'pypi'
+          ? makeHandler({ kind: 'pypi', publish: vi.fn().mockResolvedValue({ status: 'delegated' }) })
+          : makeHandler({ publish: vi.fn().mockRejectedValue(failure) }),
+    }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    // The handler's own error is what propagates — annotated, not wrapped.
+    expect(caught).toBe(failure);
+    expect(attachPublishProgress).toHaveBeenCalledWith(failure, [
+      {
+        package: 'lib-py',
+        version: '0.1.0',
+        tag: 'lib-py-v0.1.0',
+        result: { status: 'delegated' },
+      },
+    ]);
   });
 });
 
