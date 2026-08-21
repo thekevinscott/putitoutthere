@@ -121,3 +121,55 @@ describe('downloadSdists', () => {
     expect(retrySleepSeconds).toHaveBeenNthCalledWith(5, 5);
   });
 });
+
+/**
+ * The retry budget's whole job is to outlast TestPyPI's `/simple/` index
+ * propagation lag. #642. Twin of the same contract in
+ * `download-wheels.test.ts`; both loops share one budget and must clear the
+ * same window.
+ *
+ * Modelled the way the lag actually presents for sdists: the project page
+ * fetches fine, the freshly-published version simply is not listed on it yet,
+ * so `findSdistHref` finds nothing until propagation completes.
+ *
+ * Asserted as a *duration*, not an attempt count, so it stays honest if the
+ * back-off curve is ever reshaped.
+ */
+describe('download retry budget vs. TestPyPI index propagation (#642)', () => {
+  // The slow end of the propagation window observed across #628 and #630
+  // (4m19s), rounded down. The budget must clear this, not merely reach it.
+  const OBSERVED_PROPAGATION_LAG_SECONDS = 259;
+
+  /**
+   * Real back-off, and a clock that only advances by what the loop actually
+   * sleeps. The href appears the moment the accumulated wait covers the
+   * observed lag — so this passes iff the budget outlasts it.
+   */
+  function stubIndexUntilPropagated(lagSeconds: number): { elapsed: () => number } {
+    let elapsed = 0;
+    vi.mocked(retrySleepSeconds).mockImplementation((attempt) => attempt * 10);
+    sleepMock.mockImplementation((ms) => {
+      elapsed += ms / 1000;
+      return Promise.resolve();
+    });
+    stubCurl(0);
+    vi.mocked(findSdistHref).mockImplementation(() =>
+      elapsed >= lagSeconds ? 'https://files/pkg-1.0.tar.gz#s' : null,
+    );
+    return { elapsed: () => elapsed };
+  }
+
+  it('keeps retrying past the slowest observed propagation lag', async () => {
+    const clock = stubIndexUntilPropagated(OBSERVED_PROPAGATION_LAG_SECONDS);
+    await expect(downloadSdists(['pkg==1.0'], 'IDX')).resolves.toBe(0);
+    expect(clock.elapsed()).toBeGreaterThanOrEqual(OBSERVED_PROPAGATION_LAG_SECONDS);
+  });
+
+  it('still gives up on a version that never appears', async () => {
+    // The budget grows; it stays bounded. A genuinely broken publish must
+    // still fail the gate rather than hang the job.
+    stubIndexUntilPropagated(Number.POSITIVE_INFINITY);
+    await expect(downloadSdists(['pkg==1.0'], 'IDX')).resolves.toBe(1);
+    expect(err.join('')).toBe('failed to download sdist for pkg==1.0: ERRTEXT\n');
+  });
+});

@@ -104,3 +104,57 @@ describe('downloadWheels', () => {
     expect(out.join('')).not.toContain('b==2');
   });
 });
+
+/**
+ * The retry budget's whole job is to outlast TestPyPI's `/simple/` index
+ * propagation lag. #642.
+ *
+ * The failure this pins is a *false negative*: the publish succeeded, the
+ * version is live on the JSON API and lands in `/simple/` shortly after, and
+ * the gate reports the release broken anyway because it stopped waiting too
+ * early. Observed on #628's `E2E` run and, independently, on #630 — TestPyPI
+ * propagation between 2m35s and 4m19s against a budget that gives up at 150s.
+ *
+ * Asserted as a *duration*, not an attempt count, so it stays honest if the
+ * back-off curve is ever reshaped: what matters is how long the loop waits,
+ * not how many requests it splits that wait into.
+ */
+describe('download retry budget vs. TestPyPI index propagation (#642)', () => {
+  // The slow end of the propagation window observed across #628 and #630
+  // (4m19s), rounded down. The budget must clear this, not merely reach it.
+  const OBSERVED_PROPAGATION_LAG_SECONDS = 259;
+
+  /**
+   * Real back-off, and a clock that only advances by what the loop actually
+   * sleeps. `pip` starts succeeding the moment the accumulated wait covers
+   * the observed lag — so this passes iff the budget outlasts it.
+   */
+  function stubPipUntilPropagated(lagSeconds: number): { elapsed: () => number } {
+    let elapsed = 0;
+    sleepSecs.mockImplementation((attempt) => attempt * 10);
+    sleepMock.mockImplementation((ms) => {
+      elapsed += ms / 1000;
+      return Promise.resolve();
+    });
+    exec.mockImplementation(() =>
+      elapsed >= lagSeconds
+        ? Promise.resolve()
+        : Promise.reject(new Error('ERROR: No matching distribution found')),
+    );
+    return { elapsed: () => elapsed };
+  }
+
+  it('keeps retrying past the slowest observed propagation lag', async () => {
+    const clock = stubPipUntilPropagated(OBSERVED_PROPAGATION_LAG_SECONDS);
+    await expect(downloadWheels(['a==1'], 'https://idx/')).resolves.toBe(0);
+    expect(clock.elapsed()).toBeGreaterThanOrEqual(OBSERVED_PROPAGATION_LAG_SECONDS);
+  });
+
+  it('still gives up on a version that never appears', async () => {
+    // The budget grows; it stays bounded. A genuinely broken publish must
+    // still fail the gate rather than hang the job.
+    stubPipUntilPropagated(Number.POSITIVE_INFINITY);
+    await expect(downloadWheels(['a==1'], 'https://idx/')).resolves.toBe(1);
+    expect(out.join('')).toContain('::error::failed to download wheel for a==1 from TestPyPI\n');
+  });
+});
