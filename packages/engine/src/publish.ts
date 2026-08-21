@@ -201,6 +201,9 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
 
   // 4. Publish each package in dep-graph order.
   const published: PublishOutput['published'] = [];
+  // Every manifest this run has rewritten, in publish order. See the
+  // `managedManifests.add` call below for why this spans the whole run.
+  const managedManifests = new Set<string>();
   const head = await headCommit({ cwd });
   const order = publishOrder(config.packages, [...perPackage.keys()]);
 
@@ -235,8 +238,20 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         await ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
         continue;
       }
-      await handler.writeVersion(pkg, version, ctx);
-      const result = await withRetry(() => handler.publish(pkg, version, ctx));
+      // #639: the crates handler's dirty-tree guard needs to know which
+      // manifests the bump landed in — for a crate that inherits its
+      // version that is the workspace root, outside the package directory.
+      //
+      // Accumulated across the whole run, not per package: two crates
+      // inheriting from the same root both bump that one file, so the root
+      // is still dirty from the first when the second publishes — and it is
+      // no more a stray edit then than it was then. The guard exists to
+      // catch files putitoutthere did NOT write.
+      for (const written of await handler.writeVersion(pkg, version, ctx)) {
+        managedManifests.add(written);
+      }
+      const publishCtx: Ctx = { ...ctx, managedManifestPaths: [...managedManifests] };
+      const result = await withRetry(() => handler.publish(pkg, version, publishCtx));
       published.push({
         package: name,
         version,

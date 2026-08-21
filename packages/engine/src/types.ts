@@ -80,6 +80,22 @@ export interface Ctx {
    * can omit; absent => empty list.
    */
   siblingPackagePaths?: readonly string[];
+  /**
+   * Absolute paths of the manifests this package's `writeVersion` just
+   * wrote, threaded from its return value so `publish` can tell a managed
+   * bump apart from a stray edit.
+   *
+   * The crates handler's pre-publish dirty-tree check (#135) used to assume
+   * the only file it could have touched was the package's own `Cargo.toml`.
+   * That stopped being true once `writeVersion` learned to follow workspace
+   * inheritance (#639): a crate declaring `version.workspace = true` has its
+   * version bumped at the workspace root, a file outside the package
+   * directory that the guard would otherwise refuse on.
+   *
+   * Optional so local/test flows can omit; absent => the guard falls back to
+   * allowing only the package's own manifest.
+   */
+  managedManifestPaths?: readonly string[];
 }
 
 export interface Logger {
