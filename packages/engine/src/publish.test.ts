@@ -348,6 +348,68 @@ describe('publish: pre-flight and completeness', () => {
   });
 });
 
+describe('publish: writeVersion hands its manifests to publish (#639)', () => {
+  it("threads the written manifests through as the publish ctx's managedManifestPaths", async () => {
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    // A crate that inherits its version has its bump land in the workspace
+    // root's Cargo.toml — outside the package directory. The crates
+    // handler's pre-publish dirty-tree guard refuses on any dirty file it
+    // does not recognize as managed, so unless `publish` forwards what
+    // `writeVersion` actually wrote, the fix for #639 turns a corrupted
+    // manifest into a refused release.
+    const written = ['/repo/Cargo.toml', '/repo/packages/rust/Cargo.toml'];
+    const handler = makeHandler({ writeVersion: vi.fn().mockResolvedValue(written) });
+    await publish({ cwd: CWD, handlerFor: () => handler });
+
+    expect(handler.publish).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.objectContaining({ managedManifestPaths: written }),
+    );
+  });
+
+  it('forwards an empty list rather than dropping the key when nothing was written', async () => {
+    // The guard distinguishes "no managed manifests" from "not told", and
+    // both must reach it as data rather than as an absent property that a
+    // later default could silently widen.
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const handler = makeHandler();
+    await publish({ cwd: CWD, handlerFor: () => handler });
+
+    expect(handler.publish).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.objectContaining({ managedManifestPaths: [] }),
+    );
+  });
+
+  it('leaves the rest of the ctx intact alongside the added key', async () => {
+    // `publish` builds the publish-time ctx by spreading the original; a
+    // rebuild that forgot a field would strip the artifacts root or the
+    // sibling paths the same guard also reads.
+    const p = npmPkg('lib-js', 'packages/ts');
+    configWith(p);
+    vi.mocked(plan).mockResolvedValue([row(p)]);
+    allComplete(p);
+
+    const handler = makeHandler();
+    await publish({ cwd: CWD, handlerFor: () => handler });
+
+    const ctx = vi.mocked(handler.publish).mock.calls[0]![2];
+    expect(ctx.cwd).toBe(CWD);
+    expect(typeof ctx.artifactsRoot).toBe('string');
+    expect(Array.isArray(ctx.siblingPackagePaths)).toBe(true);
+  });
+});
+
 describe('publish: publish order (toposort)', () => {
   it('publishes dependencies before dependents', async () => {
     const a = npmPkg('a', 'packages/a');

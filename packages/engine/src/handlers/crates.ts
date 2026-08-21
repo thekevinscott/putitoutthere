@@ -5,9 +5,12 @@
  *
  * - isPublished: GET /api/v1/crates/{name}/{version}; 200 → true, 404 →
  *   false, 5xx → TransientError (retry-wrapped at call site).
- * - writeVersion: edits the [package] version line in Cargo.toml in
- *   place. Regex-based to preserve comments and whitespace; the
- *   alternative (TOML round-trip) loses formatting.
+ * - writeVersion: delegates to `writeResolvedCargoVersion`, which
+ *   rewrites a literal `[package].version` in place or, for a crate
+ *   that inherits (`version.workspace = true`), the workspace root's
+ *   `[workspace.package].version` instead (#428, #639). Regex-based to
+ *   preserve comments and whitespace; the alternative (TOML
+ *   round-trip) loses formatting.
  * - publish: `cargo publish --allow-dirty --verbose` with stderr
  *   captured for the failure dump. Short-circuits on
  *   already-published (idempotent).
@@ -17,9 +20,11 @@
  * that catches shipping uncommitted stray edits. We restore a
  * narrower version of that check: before invoking cargo, scan the
  * working tree via `git status --porcelain` and refuse to publish
- * if anything is dirty outside the Cargo.toml we just wrote. If we
- * can't scan (e.g. no git repo), we fall back to cargo's own
- * --allow-dirty behavior.
+ * if anything is dirty outside the manifests writeVersion just wrote.
+ * "Manifests", plural: an inheriting crate's version lives at the
+ * workspace root, so the file the bump lands in can sit outside the
+ * package directory entirely (#639). If we can't scan (e.g. no git
+ * repo), we fall back to cargo's own --allow-dirty behavior.
  *
  * OIDC: the crates-io-auth-action GHA step exchanges the OIDC JWT for
  * a short-lived CARGO_REGISTRY_TOKEN in the env. The handler doesn't
@@ -27,7 +32,7 @@
  * up (same for classic token fallback).
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult, TrustPosture } from '../types.js';
@@ -37,6 +42,7 @@ import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 import { execCapture } from '../utils/exec-capture.js';
+import { writeResolvedCargoVersion } from '../write-resolved-cargo-version.js';
 import { ExecError } from '../utils/exec-error.js';
 import { matchFirstPublishTpRejection } from './match-first-publish-tp-rejection.js';
 
@@ -82,15 +88,22 @@ async function writeVersionImpl(
     }
     throw toError(err);
   }
-  let updated: string;
+  // #639: route through the shared resolver rather than the literal-only
+  // rewriter. A crate that inherits its version (`version.workspace = true`)
+  // has no `[package].version` to rewrite, and the literal path used to walk
+  // past the table and corrupt a dependency's requirement instead. The
+  // resolver detects inheritance and rewrites `[workspace.package].version`
+  // at the workspace root — the same routing `write-version.ts` and
+  // `write-crate-version.ts` have used since #428.
+  //
+  // Returns the manifests this write MANAGES, which is what the pre-publish
+  // dirty-tree guard needs: for an inheriting crate that is a file outside
+  // the package directory, and the guard would otherwise refuse on it.
   try {
-    updated = replaceCargoVersion(original, version);
+    return await writeResolvedCargoVersion(pkg.path, original, version);
   } catch (err) {
     throw toError(err);
   }
-  if (updated === original) {return [];}
-  await writeFile(cargoPath, updated, 'utf8');
-  return [cargoPath];
 }
 
 async function publishImpl(
@@ -119,6 +132,7 @@ async function publishImpl(
     pkg.path,
     ctx.artifactsRoot,
     ctx.siblingPackagePaths,
+    ctx.managedManifestPaths,
   );
   if (unexpected !== null && unexpected.length > 0) {
     throw new Error(
@@ -271,27 +285,6 @@ function crateNameFor(pkg: { name: string; crate?: string }): string {
 }
 
 /**
- * Rewrites the first `version = "..."` assignment inside `[package]`.
- * Preserves everything else in the file byte-for-byte. Throws if the
- * field isn't found (explicit config error; fail loud rather than
- * silently creating a half-broken manifest).
- */
-export function replaceCargoVersion(source: string, version: string): string {
-  // Match [package] section header then a version = "x.y.z" line.
-  // Captures leading indent + `version = "` + old version + trailing.
-  const re = /(\[package\][\s\S]*?)(^\s*version\s*=\s*")([^"]*)(")/m;
-  const m = re.exec(source);
-  if (!m) {
-    throw new Error('Cargo.toml: no [package].version field found');
-  }
-  const [, pre, prefix, old, suffix] = m as unknown as [string, string, string, string, string];
-  if (old === version) {return source;}
-  const start = m.index + pre.length;
-  const end = start + prefix.length + old.length + suffix.length;
-  return source.slice(0, start) + prefix + version + suffix + source.slice(end);
-}
-
-/**
  * Return paths of dirty working-tree files that are NOT the package's
  * managed Cargo.toml. Returns null if we can't determine (not inside
  * a git work tree, git command missing, etc) — callers treat null as
@@ -302,6 +295,7 @@ export async function scanDirtyOutsideManifest(
   pkgPath: string,
   artifactsRoot?: string,
   siblingPackagePaths?: readonly string[],
+  managedManifestPaths?: readonly string[],
 ): Promise<string[] | null> {
   // Confirm we're inside a git work tree. If not, bail and let cargo's
   // own --allow-dirty handling take over.
@@ -317,14 +311,25 @@ export async function scanDirtyOutsideManifest(
   // we can string-compare against porcelain output directly without
   // fighting platform path conventions (macOS /private/ symlinks,
   // Windows 8.3 short names + case-insensitive FS).
-  let managedRel = '';
+  const managedRels = new Set<string>();
   try {
-    managedRel = (await execCapture('git', ['ls-files', '--full-name', '--', 'Cargo.toml'], {
+    const rel = (await execCapture('git', ['ls-files', '--full-name', '--', 'Cargo.toml'], {
       cwd: pkgPath,
     })).stdout.trim();
+    if (rel !== '') {managedRels.add(rel);}
   } catch {
     // Cargo.toml not tracked (e.g. first release on a fresh tree).
-    // Fall through; empty managedRel means nothing is allowed dirty.
+    // Fall through; an empty set means nothing is allowed dirty.
+  }
+  // #639: whatever writeVersion actually wrote. For a crate that inherits
+  // its version the bump lands in the workspace root's Cargo.toml, which is
+  // outside the package directory and would otherwise read as a stray edit
+  // and refuse the publish. Normalized with `relative()` the same way
+  // `artifactsRoot` and the sibling paths below are.
+  for (const p of managedManifestPaths ?? []) {
+    const r = relative(cwd, p);
+    if (r === '' || r.startsWith('..')) {continue;}
+    managedRels.add(r.replace(/\\/g, '/'));
   }
   let porcelain: string;
   try {
@@ -362,7 +367,7 @@ export async function scanDirtyOutsideManifest(
     const rest = raw.slice(3);
     const path = rest.includes(' -> ') ? rest.split(' -> ').pop()! : rest;
     const normalized = path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path;
-    if (normalized === managedRel) {continue;}
+    if (managedRels.has(normalized)) {continue;}
     if (
       artifactsRel !== '' &&
       (normalized === artifactsRel ||

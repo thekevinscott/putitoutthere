@@ -231,8 +231,12 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         await ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
         continue;
       }
-      await handler.writeVersion(pkg, version, ctx);
-      const result = await withRetry(() => handler.publish(pkg, version, ctx));
+      // #639: the crates handler's dirty-tree guard needs to know which
+      // manifests the bump landed in — for a crate that inherits its
+      // version that is the workspace root, outside the package directory.
+      const managedManifestPaths = await handler.writeVersion(pkg, version, ctx);
+      const publishCtx: Ctx = { ...ctx, managedManifestPaths };
+      const result = await withRetry(() => handler.publish(pkg, version, publishCtx));
       published.push({
         package: name,
         version,

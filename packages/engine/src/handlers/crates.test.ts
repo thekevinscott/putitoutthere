@@ -293,8 +293,14 @@ describe('crates.writeVersion', () => {
       '1.0.0',
       makeCtx({ cwd: dir }),
     );
-    expect(paths).toEqual([]);
+    // No write: the manifest already says 1.0.0.
     expect(writeMock).not.toHaveBeenCalled();
+    // The return value reports the manifest this bump MANAGES, not the set
+    // of files that changed — that is what the pre-publish dirty-tree guard
+    // consumes (#639), and a no-op bump still owns the same manifest. Same
+    // semantics `writeResolvedCargoVersion` has had since #428.
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
   });
 
   it('throws when Cargo.toml is missing, chaining the ENOENT as the cause', async () => {
