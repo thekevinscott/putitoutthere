@@ -107,22 +107,31 @@ jobs:
     # `github.run_id` / `github.run_attempt` on `*-first-publish`
     # fixtures). Both stamps are load-bearing — registry publishes are
     # immutable, so each run has to claim a fresh slot — but they make the
-    # check name change on every run, so nothing downstream can predict or
-    # pin it and the PR check list is unreadable.
+    # check name change on every run, so the PR check list is unreadable
+    # and nothing downstream can pin a row.
     #
     # Only stable fields go in the name. `kind` + `target` alone is NOT
     # unique: a dual-mode npm package (`polyglot-everything`) fans
-    # `bundled-cli` and `napi` across the same target list, so `build` is
+    # `bundled-cli` and `napi` across the same five targets, so `build` is
     # the minimum extra field that keeps one check name per matrix row.
-    # `build` is absent on crates rows and on vanilla npm rows, hence the
-    # conditional slot.
+    # Verified over `plan()` output for all 15 fixtures in
+    # e2e-fixture.yml: 84 rows, no collision.
+    #
+    # `build` is absent on crates rows and on vanilla npm rows, where the
+    # slot renders empty (`build crates  (noarch)`; GitHub collapses the
+    # double space when it displays the check). An earlier revision used
+    # `${{ matrix.build && format(' {0}', matrix.build) || '' }}` to close
+    # the gap. Reverted: a conditional buys a cosmetic space and costs
+    # static readability — a name is only predictable ahead of a run if it
+    # is a concatenation of plain field reads, which is the whole point of
+    # this change. Keep every slot a bare `matrix.<field>`.
     #
     # The fixture is deliberately NOT in the name. The caller job is
     # already `name: e2e (${{ matrix.fixture }})` (e2e-fixture.yml), and
     # GitHub renders a reusable workflow's check as `<caller job> /
     # <called job>` — so repeating it here would only produce
     # `e2e (js-vanilla) / build (js-vanilla, npm, noarch)`.
-    name: build (${{ matrix.kind }}${{ matrix.build && format(' {0}', matrix.build) || '' }}, ${{ matrix.target }})
+    name: build ${{ matrix.kind }} ${{ matrix.build }} (${{ matrix.target }})
     needs: plan
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
     strategy:
