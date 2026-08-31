@@ -322,6 +322,21 @@ never commits one. Concretely:
   at full standard `e2e-verify` is present-but-dormant, which is exactly
   what we want.
 
+## Comments: no extraneous ones, be concise
+
+Comment the **why** a reader cannot recover from the code — a non-obvious
+constraint, a gotcha, the issue a choice traces to. Never the *what*: if
+the code already says it, the comment only repeats it.
+
+Three lines is plenty for most. Longer reasoning belongs in
+`CHANGELOG.md`, `MIGRATIONS.md`, `README.md`, the commit message, or
+`notes/` — cite the issue number and let it carry the narrative, rather
+than inlining an essay that then has to stay in sync in two places. Do
+not re-tell a bug's discovery story or paste reproduction anecdotes into
+a source file.
+
+Applies everywhere: workflow YAML, tests, engine code.
+
 ## Design commitments
 
 Explicit non-goals that bound `putitoutthere`'s scope. Read before proposing
