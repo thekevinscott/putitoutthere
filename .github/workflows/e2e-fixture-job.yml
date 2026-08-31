@@ -116,7 +116,13 @@ jobs:
     # the minimum extra field that keeps one check name per matrix row.
     # `build` is absent on crates rows and on vanilla npm rows, hence the
     # conditional slot.
-    name: build (${{ inputs.fixture }}, ${{ matrix.kind }}${{ matrix.build && format(' {0}', matrix.build) || '' }}, ${{ matrix.target }})
+    #
+    # The fixture is deliberately NOT in the name. The caller job is
+    # already `name: e2e (${{ matrix.fixture }})` (e2e-fixture.yml), and
+    # GitHub renders a reusable workflow's check as `<caller job> /
+    # <called job>` — so repeating it here would only produce
+    # `e2e (js-vanilla) / build (js-vanilla, npm, noarch)`.
+    name: build (${{ matrix.kind }}${{ matrix.build && format(' {0}', matrix.build) || '' }}, ${{ matrix.target }})
     needs: plan
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
     strategy:
@@ -527,10 +533,14 @@ jobs:
           path: fixture-tree/${{ matrix.artifact_path }}
 
   publish:
-    # #655: not a matrix job, so the auto-generated name was already
-    # stable — but name it for the fixture anyway so the three jobs of a
-    # single fixture's run read as a set in the check list.
-    name: publish (${{ inputs.fixture }})
+    # #655: deliberately left unnamed. Not a matrix job, so the derived
+    # check name is just the job id — already stable, already resolvable
+    # statically, and the caller job's `name: e2e (${{ matrix.fixture }})`
+    # supplies the fixture. Naming it `publish (${{ inputs.fixture }})`
+    # was tried and reverted: willfire (the `CI Gate` check) does not
+    # propagate the caller's matrix into a called workflow's `inputs`
+    # context, so the expression turned 15 statically-resolved checks
+    # into 15 unresolvable ones.
     needs: [plan, build]
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
     runs-on: ubuntu-latest
