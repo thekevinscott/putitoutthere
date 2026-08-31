@@ -137,6 +137,41 @@ a neighbouring field (issue #639).
 specifically to avoid this, you can now switch to
 `version.workspace = true` — but note that is a change to your manifest,
 not something the upgrade requires.
+
+| | Before | After |
+|---|---|---|
+| `putitoutthere.toml` | no change | no change |
+| Reusable workflow inputs | no change | no change |
+| `Cargo.toml` (literal version) | bumped in place | bumped in place, unchanged |
+| `Cargo.toml` (`version.workspace = true`) | a dependency's requirement was rewritten | workspace root's `[workspace.package].version` is bumped |
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+- An inheriting crate's release now writes the **workspace root**
+  `Cargo.toml` rather than the package's own. The pre-publish dirty-tree
+  guard (which refuses to `cargo publish --allow-dirty` when anything
+  outside the managed manifest is dirty) was taught about this, so the
+  workspace-root write is recognized as the managed bump rather than
+  reported as a stray edit. No consumer action is needed; a release that
+  previously corrupted a requirement now simply succeeds.
+- A `Cargo.toml` with neither a literal `[package].version` nor a
+  resolvable workspace inheritance now fails with
+  `Cargo.toml: no [package].version field found` instead of rewriting an
+  unrelated field. This is a manifest that could never have been released
+  correctly.
+
+**Verification.** Release a crate that declares
+`version.workspace = true` and has at least one dependency in
+section-table form. After the run, the workspace root's
+`[workspace.package].version` matches the released version, and
+`cargo metadata --no-deps` reports every dependency requirement exactly
+as you wrote it. Before this fix the dependency's `req` came back as the
+release version.
+
+---
+
 ### crates: a release moves the in-repo requirements pointing at it
 
 **Summary.** With two `kind = "crates"` packages in one repo where A
@@ -176,8 +211,6 @@ sits between two that it does is still covered.
 |---|---|---|
 | `putitoutthere.toml` | no change | no change |
 | Reusable workflow inputs | no change | no change |
-| `Cargo.toml` (literal version) | bumped in place | bumped in place, unchanged |
-| `Cargo.toml` (`version.workspace = true`) | a dependency's requirement was rewritten | workspace root's `[workspace.package].version` is bumped |
 | `Cargo.toml` of a crate that path-deps a released crate | requirement left behind; `cargo` refuses to resolve | requirement moved to the released version |
 | Registry dependencies (`pyo3 = { version = "0.22" }`) | untouched | untouched |
 | Path dependencies with no `version` key | untouched | untouched |
@@ -186,26 +219,6 @@ sits between two that it does is still covered.
 
 **Behavior changes without code changes.**
 
-- An inheriting crate's release now writes the **workspace root**
-  `Cargo.toml` rather than the package's own. The pre-publish dirty-tree
-  guard (which refuses to `cargo publish --allow-dirty` when anything
-  outside the managed manifest is dirty) was taught about this, so the
-  workspace-root write is recognized as the managed bump rather than
-  reported as a stray edit. No consumer action is needed; a release that
-  previously corrupted a requirement now simply succeeds.
-- A `Cargo.toml` with neither a literal `[package].version` nor a
-  resolvable workspace inheritance now fails with
-  `Cargo.toml: no [package].version field found` instead of rewriting an
-  unrelated field. This is a manifest that could never have been released
-  correctly.
-
-**Verification.** Release a crate that declares
-`version.workspace = true` and has at least one dependency in
-section-table form. After the run, the workspace root's
-`[workspace.package].version` matches the released version, and
-`cargo metadata --no-deps` reports every dependency requirement exactly
-as you wrote it. Before this fix the dependency's `req` came back as the
-release version.
 - A crates release now writes manifests **outside** the package
   directory — the dependents' and, for an inherited requirement, the
   workspace root's. These rewrites are ephemeral: the publish job runs
