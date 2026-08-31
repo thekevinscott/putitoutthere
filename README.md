@@ -938,12 +938,12 @@ committed source).
 > `cargo build`.** Declaring `build = "bundled-cli"` *without* a
 > `[package.bundle_cli]` block is supported — you own the cross-compile,
 > and the workflow runs your `npm run build` with `TARGET`, `BUILD`, and
-> `VERSION` set (see the [table above](#napi-npm-family)). On that path
-> nothing bumps your crate for you: `[package.bundle_cli]`'s pre-build
-> version write is gated on the block you did not declare, and an npm
-> package's `package.json` version is not rewritten until the publish job
-> — so at `cargo build` time every version source on disk is still the
-> committed literal.
+> `VERSION` set (see the [three-variable table](#napi-npm-family) under
+> the napi recipe). On that path nothing bumps your crate for you:
+> `[package.bundle_cli]`'s pre-build version write is gated on the block
+> you did not declare, and an npm package's `package.json` version is not
+> rewritten until the publish job — so at `cargo build` time every version
+> source on disk is still the committed literal.
 >
 > cargo bakes `CARGO_PKG_VERSION` in at compile time from `Cargo.toml`
 > and honors no env override, so a script that skips this ships a binary
