@@ -46,8 +46,16 @@ jobs:
           # Since willfire 0.1.31 the names no longer narrow anything -- any
           # grant enables execution for the whole prediction. The granted jobs
           # run the PR's own code for real, in a docker sandbox, at the
-          # predicted commit. That is acceptable here because this workflow is
-          # `pull_request` (fork runs get a read-only token and no secrets) and
-          # its `permissions:` block is read-only throughout, but it is a real
-          # posture choice, not a formality. The names stay for the log.
+          # predicted commit. The names stay for the log.
+          #
+          # Safe today because every PR here comes from a same-repo branch
+          # (`claude/*`, `dependabot/*`), so nothing attacker-controlled
+          # reaches the sandbox, and this workflow's `permissions:` block is
+          # read-only throughout. Two conditions void that reasoning -- revisit
+          # this grant if either arrives:
+          #   - Fork PRs enabled on this repo. The sandbox has no timeout and
+          #     no resource limits, and tarball extraction happens host-side,
+          #     outside the container.
+          #   - A `CI Gate` run landing on a self-hosted runner. The isolation
+          #     argument assumes an ephemeral GitHub-hosted VM.
           execute: thekevinscott/testing-conventions:detect thekevinscott/putitoutthere:plan
