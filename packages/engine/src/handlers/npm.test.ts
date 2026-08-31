@@ -22,6 +22,7 @@ import { ExecError } from '../utils/exec-error.js';
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import { isBootstrapPublish, npm } from './npm.js';
 import type { Ctx } from '../types.js';
+import { TransientError } from '../types.js';
 
 vi.mock('../utils/exec-capture.js');
 vi.mock('node:fs/promises');
@@ -243,7 +244,7 @@ describe('npm.isPublished', () => {
     expect(await npm.isPublished(basePkg(), '0.1.0', makeCtx())).toBe(true);
     expect(execMock).toHaveBeenCalledWith(
       'npm',
-      ['view', 'demo-npm@0.1.0', 'version'],
+      ['view', 'demo-npm@0.1.0', 'version', '--fetch-retries=0'],
       expect.any(Object) as object,
     );
   });
@@ -262,9 +263,42 @@ describe('npm.isPublished', () => {
     await npm.isPublished(pkg, '0.1.0', makeCtx());
     expect(execMock).toHaveBeenCalledWith(
       'npm',
-      ['view', 'demo-js@0.1.0', 'version'],
+      ['view', 'demo-js@0.1.0', 'version', '--fetch-retries=0'],
       expect.any(Object) as object,
     );
+  });
+
+  // #650: npm's own retry budget (fetch-retries=2, 10s then 60s) is
+  // error-blind, so an offline probe paid ~70s re-attempting a DNS lookup
+  // that cannot start succeeding. piot makes the single attempt and decides
+  // for itself whether a second one is worth anything.
+  it('makes exactly one `npm view` attempt, retries disabled', async () => {
+    execMock.mockRejectedValue(new ExecError('ENOTFOUND', '', 'npm error code ENOTFOUND\n', 1));
+    await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toThrow(/could not be reached/);
+    expect(execMock).toHaveBeenCalledTimes(1);
+    expect(execMock.mock.calls[0]![1]).toContain('--fetch-retries=0');
+  });
+
+  it('throws (not `false`) when the registry hostname does not resolve', async () => {
+    const cause = new ExecError('ENOTFOUND', '', 'npm error code ENOTFOUND\nnpm error syscall getaddrinfo\n', 1);
+    execMock.mockRejectedValue(cause);
+    // "We could not ask" must not be reported as "the answer is no": the
+    // read-only caller renders UNKNOWN off this throw, and a publish stops
+    // rather than shipping against a registry it never reached.
+    await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toMatchObject({
+      message: expect.stringContaining('demo-npm@0.1.0') as unknown as string,
+      cause,
+    });
+    // Not a TransientError: `withRetry` must let a dead name through on the
+    // first attempt instead of sleeping through a backoff ladder for it.
+    await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.not.toBeInstanceOf(TransientError);
+  });
+
+  it('throws a TransientError when the registry answers 5xx', async () => {
+    execMock.mockRejectedValue(new ExecError('E503', '', 'npm error code E503\n', 1));
+    // Reached and faltered — the case the retry policy was written for, so
+    // this one stays retryable at piot's layer.
+    await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toBeInstanceOf(TransientError);
   });
 });
 
