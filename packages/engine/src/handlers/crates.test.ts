@@ -855,9 +855,10 @@ describe('crates.publish', () => {
       const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
         new Response('{}', { status: 404 }),
       );
+      const huge = hugeStderr();
       execMock.mockImplementation((file: string) => {
         if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
-        return Promise.reject(new ExecError('exit 1', '', hugeStderr(), 1));
+        return Promise.reject(new ExecError('exit 1', '', huge, 1));
       });
       process.env.CARGO_REGISTRY_TOKEN = 'tok';
       const err = await crates
@@ -873,6 +874,14 @@ describe('crates.publish', () => {
         tail: err.message.endsWith(HUGE_TAIL),
         elided: ELIDED.test(err.message),
       }).toEqual({ fits: true, head: true, tail: true, elided: true });
+      // Eliding the message is only safe because the full stream survives on
+      // the `cause`: `publish.ts` walks the chain with `findExecError` to
+      // build the job-summary dump, which is the copy holding everything the
+      // message dropped. Lose the cause and the dump reports an empty
+      // command, empty stdout and exit code -1 — the elided middle would then
+      // exist nowhere.
+      expect(err.cause).toBeInstanceOf(ExecError);
+      expect((err.cause as ExecError).stderr).toBe(huge);
       fetchSpy.mockRestore();
     });
 
