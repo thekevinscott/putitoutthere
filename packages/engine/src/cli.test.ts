@@ -441,6 +441,30 @@ describe('cli: plan dispatch', () => {
     );
   });
 
+  it('appends unpublished_kinds= alongside matrix=, skipping fully-published kinds (#622)', async () => {
+    // The reusable workflow gates its crates.io OIDC exchange on this key.
+    // Gating on the matrix instead asked "does this repo have a crate?",
+    // so an idempotent re-run demanded a working trusted publisher for a
+    // publish the handler would skip — and a failed exchange killed the
+    // job before npm and PyPI got their turn.
+    computePlanStatusMock.mockResolvedValue({
+      matrix: [matrixRow('demo-rust'), matrixRow('demo-js')],
+      verdicts: [
+        { package: 'demo-rust', kind: 'crates', version: '1.0.0', verdict: 'skip' },
+        { package: 'demo-js', kind: 'npm', version: '1.0.0', verdict: 'publish' },
+      ],
+      skew: [],
+    });
+    process.env.GITHUB_OUTPUT = '/gha/output.txt';
+    const code = await run(argv('plan', '--cwd', '/x', '--json'));
+    expect(code).toBe(0);
+    const written = String(appendFileMock.mock.calls[0]![1] as string);
+    expect(written).toContain('unpublished_kinds=["npm"]\n');
+    // The matrix contract the build job depends on is untouched: both
+    // packages still build, only the auth gate narrows.
+    expect(written).toMatch(/^matrix=\[\{/);
+  });
+
   it('does NOT write matrix= to $GITHUB_OUTPUT when the plan is empty (#146)', async () => {
     computePlanStatusMock.mockResolvedValue(planStatus([]));
     process.env.GITHUB_OUTPUT = '/gha/output.txt';

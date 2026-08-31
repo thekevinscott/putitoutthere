@@ -40,13 +40,13 @@
  * so a preview-only mode is meaningful there and is supported (#403).
  */
 
-import { appendFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import { advanceFloatingMajor } from './advance-floating-major.js';
 import { advanceV0 } from './advance-v0.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
+import { emitPlanOutputs } from './emit-plan-outputs.js';
 import { emitReleaseOutputs } from './emit-release-outputs.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
@@ -300,19 +300,11 @@ export async function run(argv: readonly string[]): Promise<number> {
             }
           }
         }
-        // GHA `outputs.matrix` — append to $GITHUB_OUTPUT when present.
-        // Skip the write entirely when the matrix is empty (#146): the
-        // consumer workflow's `if: fromJson(...).length > 0` style guard
-        // only fires when the output key exists, and emitting `matrix=[]`
-        // races against the "output not set" branch the workflow expects.
-        const githubOutput = process.env.GITHUB_OUTPUT;
-        if (githubOutput && matrix.length > 0) {
-          await appendFile(
-            githubOutput,
-            `matrix=${JSON.stringify(matrix)}\n`,
-            'utf8',
-          );
-        }
+        // GHA step outputs — `matrix` (#146) plus `unpublished_kinds`, the
+        // kinds this run still has something to publish, which the reusable
+        // workflow gates registry auth on (#622). Both writes, and the
+        // empty-matrix skip, live in `emitPlanOutputs`.
+        await emitPlanOutputs(matrix, verdicts, process.env.GITHUB_OUTPUT);
         return 0;
       }
       case 'check': {
