@@ -48,6 +48,18 @@ jobs:
           # run the PR's own code for real, in a docker sandbox, at the
           # predicted commit. The names stay for the log.
           #
+          # The `owner/repo` half does not narrow anything either, despite
+          # `action.yml:14-17` documenting it as scoping execution to this
+          # repo (pr-monitor#40). Execution reaches any job the prediction
+          # touches, including jobs defined in reusable workflows from other
+          # repositories. Today that is `thekevinscott/testing-conventions@v0`
+          # via conventions.yml -- executing its `detect` job is what resolves
+          # the eight inherited names. Same owner, so the trust is real but
+          # ordinary; note `v0` is a force-moved tag, so what runs in the
+          # sandbox can change with no diff here. That is the same class of
+          # problem that opened #659: `pr-monitor@v1` moved 1077 lines under
+          # us in one jump.
+          #
           # Safe today because every PR here comes from a same-repo branch
           # (`claude/*`, `dependabot/*`), so nothing attacker-controlled
           # reaches the sandbox, and this workflow's `permissions:` block is
