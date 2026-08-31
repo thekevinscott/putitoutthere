@@ -34,10 +34,15 @@
 export type NpmViewFailure = 'absent' | 'unreachable' | 'transient';
 
 /**
- * npm's machine-readable failure code line, in either prefix spelling:
- * `npm error code ENOTFOUND` / `npm ERR! code ENOTFOUND`.
+ * npm's machine-readable failure code, in either prefix spelling:
+ * `npm error code ENOTFOUND` (npm 11) / `npm ERR! code ENOTFOUND` (npm <= 10).
+ *
+ * The prefix sits in a lookbehind rather than a capture group so the match
+ * *is* the code. A capture group would be typed `string | undefined` under
+ * `noUncheckedIndexedAccess`, forcing a `?? ''` fallback for a group that
+ * cannot fail to participate — an unreachable default no test can pin.
  */
-const CODE_LINE = /^npm (?:error|ERR!) code (\S+)$/m;
+const CODE_LINE = /(?<=^npm (?:error|ERR!) code )\S+$/m;
 
 /** DNS resolution failed — there is no registry to talk to. */
 const UNREACHABLE_CODES: ReadonlySet<string> = new Set(['ENOTFOUND', 'EAI_AGAIN']);
@@ -53,9 +58,14 @@ const TRANSIENT_CODES: ReadonlySet<string> = new Set([
 /** npm renders an HTTP status as `E<status>`; 5xx is the registry's fault. */
 const SERVER_ERROR_CODE = /^E5[0-9][0-9]$/;
 
-export function classifyNpmViewFailure(stderr: string | undefined): NpmViewFailure {
-  const code = CODE_LINE.exec(stderr ?? '')?.[1];
-  if (code === undefined) {return 'absent';}
+export function classifyNpmViewFailure(stderr: string): NpmViewFailure {
+  const match = CODE_LINE.exec(stderr);
+  if (match === null) {
+    // npm said nothing we can read a code out of. Unrecognised shapes keep
+    // the pre-#650 reading rather than inventing a failure mode for them.
+    return 'absent';
+  }
+  const code = match[0];
   if (UNREACHABLE_CODES.has(code)) {return 'unreachable';}
   if (TRANSIENT_CODES.has(code)) {return 'transient';}
   if (SERVER_ERROR_CODE.test(code)) {return 'transient';}

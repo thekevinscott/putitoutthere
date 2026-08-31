@@ -67,8 +67,12 @@ async function isPublishedImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<
     });
     return true;
   } catch (err) {
-    const stderr = err instanceof ExecError ? err.stderr : undefined;
-    switch (classifyNpmViewFailure(stderr)) {
+    if (!(err instanceof ExecError)) {
+      // Nothing from the process seam to read npm's code line out of, so
+      // there is nothing to classify — keep the historical reading.
+      return false;
+    }
+    switch (classifyNpmViewFailure(err.stderr)) {
       case 'unreachable':
         // No registry was reached, so there is no answer to report. Saying
         // "not published" here is a guess that reads as fact: `plan` renders
@@ -79,8 +83,7 @@ async function isPublishedImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<
         // `TransientError`: a name that does not resolve will not resolve on
         // attempt two, so `withRetry` must let this through immediately.
         throw new Error(
-          `npm view ${name}@${version} failed: the npm registry could not be reached` +
-            `${stderr ? `\n${stderr.trim()}` : ''}`,
+          `npm view ${name}@${version} failed: the npm registry could not be reached\n${err.stderr.trim()}`,
           { cause: err },
         );
       case 'transient':
@@ -88,8 +91,7 @@ async function isPublishedImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<
         // retry policy exists for. `withRetry` at the publish call sites
         // retries; `plan` renders UNKNOWN.
         throw new TransientError(
-          `npm view ${name}@${version} failed: transient registry error` +
-            `${stderr ? `\n${stderr.trim()}` : ''}`,
+          `npm view ${name}@${version} failed: transient registry error\n${err.stderr.trim()}`,
         );
       case 'absent':
         // The registry answered and the version isn't there (`E404`), or the

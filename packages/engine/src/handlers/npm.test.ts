@@ -22,6 +22,7 @@ import { ExecError } from '../utils/exec-error.js';
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import { isBootstrapPublish, npm } from './npm.js';
 import type { Ctx } from '../types.js';
+vi.mock('../types.js', async () => await vi.importActual<typeof import('../types.js')>('../types.js'));
 import { TransientError } from '../types.js';
 
 vi.mock('../utils/exec-capture.js');
@@ -285,8 +286,16 @@ describe('npm.isPublished', () => {
     // "We could not ask" must not be reported as "the answer is no": the
     // read-only caller renders UNKNOWN off this throw, and a publish stops
     // rather than shipping against a registry it never reached.
+    //
+    // The message is asserted whole. Naming the package and quoting npm's
+    // own stderr underneath is the entire diagnostic value of this throw —
+    // a maintainer reading "could not be reached" with no code line cannot
+    // tell a dead DNS name from a typo'd registry URL. The trailing newline
+    // of npm's stderr is trimmed, so the message never ends in whitespace.
     await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toMatchObject({
-      message: expect.stringContaining('demo-npm@0.1.0') as unknown as string,
+      message:
+        'npm view demo-npm@0.1.0 failed: the npm registry could not be reached\n' +
+        'npm error code ENOTFOUND\nnpm error syscall getaddrinfo',
       cause,
     });
     // Not a TransientError: `withRetry` must let a dead name through on the
@@ -299,6 +308,31 @@ describe('npm.isPublished', () => {
     // Reached and faltered — the case the retry policy was written for, so
     // this one stays retryable at piot's layer.
     await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toBeInstanceOf(TransientError);
+    // Same whole-message contract as the unreachable arm, and it must say
+    // something *different*: "transient" is what tells a reader the retry
+    // was piot's decision rather than a dead end.
+    await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).rejects.toMatchObject({
+      message: 'npm view demo-npm@0.1.0 failed: transient registry error\nnpm error code E503',
+    });
+  });
+
+  it('reads a rejection that is not an ExecError as "not published"', async () => {
+    // No process-seam stderr to classify, so there is no code line to read
+    // and nothing to report as unreachable. The historical answer stands.
+    execMock.mockRejectedValue(new Error('boom'));
+    await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).resolves.toBe(false);
+  });
+
+  it('does not classify a rejection that merely looks like an ExecError', async () => {
+    // The narrowing is on the seam's own error class, not on the presence of
+    // a `stderr` property. Anything else reaching this catch came from
+    // somewhere we do not control, so its text is not npm's to interpret —
+    // duck-typing it would let an unrelated throw fabricate an UNREACHABLE
+    // verdict for a registry that was never probed.
+    execMock.mockRejectedValue(
+      Object.assign(new Error('boom'), { stderr: 'npm error code ENOTFOUND' }),
+    );
+    await expect(npm.isPublished(basePkg(), '0.1.0', makeCtx())).resolves.toBe(false);
   });
 });
 

@@ -62,7 +62,6 @@ describe('classifyNpmViewFailure', () => {
   it('falls back to absent when there is no code line at all', () => {
     // Conservative default: an unparseable failure keeps the pre-#650
     // reading rather than inventing a new outcome for it.
-    expect(classifyNpmViewFailure(undefined)).toBe('absent');
     expect(classifyNpmViewFailure('')).toBe('absent');
     expect(classifyNpmViewFailure('some other tool exploded\n')).toBe('absent');
     // The prefix is load-bearing: prose that merely mentions a code is not
@@ -70,6 +69,11 @@ describe('classifyNpmViewFailure', () => {
     expect(classifyNpmViewFailure('the request failed with code ENOTFOUND\n')).toBe('absent');
     // ...and so is the line-start anchor.
     expect(classifyNpmViewFailure('  npm error code ENOTFOUND\n')).toBe('absent');
+    // ...and so is the end-of-line anchor. A code line with trailing content
+    // is not a shape npm emits, so it is not one we claim to understand:
+    // without the `$`, this would read as a DNS failure and render UNKNOWN
+    // for a registry that may well have answered.
+    expect(classifyNpmViewFailure('npm error code ENOTFOUND and then some\n')).toBe('absent');
   });
 
   it('reads an unrecognised code as absent, not as a network failure', () => {
