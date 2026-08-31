@@ -84,7 +84,7 @@ verdict is reached rather than in what a healthy run reports.
 resolve:
 
 ```bash
-npm_config_registry=https://registry.example.invalid/ \
+npm_config_registry=https://<a-host-that-does-not-resolve>.invalid/ \
   putitoutthere plan --config putitoutthere.toml
 ```
 
