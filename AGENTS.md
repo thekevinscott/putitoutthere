@@ -329,6 +329,21 @@ features that expand the tool's surface area.
 
 @notes/design-commitments.md
 
+## Never pin cross-repo workflow refs
+
+Actions and reusable workflows from the fleet's own repos (`pr-monitor`,
+`testing-conventions`, willfire) are consumed by **moving major tag**
+(`@v0`, `@v1`) — never a SHA, never a frozen minor. The moving tag is the
+maintainer's distribution channel for fleet-wide CI conventions; tracking
+it is the point of consuming these actions.
+
+When a tag move breaks CI, that is **adoption work arriving, not an
+incident to freeze against.** Fix this repo to satisfy the new gate, or
+raise the gate's design upstream — those are the only two moves. Do not
+pin to the last-passing ref, do not pin to a SHA "for determinism," do
+not pin "temporarily while we decide." There is no forward-pin carve-out.
+(Maintainer ruling, 2026-09-01.)
+
 ## Never merge red CI
 
 **Red CI is a hard line.** Do not merge a PR with any failing required
