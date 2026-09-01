@@ -14,6 +14,7 @@
  *   status         — read-only registry-vs-tag drift report (#403)
  *   reconcile      — backfill missing tags for published-but-untagged
  *                    packages; idempotent, supports `--dry-run` (#403)
+ *                    and `--expect <name>@<version>` (#666)
  *   write-version  — bump a package's manifest to a planned version
  *                    (pre-build hook for maturin; #276)
  *   write-crate-version — bump a crate's Cargo.toml to a planned
@@ -134,6 +135,7 @@ function printUsage(): void {
       '  --per-triple      verify synthesized per-triple tarballs (verify npm-tarball)',
       '  --check           exit non-zero when status finds drift',
       '  --dry-run         report what reconcile would do without writing tags',
+      '  --expect <spec>   reconcile: confirm & tag exactly <name>@<version> (or a JSON [{name,version}] array), skipping latest-version discovery (#666)',
       '  --json            emit machine-readable output',
       '',
       'See https://github.com/thekevinscott/putitoutthere for docs.',
@@ -186,6 +188,10 @@ interface ParsedFlags {
   // `fold-bundle` (#446): the bundle commit's subject line
   // (`chore(release): bundle action` vs `chore(v0): bundle action`).
   subject?: string | undefined;
+  // `reconcile --expect` (#666): `<name>@<version>` or a JSON array of
+  // `{name, version}`, confirmed against the registry's per-version
+  // endpoint in place of latest-version discovery. Absent => discovery.
+  expect?: string | undefined;
 }
 
 export function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -218,6 +224,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--bin') {out.bin = argv[++i];}
     else if (a === '--per-triple') {out.perTriple = true;}
     else if (a === '--dry-run') {out.dryRun = true;}
+    else if (a === '--expect') {out.expect = argv[++i];}
   }
   // Always normalise --cwd to an absolute path. Downstream code joins
   // `cwd` with `artifacts/` to derive paths it then hands to subprocesses
@@ -362,6 +369,7 @@ export async function run(argv: readonly string[]): Promise<number> {
           cwd: flags.cwd,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
           dryRun: flags.dryRun,
+          ...(flags.expect !== undefined ? { expect: flags.expect } : {}),
         });
         if (flags.json) {
           process.stdout.write(JSON.stringify(result) + '\n');
