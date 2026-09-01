@@ -220,28 +220,16 @@ describe('piot-ci testpypi-verify (integration)', () => {
   });
 
   it('metadata: downloads and verifies both fixtures end to end', async () => {
-    readdirMock.mockImplementation(((dir: string) => {
-      if (dir === 'dist') {
-        return Promise.resolve(DIST_FILES.map(fileDirent));
-      }
-      if (dir === 'downloaded-wheels') {
-        return Promise.resolve([
-          'piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl',
-          'piot_fixture_zzz_python_hatch-0.0.1-py3-none-any.whl',
-        ]);
-      }
-      return Promise.resolve(['piot_fixture_zzz_python_maturin-0.0.1.tar.gz', 'piot_fixture_zzz_python_hatch-0.0.1.tar.gz']);
-    }) as unknown as typeof readdir);
+    stubReaddir();
 
-    // pip download runs through `execInherit` → spawn, wired to exit 0 above.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => Promise.resolve(jsonResponse(200, releaseJson(stemOf(url))))),
+    );
 
     captureImpl((cmd, a) => {
-      if (cmd === 'curl') {
-        if (a[1] === '-o') {
-          return '';
-        }
-        const file = `${stemOf(a[1] ?? '')}-0.0.1.tar.gz`;
-        return `<html><body><a href="https://files/${file}#sha256=z">${file}</a></body></html>`;
+      if (cmd === 'curl' && a[1] === '-o') {
+        return '';
       }
       if (cmd === 'unzip' && a[0] === '-Z1') {
         return `${stemOf(a[1] ?? '')}-0.0.1.dist-info/METADATA\n${stemOf(a[1] ?? '')}-0.0.1.dist-info/RECORD\n`;
@@ -256,12 +244,20 @@ describe('piot-ci testpypi-verify (integration)', () => {
     await expect(verify('metadata')).resolves.toBe(0);
     expect(err.join('')).toBe('');
     const printed = out.join('');
-    expect(printed).toContain('Downloading wheel for piot-fixture-zzz-python-maturin==0.0.1 from TestPyPI\n');
     expect(printed).toContain(
-      'Downloading sdist for piot-fixture-zzz-python-hatch==0.0.1 from https://files/piot_fixture_zzz_python_hatch-0.0.1.tar.gz#sha256=z\n',
+      'Downloading wheel for piot-fixture-zzz-python-maturin==0.0.1 from https://test-files.pythonhosted.org/packages/ab/piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl\n',
+    );
+    expect(printed).toContain(
+      'Downloading sdist for piot-fixture-zzz-python-hatch==0.0.1 from https://test-files.pythonhosted.org/packages/cd/piot_fixture_zzz_python_hatch-0.0.1.tar.gz\n',
     );
     expect(printed).toContain('ok: piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl METADATA Version=0.0.1\n');
     expect(printed).toContain('ok: piot_fixture_zzz_python_hatch-0.0.1.tar.gz PKG-INFO Version=0.0.1\n');
+    // The lagging surface is never consulted: no pip resolve, no simple-index
+    // scrape. That is the whole of the #668 fix.
+    expect(spawnMock).not.toHaveBeenCalled();
+    const curlArgs = execFileMock.mock.calls.filter((call) => call[0] === 'curl').map((call) => call[1] as string[]);
+    expect(curlArgs).not.toHaveLength(0);
+    expect(curlArgs.every((args) => args[1] === '-o')).toBe(true);
   });
 });
 
