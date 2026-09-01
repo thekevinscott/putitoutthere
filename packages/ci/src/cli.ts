@@ -22,6 +22,7 @@ import { runPatchCoverage } from './patch-coverage/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
+import { runWillfireCallback } from './willfire-callback/run.js';
 import { printUsage } from './usage.js';
 
 export async function run(argv: readonly string[]): Promise<number> {
@@ -63,6 +64,9 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
   if (cmd === 'testpypi-verify') {
     return runTestpypiVerify(argv);
+  }
+  if (cmd === 'willfire-callback') {
+    return runWillfireCallback();
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();
