@@ -6,6 +6,7 @@
  */
 
 import { cp, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,6 +47,7 @@ describe('materializeFixtureForMatrix', () => {
   it('copies the fixture into a fresh temp dir under the OS tmp root', async () => {
     const dir = await materializeFixtureForMatrix('/repo/packages/engine/tests/fixtures', 'js-vanilla');
     expect(dir).toBe(TMP_DIR);
+    expect(mkdtempMock).toHaveBeenCalledWith(join(tmpdir(), 'piot-fixture-matrix-'));
     expect(cpMock).toHaveBeenCalledWith(join('/repo/packages/engine/tests/fixtures', 'js-vanilla'), TMP_DIR, {
       recursive: true,
     });
@@ -57,11 +59,14 @@ describe('materializeFixtureForMatrix', () => {
       dirent('putitoutthere.toml', TMP_DIR),
       dirent('README.md', TMP_DIR),
       dirent('Cargo.toml', `${TMP_DIR}/crate`),
+      dirent('pyproject.toml', `${TMP_DIR}/py`),
     ] as unknown as Dirents);
 
     await materializeFixtureForMatrix('/repo/packages/engine/tests/fixtures', 'rust-vanilla-first-publish');
 
-    expect(writeFileMock).toHaveBeenCalledTimes(2);
+    expect(readdirMock).toHaveBeenCalledWith(TMP_DIR, { recursive: true, withFileTypes: true });
+    expect(readFileMock).toHaveBeenCalledWith(join(TMP_DIR, 'putitoutthere.toml'), 'utf8');
+    expect(writeFileMock).toHaveBeenCalledTimes(3);
     expect(writeFileMock).toHaveBeenNthCalledWith(
       1,
       join(TMP_DIR, 'putitoutthere.toml'),
@@ -70,6 +75,11 @@ describe('materializeFixtureForMatrix', () => {
     expect(writeFileMock).toHaveBeenNthCalledWith(
       2,
       join(TMP_DIR, 'crate', 'Cargo.toml'),
+      'name = "pkg-placeholder"\nversion = "0.0.0"\n',
+    );
+    expect(writeFileMock).toHaveBeenNthCalledWith(
+      3,
+      join(TMP_DIR, 'py', 'pyproject.toml'),
       'name = "pkg-placeholder"\nversion = "0.0.0"\n',
     );
   });

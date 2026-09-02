@@ -7,8 +7,6 @@
  * `availableFixtures`.
  */
 
-export const FIXTURES_ROOT_LABEL = 'packages/engine/tests/fixtures';
-
 export interface DecideFixtureMatrixInput {
   fixtureArg: string | undefined;
   availableFixtures: readonly string[];
@@ -24,7 +22,7 @@ export function decideFixtureMatrix(input: DecideFixtureMatrixInput): DecideFixt
     return { ok: false, reason: 'a fixture name is required (usage: piot-ci fixture-matrix <fixture>)' };
   }
   if (!availableFixtures.includes(fixtureArg)) {
-    return { ok: false, reason: `no fixture named '${fixtureArg}' under ${FIXTURES_ROOT_LABEL}` };
+    return { ok: false, reason: `no fixture named '${fixtureArg}' under packages/engine/tests/fixtures` };
   }
   return { ok: true, fixture: fixtureArg };
 }

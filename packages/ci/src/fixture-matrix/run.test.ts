@@ -9,6 +9,7 @@
  */
 
 import { readdir, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { plan } from 'putitoutthere';
 
@@ -35,6 +36,8 @@ const buildDocMock = vi.mocked(buildFixtureMatrixDocument);
 const out: string[] = [];
 const err: string[] = [];
 const TMP_DIR = '/tmp/piot-fixture-matrix-xyz';
+// Same relative resolution as run.ts — this test is colocated with it.
+const FIXTURES_ROOT = fileURLToPath(new URL('../../../engine/tests/fixtures', import.meta.url));
 const EMPTY_DOC: FixtureMatrixDocument = { fixture: 'js-vanilla', matrix: [], has_pypi: false };
 
 function dirent(name: string, isDir: boolean): { name: string; isDirectory: () => boolean } {
@@ -69,6 +72,7 @@ describe('runFixtureMatrix: fixture listing feeds decide', () => {
   it('passes only directory entries as availableFixtures', async () => {
     decideMock.mockReturnValue({ ok: true, fixture: 'js-vanilla' });
     await runFixtureMatrix(argv('js-vanilla'));
+    expect(readdirMock).toHaveBeenCalledWith(FIXTURES_ROOT, { withFileTypes: true });
     expect(decideMock).toHaveBeenCalledWith({ fixtureArg: 'js-vanilla', availableFixtures: ['js-vanilla'] });
   });
 });
@@ -94,7 +98,7 @@ describe('runFixtureMatrix: success path', () => {
     decideMock.mockReturnValue({ ok: true, fixture: 'js-vanilla' });
     const code = await runFixtureMatrix(argv('js-vanilla'));
     expect(code).toBe(0);
-    expect(materializeMock).toHaveBeenCalledWith(expect.any(String), 'js-vanilla');
+    expect(materializeMock).toHaveBeenCalledWith(FIXTURES_ROOT, 'js-vanilla');
     expect(planMock).toHaveBeenCalledWith({ cwd: TMP_DIR });
     expect(buildDocMock).toHaveBeenCalledWith('js-vanilla', []);
     expect(out.join('')).toBe(`${JSON.stringify(EMPTY_DOC)}\n`);

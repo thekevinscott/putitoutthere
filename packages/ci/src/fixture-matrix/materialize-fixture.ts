@@ -16,23 +16,24 @@ import { join } from 'node:path';
 import { applySubstitutions } from '../fixture-materialize/apply-substitutions.js';
 import { execInherit } from '../utils/exec-inherit.js';
 
-// Mirrors fixture-materialize's MANIFEST_NAMES / GIT_STEPS (#447): the same
-// manifest basenames carry `__VERSION__`, and the same throwaway-repo shape
-// gives `plan()` a HEAD commit with no tags.
-const MANIFEST_NAMES = ['putitoutthere.toml', 'package.json', 'Cargo.toml', 'pyproject.toml'];
-const FIXTURE_MATRIX_VERSION = '0.0.0';
-
-const GIT_STEPS: readonly (readonly string[])[] = [
-  ['init', '-q', '-b', 'main'],
-  ['config', 'user.email', 'e2e@putitoutthere.dev'],
-  ['config', 'user.name', 'piot e2e'],
-  ['config', 'commit.gpgsign', 'false'],
-  ['config', 'tag.gpgsign', 'false'],
-  ['add', '.'],
-  ['commit', '-q', '-m', 'e2e: initial fixture'],
-];
-
 export async function materializeFixtureForMatrix(fixturesRoot: string, fixture: string): Promise<string> {
+  // Mirrors fixture-materialize's MANIFEST_NAMES / GIT_STEPS (#447): the same
+  // manifest basenames carry `__VERSION__`, and the same throwaway-repo shape
+  // gives `plan()` a HEAD commit with no tags. Function-scoped so the mutation
+  // gate can switch them per test run; module-level initializers evaluate
+  // before a mutant activates and false-survive.
+  const MANIFEST_NAMES = ['putitoutthere.toml', 'package.json', 'Cargo.toml', 'pyproject.toml'];
+  const FIXTURE_MATRIX_VERSION = '0.0.0';
+  const GIT_STEPS: readonly (readonly string[])[] = [
+    ['init', '-q', '-b', 'main'],
+    ['config', 'user.email', 'e2e@putitoutthere.dev'],
+    ['config', 'user.name', 'piot e2e'],
+    ['config', 'commit.gpgsign', 'false'],
+    ['config', 'tag.gpgsign', 'false'],
+    ['add', '.'],
+    ['commit', '-q', '-m', 'e2e: initial fixture'],
+  ];
+
   const dir = await mkdtemp(join(tmpdir(), 'piot-fixture-matrix-'));
   await cp(join(fixturesRoot, fixture), dir, { recursive: true });
 
