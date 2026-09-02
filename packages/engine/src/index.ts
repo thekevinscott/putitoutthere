@@ -20,3 +20,6 @@ export type {
 } from './types.js';
 
 export { AuthError, TransientError } from './types.js';
+
+export { plan } from './plan.js';
+export type { MatrixRow, PlanOptions } from './plan.js';
