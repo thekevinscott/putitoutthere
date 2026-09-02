@@ -17,7 +17,7 @@ export function parseFixtureDocument(raw: string, fixture: string): FixtureDocum
     throw new Error(`resolve: fixture-matrix emitted invalid JSON for '${fixture}'`);
   }
   if (parsed === null || typeof parsed !== 'object') {
-    throw new Error(`resolve: fixture-matrix emitted an unexpected document for '${fixture}'`);
+    throw new Error(`resolve: fixture-matrix emitted a non-object for '${fixture}'`);
   }
   const doc = parsed as { fixture?: unknown; matrix?: unknown; has_pypi?: unknown };
   if (doc.fixture !== fixture || !Array.isArray(doc.matrix) || typeof doc.has_pypi !== 'boolean') {

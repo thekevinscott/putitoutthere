@@ -21,12 +21,14 @@ import { parseFixtureDocument } from './parse-fixture-document.js';
 import { repoSlugFromRepositoryUrl } from './repo-slug.js';
 import type { FixtureDocument } from './parse-fixture-document.js';
 
-const WORKFLOW_PATH = '.github/workflows/e2e-fixture-job.yml';
-const JOB_ID = 'plan';
-const FIXTURES_REL = 'packages/engine/tests/fixtures';
-const CI_CORE_BIN = ['node_modules', '@putitoutthere', 'ci', 'dist', 'cli-bin.js'];
-
 export async function runResolve(opts: { cwd: string }): Promise<number> {
+  // Function-scoped so the mutation gate can switch them per test run;
+  // module-level initializers evaluate before a mutant activates and
+  // false-survive.
+  const WORKFLOW_PATH = '.github/workflows/e2e-fixture-job.yml';
+  const JOB_ID = 'plan';
+  const FIXTURES_REL = 'packages/engine/tests/fixtures';
+  const CI_CORE_BIN = ['node_modules', '@putitoutthere', 'ci', 'dist', 'cli-bin.js'];
   if (!(await pathExists(join(opts.cwd, ...WORKFLOW_PATH.split('/'))))) {
     process.stdout.write('{}\n');
     return 0;

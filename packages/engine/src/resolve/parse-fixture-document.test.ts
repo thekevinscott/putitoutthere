@@ -21,10 +21,10 @@ describe('parseFixtureDocument', () => {
 
   it('rejects a non-object document', () => {
     expect(() => parseFixtureDocument('null', 'js-vanilla')).toThrow(
-      /unexpected document for 'js-vanilla'/,
+      "resolve: fixture-matrix emitted a non-object for 'js-vanilla'",
     );
     expect(() => parseFixtureDocument('"str"', 'js-vanilla')).toThrow(
-      /unexpected document for 'js-vanilla'/,
+      "resolve: fixture-matrix emitted a non-object for 'js-vanilla'",
     );
   });
 

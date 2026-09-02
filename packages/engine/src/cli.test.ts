@@ -984,6 +984,12 @@ describe('cli: resolve dispatch (#683)', () => {
       /^putitoutthere: resolve: fixtures root missing at packages\/engine\/tests\/fixtures$/m,
     );
   });
+
+  it('--help lists the resolve command', async () => {
+    const code = await run(argv('--help'));
+    expect(code).toBe(0);
+    expect(stderr.join('')).toMatch(/resolve\s+Emit willfire's callback map for the e2e plan job/);
+  });
 });
 
 describe('cli: release-github / advance / fold dispatch', () => {
