@@ -6,6 +6,8 @@
  */
 
 import { cp, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execInherit } from '../utils/exec-inherit.js';
@@ -44,7 +46,7 @@ describe('materializeFixtureForMatrix', () => {
   it('copies the fixture into a fresh temp dir under the OS tmp root', async () => {
     const dir = await materializeFixtureForMatrix('/repo/packages/engine/tests/fixtures', 'js-vanilla');
     expect(dir).toBe(TMP_DIR);
-    expect(cpMock).toHaveBeenCalledWith('/repo/packages/engine/tests/fixtures/js-vanilla', TMP_DIR, {
+    expect(cpMock).toHaveBeenCalledWith(join('/repo/packages/engine/tests/fixtures', 'js-vanilla'), TMP_DIR, {
       recursive: true,
     });
   });
@@ -62,12 +64,12 @@ describe('materializeFixtureForMatrix', () => {
     expect(writeFileMock).toHaveBeenCalledTimes(2);
     expect(writeFileMock).toHaveBeenNthCalledWith(
       1,
-      `${TMP_DIR}/putitoutthere.toml`,
+      join(TMP_DIR, 'putitoutthere.toml'),
       'name = "pkg-placeholder"\nversion = "0.0.0"\n',
     );
     expect(writeFileMock).toHaveBeenNthCalledWith(
       2,
-      `${TMP_DIR}/crate/Cargo.toml`,
+      join(TMP_DIR, 'crate', 'Cargo.toml'),
       'name = "pkg-placeholder"\nversion = "0.0.0"\n',
     );
   });
@@ -78,7 +80,7 @@ describe('materializeFixtureForMatrix', () => {
 
     await materializeFixtureForMatrix('/repo/packages/engine/tests/fixtures', 'js-napi-first-publish');
 
-    expect(writeFileMock).toHaveBeenCalledWith(`${TMP_DIR}/package.json`, 'name = "pkg-placeholder"');
+    expect(writeFileMock).toHaveBeenCalledWith(join(TMP_DIR, 'package.json'), 'name = "pkg-placeholder"');
   });
 
   it('runs the exact git init + commit sequence in the materialized dir', async () => {
