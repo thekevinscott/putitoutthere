@@ -46,4 +46,9 @@ jobs:
           # running `plan` — which its sandbox cannot do, having no network
           # for setup-pnpm. `resolve` answers them from the same core the
           # workflow itself calls, so the two cannot disagree.
-          resolve-outputs: pnpm exec putitoutthere resolve
+          #
+          # `-C` is load-bearing: willfire spawns the callback with the
+          # invoker's cwd, and pr-monitor's action runs from
+          # `github.action_path`, so a bare `pnpm exec` looks for this repo
+          # inside the action's own checkout and exits 1.
+          resolve-outputs: pnpm -C ${{ github.workspace }} exec putitoutthere resolve
