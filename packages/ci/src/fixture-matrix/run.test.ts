@@ -18,6 +18,10 @@ import { decideFixtureMatrix } from './decide.js';
 import { materializeFixtureForMatrix } from './materialize-fixture.js';
 import { runFixtureMatrix } from './run.js';
 
+// `fileURLToPath` resolves this file's own location to reach the fixtures
+// root, so the double is the real module — a stub would leave the test with no
+// path to point the listing at.
+vi.mock('node:url', async () => await vi.importActual<typeof import('node:url')>('node:url'));
 vi.mock('node:fs/promises');
 vi.mock('putitoutthere');
 vi.mock('./decide.js');

@@ -15,6 +15,10 @@ import { execCapture } from '../utils/exec-capture.js';
 import { pathExists } from '../utils/path-exists.js';
 import { runResolve } from './run-resolve.js';
 
+// `join` here builds the expected paths, so the double is the real module:
+// a stub would make every assertion compare undefined to undefined, and the
+// suite runs on windows-latest where the separator differs.
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('node:fs/promises');
 vi.mock('../utils/exec-capture.js');
 vi.mock('../utils/path-exists.js');
