@@ -1428,6 +1428,22 @@ checking out tags first:
 - run: npx putitoutthere reconcile
 ```
 
+### `resolve` — willfire's callback map (repo-internal)
+
+`resolve` answers [willfire](https://github.com/thekevinscott/willfire)'s
+callback protocol for this repo's own e2e plan job: one JSON map on
+stdout, keyed
+`thekevinscott/putitoutthere/.github/workflows/e2e-fixture-job.yml:plan`,
+one entry per fixture, each carrying the exact `matrix` / `has_pypi`
+strings the live job would write to `$GITHUB_OUTPUT` (#683). It takes no
+arguments, reads no env, and makes no network calls; any internal failure
+exits non-zero with no partial map. Run from any other checkout it prints
+`{}` — it is not a consumer surface.
+
+```bash
+npx putitoutthere resolve
+```
+
 ### Auto-heal
 
 The most common drift — a version live on the registry but missing its

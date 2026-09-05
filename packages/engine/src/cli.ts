@@ -14,6 +14,8 @@
  *   status         — read-only registry-vs-tag drift report (#403)
  *   reconcile      — backfill missing tags for published-but-untagged
  *                    packages; idempotent, supports `--dry-run` (#403)
+ *   resolve        — emit willfire's callback map for the e2e plan job
+ *                    (#683; key format frozen on thekevinscott/willfire#153)
  *   write-version  — bump a package's manifest to a planned version
  *                    (pre-build hook for maturin; #276)
  *   write-crate-version — bump a crate's Cargo.toml to a planned
@@ -53,6 +55,7 @@ import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
 import { reconcile } from './reconcile.js';
 import { releaseGithub } from './release-github/index.js';
+import { runResolve } from './resolve/run-resolve.js';
 import { formatStatusRow } from './status-format.js';
 import { computeStatus } from './status.js';
 import { formatVerifyRow } from './verify/posture-format.js';
@@ -77,6 +80,7 @@ const COMMANDS = [
   'check',
   'status',
   'reconcile',
+  'resolve',
   'verify',
   'release-github',
   'advance-v0',
@@ -103,6 +107,7 @@ function printUsage(): void {
       '  check          Pre-merge configuration validation (#319)',
       '  status         Report registry-vs-tag drift (read-only; #403)',
       '  reconcile      Backfill missing tags for published-but-untagged packages (#403)',
+      '  resolve        Emit willfire\'s callback map for the e2e plan job (#683)',
       '  verify         Report publish/trust posture — OIDC vs token, per registry (#403)',
       '  verify npm-tarball  Assert a published npm tarball honors package.json files[] (#443)',
       '  verify crate   Assert a published .crate ships its source tree (#449)',
@@ -375,6 +380,12 @@ export async function run(argv: readonly string[]): Promise<number> {
           process.stdout.write(`reconcile: ${verb} ${result.actions.length} tag(s)\n`);
         }
         return 0;
+      }
+      case 'resolve': {
+        // #683: willfire's callback map for the e2e plan job (epic
+        // thekevinscott/willfire#152). Delegates every matrix to the
+        // fixture-matrix core (#670); one JSON line, never a partial map.
+        return await runResolve({ cwd: flags.cwd });
       }
       case 'verify': {
         // #442/#443: `verify` is a command family. Bare `verify` (and
