@@ -17,6 +17,7 @@ import { runCargoRegistry } from './cargo-registry/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
+import { runFixtureMatrix } from './fixture-matrix/run.js';
 import { runPatchCoverage } from './patch-coverage/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { runTestpypiVerify } from './testpypi-verify/run.js';
@@ -50,6 +51,9 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
   if (cmd === 'fixture-materialize') {
     return runFixtureMaterialize(argv);
+  }
+  if (cmd === 'fixture-matrix') {
+    return runFixtureMatrix(argv);
   }
   if (cmd === 'verdaccio-auth') {
     return runVerdaccioAuth();
