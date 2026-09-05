@@ -87,7 +87,7 @@ describe('checkPyprojectAndBundleCli', () => {
       '/repo/rs': 'dir',
       '/repo/rs/Cargo.toml': 'file',
     });
-    vi.mocked(readDeclaredBins).mockResolvedValue(['other']);
+    vi.mocked(readDeclaredBins).mockResolvedValue(['other', 'second']);
     const findings: CheckFinding[] = [];
     await checkPyprojectAndBundleCli(pkg({}), CWD, findings);
     expect(readDeclaredBins).toHaveBeenCalledWith('/repo/rs/Cargo.toml');
@@ -95,7 +95,7 @@ describe('checkPyprojectAndBundleCli', () => {
       {
         package: 'py',
         message:
-          'bundle_cli.bin "piot" is not declared as a [[bin]] in /repo/rs/Cargo.toml. Declared bins: other.',
+          'bundle_cli.bin "piot" is not declared as a [[bin]] in /repo/rs/Cargo.toml. Declared bins: other, second.',
       },
     ]);
   });

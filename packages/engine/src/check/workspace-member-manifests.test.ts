@@ -11,6 +11,10 @@ describe('workspaceMemberManifests', () => {
     expect(expandDirGlob).not.toHaveBeenCalled();
   });
 
+  it('returns empty when [workspace] is explicitly null', async () => {
+    expect(await workspaceMemberManifests({ workspace: null }, '/ws/Cargo.toml')).toEqual([]);
+  });
+
   it('returns empty when [workspace].members is not an array', async () => {
     expect(
       await workspaceMemberManifests({ workspace: { members: 'crates/*' } }, '/ws/Cargo.toml'),

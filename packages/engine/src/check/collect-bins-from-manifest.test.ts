@@ -7,14 +7,19 @@ describe('collectBinsFromManifest', () => {
     expect(collectBinsFromManifest({ bin: [{ name: 'a' }, { name: 'b' }] })).toEqual(['a', 'b']);
   });
 
-  it('skips malformed [[bin]] entries', () => {
-    expect(collectBinsFromManifest({ bin: ['junk', null, { name: 42 }, { name: 'ok' }] })).toEqual([
-      'ok',
-    ]);
+  it('skips non-table entries even when they carry a name property', () => {
+    const trap = (): void => {};
+    expect(
+      collectBinsFromManifest({ bin: ['junk', null, trap, { name: 42 }, { name: 'ok' }] }),
+    ).toEqual(['ok']);
   });
 
   it('falls back to the implicit [package].name binary when no [[bin]] is declared', () => {
     expect(collectBinsFromManifest({ package: { name: 'mycrate' } })).toEqual(['mycrate']);
+  });
+
+  it('ignores a non-string [package].name in the implicit fallback', () => {
+    expect(collectBinsFromManifest({ package: { name: 42 } })).toEqual([]);
   });
 
   it('does not add the implicit name when explicit bins exist', () => {
