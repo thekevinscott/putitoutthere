@@ -304,6 +304,16 @@ describe('parseFlags', () => {
   it('leaves manylinux undefined when --manylinux is absent (#610)', () => {
     expect(parseFlags(['--target', 'sdist']).manylinux).toBeUndefined();
   });
+
+  it('parses --expect as one opaque value, JSON array included (#666)', () => {
+    const raw = '[{"name":"demo","version":"1.2.3"}]';
+    expect(parseFlags(['--expect', raw]).expect).toBe(raw);
+    expect(parseFlags(['--expect', '@acme/widget@1.2.3']).expect).toBe('@acme/widget@1.2.3');
+  });
+
+  it('leaves expect undefined when --expect is absent (#666)', () => {
+    expect(parseFlags(['--cwd', '/tmp/x']).expect).toBeUndefined();
+  });
 });
 
 describe('cli: check dispatch', () => {
@@ -782,6 +792,31 @@ describe('cli: reconcile dispatch', () => {
     const out = stdout.join('');
     expect(out).toContain('demo: 0.1.0 live, no tag → created demo-v0.1.0 at abcdef1 (head)');
     expect(out).toMatch(/reconcile: created 1 tag/);
+  });
+
+  it('forwards --expect to reconcile, and omits the key entirely without it', async () => {
+    // `expect` is spread in conditionally: absent means "discover", which is
+    // a different code path from `expect: undefined`.
+    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+
+    await run(argv('reconcile', '--cwd', '/x', '--expect', '@acme/widget@1.2.3'));
+    expect(reconcileMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expect: '@acme/widget@1.2.3' }),
+    );
+
+    await run(argv('reconcile', '--cwd', '/x'));
+    expect(reconcileMock.mock.calls[1]?.[0]).not.toHaveProperty('expect');
+  });
+
+  it('forwards a JSON --expect array verbatim, without reshaping it', async () => {
+    // `pypi-tag.yml` pipes the release job's `delegated_packages` output
+    // straight through; the CLI must not parse or re-encode it.
+    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+    const raw = '[{"name":"demo","version":"1.2.3","tag":"demo-v1.2.3"}]';
+
+    await run(argv('reconcile', '--cwd', '/x', '--expect', raw));
+
+    expect(reconcileMock).toHaveBeenCalledWith(expect.objectContaining({ expect: raw }));
   });
 
   it('uses "would create" verbs under --dry-run', async () => {

@@ -8,6 +8,8 @@
  * Issue #666.
  */
 
+import { toError } from './to-error.js';
+
 export interface ExpectedPackage {
   name: string;
   version: string;
@@ -16,17 +18,16 @@ export interface ExpectedPackage {
 export function parseReconcileExpect(raw: string): ExpectedPackage[] {
   const trimmed = raw.trim();
   if (trimmed.startsWith('[')) {
-    let parsed: unknown;
+    let parsed: unknown[];
     try {
-      parsed = JSON.parse(trimmed);
+      // A `[`-leading JSON document is an array by grammar, so a parse that
+      // succeeds here cannot yield anything else.
+      parsed = JSON.parse(trimmed) as unknown[];
     } catch (err) {
       throw new Error(
-        `reconcile --expect: invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        `reconcile --expect: invalid JSON: ${toError(err).message}`,
         { cause: err },
       );
-    }
-    if (!Array.isArray(parsed)) {
-      throw new Error('reconcile --expect: JSON form must be an array of {name, version}');
     }
     return parsed.map((entry, i) => {
       const name = (entry as Record<string, unknown> | null)?.name;
