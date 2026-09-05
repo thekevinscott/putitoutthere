@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run src test/workflows",
     "test:unit:watch": "vitest src test/workflows",
-    "test:unit:coverage": "vitest run --coverage src test/workflows",
+    "test:unit:coverage": "vitest run --coverage --coverage.include='src/**/*.ts' src test/workflows",
     "test:integration": "vitest run --config tests/integration/vitest.integration.config.ts",
     "test:e2e": "pnpm build && pnpm build:action && vitest run --config tests/e2e/vitest.e2e.config.ts",
     "prepare": "tsc -p tsconfig.build.json"
@@ -41,15 +41,15 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.1",
     "@vercel/ncc": "^0.45.0",
-    "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^10.8.1",
+    "@vitest/coverage-v8": "^4.1.11",
+    "eslint": "^10.9.1",
     "msw": "^2.15.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.67.0",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10",
+    "typescript-eslint": "^8.69.0",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11",
     "yaml": "^2.6.0"
   },
   "dependencies": {

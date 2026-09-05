@@ -24,9 +24,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/setup-node
+      - uses: ./packages/ci/actions/setup-node
 
-      - uses: ./.github/actions/setup-pnpm
+      - uses: ./packages/ci/actions/setup-pnpm
 
       - name: Install dependencies
         # packages/ci's `prepare` script builds its dist during install, so

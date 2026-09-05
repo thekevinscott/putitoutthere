@@ -933,6 +933,43 @@ committed source).
 > cargo invocation; keep only steps that compile or generate genuinely
 > separate artifacts (TypeScript, assets, etc.).
 
+> [!IMPORTANT]
+> **Building the CLI yourself? Stamp `Cargo.toml` from `$VERSION` before
+> `cargo build`.** Declaring `build = "bundled-cli"` *without* a
+> `[package.bundle_cli]` block is supported — you own the cross-compile,
+> and the workflow runs your `npm run build` with `TARGET`, `BUILD`, and
+> `VERSION` set (see the [three-variable table](#napi-npm-family) under
+> the napi recipe). On that path nothing bumps your crate for you:
+> `[package.bundle_cli]`'s pre-build version write is gated on the block
+> you did not declare, and an npm package's `package.json` version is not
+> rewritten until the publish job — so at `cargo build` time every version
+> source on disk is still the committed literal.
+>
+> cargo bakes `CARGO_PKG_VERSION` in at compile time from `Cargo.toml`
+> and honors no env override, so a script that skips this ships a binary
+> reporting the *previous* release. Nothing fails: the build succeeds, the
+> artifact uploads, the publish succeeds, and `my-cli --version` is simply
+> wrong. It stays invisible for exactly as long as the committed literal
+> happens to match.
+>
+> ```js
+> // scripts/build.mjs — before cargo build
+> import { readFileSync, writeFileSync } from 'node:fs';
+> const version = process.env.VERSION;
+> if (version) {
+>   const manifest = 'crates/my-cli/Cargo.toml';
+>   writeFileSync(
+>     manifest,
+>     // first [package] version key only — not the [dependencies] ones
+>     readFileSync(manifest, 'utf8').replace(/^version = ".*"$/m, `version = "${version}"`),
+>   );
+> }
+> ```
+>
+> Declaring `[package.bundle_cli]` remains the better answer where it
+> fits: it handles this for you, and gets you the zigbuild glibc floor
+> above.
+
 Each per-platform sub-package needs its own npm trusted-publisher
 registration (a policy on `my-cli` does not cover
 `my-cli-x86_64-unknown-linux-gnu`).
@@ -991,10 +1028,10 @@ yourself.
 **You own the build script.** Unlike `bundled-cli` — where the engine runs
 the cross-compile for you — the napi toolchain stays consumer-owned. For
 each per-target row the workflow runs your `package.json` `build` script
-with `TARGET` set to that triple (and `BUILD=napi`); your script runs
-`napi build` for it and stages the resulting `.node` under
-`build/<triple>/`, the directory the engine packages per-platform
-artifacts from:
+with `TARGET` set to that triple (and `BUILD=napi`, `VERSION` the version
+being released); your script runs `napi build` for it and stages the
+resulting `.node` under `build/<triple>/`, the directory the engine
+packages per-platform artifacts from:
 
 ```js
 // scripts/build.cjs — invoked by your package.json "build" script
@@ -1005,6 +1042,23 @@ if (!target || target === 'main' || target === 'noarch') process.exit(0);
 // napi-rs emits `<name>.<triple>.node`; stage it under build/<triple>/,
 // e.g.  napi build --release --target ${target} --output-dir build/${target}
 ```
+
+Your build script is invoked with exactly three variables, at both build
+time and the publish-time rebuild:
+
+| variable | value | use |
+| --- | --- | --- |
+| `TARGET` | the row's triple, or `main` on the noarch row | which triple to build |
+| `BUILD` | the row's build mode (`napi`, `bundled-cli`); empty on the publish-time rebuild | dispatch, for a script serving [both modes](#multi-mode-npm-family) |
+| `VERSION` | the version this run is releasing | stamp a version source the compiler reads |
+
+`VERSION` matters when something you compile bakes the version in. A
+colocated napi crate (`Cargo.toml` beside `package.json`) is bumped for
+you before `napi build` runs, so its `CARGO_PKG_VERSION` is already
+correct. A napi crate that lives **elsewhere** is not — the workflow logs
+a `::notice::` saying it skipped the bump — and a `.node` re-exposing the
+crate's version then reports the committed literal rather than the
+release. Stamp it from `$VERSION` yourself in that case.
 
 The `main` (noarch) row carries no per-target binary — its build run is a
 no-op for the `.node` and compiles only your TypeScript / JS.
