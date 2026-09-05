@@ -230,6 +230,65 @@ stderr shape can carry, and it is matched before the hint is reached.
 
 **Test.** `npm: E404 masks unauthorized on a first publish (#598)`.
 
+#### `npm/view-enotfound-offline.txt` — #650
+
+**Shape.** `npm view <name>@<ver> version` exits non-zero with stderr
+containing:
+
+```
+npm error code ENOTFOUND
+npm error syscall getaddrinfo
+npm error errno ENOTFOUND
+npm error network request to https://registry.npmjs.org/<name> failed,
+  reason: getaddrinfo ENOTFOUND registry.npmjs.org
+```
+
+The other fixtures in this section are `npm publish` failures. This one
+is a **read**: the `isPublished` probe `plan` runs against every npm
+package before it decides anything.
+
+**Trigger.** No route to the registry — a `--network none` sandbox, an
+air-gapped runner, a DNS-blocked network, or a `registry` config
+pointing at a name that does not resolve. npm reaches the same shape via
+`EAI_AGAIN` when the resolver itself is unreachable rather than
+answering NXDOMAIN.
+
+Two upstream behaviours meet here, and both matter:
+
+1. **npm's retry ladder is error-blind.** With the defaults piot was
+   inheriting (`fetch-retries=2`, min 10s, max 60s) npm retries a DNS
+   failure on the same schedule it retries a 503, so a name that will
+   never resolve costs ~70s before the command exits. `plan` paid that
+   per npm package.
+2. **The exit status alone cannot distinguish "not published" from "not
+   asked."** `npm view` exits non-zero for a genuine `E404` and for a
+   registry it never reached, so a handler reading only the status reads
+   an unreachable registry as an absent version.
+
+**Engine reaction.** The probe passes `--fetch-retries=0` — piot owns
+the retry decision rather than inheriting npm's — and
+`classifyNpmViewFailure` in
+[`src/handlers/classify-npm-view-failure.ts`](../packages/engine/src/handlers/classify-npm-view-failure.ts)
+reads npm's `npm error code <CODE>` line to sort the failure three ways.
+`ENOTFOUND`/`EAI_AGAIN` are `unreachable`: deterministic within a run,
+so `isPublished` throws on the first attempt and `computePlanStatus`
+renders `verdict: unknown` — the posture crates.io and PyPI already take
+when their `fetch` probe fails. Timeouts, resets, 429 and 5xx are
+`transient` and raise a `TransientError` for the publish path's existing
+`withRetry`; `E404` and anything unrecognised stay `absent`, the
+historical "not published" reading.
+
+Matching the `code` line rather than npm's prose keeps this stable
+across npm's message rewrites, and both prefix spellings are accepted
+(`npm error` on npm 11, `npm ERR!` on npm ≤ 10).
+
+**Test.** `classifyNpmViewFailure` (colocated unit), plus
+`tests/integration/plan-offline-verdict.integration.test.ts` for the
+verdict and the single-attempt probe, and
+`tests/e2e/plan-offline.e2e.test.ts`, which drives the built CLI against
+an unresolvable registry so the parsed text is npm's own rendering
+rather than a fixture string.
+
 ### PyPI
 
 #### `pypi/oidc-mint-tp-filter-rejected.json` — #252

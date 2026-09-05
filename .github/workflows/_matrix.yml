@@ -651,6 +651,10 @@ jobs:
           # `build/<triple>/` artifacts.
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
+          # #627: the planned version. No engine-side writer runs on the
+          # roll-your-own path, so a Rust build script must stamp its
+          # Cargo.toml from $VERSION before cargo bakes CARGO_PKG_VERSION in.
+          VERSION: ${{ matrix.version }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci || {
@@ -659,7 +663,7 @@ jobs:
             }
           elif [ -f pnpm-lock.yaml ]; then
             # pnpm for the *consumer's* checkout, not ours. Deliberately a
-            # literal and not ./.github/actions/setup-pnpm: that action installs
+            # literal and not ./packages/ci/actions/setup-pnpm: that action installs
             # our build toolchain, this installs theirs, and a `uses:` step
             # cannot appear inside a run: script anyway.
             npm install -g pnpm@11

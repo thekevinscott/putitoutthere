@@ -37,9 +37,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/setup-node
+      - uses: ./packages/ci/actions/setup-node
 
-      - uses: ./.github/actions/setup-pnpm
+      - uses: ./packages/ci/actions/setup-pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -70,11 +70,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/setup-node
+      - uses: ./packages/ci/actions/setup-node
         with:
           registry-url: 'https://registry.npmjs.org'
 
-      - uses: ./.github/actions/setup-pnpm
+      - uses: ./packages/ci/actions/setup-pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
