@@ -4,8 +4,9 @@
  * tool that fell silent; diagnosis lives at the tail, and the failing phase is
  * named at the head.
  *
- * The banner leads the result rather than sitting at the cut so it survives a
- * downstream head-and-tail render of the same text (#651/#658).
+ * The banner leads the result rather than sitting at the cut, so it survives
+ * the job-summary render's head-only truncation (`verbose.ts`): a reader who
+ * gets only the first slice still learns the stream was elided.
  */
 export function boundCapture(text: string, ceiling: number): string {
   if (text.length <= ceiling) {
