@@ -40,12 +40,18 @@ import { checkPyprojectAndBundleCli } from './check/check-pyproject-and-bundle-c
 import { checkPyprojectShapeFindings } from './check/check-pyproject-shape-findings.js';
 import { checkRepoUrlMatchFindings } from './check/check-repo-url-match-findings.js';
 import { checkTagTemplateCollisions } from './check/check-tag-template-collisions.js';
-import type { CheckFinding } from './check/check-types.js';
 import { loadConfig, type Package } from './config.js';
 import { toError } from './to-error.js';
 import { pathExists } from './utils/path-exists.js';
 
-export type { CheckFinding } from './check/check-types.js';
+export interface CheckFinding {
+  /** The `[[package]].name` the finding is scoped to. Absent for
+   *  file-level findings (missing config, root-level parse errors). */
+  package?: string;
+  /** Single-line, actionable message: failing artefact path or
+   *  field, why it matters, what to change. */
+  message: string;
+}
 
 export interface CheckOptions {
   cwd: string;

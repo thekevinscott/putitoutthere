@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Package } from '../config.js';
 import { checkTagTemplateCollisions } from './check-tag-template-collisions.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 describe('checkTagTemplateCollisions', () => {
   it('accepts templates that resolve to distinct tags', () => {

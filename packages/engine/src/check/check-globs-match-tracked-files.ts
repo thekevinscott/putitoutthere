@@ -1,6 +1,6 @@
 import type { Package } from '../config.js';
 import { matchesAny } from '../glob.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 import { listTrackedFiles } from './list-tracked-files.js';
 
 export async function checkGlobsMatchTrackedFiles(

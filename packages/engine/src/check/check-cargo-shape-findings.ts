@@ -1,6 +1,6 @@
 import type { Package } from '../config.js';
 import { checkCargoShape } from '../preflight.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 export async function checkCargoShapeFindings(
   packages: readonly Package[],

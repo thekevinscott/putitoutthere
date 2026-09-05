@@ -1,7 +1,7 @@
 import type { Package } from '../config.js';
 import { ErrorCodes } from '../error-codes.js';
 import { checkProvenanceMetadata } from '../preflight.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 export async function checkNpmRepository(packages: readonly Package[], findings: CheckFinding[]): Promise<void> {
   for (const f of await checkProvenanceMetadata(packages)) {

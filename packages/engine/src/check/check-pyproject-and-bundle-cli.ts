@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import type { Package } from '../config.js';
 import { pathExists } from '../utils/path-exists.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 import { readDeclaredBins } from './read-declared-bins.js';
 
 export async function checkPyprojectAndBundleCli(

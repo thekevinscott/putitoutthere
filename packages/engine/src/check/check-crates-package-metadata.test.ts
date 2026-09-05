@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { checkCratesMetadata } from '../preflight.js';
 import { checkCratesPackageMetadata } from './check-crates-package-metadata.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 vi.mock('../preflight.js');
 

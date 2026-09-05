@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Package } from '../config.js';
 import { checkPaths } from './check-paths.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 vi.mock('node:fs/promises');
 

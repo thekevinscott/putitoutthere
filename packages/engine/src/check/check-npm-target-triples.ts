@@ -2,7 +2,7 @@ import type { Package } from '../config.js';
 import { assertTripleSupported } from '../handlers/npm-platform.js';
 import { toError } from '../to-error.js';
 import { normalizeTarget, type TargetEntry } from '../types.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 export function checkNpmTargetTriples(
   packages: readonly Package[],

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Package } from '../config.js';
 import { checkGlobsMatchTrackedFiles } from './check-globs-match-tracked-files.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 import { listTrackedFiles } from './list-tracked-files.js';
 
 vi.mock('./list-tracked-files.js');

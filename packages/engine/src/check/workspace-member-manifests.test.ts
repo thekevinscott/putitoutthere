@@ -1,8 +1,10 @@
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { expandDirGlob } from '../glob.js';
 import { workspaceMemberManifests } from './workspace-member-manifests.js';
 
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('../glob.js');
 
 describe('workspaceMemberManifests', () => {
@@ -28,7 +30,7 @@ describe('workspaceMemberManifests', () => {
         { workspace: { members: ['crates/*', 42] } },
         '/ws/Cargo.toml',
       ),
-    ).toEqual(['/ws/crates/a/Cargo.toml', '/ws/crates/b/Cargo.toml']);
+    ).toEqual([join('/ws/crates/a', 'Cargo.toml'), join('/ws/crates/b', 'Cargo.toml')]);
     expect(expandDirGlob).toHaveBeenCalledTimes(1);
     expect(expandDirGlob).toHaveBeenCalledWith('/ws', 'crates/*');
   });

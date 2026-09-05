@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Package } from '../config.js';
 import { checkDependsOn } from './check-depends-on.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 describe('checkDependsOn', () => {
   it('accepts an acyclic depends_on graph', () => {

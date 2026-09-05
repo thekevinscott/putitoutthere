@@ -1,6 +1,6 @@
 import type { Package } from '../config.js';
 import { formatTag } from '../tag-template.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 export function checkTagTemplateCollisions(
   packages: readonly Package[],

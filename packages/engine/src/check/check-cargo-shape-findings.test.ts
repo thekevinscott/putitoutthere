@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { checkCargoShape } from '../preflight.js';
 import { checkCargoShapeFindings } from './check-cargo-shape-findings.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 vi.mock('../preflight.js');
 

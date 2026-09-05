@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { checkRepoUrlMatch } from '../preflight.js';
 import { checkRepoUrlMatchFindings } from './check-repo-url-match-findings.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 vi.mock('../preflight.js');
 

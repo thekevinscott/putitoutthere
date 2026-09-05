@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises';
 
 import type { Package } from '../config.js';
 import { pathExists } from '../utils/path-exists.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 export async function checkPaths(packages: readonly Package[], findings: CheckFinding[]): Promise<void> {
   for (const p of packages) {

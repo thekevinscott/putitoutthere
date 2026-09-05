@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Package } from '../config.js';
 import { checkNpmTargetTriples } from './check-npm-target-triples.js';
-import type { CheckFinding } from './check-types.js';
+import type { CheckFinding } from '../check.js';
 
 describe('checkNpmTargetTriples', () => {
   it('accepts supported triples in both string and object form', () => {
