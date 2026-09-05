@@ -13,7 +13,6 @@
 
 import { sleep } from '../utils/sleep.js';
 import { parseRequirement } from './parse-requirement.js';
-import type { ReadReleaseFailure } from './read-release-files.js';
 import { readReleaseFiles } from './read-release-files.js';
 import { releaseJsonUrl } from './release-json-url.js';
 import type { ReleaseFiles } from './release-file-types.js';
@@ -28,25 +27,27 @@ export async function resolveRelease(requirement: string, indexUrl: string): Pro
   if (url === null) {
     return { errorLine: `::error::testpypi-verify: TESTPYPI_INDEX_URL is not a URL (${indexUrl}).` };
   }
-  let failure: ReadReleaseFailure = { notFound: false, reason: 'no attempt made' };
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  // The last attempt is read outside the loop: it is the one that never sleeps,
+  // and it owns the failure the terminal message reports.
+  for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt += 1) {
     const result = await readReleaseFiles(url);
     if ('files' in result) {
       return { files: result.files };
     }
-    failure = result.failure;
-    if (attempt < MAX_ATTEMPTS) {
-      const sleepFor = retrySleepSeconds(attempt);
-      process.stdout.write(
-        `TestPyPI has no release metadata for ${requirement} yet (${failure.reason}); retrying in ${sleepFor}s\n`,
-      );
-      await sleep(sleepFor * 1000);
-    }
+    const sleepFor = retrySleepSeconds(attempt);
+    process.stdout.write(
+      `TestPyPI has no release metadata for ${requirement} yet (${result.failure.reason}); retrying in ${sleepFor}s\n`,
+    );
+    await sleep(sleepFor * 1000);
+  }
+  const last = await readReleaseFiles(url);
+  if ('files' in last) {
+    return { files: last.files };
   }
   const budget = retryBudgetSeconds();
   return {
-    errorLine: failure.notFound
+    errorLine: last.failure.notFound
       ? `::error::${requirement} is not published to TestPyPI: ${url} returned 404 for the full ${budget}s budget`
-      : `::error::could not read TestPyPI release metadata for ${requirement} from ${url} after ${budget}s: ${failure.reason}`,
+      : `::error::could not read TestPyPI release metadata for ${requirement} from ${url} after ${budget}s: ${last.failure.reason}`,
   };
 }

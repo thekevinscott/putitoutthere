@@ -20,9 +20,12 @@ export function parseReleaseFiles(body: string): ReleaseFiles | null {
   } catch {
     return null;
   }
-  const urls: unknown = typeof document === 'object' && document !== null
-    ? (document as { urls?: unknown }).urls
-    : undefined;
+  // Only `null` needs rejecting before the read: every other JSON scalar
+  // answers `.urls` with undefined, which the array check below catches.
+  if (document === null) {
+    return null;
+  }
+  const { urls } = document as { urls?: unknown };
   if (!Array.isArray(urls)) {
     return null;
   }

@@ -19,6 +19,7 @@ describe('asReleaseFile', () => {
   it.each([
     ['a non-object', 'x-1.whl'],
     ['null', null],
+    ['undefined', undefined],
     ['a missing url', { filename: 'x-1.whl' }],
     ['a missing filename', { url: 'https://f/x-1.whl' }],
     ['a non-string url', { filename: 'x-1.whl', url: 42 }],

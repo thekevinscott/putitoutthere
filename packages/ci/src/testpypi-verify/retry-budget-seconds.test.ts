@@ -1,31 +1,31 @@
 /**
- * Pins the budget as a duration — the only form in which it means anything —
- * and the two properties it must hold: long enough to absorb a read replica
- * trailing an accepted upload, and finite, so a version that never appears
- * fails the gate instead of hanging the job.
+ * Pins what the budget function itself does: sum one back-off per sleep the
+ * retry loop takes — N attempts, N-1 sleeps, the last attempt followed by none.
+ * The shipped curve and its bound are pinned in `retry-sleep.test.ts`; the
+ * back-off is mocked here so this stays about the summing rather than about
+ * today's curve.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { retryBudgetSeconds } from './retry-budget-seconds.js';
 import { MAX_ATTEMPTS, retrySleepSeconds } from './retry-sleep.js';
 
+vi.mock('./retry-sleep.js');
+
+const sleepSecs = vi.mocked(retrySleepSeconds);
+
 describe('retryBudgetSeconds', () => {
-  it('sums the back-offs the loop actually sleeps', () => {
-    // N attempts, N-1 sleeps: the last attempt is not followed by a back-off
-    // the loop will never use.
-    let expected = 0;
-    for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt += 1) {
-      expected += retrySleepSeconds(attempt);
-    }
-    expect(retryBudgetSeconds()).toBe(expected);
+  it('sums one back-off per sleep, not one per attempt', () => {
+    sleepSecs.mockReturnValue(7);
+    expect(retryBudgetSeconds()).toBe(7 * (MAX_ATTEMPTS - 1));
   });
 
-  it('leaves room for a read replica trailing an accepted upload', () => {
-    expect(retryBudgetSeconds()).toBeGreaterThanOrEqual(60);
-  });
-
-  it('stays bounded', () => {
-    expect(retryBudgetSeconds()).toBeLessThan(30 * 60);
+  it('asks every attempt but the last for its own back-off', () => {
+    sleepSecs.mockImplementation((attempt) => attempt * 10);
+    retryBudgetSeconds();
+    expect(sleepSecs.mock.calls.map(([attempt]) => attempt)).toEqual(
+      Array.from({ length: MAX_ATTEMPTS - 1 }, (_, index) => index + 1),
+    );
   });
 });
