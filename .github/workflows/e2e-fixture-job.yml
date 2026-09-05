@@ -52,9 +52,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/setup-node
+      - uses: ./packages/ci/actions/setup-node
 
-      - uses: ./.github/actions/setup-pnpm
+      - uses: ./packages/ci/actions/setup-pnpm
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -116,9 +116,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/setup-node
+      - uses: ./packages/ci/actions/setup-node
 
-      - uses: ./.github/actions/setup-pnpm
+      - uses: ./packages/ci/actions/setup-pnpm
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -244,7 +244,7 @@ jobs:
 
       # ---- npm ----
       - if: matrix.kind == 'npm'
-        uses: ./.github/actions/setup-node
+        uses: ./packages/ci/actions/setup-node
         with:
           registry-url: 'https://registry.npmjs.org'
 
@@ -404,7 +404,7 @@ jobs:
             }
           elif [ -f pnpm-lock.yaml ]; then
             # pnpm for the *consumer's* checkout, not ours. Deliberately a
-            # literal and not ./.github/actions/setup-pnpm: that action installs
+            # literal and not ./packages/ci/actions/setup-pnpm: that action installs
             # our build toolchain, this installs theirs, and a `uses:` step
             # cannot appear inside a run: script anyway.
             npm install -g pnpm@11
@@ -542,7 +542,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/setup-node
+      - uses: ./packages/ci/actions/setup-node
         with:
           registry-url: 'https://registry.npmjs.org'
 
@@ -568,7 +568,7 @@ jobs:
       # half is observable here; the tag contract is pinned at the unit /
       # integration / CLI-e2e tiers instead.
 
-      - uses: ./.github/actions/setup-pnpm
+      - uses: ./packages/ci/actions/setup-pnpm
 
       - name: Install engine dependencies
         run: pnpm install --frozen-lockfile
@@ -685,7 +685,7 @@ jobs:
               }
             elif [ -f pnpm-lock.yaml ]; then
               # pnpm for the *consumer's* checkout, not ours. Deliberately a
-              # literal and not ./.github/actions/setup-pnpm: that action installs
+              # literal and not ./packages/ci/actions/setup-pnpm: that action installs
               # our build toolchain, this installs theirs, and a `uses:` step
               # cannot appear inside a run: script anyway.
               npm install -g pnpm@11

@@ -320,7 +320,7 @@ jobs:
               }
             elif [ -f pnpm-lock.yaml ]; then
               # pnpm for the *consumer's* checkout, not ours. Deliberately a
-              # literal and not ./.github/actions/setup-pnpm: that action installs
+              # literal and not ./packages/ci/actions/setup-pnpm: that action installs
               # our build toolchain, this installs theirs, and a `uses:` step
               # cannot appear inside a run: script anyway.
               npm install -g pnpm@11
