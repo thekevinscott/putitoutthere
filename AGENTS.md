@@ -382,6 +382,57 @@ If green CI is genuinely unattainable on this PR's timeline (e.g.
 external service is down for hours and the fix requires their action),
 the move is to stop and ask. Not to merge red.
 
+## Never pin around a broken gate
+
+**Do not pin a CI tool, action, or dependency backward to a version
+that was green.** Not to unfreeze a merge queue, not to unblock a
+release, not as a "temporary" measure with a follow-up issue attached.
+Being blocked does not matter. Fixing it does.
+
+A gate that started failing did not get worse — it got more truthful,
+or it found something. Rolling it back to the version that passed
+restores the *silence*, not the correctness. The check goes green while
+the thing it checks is exactly as broken as it was, and now nobody is
+looking. That is worse than a red gate, because a red gate is at least
+honest about what it doesn't know.
+
+This is the same principle as **Never merge red CI**, applied one level
+up. Merging red ignores the alarm; pinning back unplugs it. The
+reasoning that makes pinning attractive is always the same shape — "the
+tool regressed, this is upstream's fault, we're just restoring the
+status quo" — and it is usually wrong about at least one of those
+clauses. Diagnose what the new version is telling you before deciding
+it is telling you nothing.
+
+Rules in support of this:
+
+- **Never pin backward to change a check's result.** If a version bump
+  turned a check red, the red is the finding. Investigate it.
+- **A moving upstream tag is the channel, not a hazard to pin against.**
+  Fleet-internal actions are consumed by moving major tag; there is no
+  forward-pin carve-out, "for determinism" or otherwise. When a tag move
+  breaks CI, that is adoption work arriving — fix this repo or raise the
+  gate's design upstream. (Maintainer ruling, 2026-09-01; see "Never pin
+  cross-repo workflow refs.")
+- **"Blocked" is not an argument.** A frozen merge queue is a cost, not
+  a justification. Say the cost out loud, keep the queue frozen, and
+  fix the cause. If the fix belongs to someone else, surface it and
+  wait.
+- **Don't work around a gate in your own code either.** Reshaping a
+  composite action, splitting a job, or duplicating a literal so an
+  external tool stops complaining is the same move wearing different
+  clothes — especially when it undoes a deliberate refactor. If the
+  tool is wrong, the tool gets fixed.
+
+Recorded from a real incident (2026-08-21 → 08-31): a required check
+went red repo-wide for ten days after an upstream tool started honestly
+reporting jobs it could not resolve. Pinning back to the last-green
+version looked obvious and was proposed twice. Direct testing of that
+pin target showed it emitted the same unresolvable entries and would
+have failed identically — the pin bought nothing. Had it worked, it
+would only have bought a gate answering those jobs *wrongly* instead of
+declining to answer. Both roads led away from the actual problem.
+
 ## Never rename a release-path workflow file
 
 **Do not rename `.github/workflows/*.yml` files that participate in
