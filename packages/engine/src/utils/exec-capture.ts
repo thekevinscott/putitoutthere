@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { boundCapture } from './bound-capture.js';
 import { ExecError } from './exec-error.js';
 
 export interface ExecCaptureOptions {
@@ -6,6 +7,7 @@ export interface ExecCaptureOptions {
   // directly (`{ cwd: opts.cwd }`) under exactOptionalPropertyTypes.
   cwd?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
+  /** Retained output per stream, in characters. Defaults to 8 MiB. */
   maxBuffer?: number | undefined;
 }
 
@@ -28,19 +30,34 @@ export function execCapture(
   args: readonly string[],
   opts: ExecCaptureOptions = {},
 ): Promise<ExecResult> {
+  // Default of 8 MiB: a cold `cargo publish --verbose` of a mid-sized crate
+  // was measured at ~380KB of stderr (#651), so an ordinary build stays whole
+  // and the elision path stays theoretical.
+  const ceiling = opts.maxBuffer ?? 8 * 1024 * 1024;
   return new Promise((resolve, reject) => {
     execFile(
       cmd,
       [...args],
-      { encoding: 'utf8', cwd: opts.cwd, env: opts.env, maxBuffer: opts.maxBuffer },
+      // Infinity, not `ceiling`: execFile's overflow policy is to raise
+      // ERR_CHILD_PROCESS_STDIO_MAXBUFFER and SIGTERM the child, so a real
+      // number here kills a publish for being verbose and reports a failure
+      // the tool never produced (#664). Bound what we keep instead.
+      { encoding: 'utf8', cwd: opts.cwd, env: opts.env, maxBuffer: Infinity },
       (err, stdout, stderr) => {
+        const out = boundCapture(stdout, ceiling);
+        const errOut = boundCapture(stderr, ceiling);
         if (err) {
           const code: unknown = (err as { code?: unknown }).code;
           const status = typeof code === 'number' ? code : null;
-          reject(new ExecError(err.message, stdout, stderr, status, { cause: err, command: [cmd, ...args] }));
+          reject(
+            new ExecError(boundCapture(err.message, ceiling), out, errOut, status, {
+              cause: err,
+              command: [cmd, ...args],
+            }),
+          );
           return;
         }
-        resolve({ stdout, stderr });
+        resolve({ stdout: out, stderr: errOut });
       },
     );
   });

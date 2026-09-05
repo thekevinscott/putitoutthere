@@ -83,14 +83,24 @@ async function runAction(
 beforeEach(() => {
   pkg = mkdtempSync(join(tmpdir(), 'piot-action-bundle-cli-'));
   out.length = 0;
-  vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
-    out.push(typeof c === 'string' ? c : c.toString());
+  // The callback must fire: the adapter awaits `flushStdio` before each exit
+  // (#664), so a mock that only returns `true` would park `main()` forever.
+  vi.spyOn(process.stdout, 'write').mockImplementation(((
+    c: unknown,
+    cb?: () => void,
+  ) => {
+    out.push(typeof c === 'string' ? c : String(c));
+    cb?.();
     return true;
-  });
-  vi.spyOn(process.stderr, 'write').mockImplementation((c) => {
-    out.push(typeof c === 'string' ? c : c.toString());
+  }) as unknown as typeof process.stdout.write);
+  vi.spyOn(process.stderr, 'write').mockImplementation(((
+    c: unknown,
+    cb?: () => void,
+  ) => {
+    out.push(typeof c === 'string' ? c : String(c));
+    cb?.();
     return true;
-  });
+  }) as unknown as typeof process.stderr.write);
   vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as typeof process.exit);
