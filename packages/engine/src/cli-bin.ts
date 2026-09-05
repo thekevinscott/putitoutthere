@@ -6,15 +6,18 @@
  */
 
 import { run } from './cli.js';
+import { flushStdio } from './utils/flush-stdio.js';
 
 run(process.argv).then(
-  (code) => {
+  async (code) => {
+    await flushStdio();
     process.exit(code);
   },
-  (err: unknown) => {
+  async (err: unknown) => {
     process.stderr.write(
       `putitoutthere: fatal: ${err instanceof Error ? err.message : String(err)}\n`,
     );
+    await flushStdio();
     process.exit(4);
   },
 );

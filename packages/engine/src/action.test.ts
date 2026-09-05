@@ -30,14 +30,24 @@ describe('action', () => {
     exitCode = undefined;
     runMock.mockReset();
     runMock.mockResolvedValue(0);
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    // The callback must fire: `flushStdio` awaits it before every exit, so a
+    // mock that only returns `true` would park `main()` forever.
+    vi.spyOn(process.stderr, 'write').mockImplementation(((
+      chunk: unknown,
+      cb?: () => void,
+    ) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : String(chunk));
+      cb?.();
       return true;
-    });
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    }) as unknown as typeof process.stderr.write);
+    vi.spyOn(process.stdout, 'write').mockImplementation(((
+      chunk: unknown,
+      cb?: () => void,
+    ) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : String(chunk));
+      cb?.();
       return true;
-    });
+    }) as unknown as typeof process.stdout.write);
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       exitCode = code ?? 0;
       throw new Error(`exit:${exitCode}`);
@@ -195,6 +205,45 @@ describe('action', () => {
       'verify',
       'bundle-cli',
     ]);
+  });
+
+  it('drains stdio before every exit, so a large failure dump survives (#664)', async () => {
+    // Writes to the runner's pipe are async and `process.exit` drops whatever
+    // is still queued; an 8 MiB publish dump arrived truncated at ~146KB,
+    // losing the tail where the tool prints its error.
+    const order: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(((
+      _chunk: unknown,
+      cb?: () => void,
+    ) => {
+      order.push('drain:stdout');
+      cb?.();
+      return true;
+    }) as unknown as typeof process.stdout.write);
+    vi.spyOn(process.stderr, 'write').mockImplementation(((
+      _chunk: unknown,
+      cb?: () => void,
+    ) => {
+      order.push('drain:stderr');
+      cb?.();
+      return true;
+    }) as unknown as typeof process.stderr.write);
+
+    process.env.INPUT_COMMAND = 'plan';
+    runMock.mockResolvedValue(2);
+    await expect(main()).rejects.toThrow(/exit:2/);
+
+    expect(order).toEqual(['drain:stdout', 'drain:stderr']);
+  });
+
+  it('drains stdio before the missing-command exit, so the reason is not lost (#664)', async () => {
+    await expect(main()).rejects.toThrow(/exit:1/);
+
+    // The message, then the two zero-length drain probes.
+    expect(stderrChunks).toHaveLength(2);
+    expect(stderrChunks[0]).toMatch(/missing.*command/i);
+    expect(stderrChunks[1]).toBe('');
+    expect(stdoutChunks).toEqual(['']);
   });
 
   it('verify-bundle-cli: surfaces a failed verification as a non-zero exit (#595)', async () => {

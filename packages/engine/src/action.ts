@@ -11,6 +11,7 @@
 import { pathToFileURL } from 'node:url';
 
 import { run } from './cli.js';
+import { flushStdio } from './utils/flush-stdio.js';
 
 export async function main(): Promise<void> {
   const command = process.env.INPUT_COMMAND ?? '';
@@ -27,6 +28,7 @@ export async function main(): Promise<void> {
     process.stderr.write(
       'putitoutthere action: missing required input `command`\n',
     );
+    await flushStdio();
     process.exit(1);
   }
 
@@ -74,8 +76,10 @@ export async function main(): Promise<void> {
     process.stderr.write(
       `putitoutthere action: ignoring non-zero exit (fail_on_error=false): ${code}\n`,
     );
+    await flushStdio();
     process.exit(0);
   }
+  await flushStdio();
   process.exit(code);
 }
 
