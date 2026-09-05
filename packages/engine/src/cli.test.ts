@@ -198,6 +198,14 @@ describe('cli: top-level dispatch', () => {
     );
   });
 
+  it('--help documents --expect for reconcile (#666)', async () => {
+    const code = await run(argv('--help'));
+    expect(code).toBe(0);
+    expect(stderr.join('')).toMatch(
+      /--expect <spec>\s+reconcile: confirm & tag exactly <name>@<version>/,
+    );
+  });
+
   it('prints version from package.json for `version` and its --version / -v aliases', async () => {
     // `version` is dispatched by the early guard, ahead of (and no longer a
     // member of) the command `switch`. Pin that all three spellings resolve
