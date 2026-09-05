@@ -18,6 +18,9 @@
     "test:integration": "vitest run --config tests/integration/vitest.integration.config.ts",
     "prepare": "tsc -p tsconfig.build.json"
   },
+  "dependencies": {
+    "putitoutthere": "workspace:*"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",

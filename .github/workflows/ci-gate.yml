@@ -1,11 +1,7 @@
 name: CI Gate
 
-# Aggregator check that turns green when every other required check on
-# this PR has passed. Set this as the single required status check in
-# branch protection rather than enumerating each workflow -- that way
-# adding a new workflow doesn't require updating branch protection.
-#
-# Mirrors dirsql's pr-monitor pattern.
+# Set this as the single required status check in branch protection, so
+# adding a workflow doesn't mean updating branch protection.
 
 on:
   pull_request:
@@ -18,7 +14,6 @@ concurrency:
 permissions:
   actions: read
   contents: read
-  # willfire reads the PR and its changed files to predict which workflows dispatch.
   pull-requests: read
 
 jobs:
@@ -27,4 +22,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # `resolve` below runs out of this checkout, so it must be installed first.
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-node
+
+      - uses: ./.github/actions/setup-pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - uses: thekevinscott/pr-monitor@v1
+        with:
+          # `-C` because callbacks inherit the invoker's cwd, not the workspace.
+          resolve-outputs: pnpm -C ${{ github.workspace }} exec putitoutthere resolve
