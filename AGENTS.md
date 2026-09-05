@@ -408,12 +408,12 @@ Rules in support of this:
 
 - **Never pin backward to change a check's result.** If a version bump
   turned a check red, the red is the finding. Investigate it.
-- **A moving upstream tag is a real problem, and pinning forward is the
-  fix.** Pinning to a *current* SHA so an upstream force-moved tag
-  cannot silently change behavior under you is good practice — that is
-  pinning for determinism, not for green. Pair it with Dependabot so
-  future bumps arrive as reviewable diffs. The banned move is choosing
-  the pin *target* by which version passes.
+- **A moving upstream tag is the channel, not a hazard to pin against.**
+  Fleet-internal actions are consumed by moving major tag; there is no
+  forward-pin carve-out, "for determinism" or otherwise. When a tag move
+  breaks CI, that is adoption work arriving — fix this repo or raise the
+  gate's design upstream. (Maintainer ruling, 2026-09-01; see "Never pin
+  cross-repo workflow refs.")
 - **"Blocked" is not an argument.** A frozen merge queue is a cost, not
   a justification. Say the cost out loud, keep the queue frozen, and
   fix the cause. If the fix belongs to someone else, surface it and
