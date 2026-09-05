@@ -15,16 +15,28 @@
  *   captured for the failure dump. Short-circuits on
  *   already-published (idempotent).
  *
+ * A failure message carries cargo's stderr through `elideMiddle`
+ * (#651). `--verbose` plus `CARGO_TERM_VERBOSE=true` makes a cold
+ * verify build run to hundreds of KB, and the whole message lands on
+ * one log line, which GitHub cuts at 64KB from the *front* — so the
+ * unelided version threw away cargo's error and kept the successful
+ * build chatter. Only the rendered message is bounded: `stderr` itself
+ * stays whole for the predicates below (`isRateLimited`,
+ * `matchFirstPublishTpRejection`) and for the job-summary dump, which
+ * reads it off the ExecError and writes to a file with no line cut.
+ *
  * --allow-dirty is required for our writeVersion-then-publish model
  * (#135), but cargo's default dirty-check is exactly the safety net
  * that catches shipping uncommitted stray edits. We restore a
  * narrower version of that check: before invoking cargo, scan the
  * working tree via `git status --porcelain` and refuse to publish
  * if anything is dirty outside the manifests writeVersion just wrote.
- * "Manifests", plural: an inheriting crate's version lives at the
- * workspace root, so the file the bump lands in can sit outside the
- * package directory entirely (#639). If we can't scan (e.g. no git
- * repo), we fall back to cargo's own --allow-dirty behavior.
+ * "Manifests", plural, for two reasons: an inheriting crate's version
+ * lives at the workspace root (#639), and bumping a crate also moves the
+ * in-repo requirements that point at it (#640), which live in other
+ * crates' files. Either way the write can land outside the package
+ * directory entirely. If we can't scan (e.g. no git repo), we fall back
+ * to cargo's own --allow-dirty behavior.
  *
  * OIDC: the crates-io-auth-action GHA step exchanges the OIDC JWT for
  * a short-lived CARGO_REGISTRY_TOKEN in the env. The handler doesn't
@@ -42,7 +54,9 @@ import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 import { execCapture } from '../utils/exec-capture.js';
+import { elideMiddle } from '../utils/elide-middle.js';
 import { repoRelativePaths } from '../repo-relative-paths.js';
+import { writeDependentVersionReqs } from '../write-dependent-version-reqs.js';
 import { writeResolvedCargoVersion } from '../write-resolved-cargo-version.js';
 import { ExecError } from '../utils/exec-error.js';
 import { matchFirstPublishTpRejection } from './match-first-publish-tp-rejection.js';
@@ -77,7 +91,7 @@ async function isPublishedImpl(
 async function writeVersionImpl(
   pkg: { path: string },
   version: string,
-  _ctx: Ctx,
+  ctx: Ctx,
 ): Promise<string[]> {
   const cargoPath = join(pkg.path, 'Cargo.toml');
   let original: string;
@@ -100,11 +114,22 @@ async function writeVersionImpl(
   // Returns the manifests this write MANAGES, which is what the pre-publish
   // dirty-tree guard needs: for an inheriting crate that is a file outside
   // the package directory, and the guard would otherwise refuse on it.
+  let written: string[];
   try {
-    return await writeResolvedCargoVersion(pkg.path, original, version);
+    written = [...(await writeResolvedCargoVersion(pkg.path, original, version))];
   } catch (err) {
     throw toError(err);
   }
+  // #640: bumping this crate moves it out of range of every in-repo
+  // requirement that pointed at the old version, and cargo then refuses to
+  // resolve the workspace at all — a hard failure before anything compiles,
+  // hit by the next crates.io package in the cascade rather than by this
+  // one. The build-time writers learned this in #621; the publish path is
+  // the other half.
+  written.push(
+    ...(await writeDependentVersionReqs(pkg.path, version, ctx.siblingPackagePaths)),
+  );
+  return written;
 }
 
 async function publishImpl(
@@ -219,7 +244,7 @@ async function publishImpl(
         const retryStderr = retryErr instanceof ExecError ? retryErr.stderr.trim() : undefined;
         const retryBase = retryErr instanceof Error ? retryErr.message : String(retryErr);
         throw new Error(
-          `cargo publish (fallback ${fallbackUrl}) failed${retryStderr ? `:\n${retryStderr}` : `: ${retryBase}`}`,
+          `cargo publish (fallback ${fallbackUrl}) failed${retryStderr ? `:\n${elideMiddle(retryStderr)}` : `: ${retryBase}`}`,
           { cause: retryErr },
         );
       }
@@ -246,13 +271,16 @@ async function publishImpl(
           `[${ErrorCodes.CRATES_FIRST_PUBLISH_TP_REJECTED}] cargo publish: crates.io rejected publishing "${crateNameFor(pkg)}" because the crate has never been published.`,
           'crates.io Trusted Publishing binds to an already-published crate, so the very first release of a new crate name cannot use the TP path.',
           'Bootstrap by setting CARGO_REGISTRY_TOKEN (a classic crates.io API token) for the first publish; every release after that can use trusted publishing.',
-          `\n--- cargo stderr ---\n${tpStderr}`,
+          `\n--- cargo stderr ---\n${elideMiddle(tpStderr)}`,
         ].join('\n'),
         { cause: err },
       );
     }
     const base = err instanceof Error ? err.message : String(err);
-    throw new Error(`cargo publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
+    throw new Error(
+      `cargo publish failed${stderr ? `:\n${elideMiddle(stderr)}` : `: ${base}`}`,
+      { cause: err },
+    );
   }
 
   return {

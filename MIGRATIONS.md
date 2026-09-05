@@ -21,6 +21,140 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### npm: an unreachable registry reads as UNKNOWN, not PUBLISH
+
+**Summary.** `plan` asks each registry whether the planned version is
+already live, and for npm it asks by shelling out to
+`npm view <name>@<version> version` and reading the exit status. Every
+non-zero exit was read as one thing — "that version is not published" —
+which is right for the answer the probe was written for (`E404`) and
+wrong for every way the question can fail to be asked at all. A run whose
+network could not reach `registry.npmjs.org` reported
+`verdict: publish` for a package it had never got an answer about, and
+`plan` presented that as fact.
+
+The same code path was also slow, for the same reason. Because piot
+passed no retry configuration, the probe inherited npm's own defaults —
+`fetch-retries=2`, `fetch-retry-mintimeout=10s`,
+`fetch-retry-maxtimeout=60s` — and npm applies them without
+distinguishing a 503 from a hostname that does not resolve. A DNS failure
+is deterministic within a run: no retry turns a name that does not
+resolve into one that does. piot paid ~70s per npm package to re-ask a
+question that had already been answered as fully as it ever would be.
+Measured against a `--network none` sandbox, `plan` took **70.3s** to
+emit a matrix it produces byte-identically in under a second with
+network.
+
+`npm view` now runs with `--fetch-retries=0` and piot classifies the
+failure itself, off npm's machine-readable `npm error code <CODE>` line:
+
+| npm code | reading | effect on the verdict |
+| --- | --- | --- |
+| `E404` (and anything unrecognised) | the registry answered; the version is not there | `publish` — unchanged |
+| `ENOTFOUND`, `EAI_AGAIN` | there is no registry to talk to | `unknown`, on the first attempt |
+| `ETIMEDOUT`, `ECONNRESET`, `ERR_SOCKET_TIMEOUT`, `E429`, `E5xx` | the registry was reached and faltered | raised as a `TransientError`, retried by the publish path's existing retry policy |
+
+**Required changes.** None. No config key, workflow input, or trailer
+changes, and a run with working network to npm produces the same matrix
+and the same verdicts it did before.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Three, all in how an npm
+verdict is reached rather than in what a healthy run reports.
+
+- A network failure that prevents piot from reaching npm renders that
+  package's `plan` verdict as `unknown` instead of `publish`. `unknown`
+  is what crates.io and PyPI already report in the same situation, so npm
+  is joining the existing posture rather than inventing one. It is
+  deliberately not a hard failure: `plan` still emits its full matrix, and
+  `unpublished_kinds` counts `unknown` as unpublished, so a run whose npm
+  verdict could not be resolved still acquires npm auth and still attempts
+  the publish — which then fails with "the registry could not be reached"
+  as its message rather than discovering it inside `npm publish`.
+- Transient npm failures during the probe — timeouts, reset connections,
+  429, 5xx — are now retried by piot's retry policy. Previously they were
+  swallowed into "not published" before the policy could see them, so this
+  restores coverage rather than removing it.
+- An offline or DNS-blocked `plan` returns in roughly the time the rest of
+  the plan takes instead of ~70s per npm package. The saved time is
+  entirely npm's retry ladder against a name that will not resolve.
+
+**Verification.** Run `plan` with npm pointed at a hostname that does not
+resolve:
+
+```bash
+npm_config_registry=https://<a-host-that-does-not-resolve>.invalid/ \
+  putitoutthere plan --config putitoutthere.toml
+```
+
+Before: the command takes ~70s per npm package and each one reports
+`"verdict":"publish"`. After: it returns in well under a second and the
+npm rows report `"verdict":"unknown"`, with the matrix otherwise
+identical. A normal run against the real registry is unchanged — same
+verdicts, same matrix.
+
+### A failed `cargo publish` keeps the tail of cargo's stderr
+
+**Summary.** GitHub Actions cuts a log line at 64KB — in the live view
+and in the downloaded log archive alike — and what it keeps is the head.
+The crates handler rendered cargo's entire stderr into the message it
+throws, and that message is emitted as a single structured log record, so
+the two facts collided on any crate whose verify build is chatty. The
+handler runs `cargo publish --allow-dirty --verbose` with
+`CARGO_TERM_VERBOSE=true`, which on a cold verify build means hundreds of
+KB of `Compiling …` lines; cargo prints the error *last*. The result was a
+red run whose whole diagnostic was 64KB of successful build output ending
+mid-line, with the failure itself past the cut.
+
+The rendered message is now bounded: the first 4KB, then
+`[... N bytes elided ...]`, then the last 16KB. Both ends earn their
+place — the head names the phase that was running, the tail is the error
+and its `Caused by:` frames — and the byte count is what tells a reader
+the stream continued rather than stopped.
+
+The bound applies to the *rendered message* only. Everything that
+**decides** still reads the stream whole: the 429 rate-limit predicate
+that engages the alternate registry, and the first-publish
+trusted-publishing detector that raises
+`PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED`. So does the
+`$GITHUB_STEP_SUMMARY` failure dump, which reads stderr off the captured
+error and writes to a file, where there is no per-line cut. Nothing that
+was recorded before is lost — one of the two places it was recorded is
+simply now legible.
+
+**Required changes.** None. This is a fix inside the engine's crates
+handler.
+
+| | Before | After |
+| --- | --- | --- |
+| Your `release.yml` | unchanged | unchanged |
+| `putitoutthere.toml` | unchanged | unchanged |
+| `secrets:` you pass | unchanged | unchanged |
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+- A `cargo publish` failure whose stderr exceeds ~20KB is reported with
+  its middle replaced by `[... N bytes elided ...]`. Under 20KB, the
+  message is byte-identical to before.
+- The `--- cargo stderr ---` evidence block on the first-publish
+  trusted-publishing hint is bounded the same way; the hint text and the
+  `PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED` code are unchanged, and the
+  detection still runs against the full stream.
+- The job-summary dump and the exit code are unchanged. A consumer
+  grepping the run log for a string cargo printed late will now find it;
+  one grepping for a string in the elided middle should read the job
+  summary, which still has it.
+
+**Verification.** On a release run where cargo fails, the `publish` step's
+log now ends with cargo's own error rather than a truncated `Compiling`
+line. The whole stream is still one click away under the run's job
+summary, in the **stderr** block of the failure dump.
+
+---
+
 ### `putitoutthere resolve` emits willfire's callback map
 
 **Summary.** New additive subcommand (#683). `resolve` prints the callback
@@ -135,6 +269,73 @@ grep unpublished_kinds /tmp/out
 # unpublished_kinds=[]        <- nothing left to publish; no auth needed
 # unpublished_kinds=["npm"]   <- only npm has work; crates.io is not contacted
 ```
+
+### Consumer build scripts receive `VERSION`
+
+**Summary.** The reusable workflow runs your `package.json` `build` script
+on `kind = "npm"` rows, and passed it exactly two variables: `TARGET` (the
+triple to cross-compile) and `BUILD` (the mode to dispatch on). It never
+passed the version being released. It now passes `VERSION` as well, at
+every point it invokes your script — the per-target build matrix and the
+publish-time rebuild alike.
+
+This closes a silent hole on the roll-your-own path. A package declaring
+`build = "bundled-cli"` *without* a `[package.bundle_cli]` block owns its
+own cross-compile, and no version source on disk was correct at the moment
+that script ran: `write-crate-version` is gated on `matrix.bundle_cli` (or,
+for napi, a colocated `Cargo.toml`), `write-version` is gated on
+pypi/maturin rows, and an npm package's `package.json` is not rewritten
+until the publish job. Since cargo bakes `CARGO_PKG_VERSION` from
+`Cargo.toml` at compile time and honors no env override, the shipped binary
+reported the previously committed version — and nothing failed to say so.
+
+**Required changes.** None. `VERSION` is additive; a build script that
+ignores it behaves exactly as before, and no existing variable changed.
+
+You *should* adopt it if you build a Rust binary in your own script. Stamp
+the manifest before invoking cargo:
+
+| | before | after |
+| --- | --- | --- |
+| `scripts/build.mjs` | `cargo build --release --target $TARGET …` | write `Cargo.toml`'s `[package] version` from `process.env.VERSION`, **then** `cargo build …` |
+
+See [README → Bundled-CLI npm family](./README.md#bundled-cli-npm-family)
+for a copy-paste snippet. The same applies to a **napi** crate that does
+not sit beside `package.json` — the workflow logs a `::notice::` saying it
+skipped the pre-build bump, and `VERSION` is now how you do it yourself. A
+colocated napi crate is still bumped for you and needs no change.
+
+Declaring `[package.bundle_cli]` remains the better answer where the recipe
+fits: it does the version write for you, and gets you the zigbuild glibc
+floor.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** `VERSION` is present in the
+build-step environment where it previously was not. A build script that
+already read a variable of that name from some other source — a repo-level
+`env:`, a `.env` file loaded by the script itself — will now see the
+workflow's value at that layer instead. Nothing else about the build step
+changed: same working directory, same install fallback, same ordering
+against the engine's staging step.
+
+**Verification.** Add a line to your build script and read it back in the
+release run's log:
+
+```js
+console.log(`building ${process.env.TARGET} for version ${process.env.VERSION}`);
+```
+
+For a Rust binary, the end-to-end check is the published artifact itself —
+install the freshly released package and run it:
+
+```console
+$ npm install -g my-cli && my-cli --version
+my-cli 1.4.0        # the version just released, not the previous one
+```
+
+If it still prints the previous version, your script is not stamping the
+manifest before `cargo build`.
 
 ---
 
@@ -286,6 +487,79 @@ section-table form. After the run, the workspace root's
 `cargo metadata --no-deps` reports every dependency requirement exactly
 as you wrote it. Before this fix the dependency's `req` came back as the
 release version.
+
+---
+
+### crates: a release moves the in-repo requirements pointing at it
+
+**Summary.** With two `kind = "crates"` packages in one repo where A
+path-deps B, releasing B bumped only B's own `Cargo.toml`. A's
+requirement on B stayed where it was, and the moment B's new version fell
+outside A's declared range cargo stopped resolving the workspace
+entirely:
+
+```
+error: failed to select a version for the requirement `expcore = "^0.2"`
+candidate versions found which didn't match: 0.4.2
+location searched: .../packages/core
+```
+
+That is a hard failure (exit 101) before anything compiles or packages,
+and an intermittent one — a repo releasing patches stays green for months
+and detonates on the first bump that leaves the range. A `version` key
+alongside `path` is *mandatory* for any crate that also publishes to
+crates.io, so the shape that breaks is the shape such a repo is required
+to have. #621 taught the build-time writers to move these requirements
+for the crates an artifact embeds; the publish path never learned it
+(issue #640).
+
+`writeVersion` for crates now rewrites every in-repo requirement that
+resolves to the crate it just bumped, in all three syntaxes cargo
+accepts: inline table (`b = { path = "../b", version = "0.2" }`), section
+table (`[dependencies.b]`), and a requirement inherited from the
+workspace root's `[workspace.dependencies]` — the last of which lives in
+a file no member's own rewrite would touch. Candidates are the workspace
+root, its members (expanded the way cargo expands `members`), and the
+other declared packages, so a crate the repo does not publish but which
+sits between two that it does is still covered.
+
+**Required changes.** None.
+
+| | Before | After |
+|---|---|---|
+| `putitoutthere.toml` | no change | no change |
+| Reusable workflow inputs | no change | no change |
+| `Cargo.toml` of a crate that path-deps a released crate | requirement left behind; `cargo` refuses to resolve | requirement moved to the released version |
+| Registry dependencies (`pyo3 = { version = "0.22" }`) | untouched | untouched |
+| Path dependencies with no `version` key | untouched | untouched |
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.**
+
+- A crates release now writes manifests **outside** the package
+  directory — the dependents' and, for an inherited requirement, the
+  workspace root's. These rewrites are ephemeral: the publish job runs
+  from a fresh checkout and nothing is committed, exactly as with #621's
+  build-time rewrites.
+- The pre-publish dirty-tree guard (which refuses to
+  `cargo publish --allow-dirty` when anything outside the managed
+  manifest is dirty) now recognizes every manifest the run rewrote,
+  **accumulated across the whole cascade** rather than per package. A
+  manifest rewritten while publishing the first package is still dirty
+  when the second publishes, and it is no more a stray edit then than it
+  was then. Stray edits are still refused.
+- Only requirements resolving to the crate being released move. A
+  registry dependency that happens to share a key name keeps its
+  requirement, and a path dependency carrying no `version` key is left
+  alone rather than having one invented for it.
+
+**Verification.** In a repo with two crates.io packages where one
+path-deps the other with a `version` requirement, release the dependency
+at a version outside that requirement's range. Before this fix,
+`cargo metadata` on the resulting tree failed with
+`failed to select a version for the requirement`; now it resolves, and
+the dependent's `req` matches the released version.
 
 ---
 

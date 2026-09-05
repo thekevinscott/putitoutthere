@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execCapture, type ExecResult } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+import { writeDependentVersionReqs } from '../write-dependent-version-reqs.js';
 
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import {
@@ -28,9 +29,14 @@ import type { Ctx } from '../types.js';
 
 vi.mock('../utils/exec-capture.js');
 vi.mock('node:fs/promises');
+vi.mock('../write-dependent-version-reqs.js', async () => ({
+  ...await vi.importActual<typeof import('../write-dependent-version-reqs.js')>('../write-dependent-version-reqs.js'),
+  writeDependentVersionReqs: vi.fn((): Promise<string[]> => Promise.resolve([])),
+}));
 
 const execMock = vi.mocked(execCapture);
 const readMock = vi.mocked(readFile);
+const depsMock = vi.mocked(writeDependentVersionReqs);
 const writeMock = vi.mocked(writeFile);
 
 /** A resolved `execCapture` result carrying `stdout`. */
@@ -82,6 +88,10 @@ beforeEach(() => {
   execMock.mockReset();
   readMock.mockReset();
   writeMock.mockReset();
+  // Reset the implementation too, not just the calls: a case that stubs a
+  // rewritten dependent would otherwise leak it into the next one.
+  depsMock.mockReset();
+  depsMock.mockResolvedValue([]);
   delete process.env.CARGO_REGISTRY_TOKEN;
 });
 
@@ -284,6 +294,30 @@ describe('crates.writeVersion', () => {
     // The rewritten path is the package's Cargo.toml (separator-agnostic).
     expect(paths).toHaveLength(1);
     expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
+  });
+
+  it("appends the dependents' manifests to its own, and passes the siblings through (#640)", async () => {
+    // `writeVersion` composes two writes: this crate's own version, through
+    // the #428 resolver, and the in-repo requirements pointing at it. The
+    // pre-publish dirty-tree guard consumes the union, so the second has to
+    // be APPENDED to the first — returning either alone leaves the guard
+    // refusing a file the engine itself wrote. `ctx.siblingPackagePaths`
+    // must reach the walk too, or a sibling that path-deps this crate from
+    // outside the workspace is never visited and its requirement is left
+    // stranded below the released version.
+    readMock.mockResolvedValue(`[package]\nname = "core"\nversion = "0.1.0"\n`);
+    depsMock.mockResolvedValue(['/repo/packages/host/Cargo.toml']);
+
+    const paths = await crates.writeVersion(
+      { ...basePkg(), path: dir },
+      '0.4.2',
+      makeCtx({ cwd: dir, siblingPackagePaths: ['/repo/packages/host'] }),
+    );
+
+    expect(depsMock).toHaveBeenCalledWith(dir, '0.4.2', ['/repo/packages/host']);
+    expect(paths).toHaveLength(2);
+    expect(paths[0]!.endsWith('Cargo.toml')).toBe(true);
+    expect(paths[1]).toBe('/repo/packages/host/Cargo.toml');
   });
 
   it('is idempotent when version already matches', async () => {
@@ -831,6 +865,142 @@ describe('crates.publish', () => {
       fetchSpy.mockRestore();
     });
 
+    /**
+     * #651. `--verbose` plus `CARGO_TERM_VERBOSE=true` makes a cold verify
+     * build's stderr run to hundreds of KB. The rendered message is logged
+     * on one line and GitHub cuts a log line at 64KB from the *front*, so
+     * an unelided render throws away cargo's error and keeps the healthy
+     * build chatter.
+     *
+     * Assertions here are booleans rather than `toContain` on purpose: a
+     * failed matcher against a ~480KB string prints the whole string into
+     * the test report, which is the same disease under a different roof.
+     */
+    // No leading indent on the head marker: the handler trims the stream
+    // before rendering, so cargo's leading spaces are gone by then.
+    const HUGE_HEAD = 'Updating crates.io index';
+    const HUGE_TAIL = 'error: could not compile `demo-crate` (lib)';
+    const hugeStderr = (tail: string = HUGE_TAIL): string =>
+      [`       ${HUGE_HEAD}`, '   Compiling noise v1.0.0\n'.repeat(20_000), tail].join('\n');
+    const ELIDED = /\[\.\.\. \d+ bytes elided \.\.\.\]/;
+    const GHA_LOG_LINE_LIMIT = 64 * 1024;
+
+    it('elides the middle of an oversized cargo stderr in the failure message (#651)', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      const huge = hugeStderr();
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', huge, 1));
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const err = await crates
+        .publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        )
+        .catch((e: unknown) => e as Error) as Error;
+      expect({
+        fits: err.message.length <= GHA_LOG_LINE_LIMIT,
+        head: err.message.includes(HUGE_HEAD),
+        tail: err.message.endsWith(HUGE_TAIL),
+        elided: ELIDED.test(err.message),
+      }).toEqual({ fits: true, head: true, tail: true, elided: true });
+      // Eliding the message is only safe because the full stream survives on
+      // the `cause`: `publish.ts` walks the chain with `findExecError` to
+      // build the job-summary dump, which is the copy holding everything the
+      // message dropped. Lose the cause and the dump reports an empty
+      // command, empty stdout and exit code -1 — the elided middle would then
+      // exist nowhere.
+      expect(err.cause).toBeInstanceOf(ExecError);
+      expect((err.cause as ExecError).stderr).toBe(huge);
+      fetchSpy.mockRestore();
+    });
+
+    it('elides the middle of an oversized fallback stderr too (#651)', async () => {
+      // The fallback render is a second interpolation site, so it needs
+      // its own bound — a 429 on crates.io followed by a verbose failure
+      // against the fallback registry is exactly as long.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          return Promise.reject(new ExecError('exit 1', '', 'status 429 Too Many Requests', 1));
+        }
+        return Promise.reject(new ExecError('exit 1', '', hugeStderr(), 1));
+      });
+      const stdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation((): boolean => true);
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const err = await crates
+        .publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({
+            cwd: dir,
+            env: {
+              CARGO_REGISTRY_TOKEN: 'tok',
+              PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+            },
+          }),
+        )
+        .catch((e: unknown) => e as Error) as Error;
+      expect({
+        fits: err.message.length <= GHA_LOG_LINE_LIMIT,
+        head: err.message.includes('fallback http://localhost:8000'),
+        tail: err.message.endsWith(HUGE_TAIL),
+        elided: ELIDED.test(err.message),
+      }).toEqual({ fits: true, head: true, tail: true, elided: true });
+      stdoutSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it('still reads the whole stderr when deciding, only the render is bounded (#651)', async () => {
+      // The elision happens where the message is built, not where stderr is
+      // captured. Put the rate-limit prose ~500KB deep — past anything a
+      // bounded render would keep — and the 429 fallback must still engage.
+      // A predicate reading the elided text instead would miss it.
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      let cargoCalls = 0;
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        cargoCalls += 1;
+        if (cargoCalls === 1) {
+          return Promise.reject(
+            new ExecError('exit 1', '', hugeStderr('status 429 Too Many Requests'), 1),
+          );
+        }
+        return Promise.resolve(ok(''));
+      });
+      const stdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation((): boolean => true);
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const res = await crates.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({
+          cwd: dir,
+          env: {
+            CARGO_REGISTRY_TOKEN: 'tok',
+            PIOT_CRATES_REGISTRY_FALLBACK: 'http://localhost:8000',
+          },
+        }),
+      );
+      expect(res.url).toBe('http://localhost:8000/api/v1/crates/demo-crate/0.1.0');
+      stdoutSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
     it('routes publish at PIOT_CRATES_REGISTRY_PRIMARY when set (no real-crates.io attempt, no fallback)', async () => {
       const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
         new Response('{}', { status: 404 }),
@@ -1071,6 +1241,39 @@ describe('crates.publish', () => {
       // The hint lines are newline-joined (not concatenated): the summary
       // line and the TP-binding explanation sit on separate lines.
       expect(msg).toContain('has never been published.\ncrates.io Trusted Publishing binds');
+      fetchSpy.mockRestore();
+    });
+
+    it('elides the quoted stderr when the rejection arrives buried in a verbose log (#651)', async () => {
+      // The bootstrap hint quotes cargo's stderr verbatim. On a crate whose
+      // verify build ran before the 404, that quote is hundreds of KB and
+      // GitHub's 64KB line cut takes the hint away with it — so the quote
+      // is bounded while the detector still scans the whole stream.
+      const huge = ['       Updating crates.io index', '   Compiling noise v1.0.0\n'.repeat(20_000), STDERR].join('\n');
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 404 }),
+      );
+      execMock.mockImplementation((file: string) => {
+        if (file === 'git') {return Promise.reject(new ExecError('not a git repo', '', '', null));}
+        return Promise.reject(new ExecError('exit 1', '', huge, 1));
+      });
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const err = await crates
+        .publish(
+          { ...basePkg(), path: dir },
+          '0.1.0',
+          makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'tok' } }),
+        )
+        .catch((e: unknown) => e as Error) as Error;
+      // Booleans, not `toContain`: a failed matcher on a ~500KB string
+      // dumps the whole thing into the report.
+      expect({
+        detected: err.message.includes('PIOT_CRATES_FIRST_PUBLISH_TP_REJECTED'),
+        hint: err.message.includes('Bootstrap by setting CARGO_REGISTRY_TOKEN'),
+        fits: err.message.length <= 64 * 1024,
+        evidence: err.message.endsWith(STDERR),
+        elided: /\[\.\.\. \d+ bytes elided \.\.\.\]/.test(err.message),
+      }).toEqual({ detected: true, hint: true, fits: true, evidence: true, elided: true });
       fetchSpy.mockRestore();
     });
 

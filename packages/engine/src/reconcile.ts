@@ -25,7 +25,13 @@
  * `ensureTag` no-ops when the tag already exists, so a re-run does
  * nothing.
  *
- * Issue #410, #403 slice 3, #623.
+ * `--expect` (#666) replaces discovery with a caller-asserted
+ * `package@version`: `computeStatus`'s `latestVersion` reads a mutable,
+ * CDN-cached pointer that can still name the previous release seconds
+ * after a delegated PyPI upload, silently skipping the tag it was run to
+ * cut. See `reconcile-expect.ts`.
+ *
+ * Issue #410, #403 slice 3, #623, #666.
  */
 
 import { join } from 'node:path';
@@ -34,6 +40,7 @@ import { loadConfig, type Package } from './config.js';
 import { ensureTag } from './ensure-tag.js';
 import { tagList } from './git.js';
 import { createLogger } from './log.js';
+import { reconcileExpected } from './reconcile-expect.js';
 import { resolveTagCommit } from './resolve-tag-commit.js';
 import { computeStatus } from './status.js';
 import { formatTag } from './tag-template.js';
@@ -47,6 +54,12 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
 
   const config = await loadConfig(cfgPath);
   const byName = new Map<string, Package>(config.packages.map((p) => [p.name, p]));
+
+  if (opts.expect !== undefined) {
+    const actions = await reconcileExpected(opts.expect, config, byName, cwd, dryRun, log);
+    return { ok: true, dryRun, actions };
+  }
+
   const rows = await computeStatus({ cwd, configPath: cfgPath });
 
   const actions: ReconcileAction[] = [];
