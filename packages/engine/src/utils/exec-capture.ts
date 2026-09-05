@@ -7,7 +7,7 @@ export interface ExecCaptureOptions {
   // directly (`{ cwd: opts.cwd }`) under exactOptionalPropertyTypes.
   cwd?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
-  /** Retained output per stream, in characters. Defaults to CAPTURE_CEILING. */
+  /** Retained output per stream, in characters. Defaults to 8 MiB. */
   maxBuffer?: number | undefined;
 }
 
@@ -15,13 +15,6 @@ export interface ExecResult {
   stdout: string;
   stderr: string;
 }
-
-/**
- * A cold `cargo publish --verbose` of a mid-sized crate was measured at ~380KB
- * of stderr (#651), so an ordinary build stays whole and the elision path
- * stays theoretical.
- */
-const CAPTURE_CEILING = 8 * 1024 * 1024;
 
 /**
  * Async replacement for
@@ -37,7 +30,10 @@ export function execCapture(
   args: readonly string[],
   opts: ExecCaptureOptions = {},
 ): Promise<ExecResult> {
-  const ceiling = opts.maxBuffer ?? CAPTURE_CEILING;
+  // Default of 8 MiB: a cold `cargo publish --verbose` of a mid-sized crate
+  // was measured at ~380KB of stderr (#651), so an ordinary build stays whole
+  // and the elision path stays theoretical.
+  const ceiling = opts.maxBuffer ?? 8 * 1024 * 1024;
   return new Promise((resolve, reject) => {
     execFile(
       cmd,
