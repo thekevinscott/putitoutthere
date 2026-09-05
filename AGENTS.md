@@ -675,6 +675,8 @@ surface — breaking or additive — needs an entry in both files.
 
 The CLI, the JS action (`action.yml`), and `src/` exports are **not**
 public surface — they're internal seams powering the reusable workflow.
+The one CLI exception is `resolve` (#683): its output map is a protocol
+willfire consumes, so it is public surface.
 Changes there don't require changelog entries unless they alter the
 reusable workflow's externally-visible behavior. See
 [`notes/design-commitments.md`](./notes/design-commitments.md) for the
