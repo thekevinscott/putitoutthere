@@ -322,6 +322,16 @@ never commits one. Concretely:
   at full standard `e2e-verify` is present-but-dormant, which is exactly
   what we want.
 
+## Comments
+
+No comments if possible.
+
+If you must comment, only include **why**; a non-obvious
+constraint, a gotcha, the issue a choice traces to. Never the *what*: if
+the code already says it, the comment only repeats it.
+
+Applies everywhere: workflow YAML, tests, engine code.
+
 ## Design commitments
 
 Explicit non-goals that bound `putitoutthere`'s scope. Read before proposing
