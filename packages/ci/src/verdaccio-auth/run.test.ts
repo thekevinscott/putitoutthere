@@ -1,10 +1,11 @@
 /**
- * Composition-root wiring test for the Verdaccio-auth harness (#453). Both
- * collaborators are mocked — the OS boundary (the exec seam, `node:fs/promises`)
- * and `./decide.js` — so this isolates the plumbing: the bounded `/-/ping` poll
- * (curl + sleep), the user-create PUT (exact curl flags), the token parse
- * ('null' when absent), the `.npmrc` writes, and how decide()'s lines + exit
- * code surface. The decisions live in `decide.test.ts`.
+ * Composition-root wiring test for the Verdaccio-auth harness (#453). All
+ * collaborators are mocked — the OS boundary (the exec seam,
+ * `node:fs/promises`), `./ping-once.js`, and `./decide.js` — so this isolates
+ * the plumbing: the bounded `/-/ping` poll (pingOnce + sleep), the user-create
+ * PUT (exact curl flags), the token parse ('null' when absent), the `.npmrc`
+ * writes, and how decide()'s lines + exit code surface. The ping curl contract
+ * lives in `ping-once.test.ts`; the decisions live in `decide.test.ts`.
  */
 
 import { writeFile } from 'node:fs/promises';
@@ -13,16 +14,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execCapture } from '../utils/exec-capture.js';
 import { sleep } from '../utils/sleep.js';
 import { decideVerdaccioAuth } from './decide.js';
+import { pingOnce } from './ping-once.js';
 import { runVerdaccioAuth } from './run.js';
 
 vi.mock('../utils/exec-capture.js');
 vi.mock('../utils/sleep.js');
 vi.mock('node:fs/promises');
 vi.mock('./decide.js');
+vi.mock('./ping-once.js');
 
 const exec = vi.mocked(execCapture);
 const sleepMock = vi.mocked(sleep);
 const decide = vi.mocked(decideVerdaccioAuth);
+const ping = vi.mocked(pingOnce);
 const out: string[] = [];
 
 const PUT_ARGS = [
@@ -36,22 +40,15 @@ const PUT_ARGS = [
   'http://localhost:4873/-/user/org.couchdb.user:e2e',
 ];
 
-// Route the subprocess calls: the ping curl and the PUT curl (`sleep` is its
-// own mock). `ping` is the number of leading ping attempts that fail before one
-// succeeds.
-function stub({ ping = 0, putResponse = '{"token":"t"}' }: { ping?: number; putResponse?: string }): void {
+// `ping` is the number of leading ping attempts that report down before one
+// reports up; exec serves only the PUT curl (`sleep` is its own mock).
+function stub({ ping: down = 0, putResponse = '{"token":"t"}' }: { ping?: number; putResponse?: string }): void {
   let pings = 0;
-  exec.mockImplementation((_cmd, args) => {
-    if (args.includes('-X')) {
-      return Promise.resolve({ stdout: putResponse, stderr: '' });
-    }
-    // ping curl
+  ping.mockImplementation(() => {
     pings += 1;
-    if (pings <= ping) {
-      return Promise.reject(new Error('connection refused'));
-    }
-    return Promise.resolve({ stdout: '', stderr: '' });
+    return Promise.resolve(pings > down);
   });
+  exec.mockResolvedValue({ stdout: putResponse, stderr: '' });
 }
 
 beforeEach(() => {
@@ -76,13 +73,13 @@ describe('runVerdaccioAuth: ping poll', () => {
     stub({ ping: 0 });
     await runVerdaccioAuth();
     expect(out[0]).toBe('Verdaccio up (attempt 1)\n');
-    expect(exec).toHaveBeenCalledWith('curl', ['-fsS', 'http://localhost:4873/-/ping']);
+    expect(ping).toHaveBeenCalledTimes(1);
     expect(sleepMock).not.toHaveBeenCalled();
   });
 
-  it('reports "up" only when the ping curl actually succeeds (a throw is not up)', async () => {
-    // With ping:1 the first curl throws; if a throw were treated as success the
-    // announced attempt would be 1, not 2.
+  it('reports "up" only when pingOnce reports up (a down attempt is spent, not up)', async () => {
+    // With ping:1 the first attempt reports down; if down were treated as up
+    // the announced attempt would be 1, not 2.
     stub({ ping: 1 });
     await runVerdaccioAuth();
     expect(out[0]).toBe('Verdaccio up (attempt 2)\n');
@@ -101,7 +98,7 @@ describe('runVerdaccioAuth: ping poll', () => {
     const code = await runVerdaccioAuth();
     expect(code).toBe(1);
     expect(out.join('')).toBe('::error::Verdaccio /-/ping unreachable after 10 attempts\n');
-    expect(exec).not.toHaveBeenCalledWith('curl', PUT_ARGS);
+    expect(exec).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
     expect(sleepMock).toHaveBeenCalledTimes(9);
   });
