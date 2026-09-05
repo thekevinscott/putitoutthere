@@ -6,6 +6,7 @@ import { runChangelogCheck } from './changelog-check/run.js';
 import { run } from './cli.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
+import { runFixtureMatrix } from './fixture-matrix/run.js';
 import { runPatchCoverage } from './patch-coverage/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { runTestpypiVerify } from './testpypi-verify/run.js';
@@ -16,6 +17,7 @@ vi.mock('./cargo-registry/run.js');
 vi.mock('./changelog-check/run.js');
 vi.mock('./evidence-check/run.js');
 vi.mock('./fixture-materialize/run.js');
+vi.mock('./fixture-matrix/run.js');
 vi.mock('./patch-coverage/run.js');
 vi.mock('./tdd-lint/run.js');
 vi.mock('./testpypi-verify/run.js');
@@ -101,6 +103,14 @@ describe('piot-ci dispatcher', () => {
     const code = await run(argv('fixture-materialize', 'plan'));
     expect(code).toBe(1);
     expect(runFixtureMaterialize).toHaveBeenCalledWith(['node', 'piot-ci', 'fixture-materialize', 'plan']);
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches fixture-matrix to its gate, forwarding argv, and returns its exit code', async () => {
+    vi.mocked(runFixtureMatrix).mockResolvedValue(1);
+    const code = await run(argv('fixture-matrix', 'js-vanilla'));
+    expect(code).toBe(1);
+    expect(runFixtureMatrix).toHaveBeenCalledWith(['node', 'piot-ci', 'fixture-matrix', 'js-vanilla']);
     expect(err.join('')).toBe('');
   });
 
