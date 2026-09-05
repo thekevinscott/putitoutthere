@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run src test/workflows",
     "test:unit:watch": "vitest src test/workflows",
-    "test:unit:coverage": "vitest run --coverage src test/workflows",
+    "test:unit:coverage": "vitest run --coverage --coverage.include='src/**/*.ts' src test/workflows",
     "test:integration": "vitest run --config tests/integration/vitest.integration.config.ts",
     "test:e2e": "pnpm build && pnpm build:action && vitest run --config tests/e2e/vitest.e2e.config.ts",
     "prepare": "tsc -p tsconfig.build.json"

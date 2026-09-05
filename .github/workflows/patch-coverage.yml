@@ -46,6 +46,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run unit tests with coverage
+        # The script pins `--coverage.include=src/**/*.ts` so the report lists
+        # every source file, not just the ones a test imported. Type-only
+        # modules (`*-types.ts`) compile to nothing and are elided at every
+        # import site, so without it they are absent from the report and the
+        # gate reads that as "no test ever loaded it" — a violation no test
+        # can ever clear.
         run: pnpm run test:unit:coverage
 
       - name: Diff-coverage check (100% on new src/ lines, no escape hatches)
