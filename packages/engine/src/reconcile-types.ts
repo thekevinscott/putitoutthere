@@ -36,4 +36,11 @@ export interface ReconcileOptions {
   configPath?: string;
   /** Report what would be created without writing any tag. */
   dryRun?: boolean;
+  /**
+   * `<name>@<version>`, or a JSON array of `{name, version, ...}` (#666).
+   * When present, reconcile confirms exactly these package/version pairs
+   * against the registry's per-version endpoint and tags them, skipping
+   * latest-version discovery entirely — see `reconcile-expect.ts`.
+   */
+  expect?: string;
 }

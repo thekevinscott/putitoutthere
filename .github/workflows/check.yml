@@ -50,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Deliberately an explicit literal, NOT ./.github/actions/setup-node.
+      # Deliberately an explicit literal, NOT ./packages/ci/actions/setup-node.
       # This is a `workflow_call` workflow consumers invoke cross-repo
       # (`uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0`),
       # so a `./` action path would resolve against *their* checkout, which

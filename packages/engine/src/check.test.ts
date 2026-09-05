@@ -1344,3 +1344,44 @@ path = "src/main.rs"
     ).toEqual([]);
   });
 });
+
+/* ------------------------------ aggregation ------------------------------ */
+
+describe('runChecks: aggregation across checks', () => {
+  it('returns findings from multiple distinct checks in one pass, not just the first failure', async () => {
+    // One config that trips three different check modules at once: both
+    // package paths are absent (checkPaths), depends_on is circular
+    // (checkDependsOn), and the tag templates collide
+    // (checkTagTemplateCollisions). The contract under test is
+    // runChecks' aggregation — the consumer fixes everything in one
+    // round-trip — so all three must land in a single returned list.
+    build({
+      'putitoutthere.toml': `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "a"
+kind  = "npm"
+path  = "packages/missing-a"
+globs = ["packages/missing-a/**"]
+depends_on = ["b"]
+tag_format = "v{version}"
+
+[[package]]
+name  = "b"
+kind  = "npm"
+path  = "packages/missing-b"
+globs = ["packages/missing-b/**"]
+depends_on = ["a"]
+tag_format = "v{version}"
+`,
+    });
+    const findings = await runChecks({ cwd: ROOT });
+    expect(
+      findings.some((f) => f.package === 'a' && /path .* does not exist/.test(f.message)),
+    ).toBe(true);
+    expect(findings.some((f) => f.message.includes('depends_on cycle'))).toBe(true);
+    expect(findings.some((f) => f.message.includes('tag_format collision'))).toBe(true);
+  });
+});

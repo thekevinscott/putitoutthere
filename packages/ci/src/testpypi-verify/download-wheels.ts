@@ -1,54 +1,28 @@
 /**
  * Composition root for the wheel-download phase of `testpypi-verify metadata`.
- * Reproduces the bash `while read req … python -m pip download …` loop: for
- * each requirement, announce it, then try `pip download` up to
- * `MAX_ATTEMPTS` times, sleeping `attempt*10`s between failures, and fail
- * with the exact
- * `::error::failed to download wheel …` line if all attempts fail. pip/sleep
- * run through the same subprocess boundary the bash used. Returns the exit
- * code (0 = all wheels downloaded).
+ * Fetches every wheel the resolved release lists, straight from its immutable
+ * artifact URL, and fails with the exact `::error::failed to download wheel …`
+ * line on the first that will not come down. Returns the exit code (0 = all
+ * wheels downloaded).
+ *
+ * Replaces the `pip download --index-url …/simple/` loop this phase used to
+ * run (#668): pip resolves through the simple index, so it inherited that
+ * page's edge-cache staleness no matter how long the loop waited.
  */
 
-import { execInherit } from '../utils/exec-inherit.js';
-import { sleep } from '../utils/sleep.js';
-import { MAX_ATTEMPTS, retrySleepSeconds } from './retry-sleep.js';
+import { downloadArtifact } from './download-artifact.js';
+import type { ReleaseFiles } from './release-file-types.js';
 
 const WHEELS_DIR = 'downloaded-wheels';
 
-export async function downloadWheels(requirements: readonly string[], indexUrl: string): Promise<number> {
-  for (const requirement of requirements) {
-    process.stdout.write(`Downloading wheel for ${requirement} from TestPyPI\n`);
-    let downloaded = false;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-      try {
-        await execInherit(
-          'python',
-          [
-            '-m',
-            'pip',
-            'download',
-            '--index-url',
-            indexUrl,
-            '--no-deps',
-            '--only-binary=:all:',
-            '--dest',
-            WHEELS_DIR,
-            requirement,
-          ],
-        );
-        downloaded = true;
-        break;
-      } catch {
-        if (attempt < MAX_ATTEMPTS) {
-          const sleepFor = retrySleepSeconds(attempt);
-          process.stdout.write(`TestPyPI wheel index lag for ${requirement}; retrying in ${sleepFor}s\n`);
-          await sleep(sleepFor * 1000);
-        }
+export async function downloadWheels(releases: ReadonlyMap<string, ReleaseFiles>): Promise<number> {
+  for (const [requirement, files] of releases) {
+    for (const wheel of files.wheels) {
+      process.stdout.write(`Downloading wheel for ${requirement} from ${wheel.url}\n`);
+      if (!(await downloadArtifact(wheel.url, `${WHEELS_DIR}/${wheel.filename}`))) {
+        process.stdout.write(`::error::failed to download wheel for ${requirement} from TestPyPI\n`);
+        return 1;
       }
-    }
-    if (!downloaded) {
-      process.stdout.write(`::error::failed to download wheel for ${requirement} from TestPyPI\n`);
-      return 1;
     }
   }
   return 0;
