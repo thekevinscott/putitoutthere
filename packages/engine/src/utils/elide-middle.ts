@@ -20,11 +20,6 @@
  * — a file, with no per-line cut — still carries it whole.
  */
 
-/** Bytes kept from the front: the phase banner and the first steps. */
-const DEFAULT_HEAD = 4 * 1024;
-/** Bytes kept from the back: where a tool prints what went wrong. */
-const DEFAULT_TAIL = 16 * 1024;
-
 export interface ElideMiddleOptions {
   // `| undefined` is explicit so call sites can forward an optional field
   // directly under exactOptionalPropertyTypes.
@@ -33,8 +28,11 @@ export interface ElideMiddleOptions {
 }
 
 export function elideMiddle(text: string, opts: ElideMiddleOptions = {}): string {
-  const head = opts.head ?? DEFAULT_HEAD;
-  const tail = opts.tail ?? DEFAULT_TAIL;
+  // Defaults live here, not in module constants: a top-level `const` is
+  // evaluated at import time, which puts it out of reach of the mutation
+  // gate's per-test switching and lets a wrong budget survive unkilled.
+  const head = opts.head ?? 4 * 1024;
+  const tail = opts.tail ?? 16 * 1024;
   const dropped = text.length - head - tail;
   if (dropped <= 0) {return text;}
   return [
