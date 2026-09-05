@@ -21,8 +21,21 @@ token should be stored in GitHub secrets.
 
 ## Why this is separate from real PyPI
 
-The steady-state `pypi-publish` job still uploads all non-first-publish Python
-artifacts to production PyPI with `skip-existing: true`. The TestPyPI job only
-targets `python-rust-maturin` and `python-pure-hatch`, and intentionally does
-not use `skip-existing`. If the build regresses to a stale literal version,
-TestPyPI should reject the duplicate file instead of masking the failure.
+The steady-state `pypi-publish` job uploads all non-first-publish Python
+artifacts to production PyPI. The TestPyPI job only targets
+`python-rust-maturin` and `python-pure-hatch`.
+
+Both jobs now upload with `skip-existing: true`. The TestPyPI job originally
+omitted it so a duplicate upload would 400 — an incidental canary for the
+fixture version regressing to the `0.0.1` build-mode literal instead of the
+plan-computed `0.0.<epoch>`. #669 removed the omission: the job uploads and then
+polls `/simple/`, and when that poll times out (#668) the artifacts are already
+up, so `gh run rerun --failed` re-uploaded byte-identical files and died on the
+400 before reaching the step that actually failed. Recovery cost a full ~100-job
+E2E re-run.
+
+That canary was traded for re-runnability and has not yet been replaced (#672).
+A stale `0.0.1` now skips silently, and the metadata verify then reads back the
+previous run's artifacts and finds the version it expected. The replacement
+belongs in `piot-ci testpypi-verify assert` as an explicit check that the
+artifact filenames carry `FIXTURE_VERSION`, not in twine's duplicate handling.
