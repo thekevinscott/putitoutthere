@@ -27,6 +27,7 @@ import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
 import { reconcile } from './reconcile.js';
 import { releaseGithub } from './release-github/index.js';
+import { runResolve } from './resolve/run-resolve.js';
 import { computeStatus } from './status.js';
 import { verifyBundleCli } from './verify/bundle-cli/index.js';
 import { verifyCrate } from './verify/crate/index.js';
@@ -51,6 +52,7 @@ vi.mock('./publish.js');
 vi.mock('./publish-progress.js');
 vi.mock('./reconcile.js');
 vi.mock('./release-github/index.js');
+vi.mock('./resolve/run-resolve.js');
 vi.mock('./status.js');
 vi.mock('./verify/bundle-cli/index.js');
 vi.mock('./verify/crate/index.js');
@@ -72,6 +74,7 @@ const verifyCrateMock = vi.mocked(verifyCrate);
 const verifyWheelMock = vi.mocked(verifyWheel);
 const verifyBundleCliMock = vi.mocked(verifyBundleCli);
 const releaseGithubMock = vi.mocked(releaseGithub);
+const runResolveMock = vi.mocked(runResolve);
 const advanceV0Mock = vi.mocked(advanceV0);
 const advanceFloatingMajorMock = vi.mocked(advanceFloatingMajor);
 const foldActionBundleMock = vi.mocked(foldActionBundle);
@@ -147,6 +150,7 @@ beforeEach(() => {
   verifyWheelMock.mockResolvedValue(0);
   verifyBundleCliMock.mockResolvedValue(0);
   releaseGithubMock.mockResolvedValue(0);
+  runResolveMock.mockResolvedValue(0);
   advanceV0Mock.mockResolvedValue(0);
   advanceFloatingMajorMock.mockResolvedValue(0);
   foldActionBundleMock.mockResolvedValue(0);
@@ -959,6 +963,32 @@ describe('cli: verify dispatch', () => {
     const code = await run(argv('verify', 'bogus', '--cwd', '/x'));
     expect(code).toBe(1);
     expect(stderr.join('')).toMatch(/unknown verify subcommand: bogus/);
+  });
+});
+
+describe('cli: resolve dispatch (#683)', () => {
+  it('routes resolve to the engine with the cwd', async () => {
+    runResolveMock.mockResolvedValue(0);
+    const code = await run(argv('resolve', '--cwd', '/x'));
+    expect(code).toBe(0);
+    expect(runResolveMock).toHaveBeenCalledWith({ cwd: '/x' });
+  });
+
+  it('surfaces a resolve failure as exit 1 with the friendly prefix', async () => {
+    runResolveMock.mockRejectedValue(
+      new Error('resolve: fixtures root missing at packages/engine/tests/fixtures'),
+    );
+    const code = await run(argv('resolve', '--cwd', '/x'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(
+      /^putitoutthere: resolve: fixtures root missing at packages\/engine\/tests\/fixtures$/m,
+    );
+  });
+
+  it('--help lists the resolve command', async () => {
+    const code = await run(argv('--help'));
+    expect(code).toBe(0);
+    expect(stderr.join('')).toMatch(/resolve\s+Emit willfire's callback map for the e2e plan job/);
   });
 });
 

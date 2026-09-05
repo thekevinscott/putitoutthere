@@ -6,4 +6,9 @@ describe('SDK entry', () => {
     expect(sdk.AuthError).toBeDefined();
     expect(sdk.TransientError).toBeDefined();
   });
+
+  it('re-exports plan itself, not a wrapper around it', async () => {
+    const { plan } = await import('./plan.js');
+    expect(sdk.plan).toBe(plan);
+  });
 });
