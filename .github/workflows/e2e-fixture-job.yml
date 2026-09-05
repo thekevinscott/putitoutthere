@@ -101,6 +101,10 @@ jobs:
 
   build:
     needs: plan
+    # Required: the default name interpolates run-scoped matrix fields
+    # (`version`, and `name` on first-publish fixtures), so no predictor
+    # can match it. These three are stable and unique per row.
+    name: build (${{ matrix.kind }}, ${{ matrix.target }}, ${{ matrix.artifact_path }})
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
     strategy:
       fail-fast: false
