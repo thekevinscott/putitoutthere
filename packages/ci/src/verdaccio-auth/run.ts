@@ -12,20 +12,11 @@ import { writeFile } from 'node:fs/promises';
 import { execCapture } from '../utils/exec-capture.js';
 import { sleep } from '../utils/sleep.js';
 import { decideVerdaccioAuth } from './decide.js';
+import { pingOnce } from './ping-once.js';
 
-const PING_URL = 'http://localhost:4873/-/ping';
 const USER_CREATE_URL = 'http://localhost:4873/-/user/org.couchdb.user:e2e';
 const USER_CREATE_BODY = '{"name":"e2e","password":"e2e","email":"e2e@piot.dev"}';
 const MAX_PING_ATTEMPTS = 10;
-
-async function pingOnce(): Promise<boolean> {
-  try {
-    await execCapture('curl', ['-fsS', PING_URL]);
-  } catch {
-    return false;
-  }
-  return true;
-}
 
 export async function runVerdaccioAuth(): Promise<number> {
   for (let attempt = 1; attempt <= MAX_PING_ATTEMPTS; attempt++) {

@@ -7,19 +7,15 @@
  * function, never a parallel reimplementation of matrix logic.
  */
 
-import { readdir, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { plan } from 'putitoutthere';
 
 import { buildFixtureMatrixDocument } from './build-document.js';
 import { decideFixtureMatrix } from './decide.js';
+import { listFixtures } from './list-fixtures.js';
 import { materializeFixtureForMatrix } from './materialize-fixture.js';
-
-async function listFixtures(fixturesRoot: string): Promise<string[]> {
-  const entries = await readdir(fixturesRoot, { withFileTypes: true });
-  return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-}
 
 export async function runFixtureMatrix(argv: readonly string[]): Promise<number> {
   // Resolved from this module's own location, not process.cwd() — pnpm runs

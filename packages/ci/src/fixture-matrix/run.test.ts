@@ -1,20 +1,22 @@
 /**
  * Composition-root wiring test for the fixture-matrix gate (#670). Mocks
- * every collaborator — the fixtures-root listing, `./decide.js`,
+ * every collaborator — `./list-fixtures.js`, `./decide.js`,
  * `./materialize-fixture.js`, the real engine `plan()`, and
  * `./build-document.js` — so this isolates the plumbing: argv parsing, the
  * stdout/stderr/exit-code contract, and that cleanup always runs. The real
- * decision and materialization are covered in their own colocated tests;
- * end-to-end fidelity against the real engine is the integration tier's job.
+ * listing, decision, and materialization are covered in their own colocated
+ * tests; end-to-end fidelity against the real engine is the integration
+ * tier's job.
  */
 
-import { readdir, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { plan } from 'putitoutthere';
 
 import { buildFixtureMatrixDocument, type FixtureMatrixDocument } from './build-document.js';
 import { decideFixtureMatrix } from './decide.js';
+import { listFixtures } from './list-fixtures.js';
 import { materializeFixtureForMatrix } from './materialize-fixture.js';
 import { runFixtureMatrix } from './run.js';
 
@@ -23,12 +25,11 @@ vi.mock('node:url', async () => await vi.importActual<typeof import('node:url')>
 vi.mock('node:fs/promises');
 vi.mock('putitoutthere');
 vi.mock('./decide.js');
+vi.mock('./list-fixtures.js');
 vi.mock('./materialize-fixture.js');
 vi.mock('./build-document.js');
 
-type Dirents = Awaited<ReturnType<typeof readdir>>;
-
-const readdirMock = vi.mocked(readdir);
+const listFixturesMock = vi.mocked(listFixtures);
 const rmMock = vi.mocked(rm);
 const planMock = vi.mocked(plan);
 const decideMock = vi.mocked(decideFixtureMatrix);
@@ -42,10 +43,6 @@ const TMP_DIR = '/tmp/piot-fixture-matrix-xyz';
 const FIXTURES_ROOT = fileURLToPath(new URL('../../../engine/tests/fixtures', import.meta.url));
 const EMPTY_DOC: FixtureMatrixDocument = { fixture: 'js-vanilla', matrix: [], has_pypi: false };
 
-function dirent(name: string, isDir: boolean): { name: string; isDirectory: () => boolean } {
-  return { name, isDirectory: () => isDir };
-}
-
 beforeEach(() => {
   vi.resetAllMocks();
   out.length = 0;
@@ -58,7 +55,7 @@ beforeEach(() => {
     err.push(typeof c === 'string' ? c : c.toString());
     return true;
   });
-  readdirMock.mockResolvedValue([dirent('js-vanilla', true), dirent('README.md', false)] as unknown as Dirents);
+  listFixturesMock.mockResolvedValue(['js-vanilla']);
   materializeMock.mockResolvedValue(TMP_DIR);
   planMock.mockResolvedValue([]);
   buildDocMock.mockReturnValue(EMPTY_DOC);
@@ -71,10 +68,10 @@ afterEach(() => {
 const argv = (fixture?: string) => ['node', 'piot-ci', 'fixture-matrix', ...(fixture === undefined ? [] : [fixture])];
 
 describe('runFixtureMatrix: fixture listing feeds decide', () => {
-  it('passes only directory entries as availableFixtures', async () => {
+  it('lists fixtures from the resolved fixtures root and hands them to decide', async () => {
     decideMock.mockReturnValue({ ok: true, fixture: 'js-vanilla' });
     await runFixtureMatrix(argv('js-vanilla'));
-    expect(readdirMock).toHaveBeenCalledWith(FIXTURES_ROOT, { withFileTypes: true });
+    expect(listFixturesMock).toHaveBeenCalledWith(FIXTURES_ROOT);
     expect(decideMock).toHaveBeenCalledWith({ fixtureArg: 'js-vanilla', availableFixtures: ['js-vanilla'] });
   });
 });
