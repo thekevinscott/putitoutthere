@@ -12,9 +12,8 @@
  * outside the package directory entirely.
  */
 
-import { relative } from 'node:path';
-
 import { execCapture } from '../utils/exec-capture.js';
+import { isWithinDir } from '../is-within-dir.js';
 import { repoRelativePaths } from '../repo-relative-paths.js';
 
 /**
@@ -69,48 +68,30 @@ export async function scanDirtyOutsideManifest(
   } catch {
     return null;
   }
-  // Reusable workflow's `actions/download-artifact@v4` step creates
-  // `artifacts/` under cwd unconditionally — even for fixtures whose
-  // packages don't upload anything (crates-only). That entry is engine-
-  // managed scratch space, not a stray edit; skip it.
-  let artifactsRel = '';
-  if (artifactsRoot !== undefined && artifactsRoot !== '') {
-    const r = relative(cwd, artifactsRoot);
-    artifactsRel = r === '' ? '' : r.replace(/\\/g, '/');
-  }
-  // Sibling package directories — anything inside them is workflow
-  // state from another handler (e.g. node_modules/ + package-lock.json
-  // + dist/ from the npm `Build npm packages` step). cargo only packs
-  // files inside its own package dir, so these can't end up in the
-  // crate tarball regardless of whether they're "dirty" by git's view.
-  const siblingRels = repoRelativePaths(cwd, siblingPackagePaths);
+  // Directories whose whole contents are workflow state rather than stray
+  // edits. `artifacts/` is engine-managed scratch the reusable workflow's
+  // download-artifact step creates under cwd unconditionally, even for
+  // crates-only fixtures that upload nothing (#244). A sibling package
+  // directory holds another handler's install output (node_modules/,
+  // package-lock.json, dist/ from the npm build step); cargo only packs
+  // files inside its own package dir, so neither can reach the tarball.
+  // Anything at or outside cwd drops out here, which is what retires the
+  // "artifacts root is the repo root" and "sibling is elsewhere" cases.
+  const skipRoots = [
+    ...repoRelativePaths(cwd, artifactsRoot === undefined ? undefined : [artifactsRoot]),
+    ...repoRelativePaths(cwd, siblingPackagePaths),
+  ];
   const unexpected: string[] = [];
   for (const raw of porcelain.split('\n')) {
     if (raw.length < 4) {continue;}
-    // Porcelain v1: "XY path" or "XY old -> new" for renames. Index 3+
-    // is the path; strip quoting if git applied any.
+    // Porcelain v1: "XY path" or "XY old -> new" for renames. Index 3+ is
+    // the path, and splitting on the rename arrow leaves a non-rename row
+    // untouched. Strip quoting if git applied any.
     const rest = raw.slice(3);
-    const path = rest.includes(' -> ') ? rest.split(' -> ').pop()! : rest;
+    const path = rest.split(' -> ').pop()!;
     const normalized = path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path;
     if (managedRels.has(normalized)) {continue;}
-    if (
-      artifactsRel !== '' &&
-      (normalized === artifactsRel ||
-        normalized === `${artifactsRel}/` ||
-        normalized.startsWith(`${artifactsRel}/`))
-    ) {
-      continue;
-    }
-    if (
-      siblingRels.some(
-        (s) =>
-          normalized === s ||
-          normalized === `${s}/` ||
-          normalized.startsWith(`${s}/`),
-      )
-    ) {
-      continue;
-    }
+    if (skipRoots.some((root) => isWithinDir(normalized, root))) {continue;}
     unexpected.push(normalized);
   }
   return unexpected;

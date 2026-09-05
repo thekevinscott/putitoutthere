@@ -286,6 +286,29 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     expect(result).not.toContain('old-name.rs -> crate/src/new-name.rs');
   });
 
+  it('reads a porcelain row that is exactly the minimum width', async () => {
+    // "XY p" — status flags, a space, and a one-character path — is the
+    // shortest row git can emit. Anything shorter is padding or a blank
+    // trailing line, so the width guard has to admit exactly this one.
+    mockGit({ managedRel: 'crate/Cargo.toml', porcelain: ' M a\n' });
+    expect(await scanDirtyOutsideManifest('/repo', '/repo/crate')).toEqual(['a']);
+  });
+
+  it('leaves a path that only ends with a quote alone', async () => {
+    // Both ends must be quoted for the row to be git-quoted. A lone
+    // trailing quote is part of the filename, and slicing it would report a
+    // path that does not exist.
+    mockGit({ managedRel: 'crate/Cargo.toml', porcelain: ' M crate/say-hi.rs"\n' });
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate');
+    expect(result).toEqual(['crate/say-hi.rs"']);
+  });
+
+  it('leaves a path that only starts with a quote alone', async () => {
+    mockGit({ managedRel: 'crate/Cargo.toml', porcelain: ' M "crate/say-hi.rs\n' });
+    const result = await scanDirtyOutsideManifest('/repo', '/repo/crate');
+    expect(result).toEqual(['"crate/say-hi.rs']);
+  });
+
   it('strips git quoting from a quoted porcelain path', async () => {
     // git quotes paths containing spaces/unusual bytes as `"a b.rs"`; the
     // scan must compare/report the unquoted form.
