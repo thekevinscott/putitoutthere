@@ -12,7 +12,7 @@
  * real. End-to-end behaviour (real git tag writes + CLI rendering) is
  * pinned at the integration + e2e tiers.
  *
- * Issue #410, #403 slice 3, #623.
+ * Issue #410, #403 slice 3, #623, #666.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +22,7 @@ import { loadConfig } from './config.js';
 import { ensureTag } from './ensure-tag.js';
 import { tagList } from './git.js';
 import { reconcile } from './reconcile.js';
+import { reconcileExpected } from './reconcile-expect.js';
 import { resolveTagCommit } from './resolve-tag-commit.js';
 import { computeStatus } from './status.js';
 import type { StatusRow } from './status-types.js';
@@ -29,6 +30,7 @@ import type { StatusRow } from './status-types.js';
 vi.mock('./config.js');
 vi.mock('./ensure-tag.js');
 vi.mock('./git.js');
+vi.mock('./reconcile-expect.js');
 vi.mock('./resolve-tag-commit.js');
 vi.mock('./status.js');
 
@@ -271,5 +273,85 @@ describe('reconcile', () => {
     ]);
     // Dry-run must not write the tag.
     expect(ensureTag).not.toHaveBeenCalled();
+  });
+});
+
+describe('reconcile --expect (#666)', () => {
+  it('hands the expectation to reconcileExpected and never runs discovery', async () => {
+    // The whole point of --expect is to skip computeStatus, whose
+    // latestVersion read is the CDN-cached pointer that can still name the
+    // previous release. Reaching it at all would reintroduce the bug.
+    configWith(pkg('core-rust'), pkg('other-rust'));
+    vi.mocked(reconcileExpected).mockResolvedValue([
+      {
+        package: 'core-rust',
+        kind: 'crates',
+        version: '9.9.9',
+        tag: 'core-rust-v9.9.9',
+        commit: 'expect-sha',
+        source: 'head',
+        created: true,
+      },
+    ]);
+
+    const result = await reconcile({ cwd: '/repo', expect: 'core-rust@9.9.9' });
+
+    expect(computeStatus).not.toHaveBeenCalled();
+    expect(reconcileExpected).toHaveBeenCalledWith(
+      'core-rust@9.9.9',
+      expect.objectContaining({
+        packages: [
+          expect.objectContaining({ name: 'core-rust' }),
+          expect.objectContaining({ name: 'other-rust' }),
+        ],
+      }),
+      expect.any(Map),
+      '/repo',
+      false,
+      expect.anything(),
+    );
+    expect(result).toEqual({
+      ok: true,
+      dryRun: false,
+      actions: [expect.objectContaining({ tag: 'core-rust-v9.9.9', created: true })],
+    });
+  });
+
+  it('forwards --dry-run to the expectation path', async () => {
+    configWith(pkg('core-rust'));
+    vi.mocked(reconcileExpected).mockResolvedValue([]);
+
+    const result = await reconcile({ cwd: '/repo', expect: 'core-rust@9.9.9', dryRun: true });
+
+    expect(reconcileExpected).toHaveBeenCalledWith(
+      'core-rust@9.9.9',
+      expect.anything(),
+      expect.any(Map),
+      '/repo',
+      true,
+      expect.anything(),
+    );
+    expect(result).toEqual({ ok: true, dryRun: true, actions: [] });
+  });
+
+  it('keys the package map by name so the expectation can look a package up', async () => {
+    configWith(pkg('core-rust'), pkg('other-rust'));
+    vi.mocked(reconcileExpected).mockResolvedValue([]);
+
+    await reconcile({ cwd: '/repo', expect: 'core-rust@9.9.9' });
+
+    const byName = vi.mocked(reconcileExpected).mock.calls[0]?.[2];
+    expect([...(byName?.keys() ?? [])]).toEqual(['core-rust', 'other-rust']);
+    expect(byName?.get('core-rust')).toEqual(expect.objectContaining({ name: 'core-rust' }));
+  });
+
+  it('runs discovery when no expectation is given', async () => {
+    configWith(pkg('core-rust'));
+    vi.mocked(computeStatus).mockResolvedValue([]);
+
+    await reconcile({ cwd: '/repo' });
+
+    expect(reconcileExpected).not.toHaveBeenCalled();
+    expect(computeStatus).toHaveBeenCalledTimes(1);
   });
 });

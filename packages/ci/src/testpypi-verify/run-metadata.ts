@@ -1,11 +1,12 @@
 /**
  * Composition root for `testpypi-verify metadata` — the "Verify TestPyPI
- * artifact metadata" step. Wires the phases the bash ran in order: build the
- * pinned requirements from `dist/`, write `testpypi-requirements.txt`, reset
- * the download directories, download the wheels, download the sdists, and
- * verify each artifact's metadata version. The only I/O here is the env read,
- * the `dist/` listing, and the requirements-file/directory bookkeeping; every
- * decision and each network phase lives in its own module.
+ * artifact metadata" step. Wires the phases in order: build the pinned
+ * requirements from `dist/`, write `testpypi-requirements.txt`, reset the
+ * download directories, resolve each release's published artifact URLs,
+ * download the wheels, download the sdists, and verify each artifact's
+ * metadata version. The only I/O here is the env read, the `dist/` listing,
+ * and the requirements-file/directory bookkeeping; every decision and each
+ * network phase lives in its own module.
  */
 
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
@@ -13,6 +14,7 @@ import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { buildRequirements } from './build-requirements.js';
 import { downloadSdists } from './download-sdists.js';
 import { downloadWheels } from './download-wheels.js';
+import { resolveReleases } from './resolve-releases.js';
 import { verifyArtifacts } from './verify-artifacts.js';
 
 const DIST_DIR = 'dist';
@@ -43,11 +45,17 @@ export async function runTestpypiMetadata(): Promise<number> {
   await mkdir(WHEELS_DIR, { recursive: true });
   await mkdir(SDISTS_DIR, { recursive: true });
 
-  const wheelExit = await downloadWheels(requirements, indexUrl);
+  const resolved = await resolveReleases(requirements, indexUrl);
+  if ('errorLine' in resolved) {
+    process.stdout.write(`${resolved.errorLine}\n`);
+    return 1;
+  }
+
+  const wheelExit = await downloadWheels(resolved.releases);
   if (wheelExit !== 0) {
     return wheelExit;
   }
-  const sdistExit = await downloadSdists(requirements, indexUrl);
+  const sdistExit = await downloadSdists(resolved.releases);
   if (sdistExit !== 0) {
     return sdistExit;
   }

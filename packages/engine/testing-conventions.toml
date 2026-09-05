@@ -1,32 +1,20 @@
 # testing-conventions config — packages/engine only (wired via the engine job's
 # `config:` input in .github/workflows/conventions.yml).
 #
-# This file exists ONLY to lift three genuinely-equivalent mutation mutants
-# (see reasons below). It intentionally sets no coverage floors, lint rules, or
-# other options, so every other gate (unit/integration lint, coverage, ci
-# mutation) keeps its built-in defaults — the presence of this file must not
-# change any behavior beyond these `mutation`-scoped waivers.
+# This file exists ONLY to lift a genuinely-equivalent mutation mutant (see
+# reason below) and to set the one_function_per_file ratchet. It intentionally
+# sets no coverage floors, lint rules, or other options, so every other gate
+# (unit/integration lint, coverage, ci mutation) keeps its built-in defaults.
 #
 # `one_function_per_file`: per maintainer ruling, downstream consumers set
-# their own threshold — upstream's default (max_lines = 1) stays put.
-# Current ceiling on packages/engine/src is cli.ts's `run` at 267 lines;
-# 300 clears every existing finding. Ratchet this down over time as the
-# module-per-function refactor (AGENTS.md > "One function per file")
-# progresses; do not raise it.
+# their own threshold — upstream's default (max_lines = 1) stays put. A file
+# fails only when two or more module-scope functions exceed max_lines, so the
+# binding ceiling is the largest *second* function in any one file. Current
+# ceiling on packages/engine/src: crates.ts, where scanDirtyOutsideManifest
+# (59 lines) shares the file with publishImpl — 60 clears it. Ratchet this
+# down as the one-function-per-file refactor (#680) progresses; do not raise.
 [typescript]
-one_function_per_file = { max_lines = 300 }
-
-[[typescript.exempt]]
-path = "check.ts"
-lines = [161]
-rules = ["mutation"]
-reason = "checkCargoShape(packages, { cwd }) — the {cwd}->{} mutant is unobservable at the unit tier. checkCargoShape defaults `options.cwd ?? process.cwd()`; the crates branch builds its manifest path from `p.path` and ignores cwd entirely, and the only cwd-dependent branch (pypi+bundle_cli `resolve(cwd, crate_path)`) resolves to an absolute manifest path that the suffix-normalizing in-memory fs harness reads identically and that no finding assertion inspects. Real cwd-relative resolution is exercised at the integration/e2e tiers."
-
-[[typescript.exempt]]
-path = "check.ts"
-lines = [363]
-rules = ["mutation"]
-reason = "listTrackedFiles: `stdout.split('\\n').filter((l) => l.length > 0)`. The three mutants (drop .filter, ConditionalExpression->true, l.length >= 0) all keep empty-string entries produced by a trailing newline. The tracked-file list is consumed only by checkGlobsMatchTrackedFiles via matchesAny(globs, file); an empty-string path never matches any package glob, so retaining or dropping empties yields identical findings — no test can observe the difference."
+one_function_per_file = { max_lines = 60 }
 
 [[typescript.exempt]]
 path = "plan.ts"

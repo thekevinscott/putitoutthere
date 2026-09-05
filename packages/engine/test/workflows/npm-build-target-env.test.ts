@@ -122,3 +122,66 @@ describe('reusable workflow: npm build step exposes TARGET / BUILD env', () => {
     ).toBe(true);
   });
 });
+
+/**
+ * Workflow-YAML contract (#627): the same npm build step must also set
+ * `VERSION`, the version the run is publishing.
+ *
+ * `TARGET` / `BUILD` say which triple and which mode, but not which
+ * version. On the roll-your-own path (`build = "bundled-cli"` with no
+ * `[package.bundle_cli]`) no engine-side writer runs, so every version
+ * source on disk is still the committed literal when `cargo build` bakes
+ * `CARGO_PKG_VERSION` in — and nothing fails: the publish succeeds and
+ * only the installed binary's `--version` disagrees.
+ *
+ * Checked at all three sites the pipeline runs a consumer build script,
+ * because a value present at one and absent at another is the drift that
+ * kept #287 invisible until a real consumer's first publish hit it.
+ */
+describe('reusable workflow: npm build step exposes VERSION env (#627)', () => {
+  it('_matrix.yml build-matrix npm step sets VERSION=${{ matrix.version }}', () => {
+    const steps = loadSteps('_matrix.yml', 'build');
+    const step = findNpmRunBuildStep(steps);
+    expect(step, '_matrix.yml: could not find npm `npm run build` step').toBeDefined();
+    expect(
+      step!.env!.VERSION,
+      `_matrix.yml: npm build step must set VERSION so a roll-your-own bundled-cli build script can stamp ` +
+        `Cargo.toml before \`cargo build\` bakes CARGO_PKG_VERSION in. Without it the script has no reachable ` +
+        `source of truth for the planned version, and every npm release ships a binary reporting the ` +
+        `previously committed one — silently, all the way through publish.`,
+    ).toBe('${{ matrix.version }}');
+  });
+
+  it('release.yml publish-job npm rebuild step sets VERSION (loop variable)', () => {
+    const steps = loadSteps('release.yml', 'publish');
+    const step = steps.find(
+      (s) =>
+        typeof s.run === 'string' &&
+        /jq\s.*select\(\.kind\s*==\s*"npm"\)/.test(s.run) &&
+        /npm\s+run\s+build/.test(s.run),
+    );
+    expect(
+      step,
+      'release.yml: could not find publish-job npm rebuild step (the loop over `kind == "npm"` rows that calls `npm run build`)',
+    ).toBeDefined();
+    expect(
+      /\bVERSION=/.test(step!.run!),
+      `release.yml: npm rebuild loop body must set VERSION per iteration. The publish-time rebuild runs the ` +
+        `same consumer build script the build matrix ran; leaving VERSION unset there hands the script an ` +
+        `\`undefined\` at publish time for a value it saw defined at build time — the asymmetry #287 fixed ` +
+        `for TARGET / BUILD.`,
+    ).toBe(true);
+  });
+
+  it('e2e-fixture-job.yml npm build step sets VERSION=${{ matrix.version }}', () => {
+    const steps = loadSteps('e2e-fixture-job.yml', 'build');
+    const step = findNpmRunBuildStep(steps);
+    expect(step, 'e2e-fixture-job.yml: could not find npm `npm run build` step').toBeDefined();
+    expect(
+      step!.env!.VERSION,
+      `e2e-fixture-job.yml: the internal e2e harness must pass VERSION too. When the fixture's env block and ` +
+        `the consumer-facing \`_matrix.yml\` disagree, the fixture goes green on a contract real consumers ` +
+        `never receive — exactly how #287 stayed invisible until a real first publish hit it.`,
+    ).toBe('${{ matrix.version }}');
+  });
+});
