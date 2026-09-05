@@ -27,4 +27,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # The resolver below answers out of this checkout — it reads the
+      # fixture directories and shells out to the `piot-ci` core, so the
+      # workspace has to be installed before the gate runs.
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-node
+
+      - uses: ./.github/actions/setup-pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - uses: thekevinscott/pr-monitor@v1
+        with:
+          # `build` in e2e-fixture-job.yml fans out over a matrix the engine
+          # computes at runtime, so willfire can only name those 15 checks by
+          # running `plan` — which its sandbox cannot do, having no network
+          # for setup-pnpm. `resolve` answers them from the same core the
+          # workflow itself calls, so the two cannot disagree.
+          #
+          # `-C` is load-bearing: willfire spawns the callback with the
+          # invoker's cwd, and pr-monitor's action runs from
+          # `github.action_path`, so a bare `pnpm exec` looks for this repo
+          # inside the action's own checkout and exits 1.
+          resolve-outputs: pnpm -C ${{ github.workspace }} exec putitoutthere resolve
