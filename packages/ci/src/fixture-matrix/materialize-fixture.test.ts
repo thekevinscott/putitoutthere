@@ -14,10 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execInherit } from '../utils/exec-inherit.js';
 import { materializeFixtureForMatrix } from './materialize-fixture.js';
 
-// `tmpdir` and `join` build the expected paths the assertions compare against,
-// so both doubles are the real modules: stubbing them would leave every
-// expectation comparing undefined to undefined, and the suite runs on
-// windows-latest where the separator differs.
+// Real modules: the assertions build expected paths with them.
 vi.mock('node:os', async () => await vi.importActual<typeof import('node:os')>('node:os'));
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('node:fs/promises');
