@@ -7,8 +7,8 @@ point that `@`-includes this file, so edit here — not there.
 ## Verify the toolchain before running anything
 
 This repo requires **Node >= 24** and **pnpm >= 11** (`engines` in the root
-`package.json`; CI pins Node 24 via `.github/actions/setup-node`). Nothing in
-the tree corrects a mismatched host — there is no `.nvmrc` and no
+`package.json`; CI pins Node 24 via `packages/ci/actions/setup-node`).
+Nothing in the tree corrects a mismatched host — there is no `.nvmrc` and no
 `packageManager` field — and hosted agent containers routinely ship older
 defaults. The Claude Code web image has been observed shipping **Node 22 /
 pnpm 10**, which cannot run a single command in this repo.
@@ -321,6 +321,16 @@ never commits one. Concretely:
 - This does not conflict with reaching the full standard on each package:
   at full standard `e2e-verify` is present-but-dormant, which is exactly
   what we want.
+
+## Comments
+
+No comments if possible.
+
+If you must comment, only include **why**; a non-obvious
+constraint, a gotcha, the issue a choice traces to. Never the *what*: if
+the code already says it, the comment only repeats it.
+
+Applies everywhere: workflow YAML, tests, engine code.
 
 ## Design commitments
 
