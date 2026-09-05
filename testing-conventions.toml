@@ -1,0 +1,10 @@
+# testing-conventions config for the `ci` job in .github/workflows/conventions.yml
+# (packages/ci/src, no `config:` override so this repo-root default applies).
+#
+# `one_function_per_file`: per maintainer ruling, downstream consumers set
+# their own threshold — upstream's default (max_lines = 1) stays put.
+# Current ceiling on packages/ci/src is verdaccio-auth/run.ts's
+# `runVerdaccioAuth` at 25 lines; 30 clears the one existing finding.
+# Ratchet this down over time; do not raise it.
+[typescript]
+one_function_per_file = { max_lines = 30 }
