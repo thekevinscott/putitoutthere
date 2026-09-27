@@ -11,3 +11,4 @@
 export function isWithinDir(path: string, dir: string): boolean {
   return path === dir || path.startsWith(`${dir}/`);
 }
+

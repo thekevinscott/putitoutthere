@@ -321,3 +321,4 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     expect(result).not.toContain('"crate/a file.rs"');
   });
 });
+

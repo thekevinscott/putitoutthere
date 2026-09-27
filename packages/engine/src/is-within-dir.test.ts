@@ -29,3 +29,4 @@ describe('isWithinDir', () => {
     expect(isWithinDir('vendor/artifacts', 'artifacts')).toBe(false);
   });
 });
+
