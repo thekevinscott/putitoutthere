@@ -71,9 +71,10 @@ export function classifyPypiVersionSource(
   tool: Record<string, unknown>,
 ): PypiVersionSourceVerdict {
   const requires = buildSystem.requires;
-  const hatchVersion = asTable(asTable(tool.hatch)?.version);
-  const setuptoolsScm = asTable(tool.setuptools_scm);
-  if (setuptoolsScm !== undefined && buildRequiresDeclares(requires, 'setuptools-scm')) {
+  const hatch = isTable(tool.hatch) ? tool.hatch : {};
+  const hatchVersion = isTable(hatch.version) ? hatch.version : undefined;
+  const hasSetuptoolsScm = isTable(tool.setuptools_scm);
+  if (hasSetuptoolsScm && buildRequiresDeclares(requires, 'setuptools-scm')) {
     return REACHABLE;
   }
   if (hatchVersion?.source === 'vcs') {
@@ -93,7 +94,7 @@ export function classifyPypiVersionSource(
       detail: `${HATCH_PATH_SOURCE}. Declared path: "${path}"`,
     };
   }
-  if (setuptoolsScm !== undefined) {
+  if (hasSetuptoolsScm) {
     return {
       reachable: false,
       code: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
@@ -107,9 +108,6 @@ export function classifyPypiVersionSource(
   };
 }
 
-/** Narrow a parsed TOML value to a table, or `undefined` when it is not one. */
-function asTable(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
+function isTable(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -152,7 +152,9 @@ describe('classifyPypiVersionSource (#696)', () => {
       ['a non-table [tool.hatch]', { hatch: 'hatchling' }],
       ['a non-table [tool.hatch.version]', { hatch: { version: 'dynamic' } }],
       ['a null [tool.hatch.version]', { hatch: { version: null } }],
+      ['an array-of-tables [[tool.hatch.version]]', { hatch: { version: [{ source: 'vcs' }] } }],
       ['a non-table [tool.setuptools_scm]', { setuptools_scm: true }],
+      ['an array-of-tables [[tool.setuptools_scm]]', { setuptools_scm: [{}] }],
     ])('treats %s as no source', (_label, tool) => {
       const verdict = classifyPypiVersionSource(
         { requires: ['hatchling', 'hatch-vcs', 'setuptools-scm'] },
