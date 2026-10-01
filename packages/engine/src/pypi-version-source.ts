@@ -47,43 +47,43 @@ export type PypiVersionSourceVerdict =
       readonly detail: string;
     };
 
-const REACHABLE: PypiVersionSourceVerdict = { reachable: true };
-
-const NO_VERSION_TABLE =
-  '[project].dynamic includes "version" but neither [tool.hatch.version] nor [tool.setuptools_scm] is present; the build backend has no way to compute a version';
-
-const HATCH_VCS_NOT_DECLARED =
-  '[tool.hatch.version].source = "vcs" names hatch-vcs\'s plugin entry point, but "hatch-vcs" is not in [build-system].requires; hatchling fails mid-build with `Unknown version source: vcs`';
-
-const SCM_NOT_DECLARED =
-  '[tool.setuptools_scm] is present but "setuptools-scm" is not in [build-system].requires; without the plugin installed setuptools falls back to no version at all';
-
-// Every hatchling version source other than `vcs` resolves to a file in
-// the tree: the default `regex` source (implied by a bare `path`) reads a
-// literal out of it, and `source = "code"` imports it. Neither sees
-// SETUPTOOLS_SCM_PRETEND_VERSION, and nothing in a release run edits the
-// file, so the wheel ships whatever is committed.
-const HATCH_PATH_SOURCE =
-  '[tool.hatch.version] resolves the version from a file in the tree, which no release step rewrites (write-version is maturin-only) and which hatchling reads without consulting SETUPTOOLS_SCM_PRETEND_VERSION -- the wheel would ship the committed literal, not the planned version. Use source = "vcs" with "hatch-vcs" in [build-system].requires (or [tool.setuptools_scm] with "setuptools-scm")';
-
 export function classifyPypiVersionSource(
   buildSystem: Record<string, unknown>,
   tool: Record<string, unknown>,
 ): PypiVersionSourceVerdict {
+  // The verdict and its detail strings are function-scope, not module-scope:
+  // a module-level initializer runs once at import time, before the mutation
+  // runner can activate a mutant on it, so a constant up there is unkillable
+  // by any assertion in here no matter how tightly the detail is pinned.
+  const reachable: PypiVersionSourceVerdict = { reachable: true };
+  const noVersionTable =
+    '[project].dynamic includes "version" but neither [tool.hatch.version] nor [tool.setuptools_scm] is present; the build backend has no way to compute a version';
+  const hatchVcsNotDeclared =
+    '[tool.hatch.version].source = "vcs" names hatch-vcs\'s plugin entry point, but "hatch-vcs" is not in [build-system].requires; hatchling fails mid-build with `Unknown version source: vcs`';
+  const scmNotDeclared =
+    '[tool.setuptools_scm] is present but "setuptools-scm" is not in [build-system].requires; without the plugin installed setuptools falls back to no version at all';
+  // Every hatchling version source other than `vcs` resolves to a file in
+  // the tree: the default `regex` source (implied by a bare `path`) reads a
+  // literal out of it, and `source = "code"` imports it. Neither sees
+  // SETUPTOOLS_SCM_PRETEND_VERSION, and nothing in a release run edits the
+  // file, so the wheel ships whatever is committed.
+  const hatchPathSource =
+    '[tool.hatch.version] resolves the version from a file in the tree, which no release step rewrites (write-version is maturin-only) and which hatchling reads without consulting SETUPTOOLS_SCM_PRETEND_VERSION -- the wheel would ship the committed literal, not the planned version. Use source = "vcs" with "hatch-vcs" in [build-system].requires (or [tool.setuptools_scm] with "setuptools-scm")';
+
   const requires = buildSystem.requires;
   const hatch = isTable(tool.hatch) ? tool.hatch : {};
   const hatchVersion = isTable(hatch.version) ? hatch.version : undefined;
   const hasSetuptoolsScm = isTable(tool.setuptools_scm);
   if (hasSetuptoolsScm && buildRequiresDeclares(requires, 'setuptools-scm')) {
-    return REACHABLE;
+    return reachable;
   }
   if (hatchVersion?.source === 'vcs') {
     return buildRequiresDeclares(requires, 'hatch-vcs')
-      ? REACHABLE
+      ? reachable
       : {
           reachable: false,
           code: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
-          detail: HATCH_VCS_NOT_DECLARED,
+          detail: hatchVcsNotDeclared,
         };
   }
   if (hatchVersion !== undefined) {
@@ -91,20 +91,20 @@ export function classifyPypiVersionSource(
     return {
       reachable: false,
       code: 'PIOT_PYPI_HATCH_VERSION_PATH',
-      detail: `${HATCH_PATH_SOURCE}. Declared path: "${path}"`,
+      detail: `${hatchPathSource}. Declared path: "${path}"`,
     };
   }
   if (hasSetuptoolsScm) {
     return {
       reachable: false,
       code: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
-      detail: SCM_NOT_DECLARED,
+      detail: scmNotDeclared,
     };
   }
   return {
     reachable: false,
     code: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
-    detail: NO_VERSION_TABLE,
+    detail: noVersionTable,
   };
 }
 

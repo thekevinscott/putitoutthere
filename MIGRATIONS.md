@@ -67,6 +67,7 @@ leave it — nothing reads it once `source = "vcs"` is set).
 | `[tool.hatch.version] source = "code"` | same as above | same as above |
 | `source = "vcs"`, `hatch-vcs` absent from `requires` | `check` passed; the build failed mid-release with `Unknown version source: vcs` | `check` fails with `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND` |
 | `[tool.setuptools_scm]`, `setuptools-scm` absent from `requires` | `check` passed; the build produced no version | `check` fails with `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND` |
+| `[[tool.hatch.version]]` / `[[tool.setuptools_scm]]` (array-of-tables typo) | `check` passed — the presence test accepted any non-null object, arrays included | `check` fails with `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND` |
 | `source = "vcs"` with `hatch-vcs` declared | passed | passed, unchanged |
 | `[tool.setuptools_scm]` with `setuptools-scm` declared | passed | passed, unchanged |
 | `build = "maturin"` | passed | passed, unchanged |
