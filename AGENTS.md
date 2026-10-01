@@ -1,8 +1,8 @@
 # Guidance for LLM agents
 
-This file is the primary instruction set for any LLM (Claude, Codex, Cursor,
-etc.) working in this repo. `CLAUDE.md` exists as a Claude-specific entry
-point that `@`-includes this file, so edit here — not there.
+This file is the sole instruction set for any LLM (Claude, Codex, Cursor,
+etc.) working in this repo. There is no per-agent pointer file — every agent
+reads this one, so changes land here.
 
 ## Verify the toolchain before running anything
 
