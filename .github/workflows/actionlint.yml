@@ -10,10 +10,19 @@ name: Actionlint
 # push → wait for runner → wait for step. Lint locally first.
 
 on:
+  # Inputs beyond the workflow dir, all of which actionlint genuinely reads:
+  # the local actions it resolves through `uses: ./` — the repo-root
+  # `action.yml` and the composites #653 moved to packages/ci/actions, whose
+  # `runs.main`/inputs it validates — plus the tested id-token assertion this
+  # job also runs. The `push:` trigger below is left as it was; narrowing push
+  # triggers is a separate decision.
   pull_request:
     paths:
       - '.github/workflows/**'
       - '.github/actionlint.yaml'
+      - 'action.yml'
+      - 'packages/ci/actions/**'
+      - 'packages/ci/src/actionlint-idtoken/**'
   push:
     branches: [main]
     paths:

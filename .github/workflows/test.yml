@@ -1,7 +1,34 @@
 name: Test
 
 on:
+  # The unit suite is `vitest run src test/workflows` (packages/engine) plus
+  # `vitest run src` (packages/ci), so its inputs reach well outside
+  # packages/**: the `test/workflows` tier parses the repo's own workflow YAML
+  # and asserts invariants against the root manifests it documents. Each entry
+  # below is read by a test on disk today —
+  #   .github/workflows/**  every file, enumerated by workflow-yaml-invariants
+  #   action.yml            action-manifest.test.ts
+  #   putitoutthere.toml    dogfood-globs.test.ts
+  #   README.md             consumer-template.test.ts, workflow-yaml-invariants
+  #   CHANGELOG.md          workflow-yaml-invariants (reusable-workflow ref)
+  # — so dropping any of them would let a red unit suite merge green.
+  #
+  # The own-file requirement is satisfied by `.github/workflows/**`, which is a
+  # genuine build input here rather than a self-reference.
+  #
+  # Out of scope: notes/**, AGENTS.md, MIGRATIONS.md, .claude/** — no test
+  # reads them.
   pull_request:
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'action.yml'
+      - 'putitoutthere.toml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - '.github/workflows/**'
   push:
     branches: [main]
 

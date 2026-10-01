@@ -8,8 +8,22 @@ name: Integration
 on:
   push:
     branches: [main]
+  # Mocked-registry suite over packages/**. One non-obvious input:
+  # resolve.integration.test.ts runs `resolve` against the REAL repo root, and
+  # `run-resolve.ts` reads `.github/workflows/e2e-fixture-job.yml` (the
+  # callback key) plus packages/engine/tests/fixtures/ (the fixture list). So
+  # editing that one workflow file can turn this suite red, and it has to be a
+  # trigger. No other workflow file is read, so the rest of
+  # `.github/workflows/**` stays out.
   pull_request:
     branches: [main]
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/e2e-fixture-job.yml'
+      - '.github/workflows/integration.yml'
 
 jobs:
   integration:

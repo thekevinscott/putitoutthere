@@ -1,7 +1,43 @@
 name: E2E
 
 on:
+  # The expensive lane: 15 fixtures publishing for real to crates.io, PyPI,
+  # TestPyPI and npm over OIDC. Scope is "anything the fixture run actually
+  # executes":
+  #   packages/**   the engine under test, the packages/ci gates the job
+  #                 shells out to, the fixture trees themselves
+  #                 (packages/engine/tests/fixtures/**), and the
+  #                 setup-node/setup-pnpm composites
+  #   action.yml    e2e-fixture-job.yml drives the engine via `uses: ./`
+  #   e2e-fixture-job.yml  the reusable child this matrix calls
+  #
+  # Deliberately NOT triggers: release.yml, _matrix.yml, build.yml, check.yml.
+  # e2e-fixture-job.yml mirrors them but never invokes them, so a run here
+  # yields no signal on a change to one. The mirror itself is pinned by the
+  # unit tier (test/workflows: cargo-cache, napi-crate-version,
+  # publish-github-token), which test.yml triggers on `.github/workflows/**`.
+  # putitoutthere.toml is out for the same reason — the job materializes each
+  # fixture's own config, never the repo's.
+  #
+  # `packages/**` rather than an enumeration of the four piot-ci gates the lane
+  # actually shells out to (fixture-materialize, cargo-registry,
+  # verdaccio-auth, testpypi-verify). The enumeration would be tighter — a
+  # changelog-gate refactor would stop costing 15 real publishes — but it only
+  # stays correct while someone remembers to extend it, and the PR that adds a
+  # fifth gate edits e2e-fixture-job.yml (so it runs) while the NEXT PR
+  # touching only that gate would silently skip the lane. Over-running costs a
+  # wave; under-running ships an unexercised publish path. Making this precise
+  # is #701's job (`scope`, which derives the set from file contents), not a
+  # static glob's.
   pull_request:
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'action.yml'
+      - '.github/workflows/e2e-fixture-job.yml'
+      - '.github/workflows/e2e-fixture.yml'
   push:
     branches: [main]
   workflow_dispatch:

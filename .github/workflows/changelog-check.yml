@@ -9,8 +9,29 @@ name: Changelog check
 # the `piot-ci changelog-check` command), not inline bash — see AGENTS.md
 # > "Repo-internal CI gates" (#452, epic #442).
 
+# Paths are a deliberate SUPERSET of the gate's own public-surface globset
+# (`SURFACE_PATHSPECS` in packages/ci/src/changelog-check/run.ts: action.yml,
+# packages/engine/src/**/*.ts minus tests, docs/api/**, docs/guide/**). They
+# only decide whether the decision is worth a runner — the gate re-derives it
+# from BASE_SHA anyway, and returns "No public-surface files changed; skipping"
+# for everything these globs exclude.
+#
+# Keep them a superset. Narrowing one below the globset would let a
+# surface-changing PR merge with no CHANGELOG/MIGRATIONS entry, silently, with
+# no check to point at. Nothing enforces the relation mechanically here.
+#
+# CHANGELOG.md / MIGRATIONS.md are not triggers: with no surface change the
+# gate passes either way, so a changelog-only PR would burn a runner on a
+# foregone verdict.
 on:
   pull_request:
+    paths:
+      - 'action.yml'
+      - 'packages/engine/src/**'
+      - 'docs/**'
+      - 'packages/ci/src/changelog-check/**'
+      - 'packages/ci/actions/**'
+      - '.github/workflows/changelog-check.yml'
 
 permissions:
   contents: read

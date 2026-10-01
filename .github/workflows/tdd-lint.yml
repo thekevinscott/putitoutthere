@@ -12,8 +12,17 @@ name: TDD Lint
 # the `piot-ci tdd-lint` command), not inline bash — see AGENTS.md >
 # "Repo-internal CI gates" (#452, epic #442).
 
+# The gate's `git diff` is pathspec-scoped to `packages/engine/src/` (run.ts),
+# so a diff touching nothing there has no claim to make and passes. Keep
+# `packages/engine/src/**` a superset of that pathspec: narrowing it would let
+# a src change merge with no test alongside it.
 on:
   pull_request:
+    paths:
+      - 'packages/engine/src/**'
+      - 'packages/ci/src/tdd-lint/**'
+      - 'packages/ci/actions/**'
+      - '.github/workflows/tdd-lint.yml'
 
 permissions:
   contents: read
