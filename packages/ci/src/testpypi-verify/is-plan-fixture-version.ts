@@ -9,8 +9,10 @@
  * other than the plan at all. Pure. (#672)
  */
 
-const BUILD_BASELINE_VERSION = '0.0.1';
-
 export function isPlanFixtureVersion(version: string): boolean {
-  return /^0\.0\.\d+$/.test(version) && version !== BUILD_BASELINE_VERSION;
+  // Function-scope, not module-scope: a module-level initializer runs once at
+  // import time, before the mutation runner can activate a mutant on it, so a
+  // constant up there is unkillable by any assertion in here.
+  const buildBaselineVersion = '0.0.1';
+  return /^0\.0\.\d+$/.test(version) && version !== buildBaselineVersion;
 }
