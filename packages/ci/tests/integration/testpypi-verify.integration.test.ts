@@ -57,11 +57,18 @@ function captureImpl(fn: (cmd: string, a: string[]) => string): void {
   }) as unknown as typeof execFile);
 }
 
+// The throwaway version `piot-ci fixture-materialize plan` stamps on a fixture
+// for the run that is about to publish it (`0.0.<unix-seconds>`), and the stale
+// `0.0.1` baseline `fixture-materialize build` stamps instead. Every artifact
+// reaching the TestPyPI upload must carry the former (#672).
+const PLAN_VERSION = '0.0.1700000000';
+const BUILD_BASELINE_VERSION = '0.0.1';
+
 const DIST_FILES = [
-  'piot_fixture_zzz_python_maturin-0.0.1.tar.gz',
-  'piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl',
-  'piot_fixture_zzz_python_hatch-0.0.1.tar.gz',
-  'piot_fixture_zzz_python_hatch-0.0.1-py3-none-any.whl',
+  `piot_fixture_zzz_python_maturin-${PLAN_VERSION}.tar.gz`,
+  `piot_fixture_zzz_python_maturin-${PLAN_VERSION}-cp312-cp312-manylinux.whl`,
+  `piot_fixture_zzz_python_hatch-${PLAN_VERSION}.tar.gz`,
+  `piot_fixture_zzz_python_hatch-${PLAN_VERSION}-py3-none-any.whl`,
 ];
 
 function fileDirent(name: string): { name: string; isFile: () => boolean } {
@@ -133,17 +140,17 @@ function jsonResponse(status: number, body: string): Response {
 /** The `/pypi/{name}/{version}/json` payload TestPyPI serves for a published release. */
 function releaseJson(stem: string): string {
   return JSON.stringify({
-    info: { version: '0.0.1' },
+    info: { version: PLAN_VERSION },
     urls: [
       {
         packagetype: 'bdist_wheel',
-        filename: `${stem}-0.0.1-cp312-cp312-manylinux.whl`,
-        url: `https://test-files.pythonhosted.org/packages/ab/${stem}-0.0.1-cp312-cp312-manylinux.whl`,
+        filename: `${stem}-${PLAN_VERSION}-cp312-cp312-manylinux.whl`,
+        url: `https://test-files.pythonhosted.org/packages/ab/${stem}-${PLAN_VERSION}-cp312-cp312-manylinux.whl`,
       },
       {
         packagetype: 'sdist',
-        filename: `${stem}-0.0.1.tar.gz`,
-        url: `https://test-files.pythonhosted.org/packages/cd/${stem}-0.0.1.tar.gz`,
+        filename: `${stem}-${PLAN_VERSION}.tar.gz`,
+        url: `https://test-files.pythonhosted.org/packages/cd/${stem}-${PLAN_VERSION}.tar.gz`,
       },
     ],
   });
@@ -161,13 +168,13 @@ function stubReaddir(): void {
     }
     if (dir === 'downloaded-wheels') {
       return Promise.resolve([
-        'piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl',
-        'piot_fixture_zzz_python_hatch-0.0.1-py3-none-any.whl',
+        `piot_fixture_zzz_python_maturin-${PLAN_VERSION}-cp312-cp312-manylinux.whl`,
+        `piot_fixture_zzz_python_hatch-${PLAN_VERSION}-py3-none-any.whl`,
       ]);
     }
     return Promise.resolve([
-      'piot_fixture_zzz_python_maturin-0.0.1.tar.gz',
-      'piot_fixture_zzz_python_hatch-0.0.1.tar.gz',
+      `piot_fixture_zzz_python_maturin-${PLAN_VERSION}.tar.gz`,
+      `piot_fixture_zzz_python_hatch-${PLAN_VERSION}.tar.gz`,
     ]);
   }) as unknown as typeof readdir);
 }
@@ -188,12 +195,12 @@ function stubStaleSimpleIndex(): void {
       return `<html><body><a href="https://files/${stale}#sha256=z">${stale}</a></body></html>`;
     }
     if (cmd === 'unzip' && a[0] === '-Z1') {
-      return `${stemOf(a[1] ?? '')}-0.0.1.dist-info/METADATA\n`;
+      return `${stemOf(a[1] ?? '')}-${PLAN_VERSION}.dist-info/METADATA\n`;
     }
     if (cmd === 'tar' && a[0] === '-tzf') {
-      return `${stemOf(a[1] ?? '')}-0.0.1/PKG-INFO\n`;
+      return `${stemOf(a[1] ?? '')}-${PLAN_VERSION}/PKG-INFO\n`;
     }
-    return 'Name: x\nVersion: 0.0.1\n';
+    return `Name: x\nVersion: ${PLAN_VERSION}\n`;
   });
 }
 
@@ -202,21 +209,41 @@ describe('piot-ci testpypi-verify (integration)', () => {
     readdirMock.mockResolvedValue(DIST_FILES.map(fileDirent) as unknown as Awaited<ReturnType<typeof readdir>>);
     await expect(verify('assert')).resolves.toBe(0);
     expect(out.join('')).toBe(
-      'dist/piot_fixture_zzz_python_hatch-0.0.1-py3-none-any.whl\n' +
-        'dist/piot_fixture_zzz_python_hatch-0.0.1.tar.gz\n' +
-        'dist/piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl\n' +
-        'dist/piot_fixture_zzz_python_maturin-0.0.1.tar.gz\n',
+      `dist/piot_fixture_zzz_python_hatch-${PLAN_VERSION}-py3-none-any.whl\n` +
+        `dist/piot_fixture_zzz_python_hatch-${PLAN_VERSION}.tar.gz\n` +
+        `dist/piot_fixture_zzz_python_maturin-${PLAN_VERSION}-cp312-cp312-manylinux.whl\n` +
+        `dist/piot_fixture_zzz_python_maturin-${PLAN_VERSION}.tar.gz\n`,
     );
   });
 
   it('assert: fails with the exact error when a fixture wheel is missing', async () => {
     readdirMock.mockResolvedValue(
-      DIST_FILES.filter((name) => name !== 'piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl').map(
+      DIST_FILES.filter((name) => name !== `piot_fixture_zzz_python_maturin-${PLAN_VERSION}-cp312-cp312-manylinux.whl`).map(
         fileDirent,
       ) as unknown as Awaited<ReturnType<typeof readdir>>,
     );
     await expect(verify('assert')).resolves.toBe(1);
     expect(out.join('')).toContain('::error::missing piot_fixture_zzz_python_maturin wheel artifact for TestPyPI');
+  });
+
+  /**
+   * #672. The upload runs with `skip-existing: true` (#669), so a run whose
+   * fixtures regressed to the `0.0.1` build-mode baseline uploads nothing new,
+   * the metadata verify reads back the *previous* run's files, and their
+   * embedded version is exactly what this run expected — green on a stale
+   * build. The pre-upload assert step is the only place that can see it, and
+   * it must refuse before twine is ever asked.
+   */
+  it('assert: refuses a stale build-mode version before anything is uploaded', async () => {
+    readdirMock.mockResolvedValue(
+      DIST_FILES.map((name) => fileDirent(name.replace(PLAN_VERSION, BUILD_BASELINE_VERSION))) as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >,
+    );
+    await expect(verify('assert')).resolves.toBe(1);
+    expect(out.join('')).toContain(
+      '::error::piot-fixture-zzz-python-maturin artifacts carry version 0.0.1, not the plan-computed 0.0.<epoch> version this run stamped',
+    );
   });
 
   it('metadata: downloads and verifies both fixtures end to end', async () => {
@@ -232,26 +259,26 @@ describe('piot-ci testpypi-verify (integration)', () => {
         return '';
       }
       if (cmd === 'unzip' && a[0] === '-Z1') {
-        return `${stemOf(a[1] ?? '')}-0.0.1.dist-info/METADATA\n${stemOf(a[1] ?? '')}-0.0.1.dist-info/RECORD\n`;
+        return `${stemOf(a[1] ?? '')}-${PLAN_VERSION}.dist-info/METADATA\n${stemOf(a[1] ?? '')}-${PLAN_VERSION}.dist-info/RECORD\n`;
       }
       if (cmd === 'tar' && a[0] === '-tzf') {
-        return `${stemOf(a[1] ?? '')}-0.0.1/PKG-INFO\n${stemOf(a[1] ?? '')}-0.0.1/setup.py\n`;
+        return `${stemOf(a[1] ?? '')}-${PLAN_VERSION}/PKG-INFO\n${stemOf(a[1] ?? '')}-${PLAN_VERSION}/setup.py\n`;
       }
       // unzip -p / tar -xzOf: the metadata blob
-      return 'Name: x\nVersion: 0.0.1\n';
+      return `Name: x\nVersion: ${PLAN_VERSION}\n`;
     });
 
     await expect(verify('metadata')).resolves.toBe(0);
     expect(err.join('')).toBe('');
     const printed = out.join('');
     expect(printed).toContain(
-      'Downloading wheel for piot-fixture-zzz-python-maturin==0.0.1 from https://test-files.pythonhosted.org/packages/ab/piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl\n',
+      `Downloading wheel for piot-fixture-zzz-python-maturin==${PLAN_VERSION} from https://test-files.pythonhosted.org/packages/ab/piot_fixture_zzz_python_maturin-${PLAN_VERSION}-cp312-cp312-manylinux.whl\n`,
     );
     expect(printed).toContain(
-      'Downloading sdist for piot-fixture-zzz-python-hatch==0.0.1 from https://test-files.pythonhosted.org/packages/cd/piot_fixture_zzz_python_hatch-0.0.1.tar.gz\n',
+      `Downloading sdist for piot-fixture-zzz-python-hatch==${PLAN_VERSION} from https://test-files.pythonhosted.org/packages/cd/piot_fixture_zzz_python_hatch-${PLAN_VERSION}.tar.gz\n`,
     );
-    expect(printed).toContain('ok: piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl METADATA Version=0.0.1\n');
-    expect(printed).toContain('ok: piot_fixture_zzz_python_hatch-0.0.1.tar.gz PKG-INFO Version=0.0.1\n');
+    expect(printed).toContain(`ok: piot_fixture_zzz_python_maturin-${PLAN_VERSION}-cp312-cp312-manylinux.whl METADATA Version=${PLAN_VERSION}\n`);
+    expect(printed).toContain(`ok: piot_fixture_zzz_python_hatch-${PLAN_VERSION}.tar.gz PKG-INFO Version=${PLAN_VERSION}\n`);
     // The lagging surface is never consulted: no pip resolve, no simple-index
     // scrape. That is the whole of the #668 fix.
     expect(spawnMock).not.toHaveBeenCalled();
@@ -296,8 +323,8 @@ describe('piot-ci testpypi-verify metadata vs. TestPyPI index lag (#668)', () =>
     await expect(withFakeTimers(() => verify('metadata'))).resolves.toBe(0);
     expect(err.join('')).toBe('');
     const printed = out.join('');
-    expect(printed).toContain('ok: piot_fixture_zzz_python_maturin-0.0.1-cp312-cp312-manylinux.whl METADATA Version=0.0.1\n');
-    expect(printed).toContain('ok: piot_fixture_zzz_python_hatch-0.0.1.tar.gz PKG-INFO Version=0.0.1\n');
+    expect(printed).toContain(`ok: piot_fixture_zzz_python_maturin-${PLAN_VERSION}-cp312-cp312-manylinux.whl METADATA Version=${PLAN_VERSION}\n`);
+    expect(printed).toContain(`ok: piot_fixture_zzz_python_hatch-${PLAN_VERSION}.tar.gz PKG-INFO Version=${PLAN_VERSION}\n`);
   });
 
   it('still fails a version that is not on TestPyPI, and names it as unpublished', async () => {
@@ -309,7 +336,7 @@ describe('piot-ci testpypi-verify metadata vs. TestPyPI index lag (#668)', () =>
     const printed = out.join('') + err.join('');
     // The distinction the old gate could not draw: a version the registry has
     // never seen is a broken publish, not a slow index.
-    expect(printed).toContain('piot-fixture-zzz-python-maturin==0.0.1 is not published to TestPyPI');
+    expect(printed).toContain(`piot-fixture-zzz-python-maturin==${PLAN_VERSION} is not published to TestPyPI`);
     expect(printed).not.toContain('index lag');
   });
 
@@ -317,12 +344,12 @@ describe('piot-ci testpypi-verify metadata vs. TestPyPI index lag (#668)', () =>
     stubReaddir();
     stubStaleSimpleIndex();
     const sdistOnly = JSON.stringify({
-      info: { version: '0.0.1' },
+      info: { version: PLAN_VERSION },
       urls: [
         {
           packagetype: 'sdist',
-          filename: 'piot_fixture_zzz_python_maturin-0.0.1.tar.gz',
-          url: 'https://test-files.pythonhosted.org/packages/cd/piot_fixture_zzz_python_maturin-0.0.1.tar.gz',
+          filename: `piot_fixture_zzz_python_maturin-${PLAN_VERSION}.tar.gz`,
+          url: `https://test-files.pythonhosted.org/packages/cd/piot_fixture_zzz_python_maturin-${PLAN_VERSION}.tar.gz`,
         },
       ],
     });
@@ -333,7 +360,7 @@ describe('piot-ci testpypi-verify metadata vs. TestPyPI index lag (#668)', () =>
     const printed = out.join('') + err.join('');
     // A published release missing an artifact is broken now and will still be
     // broken in ten minutes, so it must not consume the lag budget.
-    expect(printed).toContain('piot-fixture-zzz-python-maturin==0.0.1 is published to TestPyPI but its release lists no wheel');
+    expect(printed).toContain(`piot-fixture-zzz-python-maturin==${PLAN_VERSION} is published to TestPyPI but its release lists no wheel`);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
