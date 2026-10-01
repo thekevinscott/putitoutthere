@@ -332,9 +332,16 @@ version = 1   # required; only 1 is valid today
 >   `build` mode (`maturin` → `maturin`, `setuptools` →
 >   `setuptools.build_meta`, `hatch` → `hatchling.build`) —
 >   `PIOT_PYPI_BUILD_BACKEND_MISMATCH`.
-> - When `[project].dynamic` contains `"version"`, either
->   `[tool.hatch.version]` or `[tool.setuptools_scm]` declares the version
->   source — `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND`.
+> - When `[project].dynamic` contains `"version"`, the declared version
+>   source is one a release run can actually reach: `[tool.hatch.version]
+>   source = "vcs"` with `hatch-vcs` in `[build-system].requires`,
+>   `[tool.setuptools_scm]` with `setuptools-scm` in
+>   `[build-system].requires`, or `build = "maturin"` (which takes the
+>   version from the sibling `Cargo.toml`). A missing plugin is
+>   `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND`; a `[tool.hatch.version]` that
+>   reads the version out of a file in the tree is
+>   `PIOT_PYPI_HATCH_VERSION_PATH` (see [Python version
+>   source](#python-version-source--required-shape)).
 > - When `bundle_cli` is set, `[tool.maturin].include` covers
 >   `bundle_cli.stage_to` — `PIOT_PYPI_MATURIN_INCLUDE_MISSING`.
 
@@ -1273,6 +1280,40 @@ ignored by `hatch-vcs`; only the global form works.
   `Cargo.toml`'s `[package].version`. putitoutthere bumps `Cargo.toml`
   before `maturin build` runs.
 
+### Rejected: a version read from a file in the tree
+
+`dynamic = ["version"]` is necessary but not sufficient. Hatchling's
+default version source reads a literal out of the file named by
+`[tool.hatch.version].path`, and `source = "code"` imports one — neither
+consults `SETUPTOOLS_SCM_PRETEND_VERSION`, and putitoutthere never edits
+that file. The wheel ships whatever is committed, which is the previous
+release's version:
+
+```toml
+# REJECTED — PIOT_PYPI_HATCH_VERSION_PATH
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "your-package"
+dynamic = ["version"]
+
+[tool.hatch.version]
+path = "src/your_package/_version.py"   # nothing rewrites this
+```
+
+The fix is to switch the source: `source = "vcs"` with `hatch-vcs` in
+`[build-system].requires`, as shown above.
+
+The plugin itself must also be declared. `[tool.hatch.version] source =
+"vcs"` names hatch-vcs's entry point, so without `hatch-vcs` in
+`[build-system].requires` hatchling fails mid-build with `Unknown version
+source: vcs`; likewise `[tool.setuptools_scm]` without `setuptools-scm` in
+`requires` leaves setuptools with no version at all. Both are
+`PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND`, caught at PR time rather than
+mid-release.
+
 If a Python package can't fit any of these three shapes, it's outside
 putitoutthere's scope — write your own release workflow.
 
@@ -1296,7 +1337,8 @@ line. Grep the run log for the code, then look it up here.
 | `PIOT_PYPI_STATIC_VERSION` | `pyproject.toml` declares a static `[project].version = "..."` literal. Use `[project].dynamic = ["version"]` instead (see [Python version source](#python-version-source--required-shape)). | PR-time and publish-time. |
 | `PIOT_PYPI_NAME_MISMATCH` | `pyproject.toml`'s `[project].name` disagrees with the configured `[[package]].name` (or `pypi` override). | PR-time and publish-time. |
 | `PIOT_PYPI_BUILD_BACKEND_MISMATCH` | `[build-system].build-backend` is set but doesn't match the configured `build` mode (`maturin` → `maturin`, `setuptools` → `setuptools.build_meta`, `hatch` → `hatchling.build`). | PR-time and publish-time. |
-| `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND` | `[project].dynamic` contains `"version"` but no `[tool.hatch.version]` or `[tool.setuptools_scm]` block declares the source. | PR-time and publish-time. |
+| `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND` | `[project].dynamic` contains `"version"` but the backend cannot reach a version source: no `[tool.hatch.version]` or `[tool.setuptools_scm]` block declares one, or the block is there but its plugin (`hatch-vcs` / `setuptools-scm`) is missing from `[build-system].requires` (see [Python version source](#python-version-source--required-shape)). | PR-time and publish-time. |
+| `PIOT_PYPI_HATCH_VERSION_PATH` | `[tool.hatch.version]` reads the version from a file in the tree (a bare `path`, or `source = "code"`). No release step rewrites that file and hatchling ignores `SETUPTOOLS_SCM_PRETEND_VERSION`, so the wheel would ship the committed literal. Switch to `source = "vcs"` with `hatch-vcs` in `[build-system].requires` (see [Python version source](#python-version-source--required-shape)). | PR-time and publish-time. |
 | `PIOT_PYPI_MATURIN_INCLUDE_MISSING` | `bundle_cli` is set on a maturin package but `[tool.maturin].include` doesn't cover `bundle_cli.stage_to`. The cross-compiled binary wouldn't land in any wheel. | PR-time and publish-time. |
 | `PIOT_AUTH_NO_TOKEN` | The publish job reached the registry-auth step with no token resolved (neither an OIDC-minted token nor a caller-provided long-lived token). Almost always means the reusable workflow's trusted-publisher exchange failed silently or the caller-provided secret was empty. | Publish-time only. |
 | `PIOT_PUBLISH_EMPTY_PLAN` | `publish` was invoked but `plan` returned zero rows for a reason other than `release: skip`. The reusable workflow's gate normally prevents this; if it fires, the gate was bypassed or the engine is inconsistent. | Publish-time only. |

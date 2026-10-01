@@ -29,6 +29,7 @@ import { parse as parseToml } from 'smol-toml';
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { expandDirGlob } from './glob.js';
+import { classifyPypiVersionSource } from './pypi-version-source.js';
 import type { Kind } from './types.js';
 
 // Per-kind accepted env var names, primary first. `checkAuth` scans left
@@ -543,6 +544,7 @@ export type PypiShapeCode =
   | 'PIOT_PYPI_NAME_MISMATCH'
   | 'PIOT_PYPI_BUILD_BACKEND_MISMATCH'
   | 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND'
+  | 'PIOT_PYPI_HATCH_VERSION_PATH'
   | 'PIOT_PYPI_MATURIN_INCLUDE_MISSING';
 
 export interface PyprojectShapeFinding {
@@ -641,27 +643,29 @@ export async function checkPyprojectShape(
       }
     }
 
-    // PYPI_DYNAMIC_VERSION_NO_BACKEND — only checks setuptools / hatch.
-    // Maturin sources its version from Cargo.toml's [package].version
-    // when `dynamic = ["version"]`, so requiring a `[tool.hatch.version]`
-    // or `[tool.setuptools_scm]` block would surface false positives on
-    // every maturin pypi package.
+    // PYPI_DYNAMIC_VERSION_NO_BACKEND / PYPI_HATCH_VERSION_PATH — only
+    // checks setuptools / hatch. Maturin sources its version from
+    // Cargo.toml's [package].version when `dynamic = ["version"]` (and
+    // `write-version` does bump that), so classifying its pyproject
+    // would surface false positives on every maturin pypi package.
+    //
+    // The declared source has to be *reachable*, not merely present: a
+    // version table whose plugin is missing from
+    // `[build-system].requires`, or one that reads a literal off a file
+    // nothing rewrites, both ship the previous release's version. The
+    // decision lives in `classifyPypiVersionSource` (#696).
     if (p.build !== 'maturin') {
       const dynamic = project.dynamic;
       const dynamicHasVersion =
         Array.isArray(dynamic) && dynamic.some((v) => v === 'version');
       if (dynamicHasVersion) {
-        const hatchVersion = ((tool.hatch ?? {}) as Record<string, unknown>).version;
-        const setuptoolsScm = tool.setuptools_scm;
-        const hasHatchSource = typeof hatchVersion === 'object' && hatchVersion !== null;
-        const hasSetuptoolsScm = typeof setuptoolsScm === 'object' && setuptoolsScm !== null;
-        if (!hasHatchSource && !hasSetuptoolsScm) {
+        const verdict = classifyPypiVersionSource(buildSystem, tool);
+        if (!verdict.reachable) {
           findings.push({
             package: p.name,
             pyprojectPath,
-            code: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
-            detail:
-              '[project].dynamic includes "version" but neither [tool.hatch.version] nor [tool.setuptools_scm] is present; the build backend has no way to compute a version',
+            code: verdict.code,
+            detail: verdict.detail,
           });
         }
       }
