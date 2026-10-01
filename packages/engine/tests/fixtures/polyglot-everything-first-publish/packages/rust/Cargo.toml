@@ -6,6 +6,14 @@ license = "MIT"
 description = "Put It Out There first-publish polyglot canary fixture (Rust crate). Publishes to an in-job cargo-http-registry under a uniquified name. Safe to ignore."
 repository = "https://github.com/thekevinscott/putitoutthere"
 
+# An explicit lib name, deliberately free of the `-placeholder` suffix the
+# first-publish twin uniquifies per run: `src/*.rs` is not substituted at
+# materialize time, so a Rust `use` of a package-name-derived identifier
+# would stop compiling the moment the package name moved. #641.
+[lib]
+name = "piot_fixture_zzz_poly_core"
+path = "src/lib.rs"
+
 [[bin]]
 name = "piot-fixture-zzz"
 path = "src/main.rs"

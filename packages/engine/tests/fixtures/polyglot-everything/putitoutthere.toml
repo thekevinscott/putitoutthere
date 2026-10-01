@@ -6,12 +6,29 @@ version = 1
 #   (bundled-cli binary AND napi-rs `.node` addon, both selected
 #   via the main package's optionalDependencies at install time).
 # The v0 success criterion (plan.md §25.3 #2).
+#
+# #641 gave it the structure that claim requires: one cargo workspace
+# (root `Cargo.toml`), the pyo3 extension module path-depping the core
+# crate WITH a version requirement, and a core that owns a real
+# `CARGO_PKG_VERSION`-bearing symbol re-exposed through the pyo3 module.
+# Those are the preconditions of the embedded-crate version bug that
+# shipped twice (#374, then #621); without them this fixture could not
+# have caught either.
+#
+# Still missing, deliberately: a colocated napi crate. `packages/ts` is
+# pure TypeScript, so the napi mode below takes the skip-with-notice
+# path (#429). Adding one would publish new
+# `…-cli-napi-<triple>` platform packages that need Trusted Publisher
+# registrations before this fixture's job can go green — see #641.
 
 [[package]]
 name = "piot-fixture-zzz-poly-rust"
 kind = "crates"
 path = "packages/rust"
-globs = ["packages/rust/**"]
+# The workspace root is part of this crate's build unit, so a change to
+# it is a change to this package (mirrors
+# python-rust-maturin-workspace-first-publish). #641.
+globs = ["packages/rust/**", "Cargo.toml"]
 first_version = "__VERSION__"
 
 [[package]]
