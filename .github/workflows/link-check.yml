@@ -34,7 +34,7 @@ jobs:
       - uses: lycheeverse/lychee-action@v2
         with:
           # Excludes:
-          #   - CLAUDE.md @-imports (file paths, not URLs)
+          #   - AGENTS.md @-imports (file paths, not URLs)
           #   - claude.ai code-session reference URLs (auth-walled)
           #   - GitHub issue/PR self-refs (rate-limit + churn noise)
           #   - URLs containing template placeholders like `<your-package>` --
