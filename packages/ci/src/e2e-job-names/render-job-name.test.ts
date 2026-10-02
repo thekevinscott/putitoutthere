@@ -54,6 +54,15 @@ describe('renderJobName', () => {
     expect(renderJobName('build (${{ matrix.kind.nope }})', ROW)).toBe('build ()');
   });
 
+  // `matrix.kind.nope` above misses on *any* guard, so it does not pin the
+  // object test down: a guard narrowed to `!== null` reads a string's own
+  // members happily. `'npm'.length` is a real property, so without the
+  // `typeof === 'object'` half this renders `3`. A string's intrinsics are not
+  // fields the row carries.
+  it('renders a dotted path onto a string intrinsic as empty, not the intrinsic', () => {
+    expect(renderJobName('build (${{ matrix.kind.length }})', ROW)).toBe('build ()');
+  });
+
   // `typeof null === 'object'`, so walking past a null segment has to be
   // guarded separately or the property read throws a TypeError that surfaces
   // as "the workflow is broken" instead of an empty slot.
