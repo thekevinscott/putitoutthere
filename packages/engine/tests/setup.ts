@@ -19,15 +19,15 @@
  * explicitly (after this hook runs); the new preflight unit tests pass
  * `githubRepository` as an option directly and don't depend on `process.env`.
  *
- * SCOPE — this hook does NOT run everywhere. It reaches only the runs that
- * load `vitest.config.ts`: the engine's own `test:unit` /
- * `test:unit:coverage` / `test:integration`. The testing-conventions coverage
- * gate runs vitest rooted at `packages/engine/src`, and since vitest 5 dropped
- * vitest 4's upward config-file search, that run loads no config and so never
- * loads this file. Any test whose assertion depends on one of these vars being
- * unset must stub it itself (`vi.stubEnv(name, undefined)`) — relying on this
- * hook alone passes locally and fails under the gate in CI, which is exactly
- * how the vitest 5 upgrade surfaced two latent failures in src/check.test.ts.
+ * SCOPE — this hook reaches only the runs that load `vitest.config.ts`. On
+ * vitest 4 that includes the testing-conventions gate's run (rooted at
+ * `packages/engine/src`), because vitest 4 searches upward from `--root` for a
+ * config file. vitest 5 removed that search, so the same run would load no
+ * config and never load this file; we are pinned to 4 only until the mutation
+ * gate can run on 5 (#715). So don't depend on this hook for correctness: a
+ * test whose assertion needs one of these vars unset stubs it itself
+ * (`vi.stubEnv(name, undefined)`). The vitest 5 attempt surfaced exactly that
+ * latent failure in two src/check.test.ts cases, which now stub explicitly.
  */
 
 import { beforeEach } from 'vitest';
