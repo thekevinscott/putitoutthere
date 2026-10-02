@@ -64,6 +64,7 @@ describe('action', () => {
     delete process.env.INPUT_STAGE_TO;
     delete process.env.INPUT_BIN;
     delete process.env.INPUT_TARGET;
+    delete process.env.INPUT_EXPECT;
   });
 
   it('fails when INPUT_COMMAND is missing', async () => {
@@ -157,6 +158,48 @@ describe('action', () => {
       '/repo',
       '--release-packages',
       'demo@minor',
+    ]);
+  });
+
+  it('reconcile: forwards expect as --expect (#694)', async () => {
+    // `pypi-tag.yml` invokes the action with command: reconcile and
+    // expect: ${{ inputs.expect }} — the release job's
+    // `delegated_packages`, forwarded unreshaped. Without this hop the
+    // adapter drops the expectation, reconcile falls back to reading
+    // PyPI's project pointer, and a first publish that has not
+    // propagated reads as "never published": `actions: []`, exit 0, tag
+    // silently lost.
+    process.env.INPUT_COMMAND = 'reconcile';
+    process.env.INPUT_WORKING_DIRECTORY = '/repo';
+    process.env.INPUT_EXPECT = '[{"name":"demo-py","version":"0.0.0","tag":"demo-py-v0.0.0"}]';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'reconcile',
+      '--json',
+      '--cwd',
+      '/repo',
+      '--expect',
+      '[{"name":"demo-py","version":"0.0.0","tag":"demo-py-v0.0.0"}]',
+    ]);
+  });
+
+  it('reconcile: omits --expect when the input is unset (#694)', async () => {
+    // Bare `piot reconcile` must stay reachable: a consumer on an older
+    // template, or a manual re-run, passes no expectation and gets the
+    // discovery pass. An empty `--expect ''` would instead be parsed as
+    // an expectation of nothing.
+    process.env.INPUT_COMMAND = 'reconcile';
+    process.env.INPUT_WORKING_DIRECTORY = '/repo';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node',
+      'putitoutthere',
+      'reconcile',
+      '--json',
+      '--cwd',
+      '/repo',
     ]);
   });
 
