@@ -1,28 +1,14 @@
 name: Changelog check
 
-# Enforces AGENTS.md's "Changelog and migration policy": every PR that
-# touches public-surface files must update both CHANGELOG.md and
-# MIGRATIONS.md. Opt out per-PR by adding a commit with a
-# `skip-changelog:` trailer (any value).
-#
-# The gate logic lives in tested TypeScript (`packages/ci/src/changelog-check/`,
-# the `piot-ci changelog-check` command), not inline bash — see AGENTS.md
-# > "Repo-internal CI gates" (#452, epic #442).
+# Enforces AGENTS.md's changelog policy: a PR touching public surface must
+# update CHANGELOG.md and MIGRATIONS.md. Opt out with a `skip-changelog:`
+# commit trailer. Gate logic is tested TypeScript in
+# packages/ci/src/changelog-check/ (#452, epic #442).
 
-# Paths are a deliberate SUPERSET of the gate's own public-surface globset
-# (`SURFACE_PATHSPECS` in packages/ci/src/changelog-check/run.ts: action.yml,
-# packages/engine/src/**/*.ts minus tests, docs/api/**, docs/guide/**). They
-# only decide whether the decision is worth a runner — the gate re-derives it
-# from BASE_SHA anyway, and returns "No public-surface files changed; skipping"
-# for everything these globs exclude.
-#
-# Keep them a superset. Narrowing one below the globset would let a
-# surface-changing PR merge with no CHANGELOG/MIGRATIONS entry, silently, with
-# no check to point at. Nothing enforces the relation mechanically here.
-#
-# CHANGELOG.md / MIGRATIONS.md are not triggers: with no surface change the
-# gate passes either way, so a changelog-only PR would burn a runner on a
-# foregone verdict.
+# Paths are a deliberate SUPERSET of the gate's own `SURFACE_PATHSPECS`
+# (packages/ci/src/changelog-check/run.ts); they only decide whether the
+# decision is worth a runner. Keep it a superset -- narrowing below the
+# globset lets a surface-changing PR merge with no entry and no red check.
 on:
   pull_request:
     paths:

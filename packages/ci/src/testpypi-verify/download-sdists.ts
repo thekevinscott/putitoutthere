@@ -1,13 +1,8 @@
 /**
  * Composition root for the sdist-download phase of `testpypi-verify metadata`.
  * Fetches every sdist the resolved release lists from its immutable artifact
- * URL, failing with `failed to download sdist for {req} from TestPyPI` on the
- * first that will not come down. Returns the exit code (0 = all sdists
- * downloaded).
- *
- * Replaces the simple-index scrape this phase used to run (#668) — parsing
- * anchors out of `/simple/{project}/` meant waiting on an edge-cached page
- * whose staleness no retry budget can outlast.
+ * URL. Replaces the simple-index scrape this phase used to run (#668): that
+ * page is edge-cached, and no retry budget can outlast its staleness.
  */
 
 import { downloadArtifact } from './download-artifact.js';

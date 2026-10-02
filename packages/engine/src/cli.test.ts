@@ -1,16 +1,8 @@
 /**
- * Unit suite for the `putitoutthere` CLI dispatcher (`cli.ts`). Isolated
- * per the unit-suite convention: every engine collaborator the dispatcher
- * calls (`./plan-status.js`, `./check.js`, `./status.js`, `./publish.js`,
- * the `write-*` hooks) and the `node:fs` `$GITHUB_OUTPUT` sink are mocked,
- * so each test exercises only `run`'s routing / flag-validation / exit-code
- * / output-shape branching. The real engine behaviour those handlers carry
- * (actual version bumps, real drift detection, launcher authoring) is
- * covered at the integration and e2e-cli tiers — see AGENTS.md.
- *
- * `parseFlags` is exercised directly (it is `cli.ts`'s own pure code);
- * `./status-format.js` / `./version.js` stay real (pure, no I/O, and not
- * imported here) so the human-readable render is asserted end to end.
+ * Unit suite for the `putitoutthere` CLI dispatcher (`cli.ts`): `run`'s
+ * routing, flag validation, exit codes, and output shape. `./status-format.js`
+ * / `./version.js` stay real (pure, no I/O, and not imported here) so the
+ * human-readable render is asserted end to end.
  */
 
 import { appendFile } from 'node:fs/promises';

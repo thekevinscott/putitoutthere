@@ -1,17 +1,8 @@
 /**
- * Author the npm bundled-cli launcher (`bin/<bin>.js`) at build time.
- *
- * Bundled-CLI consumers used to ship a templated launcher whose only
- * per-consumer inputs are the package name and the configured `targets`
- * list — both of which the engine has at plan time. Issue #299
- * absorbs that template into the engine: the build job invokes
- * `write-launcher` on the main row of every `kind = "npm" && build =
- * "bundled-cli"` package and the launcher is generated in place.
- *
- * Override semantics: existing `bin/<bin>.js` files are never
- * overwritten, and an existing `package.json#bin` field is left as-is.
- * Consumers who need a custom launcher commit it under the same path
- * and the workflow respects it.
+ * Author the npm bundled-cli launcher (`bin/<bin>.js`) at build time (#299), on
+ * the main row of every `kind = "npm" && build = "bundled-cli"` package. An
+ * existing `bin/<bin>.js` is never overwritten and `package.json#bin` is left
+ * as-is, so a consumer's committed custom launcher stands.
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -164,20 +155,10 @@ export async function writeLauncherFromConfig(
   const buildEntries = normalizeBuild(npmPkg.build);
   const bundledCli = buildEntries.find((e) => e.mode === 'bundled-cli');
   if (!bundledCli) {return [];}
-  // `[package.bundle_cli]` is optional on a bundled-cli npm package — #298
-  // kept the table opt-in. When it's declared the reusable workflow
-  // cross-compiles the Rust binary and we author the launcher from
-  // `bundle_cli.bin`. When it's absent the consumer is on the legacy
-  // "bring your own scripts/build.cjs + bin/<bin>.js" path: the
-  // cross-compile step already skips them (it gates on `matrix.bundle_cli`),
-  // and the engine has no binary name to author a launcher from. No-op so
-  // the consumer's committed launcher + package.json#bin stand untouched.
-  // The workflow can't make this distinction — the main row this runs on
-  // never carries `bundle_cli` (plan.ts attaches it only to per-target
-  // bundled-cli rows) — so the gate lives here, where the full config is
-  // loaded. Skipping it dereferenced the absent table and crashed every
-  // legacy bundled-cli package's main row once #299 moved launcher
-  // generation into the engine.
+  // `[package.bundle_cli]` is optional (#298). Absent ⇒ the consumer's legacy
+  // "bring your own bin/<bin>.js" path, so no-op. The gate lives here, not in
+  // the workflow: the main row never carries `bundle_cli` (plan.ts attaches it
+  // to per-target rows only), and #299 crashed every legacy main row without it.
   const bundleCli = npmPkg.bundle_cli;
   if (bundleCli === undefined) {return [];}
   // bundle_cli present ⇒ `targets` is non-empty (config.ts refinement), so
@@ -208,16 +189,9 @@ function extractBase(npmName: string): string {
 
 /**
  * Map a target triple (napi-rs short form or Rust target) to the Node
- * `${platform}-${arch}` lookup key used in the generated launcher's
- * `triples` table.
- *
- * Mirrors the TRIPLE_MAP in `src/handlers/npm-platform.ts`, but
- * collapses `os`/`cpu`/`libc` into the `<node-platform>-<node-arch>`
- * key Node exposes at install time. Unmapped triples throw — plan-
- * time guard (`assertTripleSupported`) already rejects them before the
- * matrix runs, so reaching the throw implies map drift between the
- * two files; the vocabulary matches `targetToOsCpu` so the drift is
- * obvious.
+ * `${platform}-${arch}` key the generated launcher's `triples` table uses.
+ * Unmapped triples throw: plan-time `assertTripleSupported` already rejects
+ * them, so reaching the throw implies drift from `npm-platform.ts`'s TRIPLE_MAP.
  */
 export function nodePlatformKey(triple: string): string {
   const t = triple.toLowerCase();

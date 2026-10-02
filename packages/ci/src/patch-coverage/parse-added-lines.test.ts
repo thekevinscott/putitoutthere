@@ -1,13 +1,8 @@
 /**
  * Pins how the patch-coverage gate (#468) turns a `git diff --unified=0
  * --no-prefix -M` post-image into the added `src/**` lines it must cover.
- * Reproduces the `.mjs`'s unified-diff walk:
- *   - `+++ <path>` sets the current post-image file (`/dev/null` clears it);
- *   - `@@ … +C[,D] @@` resets the running absolute line number to C;
- *   - `+` lines inside a counted file record { line, text } and advance the
- *     line counter; test/decl/out-of-scope files advance but don't record;
- *   - ` ` context lines advance; `-` lines are ignored (post-image only).
- * Pure; exact assertions on the returned per-file added-line lists.
+ * Out-of-scope files still advance the line counter without recording, and `-`
+ * lines are ignored — we track post-image rows only.
  */
 
 import { describe, expect, it } from 'vitest';

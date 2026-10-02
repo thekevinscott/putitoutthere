@@ -1,30 +1,8 @@
 /**
- * npm moniker-rule name collision (#617) against the real CLI and the
- * real npm client — the e2e twin of the `npm: E403 name-too-similar`
- * block in `registry-auth.integration.test.ts`.
- *
- * Where the integration test hands the handler a canned stderr string,
- * this shells out to the built CLI (`node dist/cli-bin.js publish`), which
- * spawns the **real npm binary**, which renders the registry's 403 into
- * **its own** stderr — the exact text the engine has to parse. A mock of
- * `execFile` cannot catch a misread of npm's rendering; this can.
- *
- * The registry is local. It has to be: an unauthenticated
- * `PUT https://registry.npmjs.org/<name>` answers `{"error":"Not found"}`,
- * so the moniker rejection is unobservable without publish credentials for
- * a name that is genuinely blocked — and provoking one on npmjs.org means
- * a real authenticated publish attempt. The local server returns npmjs.org's
- * documented moniker body verbatim; everything downstream of it (npm's
- * error rendering, the CLI subprocess, config load, plan, preflight,
- * handler dispatch, and the live `npm view` idempotency probe against
- * registry.npmjs.org) is real and unmocked.
- *
- * Red before the fix: the CLI dumps npm's stderr under a generic
- * "npm publish failed" and offers no diagnosis, so an operator reads the
- * 403 as a credentials problem — which is how #617 burned four runs and
- * two fresh tokens on a name no token could ever create.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #617.
+ * npm moniker-rule name collision (#617) against the real npm binary, whose
+ * own stderr rendering of the registry's 403 is what the engine parses.
+ * The registry is local: an unauthenticated `PUT registry.npmjs.org/<name>`
+ * answers `{"error":"Not found"}`, so the moniker 403 needs credentials.
  */
 
 import { execFile, execFileSync } from 'node:child_process';

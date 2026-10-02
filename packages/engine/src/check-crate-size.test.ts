@@ -1,16 +1,5 @@
 /**
  * Unit tests for `checkCratesPackageSize` (#362).
- *
- * The file under test is `check-crate-size.ts`. Its only dependency
- * outside itself is the `cargo package` subprocess, mocked here at the
- * async process seam (`execCapture`) — so these cases call the check
- * function directly with hand-built packages, with no git repo, config
- * loader, or Rust toolchain involved. They own branch coverage of the
- * module.
- *
- * The end-to-end path through `runChecks` (real config loader, real
- * check dispatch) is covered by
- * `tests/integration/check-crate-size.integration.test.ts`.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';

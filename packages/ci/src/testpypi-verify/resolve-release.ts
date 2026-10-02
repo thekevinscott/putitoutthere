@@ -1,14 +1,8 @@
 /**
  * Composition root for resolving one requirement's published artifacts. Polls
- * the version-pinned release-metadata URL under the shared retry budget and
- * returns the files it lists, or the `::error::` line that names why it could
- * not.
- *
- * The budget still exists because a read replica can trail an accepted upload
- * by seconds — but the terminal message no longer conflates the two states the
- * old `/simple/` poll could not tell apart (#668): a 404 that outlives the
- * budget means the version is not on TestPyPI at all, which is a broken
- * publish, not a slow index. It stays bounded either way.
+ * the version-pinned release-metadata URL under the shared retry budget. A 404
+ * that outlives the budget means the version is not on TestPyPI at all — a
+ * broken publish, not a slow index (#668). Bounded either way.
  */
 
 import { sleep } from '../utils/sleep.js';

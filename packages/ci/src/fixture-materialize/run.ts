@@ -1,11 +1,8 @@
 /**
- * Composition root for the fixture-materialize harness (#447). Reads the phase
- * (argv) and FIXTURE / RUN_ID / RUN_ATTEMPT / FIXTURE_VERSION / GITHUB_ENV from
- * the env, performs the real I/O the three "Materialize fixture" bash blocks in
- * `.github/workflows/e2e-fixture-job.yml` performed — wipe + copy the fixture
- * tree, rewrite the manifest tokens, export FIXTURE_VERSION, init the throwaway
- * git repo — and returns the exit code. The only I/O lives here; the phase
- * decisions are `decide.ts`'s.
+ * Composition root for the fixture-materialize harness (#447). Performs the real
+ * I/O the three "Materialize fixture" bash blocks in `e2e-fixture-job.yml` did —
+ * wipe + copy the fixture tree, rewrite manifest tokens, export FIXTURE_VERSION,
+ * init the throwaway git repo. The phase decisions are `decide.ts`'s.
  */
 
 import { appendFile, cp, readdir, readFile, rm, writeFile } from 'node:fs/promises';

@@ -1,31 +1,10 @@
 name: Setup pnpm
 description: Installs the pnpm major this repo's own CI builds with.
 
-# Single source of truth for the pnpm version used to build *this* repo.
-# Sixteen workflow steps referenced the same literal before this action
-# existed; they now carry no version at all, so the majors cannot drift
-# apart.
-#
-# Deliberately NOT derived from `engines.pnpm` in package.json, and
-# deliberately not used by the consumer-facing install steps. Both are
-# the same "11" today by coincidence, not by coupling:
-#
-#   engines.pnpm      what the *published* package claims to support.
-#                     A consumer contract.
-#   this action       what *our* CI installs to build and test. An
-#                     internal toolchain choice. Could legitimately move
-#                     ahead of the supported floor to test the next major.
-#   _matrix.yml /     what we install into a *consumer's* checkout to
-#   release.yml       build their repo. Their toolchain, not ours —
-#                     see the comments at those call sites.
-#
-# Deriving any of the three from another would assert a coupling that
-# isn't real, and would make one of them impossible to move alone.
-#
-# Sibling: ../setup-node/action.yml does the same job for the Node
-# version. The two are kept separate rather than merged into one "JS
-# toolchain" action because three sites need Node without pnpm — see
-# that file's header for the reasoning.
+# Single source of truth for the pnpm major that builds *this* repo.
+# Deliberately not derived from `engines.pnpm` (the published package's
+# consumer contract) nor used by consumer-facing install steps. All are
+# "11" by coincidence, not coupling; deriving one would freeze the others.
 runs:
   using: composite
   steps:

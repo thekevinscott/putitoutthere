@@ -1,15 +1,8 @@
 /**
- * Pre-flight check tests. Auth (§16.3) + npm provenance metadata (#280).
- *
- * Issue #14, #280.
- *
- * `node:fs` is automocked and backed by an in-memory virtual filesystem
- * (`vfs`) so each case isolates the branching logic under test rather
- * than touching real temp dirs. The subject builds paths with the real
- * `node:path`; the harness normalizes separators (and any Windows drive
- * letter) before looking a path up, so keys are stable on POSIX and
- * Windows alike. Path assertions are separator-agnostic (`[/\\]`) for
- * the same reason.
+ * Pre-flight check tests — auth plus npm provenance metadata (#14, #280). The
+ * in-memory `vfs` harness normalizes separators and any Windows drive letter
+ * before looking a path up, so keys and path assertions hold on POSIX and
+ * Windows alike.
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';

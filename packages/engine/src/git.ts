@@ -1,10 +1,7 @@
 /**
- * Thin wrapper around the `git` CLI for the ops putitoutthere needs.
- *
- * Stderr is captured and surfaced in thrown errors so failures are
- * diagnosable without re-running with --verbose.
- *
- * Issue #9. Plan: §13.6 (no-push tag model), §14.2 (last-tag resolver).
+ * Thin wrapper around the `git` CLI for the ops putitoutthere needs. Stderr is
+ * captured and surfaced in thrown errors so failures are diagnosable without a
+ * --verbose re-run. Issue #9. Plan: §13.6 (no-push tag model), §14.2.
  */
 
 import { execCapture } from './utils/exec-capture.js';
@@ -215,16 +212,10 @@ export async function tagCommit(name: string, opts: GitOptions = {}): Promise<st
 /* -------------------------- last-tag resolver -------------------------- */
 
 /**
- * Find the highest-semver tag for a given package.
- *
- * Tag shape comes from the package's `tag_format` template (default
- * `{name}-v{version}`). We glob-filter, parse each candidate against
- * the template, and return the highest. Malformed candidates that
- * match the glob but not strict semver are skipped silently — they're
- * operator noise, not tool output.
- *
- * Returns the winning tag paired with its already-parsed `version` (so
- * callers never re-parse), or null when no tag for this package exists.
+ * Find the highest-semver tag for a given package, matching its `tag_format`
+ * template (default `{name}-v{version}`). Candidates that match the glob but
+ * not strict semver are skipped silently — operator noise, not tool output.
+ * Returns the winning tag with its already-parsed `version`, or null.
  */
 export async function lastTag(
   packageName: string,

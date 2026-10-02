@@ -1,10 +1,8 @@
 /**
  * Pins the pure-punctuation test the patch-coverage gate (#468) uses to skip
- * lines v8 never instruments. Reproduces the `.mjs`'s
- * `/^[(){}\[\];,]+$/.test(trimmed)` — true only when the string is non-empty
- * and made up entirely of the characters `(`, `)`, `{`, `}`, `[`, `]`, `;`,
- * `,`. Implemented as an explicit character-set check (no regex quantifier)
- * so the one-or-more semantics are pinned by an exact empty-string case. Pure.
+ * lines v8 never instruments, reproducing the `.mjs`'s
+ * `/^[(){}\[\];,]+$/.test(trimmed)`. An explicit character-set check, not a
+ * regex quantifier, so the one-or-more semantics need an exact empty-string case.
  */
 
 import { describe, expect, it } from 'vitest';

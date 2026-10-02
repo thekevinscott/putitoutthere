@@ -1,19 +1,8 @@
 /**
- * Integration test for the evidence-check gate (#445, epic #442).
- *
- * Drives the real `piot-ci evidence-check` dispatch in-process — `run()` from
- * `cli.ts` → `runEvidenceCheck` → the added-bullet parse → the (empty-needle)
- * poll → `decideEvidenceCheck` — with only the OS boundary mocked (the exec
- * seam for git/gh, the sleep seam, `node:fs/promises` for the CHANGELOG read).
- * Unlike `src/evidence-check/run.test.ts` (which mocks the decision helpers to
- * isolate wiring), this exercises the real cross-module decision, so the
- * end-to-end pass/fail output is asserted through the actual command.
- *
- * These scenarios have no `(verified by: …)` citations, so `citedRunNeedles`
- * is empty and `pollUntilResolved` returns without touching `gh` or `sleep`
- * (see poll.ts), and the gate skips the run query entirely. The live-run /
- * `gh api` polling path is covered at the unit tier (run.test.ts,
- * passed-evidence.test.ts).
+ * Integration test for the evidence-check gate (#445, epic #442). Drives the
+ * real `piot-ci evidence-check` dispatch in-process with only the OS boundary
+ * mocked. These scenarios carry no `(verified by: …)` citations, so the poll
+ * returns without touching `gh` or `sleep`; that path is covered at unit tier.
  */
 
 import type * as ChildProcess from 'node:child_process';

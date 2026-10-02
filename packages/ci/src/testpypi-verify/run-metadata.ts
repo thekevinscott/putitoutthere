@@ -1,12 +1,8 @@
 /**
  * Composition root for `testpypi-verify metadata` — the "Verify TestPyPI
- * artifact metadata" step. Wires the phases in order: build the pinned
- * requirements from `dist/`, write `testpypi-requirements.txt`, reset the
- * download directories, resolve each release's published artifact URLs,
- * download the wheels, download the sdists, and verify each artifact's
- * metadata version. The only I/O here is the env read, the `dist/` listing,
- * and the requirements-file/directory bookkeeping; every decision and each
- * network phase lives in its own module.
+ * artifact metadata" step. Wires the phases in order: pinned requirements from
+ * `dist/`, the requirements file, reset download dirs, resolve release URLs,
+ * download wheels, download sdists, verify each artifact's metadata version.
  */
 
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';

@@ -1,42 +1,9 @@
 /**
- * Workflow-YAML contract: both bundle_cli lanes in the reusable workflow
- * (and the npm lane's e2e mirror) must produce **dynamically linked**
- * Linux binaries — a static (static-pie) binary has no dynamic loader, so
- * any runtime `dlopen` fails and consumer CLIs that load SQLite extensions
- * die with `Dynamic loading not supported` (dirsql#755, dirsql#762). The
- * two lanes get there differently, because their portability stories
- * differ:
- *
- * **pypi (#603)**: compile the declared gnu triple directly. The wheel's
- * manylinux platform tag already encodes the glibc floor of everything
- * built on the runner, and pip refuses to install the wheel anywhere
- * older — a dynamically linked gnu binary has exactly the wheel's own
- * reach.
- *
- * **npm (#605)**: npm has **no install-time glibc gate**, so a plain gnu
- * build would carry the runner's glibc (2.39 on ubuntu-latest) and fail
- * at runtime on any older distro:
- *
- *   ./bin: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
- *
- * That was #381's rationale for static musl — which traded away `dlopen`.
- * The lane now pins the floor at **link time** instead: `cargo zigbuild
- * --target "$RUST_TARGET.$GLIBC_FLOOR"` links against a chosen old glibc
- * (2.17, the manylinux2014 baseline) regardless of the runner's, so the
- * binary is dynamic (dlopen works) AND runs on every glibc distro since
- * 2012. musl-libc distros (Alpine) are unaffected either way: the
- * synthesized platform packages declare `libc: ["glibc"]`, so npm's own
- * libc gating never installs them there.
- *
- * The npm contract this test enforces per affected step: the declared
- * Rust triple (`$RUST_TARGET`) is consumed directly — no gnu→musl
- * substitution anywhere — the cargo build goes through `zigbuild` with a
- * pinned `GLIBC_FLOOR`, and the verify step asserts BOTH that the staged
- * Linux binary is dynamically linked AND that its max versioned
- * `GLIBC_*` symbol stays within the floor (the ceiling check catches the
- * #381/#189 regression the static assert used to guard against, without
- * giving up dlopen). The tests deliberately do not pin exact shell
- * syntax — refactors stay passing as long as the contract is visible.
+ * Workflow-YAML contract: both bundle_cli lanes must produce **dynamically
+ * linked** Linux binaries — static-pie has no dynamic loader, so `dlopen` dies
+ * with `Dynamic loading not supported` (dirsql#755/#762). npm pins the glibc
+ * floor at link time (`zigbuild --target "$RUST_TARGET.$GLIBC_FLOOR"`, 2.17)
+ * instead of #381's static musl; pypi builds the gnu triple direct (#603/#605).
  */
 
 import { readFileSync } from 'node:fs';
@@ -334,29 +301,10 @@ describe('npm bundle_cli verify: asserts dynamic linkage and the pinned glibc ce
 });
 
 describe('npm bundle_cli: a consumer-declared `*-musl` target still builds and verifies (#605)', () => {
-  // `targets` is free-form, and `npm-platform.ts`'s TRIPLE_MAP knows every
-  // musl spelling (`linux-x64-musl`, `x86_64-unknown-linux-musl`,
-  // `armv7-unknown-linux-musleabihf`, …), synthesizing `libc: ["musl"]` so
-  // npm routes those sub-packages to musl distros only. Such a row is not the
-  // #605 defect — the consumer asked for musl, and Alpine has no glibc to
-  // dlopen against — but the #605 fix took two things away from it:
-  //
-  //   1. The `musl-tools` + `CC_<triple>=musl-gcc` step ran on EVERY Linux
-  //      row. It was replaced by a zigbuild install that only the
-  //      `*-linux-gnu*` cargo arm consumes, so a declared-musl row now has no
-  //      C cross-compiler at all — every crate with C sources (the very ones
-  //      a musl consumer is told to vendor: `libsqlite3-sys` bundled,
-  //      vendored openssl, vendored libgit2) fails to link.
-  //   2. The verify step's static-linkage assertion is unconditional on
-  //      Linux, and musl output is static-pie by construction — so a
-  //      declared-musl row that does compile is failed for being exactly what
-  //      it was configured to be, under a dlopen rationale that cannot apply
-  //      to it.
-  //
-  // The contract: musl rows go through `cargo zigbuild` too (zig ships musl,
-  // so it *is* the C cross-compiler that replaced musl-tools) with no
-  // glibc-floor suffix — musl has no glibc to floor — and the gnu-lane
-  // linkage assertions are scoped to gnu triples.
+  // Declared-musl rows are not the #605 defect (Alpine has no glibc to dlopen
+  // against), but the #605 fix broke them twice: it replaced musl-tools/`musl-gcc`
+  // with a zigbuild install only the gnu arm consumed, and its unconditional
+  // static-linkage assert fails musl output, which is static-pie by construction.
   const paths = [
     { label: '_matrix.yml', file: '_matrix.yml', job: 'build' },
     { label: 'e2e-fixture-job.yml', file: 'e2e-fixture-job.yml', job: 'build' },
@@ -582,34 +530,10 @@ describe('reusable workflow: pypi bundle_cli binaries are compiled against the d
 });
 
 describe('reusable workflow: npm bundled-cli reads the engine-resolved Rust triple from matrix.rust_target (#387)', () => {
-  // `matrix.target` for npm bundled-cli rows is an napi-rs short-form
-  // triple (linux-x64-gnu, darwin-arm64, win32-x64-msvc, …) — NOT a Rust
-  // triple. rustup / cargo only understand Rust triples, so the triple
-  // must be mapped (linux-x64-gnu → x86_64-unknown-linux-gnu) before any
-  // rustup / cargo invocation, otherwise:
-  //
-  //   error: toolchain 'stable-x86_64-unknown-linux-gnu' does not support
-  //          target 'linux-x64-gnu'
-  //
-  // That mapping belongs in the engine, not in shell. `plan.ts` resolves
-  // it once via `toRustTriple` and emits it on each bundled-cli row as
-  // `rust_target`; the workflow consumes `${{ matrix.rust_target }}`
-  // instead of re-deriving the correspondence inline. This keeps a single
-  // source of truth (the engine's TRIPLE_MAP / NAPI_TO_RUST), is
-  // unit-testable, and lets future musl-suffixed npm triples flow through
-  // the same map. Previously each affected step carried its own copy of
-  // the napi→rust `case` table — exactly the parallel reimplementation
-  // #387 removes.
-  //
-  // The observable contract, per affected step:
-  //   1. the step binds an env var to `${{ matrix.rust_target }}` (the
-  //      engine-resolved Rust triple) and consumes that, and
-  //   2. the run block carries NO inline napi→rust lookup — it contains
-  //      no literal Rust-triple component (`unknown-linux`,
-  //      `apple-darwin`, `pc-windows-msvc`). Those substrings appear only
-  //      if a `case` / lookup table survived in the shell; the gnu→musl
-  //      substitution `${RUST_TARGET//-linux-gnu/-linux-musl}` matches
-  //      none of them.
+  // `matrix.target` for npm bundled-cli rows is an napi-rs short-form triple
+  // (linux-x64-gnu, …), not a Rust triple: rustup answers `does not support
+  // target 'linux-x64-gnu'`. #387 moved the mapping into the engine
+  // (`matrix.rust_target`), so a surviving inline `case` table is the regression.
   const npmPaths = [
     { label: '_matrix.yml npm bundled-cli', file: '_matrix.yml', job: 'build' },
     { label: 'e2e-fixture-job.yml npm bundled-cli', file: 'e2e-fixture-job.yml', job: 'build' },

@@ -1,30 +1,8 @@
 /**
- * The e2e twin of `tests/integration/publish-stderr-tail.integration.test.ts`
- * (#651): a failed publish's log must carry the tail of the tool's stderr,
- * where the error is, inside GitHub's 64KB per-line cut.
- *
- * Where the integration test drives the engine in-process with the
- * subprocess mocked, this one **shells out to the built CLI**
- * (`node dist/cli-bin.js publish …`) and reads the bytes the process
- * actually wrote. Everything between the failing child and the log line is
- * real: a real pipe carrying ~380KB of stderr, the real `execCapture` seam
- * (whose `maxBuffer` a stream this size is measured against), the real
- * logger, the real CLI error path. The idempotency probe is a real
- * crates.io GET for a crate that has never been published — a live 404, so
- * the publish path is genuinely entered.
- *
- * Only `cargo` is stubbed, as a recording script on `PATH` — same device as
- * the `gh` stub in `release-github.e2e.test.ts`, and for the same reason: a
- * cold verify build that fails on demand is not something a test loop can
- * produce hermetically. The stub is a real subprocess writing real bytes;
- * what it is standing in for is only *which* tool produced them.
- *
- * Red before the fix: the engine renders the whole stream into the message
- * it throws and logs that as one structured record, so the longest line the
- * CLI writes is the size of cargo's stderr — six times past the cut, with
- * cargo's error in the discarded half.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * A failed publish's log must carry the tail of the tool's stderr, where the
+ * error is, inside GitHub's 64KB per-line cut (#651). ~380KB of real stderr
+ * over a real pipe through the real `execCapture` seam; only `cargo` is
+ * stubbed as a recording script on `PATH` (a failing build isn't hermetic).
  */
 
 import { execFileSync } from 'node:child_process';

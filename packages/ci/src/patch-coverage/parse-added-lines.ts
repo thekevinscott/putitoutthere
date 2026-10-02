@@ -1,14 +1,8 @@
 /**
  * Turns a `git diff --unified=0 --no-prefix -M` post-image into the added
  * `packages/engine/src/**` lines the patch-coverage gate (#468) must cover.
- * Reproduces the `.mjs`'s unified-diff walk exactly:
- *   - `+++ <path>` sets the current post-image file (`/dev/null` clears it);
- *   - `@@ … +C[,D] @@` re-bases the running absolute line number to C;
- *   - a `+` line inside a counted file records { line, text } and advances the
- *     counter; a `+` line in a test/decl/out-of-scope file only advances it;
- *   - a ` ` context line advances the counter; a `-` line is ignored (we track
- *     post-image rows only); an in-hunk `+++`/`---` row is a header artefact.
- * Pure.
+ * A `+` line in a test/decl/out-of-scope file only advances the counter; a `-`
+ * line is ignored (post-image rows only); an in-hunk `+++`/`---` is a header.
  */
 
 import { isCountedSrcPath } from './is-counted-src-path.js';

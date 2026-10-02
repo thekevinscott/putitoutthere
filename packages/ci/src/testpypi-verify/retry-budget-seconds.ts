@@ -1,11 +1,8 @@
 /**
  * What the bounded retry loops spend waiting before they give up, in seconds.
  * The loops sleep *between* attempts, so `MAX_ATTEMPTS` attempts spend
- * `MAX_ATTEMPTS - 1` back-offs. Pure.
- *
- * A duration is the only thing the retry budget actually states — neither
- * `MAX_ATTEMPTS` nor `retrySleepSeconds` means anything alone — so the error
- * lines quote this rather than an attempt count.
+ * `MAX_ATTEMPTS - 1` back-offs. A duration is the only thing the budget states,
+ * so the error lines quote this rather than an attempt count. Pure.
  */
 
 import { MAX_ATTEMPTS, retrySleepSeconds } from './retry-sleep.js';

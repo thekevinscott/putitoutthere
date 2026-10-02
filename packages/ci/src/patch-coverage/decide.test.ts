@@ -1,11 +1,8 @@
 /**
  * Decision matrix for the patch-coverage gate (#468), extracted from
- * `.github/workflows/patch-coverage.mjs`. Pins the exact pass/fail decisions,
- * the exact stdout (`out`) / stderr (`err`) lines, and the exact exit codes
- * the `.mjs` produced, so the TypeScript reimplementation is provably
- * equivalent. Pure — the coverage lookup is injected as `coverageFor`. Exact
- * assertions (`toEqual` on the full line lists) so a dropped or altered
- * message is caught.
+ * `.github/workflows/patch-coverage.mjs`. Pure — the coverage lookup is
+ * injected as `coverageFor`. Exact `toEqual` on the full stdout/stderr line
+ * lists and exit codes, so a dropped or altered message is caught.
  */
 
 import { describe, expect, it } from 'vitest';

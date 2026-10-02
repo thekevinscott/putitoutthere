@@ -1,46 +1,8 @@
 /**
- * A crates release rewrites the in-repo requirements pointing at it —
- * integration.
- *
- * Issue #640. #621 taught the **build**-time writers (`write-version.ts` for
- * maturin, `write-crate-version.ts` for bundled-cli/napi) to bump every
- * in-repo crate an artifact embeds *and* rewrite every version requirement
- * pointing at those crates. The **publish** path never learned either half.
- * `handlers/crates.ts`'s `writeVersionImpl` bumps exactly one manifest: the
- * crate's own.
- *
- * So for two crates.io packages in one repo where A path-deps B:
- *
- *     # packages/host/Cargo.toml
- *     [dependencies]
- *     expcore = { path = "../core", version = "0.2" }
- *
- * releasing B at 0.4.2 moves B past A's requirement and nothing updates A.
- * Cargo then refuses to resolve at all:
- *
- *     error: failed to select a version for the requirement `expcore = "^0.2"`
- *     candidate versions found which didn't match: 0.4.2
- *     location searched: …/packages/core
- *
- * A hard failure (exit 101) before anything compiles or packages — and an
- * intermittent one, since a repo on a patch cadence stays green until the
- * first bump that leaves the declared range.
- *
- * A `version` key alongside `path` is **mandatory** for any crate that also
- * publishes to crates.io, so the shape that breaks is exactly the shape a
- * multi-crate crates.io repo is required to have.
- *
- * The rewrite is deliberately narrow: only requirements that point at the
- * crate this run actually bumped move. A registry dependency that happens to
- * share a key name keeps its requirement — pinning `pyo3` to piot's release
- * version would name a pyo3 that does not exist.
- *
- * Real config loader, real plan, real preflight, real handler dispatch, real
- * git, against an on-disk cargo workspace. Mocked seams: the `cargo`
- * subprocess (recorded, never invoked) and crates.io HTTP via msw. The e2e
- * twin (`tests/e2e/crates-path-dep-version-req.e2e.test.ts`) runs real cargo
- * resolution over the result, which is the tier that can prove the tree is
- * actually buildable rather than merely textually plausible.
+ * A crates release rewrites the in-repo requirements pointing at it (#640);
+ * #621 taught only the build-time writers. Cargo's refusal: error: failed to
+ * select a version for the requirement `expcore = "^0.2"`. The rewrite is
+ * narrow on purpose — a registry dep sharing a key name keeps its requirement.
  */
 
 import { EventEmitter } from 'node:events';

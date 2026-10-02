@@ -1,13 +1,8 @@
 /**
- * Integration test for the tdd-lint gate (#452, epic #442).
- *
- * Drives the real `piot-ci tdd-lint` dispatch in-process — `run()` from
- * `cli.ts` → `runTddLint` → `decideTddLint` — with only the git-subprocess
- * boundary (the exec seam) mocked. Unlike `src/tdd-lint/run.test.ts`
- * (which also mocks `decide` to isolate the composition root's wiring), this
- * exercises the real decision, so the end-to-end output the workflow relies
- * on — the `::notice` bypass, the `::error` block, the OK/skip messages — is
- * asserted through the actual command a maintainer would run.
+ * Integration test for the tdd-lint gate (#452, epic #442). Drives the real
+ * `piot-ci tdd-lint` dispatch in-process with only the git subprocess seam
+ * mocked, so — unlike `src/tdd-lint/run.test.ts`, which also mocks `decide` —
+ * the real `::notice` bypass, `::error` block, and OK/skip messages are pinned.
  */
 
 import type * as ChildProcess from 'node:child_process';

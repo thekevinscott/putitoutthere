@@ -1,27 +1,8 @@
 /**
- * Unit tests for `runChecks`.
- *
- * Per AGENTS.md's test-tier split, the behavioural contract for each
- * check is *also* exercised in
- * `tests/integration/check.integration.test.ts` — the tier #319's
- * acceptance criteria call out. These cases own coverage: the
- * integration config is excluded from `test:unit:coverage` per
- * `vitest.config.ts`, so every branch in `check.ts` needs a unit
- * case here even when the integration suite already covers it.
- *
- * `runChecks` isolates cleanly: its only collaborators are the
- * `node:fs` and `node:child_process` boundaries (directly in
- * `check.ts`, and transitively through the real `config` / `preflight`
- * / `glob` / `cascade` engine modules it drives). Both are automocked
- * and fed from a tiny in-memory tree so each case stages exactly the
- * manifest files the check under test reads — no throwaway git repo,
- * no real filesystem. `git ls-files` returns the tree's file list;
- * `cargo package` (the crate-size probe) is driven to "can't verify"
- * so it skips, matching how the old real-repo cases behaved without a
- * publishable crate.
- *
- * Paths are asserted separator-agnostically (never an OS-specific path
- * literal) so the suite holds on Windows, macOS, and Linux CI alike.
+ * Unit tests for `runChecks` (#319). These duplicate the integration tier's
+ * per-check contracts on purpose: the integration config is excluded from
+ * `test:unit:coverage` per `vitest.config.ts`, so every branch in `check.ts`
+ * needs a unit case here regardless. Path assertions stay separator-agnostic.
  */
 
 import { readFileSync } from 'node:fs';
@@ -720,18 +701,10 @@ dynamic = ["version"]
   });
 
   it("accepts maturin+bundle_cli when the bin lives in a workspace member crate (crate_path is the workspace root)", async () => {
-    // Cargo-workspace layout (this is `thekevinscott/dirsql`'s shape):
-    // - `/Cargo.toml`      = `[workspace]` table, no `[[bin]]`
-    // - `/crates/cli/Cargo.toml` = `[package]` with `[[bin]] my-cli`
-    //
-    // `cargo build --bin my-cli` from the workspace root resolves the
-    // bin transparently. The check must do the same — walking the
-    // workspace's `members` and aggregating each member's `[[bin]]`
-    // entries — otherwise `crate_path = "."` (the default) is
-    // unsatisfiable for the standard cargo-workspace shape: any value
-    // that makes the check pass breaks the build's stage step (which
-    // reads from `<crate_path>/target/...`, but cargo writes to the
-    // workspace-rooted target dir).
+    // Cargo-workspace shape: a `[workspace]` root with no `[[bin]]`, the member
+    // crate carrying it. `cargo build --bin` resolves it from the root, so the
+    // check must walk `members` too — otherwise the default `crate_path = "."`
+    // is unsatisfiable and any value that passes breaks the stage step's paths.
     build({
       'putitoutthere.toml': `
 [putitoutthere]

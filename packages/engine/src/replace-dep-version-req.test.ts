@@ -1,12 +1,8 @@
 /**
- * Unit tests for `replaceDepVersionReq` (#621).
- *
- * Two properties are load-bearing. The requirement on a bumped path
- * dependency MUST move (otherwise cargo refuses to resolve and the build
- * dies at exit 101), and a registry dependency's requirement MUST NOT
- * (rewriting pyo3's `0.22` to the release version pins a version that does
- * not exist). Formatting is preserved byte-for-byte: the manifest belongs
- * to the consumer.
+ * Unit tests for `replaceDepVersionReq` (#621). Two properties are
+ * load-bearing: the requirement on a bumped path dependency MUST move (cargo
+ * otherwise refuses to resolve and the build dies at exit 101), and a registry
+ * dependency's MUST NOT (it would pin a version that does not exist).
  */
 
 import { describe, expect, it } from 'vitest';

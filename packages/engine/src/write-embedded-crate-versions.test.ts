@@ -1,15 +1,8 @@
 /**
- * Unit tests for `writeEmbeddedCrateVersions` (#621).
- *
- * `node:fs` and the workspace-root walk are mocked so each case isolates a
- * routing branch; the real on-disk graph walk is covered by the integration
- * tier and the compiled-artifact contract by the e2e tier.
- *
- * Manifests are matched by path SUFFIX rather than equality: the unit
- * suite also runs on windows-latest, where the code under test resolves
- * "/r/host" into a drive-lettered, backslash-separated path. Comparing the
- * tail keeps the assertions honest on both without importing a path
- * collaborator the isolation gate would reject.
+ * Unit tests for `writeEmbeddedCrateVersions` (#621). Manifests are matched by
+ * path SUFFIX rather than equality: the unit suite also runs on
+ * windows-latest, where "/r/host" resolves to a drive-lettered,
+ * backslash-separated path.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';

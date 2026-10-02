@@ -1,13 +1,8 @@
 /**
- * Integration test for the actionlint id-token gate (#452, epic #442).
- *
- * Drives the real `piot-ci actionlint-idtoken` dispatch in-process — `run()`
- * from `cli.ts` → `runActionlintIdToken` → `decideActionlintIdToken` — with
- * only the filesystem boundary (`node:fs/promises`) mocked. Unlike
- * `src/actionlint-idtoken/run.test.ts` (which also mocks `decide` to isolate
- * the composition root's wiring), this exercises the real matcher, so the
- * `grep -n` line-number echo and the `::error file=…` output the workflow
- * relies on are asserted through the actual command.
+ * Integration test for the actionlint id-token gate (#452, epic #442). Drives
+ * the real `piot-ci actionlint-idtoken` dispatch in-process with only
+ * `node:fs/promises` mocked, so — unlike `src/.../run.test.ts`, which also mocks
+ * `decide` — the real matcher and the `::error file=…` output are asserted.
  */
 
 import { readFile } from 'node:fs/promises';

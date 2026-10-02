@@ -1,28 +1,9 @@
 name: putitoutthere build
 
-# Reusable workflow for PR-time build verification.
-#
-# Consumer integration (their own .github/workflows/build-check.yml):
-#
-#   on:
-#     pull_request: {}
-#
-#   jobs:
-#     build-check:
-#       uses: thekevinscott/putitoutthere/.github/workflows/build.yml@v0
-#
-# Same plan + build matrix as `release.yml` runs, called via the same
-# `_matrix.yml` reusable workflow. Stops there: there is no publish
-# job, no `id-token: write` permission, no OIDC trusted-publisher
-# exchange, no registry auth. The bytes required to publish do not
-# exist on this code path. That structural guarantee — not a
-# `dry_run: true` runtime flag — is what makes this safe to run on
-# untrusted PRs.
-#
-# Permissions: contents: read only. A grep assertion in
-# `actionlint.yml` rejects any future patch that adds `id-token: write`
-# to this file or to `_matrix.yml`. See issue #272 for the
-# safety reasoning.
+# Reusable workflow for PR-time build verification: the same plan + build
+# matrix release.yml runs, via `_matrix.yml`, and nothing more. No publish
+# job, no `id-token: write`, no registry auth -- the bytes needed to publish
+# do not exist here. A grep in actionlint.yml rejects adding them (#272).
 
 on:
   workflow_call:

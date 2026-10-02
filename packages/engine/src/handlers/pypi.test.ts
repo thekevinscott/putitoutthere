@@ -1,21 +1,8 @@
 /**
- * PyPI handler tests.
- *
- * Issue #17. Plan: §6.4, §12.2, §12.3, §13.1, §14.5.
- *
- * **Architectural note (2026-04-28).** The PyPI handler no longer
- * uploads to PyPI from inside the engine; the upload happens in a
- * caller-side `pypi-publish` job that runs `pypa/gh-action-pypi-publish`.
- * The engine's role is plan + build + version-rewrite + git tag.
- * See `notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md`
- * and the handler comment in `pypi.ts` for the why.
- *
- * Unit-suite isolation: the subprocess boundary (the process seam,
- * `execCapture`) and the filesystem (`node:fs/promises`) are mocked so each
- * case isolates the unit under test — pyproject.toml contents are driven
- * through `readFile` resolutions rather than a real temp tree. Real
- * end-to-end file behavior is covered by the pypi integration tier
- * (tests/integration/pypi.integration.test.ts).
+ * PyPI handler tests (#17). The handler no longer uploads to PyPI — that
+ * happens caller-side via `pypa/gh-action-pypi-publish`; the engine's role is
+ * plan + build + version-rewrite + git tag. See
+ * `notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md`.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';

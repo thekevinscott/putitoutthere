@@ -1,17 +1,8 @@
 /**
- * `putitoutthere verify` — per-package publish/trust posture (#414).
- *
- * Answers "do I still need the registry token, or is OIDC trusted
- * publishing active?" For each package it reads the latest published
- * version (the same `latestVersion` `status` uses) and then that release's
- * trust attribution via the handler's `trustPosture` primitive — from
- * PUBLIC registry data, no secrets. Classifies `oidc` (trusted publisher /
- * provenance) / `token` / `unpublished` (no release) / `unreachable`.
- *
- * Shared engine, no parallel logic (design-commitments #7): a thin reader
- * over the per-kind handlers, reusing the exact registry-name resolution
- * the publish path runs. The read degrades — an unreachable registry
- * yields `unreachable`, never an abort — matching `status`.
+ * `putitoutthere verify` — per-package publish/trust posture (#414): "do I still
+ * need the registry token, or is OIDC trusted publishing active?", answered from
+ * PUBLIC registry data via the handler's `trustPosture`. Classifies `oidc` /
+ * `token` / `unpublished` / `unreachable`; unreachable degrades, never aborts.
  */
 
 import { join } from 'node:path';

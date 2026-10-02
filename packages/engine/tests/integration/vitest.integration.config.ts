@@ -1,10 +1,6 @@
 /**
- * Vitest config for integration tests. Kept separate from the unit
- * config so coverage gates don't try to apply to mock-heavy files.
- *
- * Invoked via `pnpm run test:integration`.
- *
- * Issue #27.
+ * Vitest config for integration tests. Separate from the unit config so
+ * coverage gates do not apply to mock-heavy files. Issue #27.
  */
 
 import { defineConfig } from 'vitest/config';

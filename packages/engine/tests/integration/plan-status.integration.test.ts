@@ -1,24 +1,8 @@
 /**
- * `piot plan` — publish/skip verdict + dependency-skew view (integration).
- *
- * `plan` today emits the build matrix; the publish-vs-skip decision lives
- * in the publish path (`handler.isPublished`) and is surfaced nowhere
- * until a real publish runs. Slice 4 (#412) makes `plan` always answer
- * "what would a release from this ref actually ship?": per package,
- * PUBLISH (version not yet on the registry) vs SKIP (already published)
- * vs UNKNOWN (registry unreachable — reported, never aborts), plus a
- * dependency-skew warning when a package would PUBLISH while a
- * `depends_on` dependency SKIPs (the motivating incident's forward
- * consequence: dependents shipping ahead of a stuck dependency).
- *
- * Thin reader, no parallel logic (design-commitments #7): the real
- * planner (cascade + version) + the real `isPublished` the publish path
- * dispatches through. Only the registry HTTP boundary is mocked (msw);
- * config, plan, version, and handler dispatch are real. The build
- * `matrix` it emits is byte-identical to today's — verdicts are additive.
- * This is the e2e twin of `tests/e2e/plan-status.e2e.test.ts`.
- *
- * Issue #412, #403 slice 4.
+ * `plan` publish/skip verdict + dependency-skew view (#412, #403 slice 4).
+ * UNKNOWN (registry unreachable) is reported, never aborts, and the build
+ * `matrix` stays byte-identical — verdicts are additive. Thin reader over the
+ * real planner and the real `isPublished`; only registry HTTP is mocked.
  */
 
 import { execFileSync } from 'node:child_process';

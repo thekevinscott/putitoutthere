@@ -1,10 +1,5 @@
 /**
- * `verifyWheel` orchestrator (#450). `node:fs/promises` and the file-finding /
- * zip-reading helpers are mocked so this pins the branching / output / exit
- * codes in isolation; their real behaviour is covered in
- * `find-dist-file.test.ts` and `read-wheel-version.test.ts`, and end-to-end in
- * the integration + e2e tiers. The dist-presence check is driven through the
- * mocked `stat` (also backing `pathExists`).
+ * `verifyWheel` orchestrator (#450): the branching, output, and exit codes.
  */
 
 import { stat } from 'node:fs/promises';

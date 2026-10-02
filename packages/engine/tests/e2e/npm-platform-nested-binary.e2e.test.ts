@@ -1,34 +1,8 @@
 /**
- * Nested bundled-cli artifacts, end-to-end through the real CLI and the
- * real `npm` CLI — the e2e twin of
- * `npm-platform-nested-binary.integration.test.ts` (#626).
- *
- * A consumer's build step may stage the cross-compiled binary either flat
- * (`artifacts/<pkg>-<triple>/<bin>`) or nested under a subdirectory
- * (`artifacts/<pkg>-<triple>/bin/<bin>`). Both layouts clear the
- * completeness check — it lists files recursively — so both reach
- * `synthesizePlatformPackage`. The nested one used to synthesize
- * `"main": "bin"` (a *directory*) and, worse, land the #365 executable-bit
- * restore on that directory instead of on the binary, so the published
- * tarball carried the binary at 0644. Live casualty:
- * `@agent-transcripts/x86_64-unknown-linux-gnu@0.0.1`.
- *
- * Where the integration twin mocks the npm subprocess and inspects the
- * staging directory, this shells out to the built CLI (`node
- * dist/cli-bin.js publish`) and lets the real `npm` CLI pack and PUT the
- * tarball. The assertion reads the bytes npm actually published — the
- * exact artifact a consumer downloads. That is the fidelity a mock cannot
- * offer: `npm pack`'s `portable: true` mode is what turns a staged file's
- * executable bit into 0755-vs-0644 in the tarball, and no mocked
- * subprocess reproduces it.
- *
- * The registry is a local, in-process HTTP stub rather than npmjs.org:
- * this scenario *must* publish to be observable, and publishing to real
- * npm on every PR is not an option. Same trade the fixture suite makes
- * with Verdaccio for its `-first-publish` rows. Everything else — the
- * engine, the npm CLI, the filesystem, the tarball — is real.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #626.
+ * Nested bundled-cli artifacts (`artifacts/<pkg>-<triple>/bin/<bin>`) through
+ * the real `npm` CLI: `npm pack`'s `portable: true` mode is what turns a
+ * staged file's executable bit into 0755-vs-0644 in the tarball, which no
+ * mocked subprocess reproduces. The registry is a local stub. #626.
  */
 
 import { execFile, execFileSync } from 'node:child_process';

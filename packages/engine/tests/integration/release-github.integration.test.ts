@@ -1,30 +1,8 @@
 /**
- * `piot release-github` — "Create GitHub Release(s) for new tag(s)"
- * (integration). Epic #442, sub-issue #444.
- *
- * Extraction of the inline "Create GitHub Release(s) for new tag(s)" bash
- * step in `.github/workflows/release.yml` into one tested engine command.
- * The #436/#437 fragility becomes ordinary code, and this tier pins the
- * contract:
- *
- * - **no-fetch** — the command never runs `git fetch`. Local tag state is
- *   already complete (checkout fetched every remote tag; the engine created
- *   the new tags locally in the same job), and an un-forced `git fetch
- *   --tags` rejects any tag that moved since checkout — a consumer's
- *   floating major tag moving mid-run fails the job after a fully
- *   successful publish (#436).
- * - **ref-scoped-push** — each tag is pushed `git push origin
- *   refs/tags/<tag>`, idempotent and invisible to every other tag, before
- *   its Release is created (heals the engine's warn-only tag push, #407).
- * - **idempotent-create** — the `gh release view` guard stays, so re-runs
- *   skip already-created Releases instead of erroring.
- *
- * This tier drives the CLI in-process (`run([...])`) and mocks only the
- * Node built-in subprocess boundary — `execFile` (under `execCapture`) and
- * `spawn` (under `execInherit`) — so the first-party exec seam runs for real
- * (testing-conventions forbids mocking first-party modules in integration
- * tests). The e2e twin (`tests/e2e/release-github.e2e.test.ts`) shells out to
- * the built CLI against a real git repo + bare remote with a stubbed `gh`.
+ * `piot release-github` (epic #442, #444). Never runs `git fetch`: an
+ * un-forced `git fetch --tags` rejects any tag that moved since checkout, so
+ * a floating major tag moving mid-run fails the job after a fully successful
+ * publish (#436). Mocks only the Node built-in subprocess boundary.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

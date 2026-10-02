@@ -1,46 +1,8 @@
 /**
  * `putitoutthere` CLI entry. Internal seam — the reusable workflow
- * (`.github/workflows/release.yml`) invokes this. Not a consumer-
- * facing surface; flags / help text are stable enough to test, but
- * not promised externally. See `notes/design-commitments.md`.
- *
- * Commands:
- *   plan           — compute and emit the release plan
- *   publish        — execute the plan against the registries
- *   check          — pre-merge configuration validation (#319). Runs every
- *                    check knowable from the consumer's repo state alone.
- *                    Internal — invoked by the pre-merge reusable workflow;
- *                    not surfaced in user-facing docs per non-goal #7.
- *   status         — read-only registry-vs-tag drift report (#403)
- *   reconcile      — backfill missing tags for published-but-untagged
- *                    packages; idempotent, supports `--dry-run` (#403)
- *                    and `--expect <name>@<version>` (#666)
- *   resolve        — emit willfire's callback map for the e2e plan job
- *                    (#683; key format frozen on thekevinscott/willfire#153)
- *   write-version  — bump a package's manifest to a planned version
- *                    (pre-build hook for maturin; #276)
- *   write-crate-version — bump a crate's Cargo.toml to a planned
- *                    version (pre-build hook for npm bundled-cli; #366)
- *   version        — print CLI version
- *
- * Global flags:
- *   --cwd <path>      working directory (default: process.cwd())
- *   --config <path>   path to putitoutthere.toml
- *   --json            machine-readable output
- *
- * `plan` / `publish` flags:
- *   --release-packages <spec>  manual-release spec; bypasses change
- *                    detection and plans exactly the named packages
- *
- * `write-version` flags:
- *   --path <dir>      package directory (where pyproject.toml lives)
- *   --version <v>     planned version to write
- *
- * `--dry-run` is rejected on every command except `reconcile`. It was
- * removed from `plan` / `publish` deliberately (#244): the library's job
- * is publishing, and a non-publishing mode of the publish command was a
- * coverage hole pretending to be a feature. `reconcile` is read-then-tag,
- * so a preview-only mode is meaningful there and is supported (#403).
+ * (`.github/workflows/release.yml`) invokes this; not a consumer-facing
+ * surface (see `notes/design-commitments.md`). `--dry-run` is rejected
+ * everywhere except `reconcile`, which is read-then-tag (#244, #403).
  */
 
 import { isAbsolute, resolve } from 'node:path';

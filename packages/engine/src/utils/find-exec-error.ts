@@ -1,18 +1,10 @@
 import { ExecError } from './exec-error.js';
 
 /**
- * The `ExecError` a thrown error was built from, or null when none is in
- * its cause chain.
- *
- * Handlers catch the seam's `ExecError` and rethrow a rendered message with
- * the original as `cause` — which is the right shape for a human reading one
- * line, and the wrong shape for the failure dump, which was reconstructing
- * the subprocess from that rendered sentence and so reported an empty
- * command, an empty stdout and exit code -1. Walking back to the `ExecError`
- * recovers what actually ran. #617.
- *
- * Bounded depth: `cause` is caller-supplied and can be cyclic, and no real
- * chain in this engine is more than a couple of links deep.
+ * The `ExecError` a thrown error was built from, or null when none is in its
+ * cause chain. Handlers rethrow a rendered message with the original as
+ * `cause`, which left the failure dump reporting an empty command, empty stdout
+ * and exit -1 (#617). Depth is bounded: `cause` is caller-supplied and cyclic.
  */
 const MAX_DEPTH = 10;
 

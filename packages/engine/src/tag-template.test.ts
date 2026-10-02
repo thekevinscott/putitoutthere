@@ -1,10 +1,8 @@
 /**
- * Tests for the tag-template helpers (`src/tag-template.ts`).
- *
- * Covers the default shape, the single-package `v{version}` shape, and
- * the edge cases that bit us before this was configurable — tags from
- * sibling packages that share a name prefix, non-semver noise, and
- * hyphen-bearing package names.
+ * Tests for the tag-template helpers (`src/tag-template.ts`). Covers the
+ * default shape, the single-package `v{version}` shape, and the edge cases
+ * that bit us before this was configurable: tags from sibling packages that
+ * share a name prefix, non-semver noise, hyphen-bearing package names.
  */
 
 import { describe, expect, it } from 'vitest';

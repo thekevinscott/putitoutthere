@@ -1,11 +1,8 @@
 /**
- * Action manifest invariants. Catches the unbalanced-quote class of bug
- * (#249) where `action.yml` ships syntactically broken and the GitHub
- * runner is the first parser to touch it.
- *
- * Companion to `workflow-yaml-invariants.test.ts`, which only walks
- * `.github/workflows/`. The repo-root `action.yml` had no local parser
- * coverage before this test.
+ * Action manifest invariants. Catches the unbalanced-quote class of bug (#249)
+ * where `action.yml` ships syntactically broken and the GitHub runner is the
+ * first parser to touch it. `workflow-yaml-invariants.test.ts` only walks
+ * `.github/workflows/`, so the repo-root `action.yml` had no local coverage.
  */
 
 import { readFileSync } from 'node:fs';

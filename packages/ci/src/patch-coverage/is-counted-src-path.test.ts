@@ -1,10 +1,7 @@
 /**
- * Pins which post-image paths the patch-coverage gate (#468) counts added
- * lines for. Reproduces the `.mjs`'s two skip filters:
- *   - `/\.test\.ts$|\.d\.ts$/` (test and declaration files never count), and
- *   - `!currentFile.startsWith('packages/engine/src/') || !currentFile.endsWith('.ts')`
- *     (only engine `src/**` TypeScript counts).
- * Pure; exact boolean assertions.
+ * Pins which post-image paths the patch-coverage gate (#468) counts added lines
+ * for, reproducing the `.mjs`'s two skip filters: test and declaration files
+ * never count, and only engine `src/**` TypeScript counts.
  */
 
 import { describe, expect, it } from 'vitest';

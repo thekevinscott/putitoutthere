@@ -1,19 +1,8 @@
 /**
- * Unit tests for `normalizeArtifactLayout`.
- *
- * The integration story lives in
- * `tests/integration/artifact-layout.integration.test.ts` (the failing
- * test that drove this module's creation per #311). These unit cases
- * cover the no-op branches and edge shapes the integration tier
- * doesn't exercise: multi-artifact plans, already-subdir layouts,
- * crates-only matrices, vanilla-npm matrices, and empty/missing
- * artifact roots.
- *
- * The `node:fs` boundary is automocked so each case isolates the
- * branching logic — `existsSync` / `readdirSync` are driven to stage a
- * scenario and the move is asserted through the `mkdirSync` /
- * `renameSync` calls, not real files. Path assertions are separator-
- * agnostic so they hold on Windows as well as POSIX.
+ * Unit tests for `normalizeArtifactLayout` (#311). Covers the branches the
+ * integration tier doesn't: multi-artifact plans, already-subdir layouts,
+ * crates-only matrices, vanilla-npm matrices, and empty/missing artifact
+ * roots.
  */
 
 import { mkdir, readdir, rename, stat } from 'node:fs/promises';

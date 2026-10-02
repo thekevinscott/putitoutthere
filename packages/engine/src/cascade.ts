@@ -1,26 +1,8 @@
 /**
- * Cascade algorithm. Given a package list and the files changed since
- * the last release, returns the packages that will release.
- *
- * Two passes (plan.md §11.1):
- *   1. Direct match: every package whose `globs` intersect the
- *      files changed since *its own* last tag is cascaded.
- *   2. Transitive match: repeat until stable — any package whose
- *      `depends_on` list contains an already-cascaded package gets
- *      added.
- *
- * Seed detection is strictly per-package: using the union of every
- * package's diff lets commits that were already shipped under one
- * package's prior tag spuriously re-trigger another package. See #126.
- *
- * Cycle detection per §11.3: cycles in depends_on are a config error
- * and throw loudly before cascade runs. Dangling depends_on names also
- * throw.
- *
- * Output preserves the input order so downstream matrix emission is
- * deterministic.
- *
- * Issue #7.
+ * Cascade algorithm (#7, plan.md §11.1): direct glob match per package, then
+ * transitive `depends_on` closure. Seed detection is strictly per-package —
+ * the union of every package's diff would let commits already shipped under
+ * one package's prior tag spuriously re-trigger another (#126).
  */
 
 import type { Package } from './config.js';

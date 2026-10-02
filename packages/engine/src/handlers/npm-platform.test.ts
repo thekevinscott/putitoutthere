@@ -1,19 +1,7 @@
 /**
- * npm platform-package orchestration tests.
- *
- * Mocks the process seam (`execCapture`) so we can assert every npm
- * invocation (platform publishes, then main) and stub per-package
+ * npm platform-package orchestration tests (#19). Asserts every npm
+ * invocation (the platform publishes, then main) against stubbed per-package
  * `isPublished` lookups.
- *
- * Unit-suite isolation: the subprocess boundary (the process seam,
- * `execCapture`) and the filesystem (`node:fs/promises`) are both mocked.
- * `node:fs/promises` is backed by a small in-memory tree (below) shared
- * between test setup and the unit under test, so synthesized staging dirs,
- * artifact reads, and package.json rewrites all observe the same state
- * without a real temp tree. Real end-to-end file behavior is covered by
- * the npm integration tier (tests/integration/npm.integration.test.ts).
- *
- * Issue #19. Plan: §13.7.
  */
 
 import { chmod, cp, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';

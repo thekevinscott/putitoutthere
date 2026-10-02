@@ -1,33 +1,9 @@
 /**
- * Every fixture under `tests/fixtures/` carries a
- * `.github/workflows/release.yml` snapshot of the canonical consumer
- * template (the one the README's Quickstart shows). This test asserts
- * every snapshot is byte-identical to that template.
- *
- * Why: the e2e harness in `.github/workflows/e2e-fixture.yml` runs
- * the same plan → build → publish → pypi-publish job graph against
- * each fixture that the reusable workflow runs against a real
- * consumer's tree. For that to be a faithful test of the consumer
- * experience, each fixture has to be self-describing: opening
- * `tests/fixtures/python-rust-maturin/` should show exactly what a
- * maturin consumer would write. If any fixture's workflow drifts
- * from the canonical template, this test fails — preventing the
- * fixtures from quietly becoming a parallel testing universe with
- * its own special-case YAML.
- *
- * This is a snapshot, not an executor. GitHub Actions parses
- * workflows from the trigger commit's repo root at workflow-load
- * time; a workflow living under `tests/fixtures/...` is never
- * actually run by GitHub. Execution lives in
- * `.github/workflows/e2e-fixture.yml`. Issue #244.
- *
- * 2026-04-28: template now includes a conditional `pypi-publish` job.
- * PyPI Trusted Publishers can't validate tokens minted from inside
- * a cross-repo reusable workflow (warehouse#11096), so PyPI uploads
- * have to run in the caller's workflow context. The job's `if:`
- * gates on the reusable workflow's `has_pypi` output — non-PyPI
- * repos paste it but it never executes for them, preserving the
- * "single canonical template" invariant.
+ * Every fixture's `.github/workflows/release.yml` must be byte-identical to the
+ * canonical consumer template (#244), so fixtures can't become a parallel YAML
+ * universe. Snapshots, not executors: GitHub loads workflows from the repo root,
+ * so one under `tests/fixtures/` never runs — execution is `e2e-fixture.yml`'s.
+ * The template's conditional `pypi-publish` job exists for warehouse#11096.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';

@@ -1,57 +1,8 @@
 /**
- * Pre-build version bump reaches EMBEDDED workspace crates — integration.
- *
- * Issue #621. #374 fixed "the shipped CLI prints a stale version" for the
- * `bundle_cli` path; the symptom returned byte-identical once the CLI moved
- * into a maturin extension module and a napi addon, because all three
- * pre-build writers bump only **the crate the build tool reads as its
- * version source**:
- *
- *   write-version        (#276) -> maturin's version source (`matrix.path`)
- *   write-crate-version  (#366) -> `bundle_cli.crate_path`
- *   napi pre-build step  (#429) -> the napi crate at `matrix.path`
- *
- * That invariant answers "what version is this artifact?" It does not answer
- * "whose `CARGO_PKG_VERSION` is observable *from* this artifact?" Those sets
- * are identical only when the artifact is one crate deep. The moment the
- * artifact embeds a sibling crate **by path** and that sibling owns the
- * version-bearing symbol (`clap`'s `#[command(version)]` expands
- * `env!("CARGO_PKG_VERSION")` inside the crate where it is written), nothing
- * bumps the sibling and the artifact ships a stale literal forever.
- *
- * `CARGO_PKG_VERSION` is a compile-time constant scoped per crate, read from
- * that crate's own on-disk `[package].version`. There is no env override --
- * not `CARGO_PKG_VERSION=... cargo build`, not `.cargo/config.toml [env]`
- * with `force = true`. Rewriting the manifest before the build is the only
- * lever, which is why this is putitoutthere's problem and not the consumer's.
- *
- * Two contracts are pinned here, and the second is the one that bites:
- *
- *  1. every in-repo crate the artifact compiles is bumped to the artifact's
- *     release version;
- *  2. every in-repo version **requirement** pointing at a bumped crate is
- *     rewritten too.
- *
- * Without (2) the fix is worse than the bug. A `dep = { path = "..",
- * version = "0.2" }` requirement -- which is *mandatory* for any crate that
- * also publishes to crates.io -- stops matching the moment the dependency is
- * bumped past it, and cargo refuses to resolve:
- *
- *     error: failed to select a version for the requirement `core = "^0.2"`
- *     candidate versions found which didn't match: 0.4.2
- *
- * That is a hard build failure (exit 101) before a line compiles, and it is
- * *intermittent*: a patch-cadence repo stays green for months and detonates
- * on the first bump that leaves the requirement's range.
- *
- * This lives in `tests/integration/` because the behavior is only observable
- * when the real manifest readers, the real workspace-root walk, and the real
- * dependency-graph walk run together against an on-disk cargo workspace --
- * a seam a unit test with stubbed inputs cannot exercise. The e2e twin
- * (`tests/e2e/embedded-crate-version.e2e.test.ts`) shells out to the built
- * CLI, then actually runs `cargo build` and executes the binary, which is
- * the only tier that can catch the resolution failure above: a
- * manifest-only assertion passes green on a tree that cannot build.
+ * Pre-build version bump reaches EMBEDDED workspace crates (#374, #621).
+ * `CARGO_PKG_VERSION` is a per-crate compile-time constant read from that
+ * crate's own manifest, with no env override — not `CARGO_PKG_VERSION=…`,
+ * not `.cargo/config.toml [env]` with `force = true`. Requirements move too.
  */
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

@@ -1,19 +1,8 @@
 /**
- * The registry kinds a planned release still has work for (#622).
- *
- * Distinct `kind`s carrying at least one package whose planned version is
- * NOT already on its registry, in first-seen order. The reusable workflow
- * gates registry authentication on this: `release.yml` used to ask the build
- * matrix "does this repo have a crates package?", which is true whenever a
- * crate exists — published or not — so the crates.io OIDC exchange fired on
- * re-runs with nothing left to ship, and a failing exchange killed the
- * publish job before npm and PyPI got their turn.
- *
- * `unknown` (the registry could not be reached, so `plan` degraded rather
- * than aborting) counts as unpublished. Reading "we could not tell" as
- * "nothing to do" would drop the credential a publish may well still need,
- * turning a registry blip at plan time into an auth failure at publish time;
- * listing the kind preserves the pre-#622 behaviour in exactly that case.
+ * The registry kinds a planned release still has work for (#622): distinct
+ * `kind`s with a package whose planned version is not yet on its registry.
+ * `release.yml` gates registry auth on this, so a re-run with nothing left to
+ * ship needs no crates.io OIDC. `unknown` counts as unpublished, never as done.
  */
 
 import type { PlanVerdict } from './plan-status-types.js';

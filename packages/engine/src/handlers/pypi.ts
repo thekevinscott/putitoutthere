@@ -1,41 +1,9 @@
 /**
- * PyPI handler.
- *
- * **Architectural note (2026-04-28).** PyPI's Trusted Publisher matching
- * filters candidate publishers by `repository_owner` + `repository_name`
- * before checking `job_workflow_ref`. When OIDC tokens are minted from
- * inside a cross-repo reusable workflow, the `repository` claim is the
- * *caller's* repo and `job_workflow_ref` is the reusable workflow's
- * path — so a TP registered against the reusable workflow's repo is
- * filtered out before workflow_ref is even checked. PyPI documents this
- * as unsupported and tracks the fix at pypi/warehouse#11096 (no
- * timeline). See `notes/audits/2026-04-28-pypi-tp-reusable-workflow-
- * constraint.md`.
- *
- * Consequence for `putitoutthere`: the engine cannot upload to PyPI
- * from inside the reusable workflow's publish job. The actual upload
- * is delegated to a caller-side `pypi-publish` job that runs
- * `pypa/gh-action-pypi-publish` from the consumer's own workflow
- * context (where both `repository` and `job_workflow_ref` align with
- * the consumer's repo + their TP registration). The reusable workflow
- * still emits the matrix and builds artifacts; the upload moves, and
- * with it the package's git tag (#623) — a tag records what shipped, so
- * it belongs to the job that actually ships it.
- *
- * The handler therefore:
- *  - `isPublished`: unchanged. Public PyPI HEAD; no auth needed.
- *  - `writeVersion`: unchanged. Rewrites `[project].version` in-place
- *    or logs a SETUPTOOLS_SCM hint for dynamic-version projects.
- *  - `publish`: NO upload. Returns `{ status: 'delegated' }`, which
- *    `publish.ts` deliberately does NOT tag (#623). The upload runs in
- *    the caller's `pypi-publish` job via `pypa/gh-action-pypi-publish`;
- *    the tag is cut afterwards, from that same job, once PyPI confirms
- *    the version is live. Reporting `published` here used to cut the tag
- *    at the moment of delegation, so any later failure in the run — a
- *    different registry, a different package — left a tag on the remote
- *    naming a distribution nobody had uploaded.
- *
- * Issue #17, #623. Plan: §6.4, §12.2, §12.3, §13.1, §14.5, §16.1.
+ * PyPI handler (#17, #623; plan §6.4, §12.2, §12.3, §13.1, §14.5, §16.1). TP
+ * matching filters on `repository_owner`/`repository_name` before
+ * `job_workflow_ref`, so a cross-repo reusable workflow's token never matches
+ * (pypi/warehouse#11096): `publish` uploads nothing, returns `{ status:
+ * 'delegated' }`, and the caller's `pypi-publish` job uploads and tags.
  */
 
 import { readFile } from 'node:fs/promises';

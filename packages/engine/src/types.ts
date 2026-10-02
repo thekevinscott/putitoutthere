@@ -1,10 +1,7 @@
 /**
- * Public SDK + internal handler types.
- *
- * Full contract specified in plan.md §7.1. This file is the scaffolded
- * surface; each field's implementation lands in its own issue:
- * #5 (config), #7 (cascade), #11 (logger), #12 (handler dispatcher),
- * #13 (completeness), #14 (pre-flight), #16–#19 (handlers).
+ * Public SDK + internal handler types. Full contract in plan.md §7.1; per-field
+ * implementations land in #5 (config), #7 (cascade), #11 (logger), #12 (handler
+ * dispatcher), #13 (completeness), #14 (pre-flight), #16–#19 (handlers).
  */
 
 export type Kind = 'crates' | 'pypi' | 'npm';
@@ -81,19 +78,10 @@ export interface Ctx {
    */
   siblingPackagePaths?: readonly string[];
   /**
-   * Absolute paths of the manifests this package's `writeVersion` just
-   * wrote, threaded from its return value so `publish` can tell a managed
-   * bump apart from a stray edit.
-   *
-   * The crates handler's pre-publish dirty-tree check (#135) used to assume
-   * the only file it could have touched was the package's own `Cargo.toml`.
-   * That stopped being true once `writeVersion` learned to follow workspace
-   * inheritance (#639): a crate declaring `version.workspace = true` has its
-   * version bumped at the workspace root, a file outside the package
-   * directory that the guard would otherwise refuse on.
-   *
-   * Optional so local/test flows can omit; absent => the guard falls back to
-   * allowing only the package's own manifest.
+   * Absolute paths of the manifests this package's `writeVersion` just wrote,
+   * so `publish` can tell a managed bump from a stray edit. A crate with
+   * `version.workspace = true` is bumped at the workspace root (#639), outside
+   * what the #135 dirty-tree guard allows. Absent => the package's own manifest.
    */
   managedManifestPaths?: readonly string[];
 }
@@ -113,19 +101,10 @@ export interface ArtifactStore {
 }
 
 /**
- * What a platform-package family did during one publish (#625).
- *
- * `napi` and `bundled-cli` npm packages ship a synthesized package per
- * target alongside the umbrella package — a six-package release is one
- * umbrella and five platform packages. `publishPlatforms` has always
- * known which of them it published and which were already live; this is
- * how that reaches the run report, which is the only record an operator
- * has of what a release actually did. Without it a complete
- * multi-package publish and a partial one that shipped the umbrella and
- * stopped produce byte-identical output.
- *
- * Registry names (`@scope/pkg-<triple>`), not config names, so they can
- * be pasted straight at a registry.
+ * What a platform-package family did during one publish (#625). Without it a
+ * complete multi-package publish and a partial one that shipped only the
+ * umbrella produce byte-identical run reports. Names are registry names
+ * (`@scope/pkg-<triple>`), not config names, so they paste straight at one.
  */
 export interface PlatformPublishSummary {
   /** Published during this run, in publish order. */

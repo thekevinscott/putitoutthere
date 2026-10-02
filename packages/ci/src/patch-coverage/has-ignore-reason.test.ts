@@ -1,10 +1,8 @@
 /**
- * Pins `hasIgnoreReason`, the patch-coverage gate's documented-marker detector.
- * A marker earns permission only when a non-whitespace reason follows the `--`
- * separator (a trailing `-- why` on a v8/c8 ignore marker); a bare marker does
- * not. Inputs are chosen to kill each fixed-string mutant on the one-line
- * implementation: the `--` and comment-close split literals, the `slice(1)` /
- * `join('--')` reassembly, the first-segment pick, `trim()`, and `length > 0`.
+ * Pins `hasIgnoreReason`, the patch-coverage gate's documented-marker detector:
+ * a marker earns permission only when a non-whitespace reason follows the `--`
+ * separator. Inputs are chosen to kill each fixed-string mutant on the one-line
+ * implementation (the split literals, the `slice(1)`/`join('--')` reassembly).
  */
 
 import { describe, expect, it } from 'vitest';

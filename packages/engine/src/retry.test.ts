@@ -1,14 +1,8 @@
 /**
- * Retry policy tests. Exercises withRetry against synthetic errors.
- *
- * Semantics per plan.md §13.3 / §7.3.
- *
- * Issue #10.
- *
- * Pattern note: rejection tests use Promise.all(expect.rejects, runTimers)
- * so the `.rejects` matcher attaches a handler synchronously before
- * vitest advances fake timers. Without that, the rejection fires during
- * timer flush and Node flags it as unhandled.
+ * Retry policy tests (#10). Rejection tests use
+ * `Promise.all(expect.rejects, runTimers)` so the `.rejects` matcher attaches
+ * a handler synchronously before vitest advances fake timers — without that
+ * the rejection fires during timer flush and Node flags it as unhandled.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

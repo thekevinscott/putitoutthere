@@ -1,26 +1,9 @@
 /**
- * #622: the crates.io OIDC exchange must be gated on *crates work left to
- * do*, not on *the repo having a crates package*.
- *
- * `release.yml` gated the `rust-lang/crates-io-auth-action` step on
- * `contains(needs.build.outputs.matrix, '"kind":"crates"')`. That asks "does
- * this repo publish a crate?" — so a re-run whose crates version is already
- * live still ran the exchange, and a failing exchange (no trusted publisher
- * registered yet, or a record that has not propagated) killed the publish job
- * before the engine action ran, taking npm and PyPI with it for crates.io
- * work that would have been skipped anyway.
- *
- * The decision itself lives in tested code — `plan` emits `unpublished_kinds`
- * from the same `handler.isPublished` the publish path dispatches through
- * (`src/unpublished-kinds.ts`, exercised by the integration + e2e twins). What
- * cannot live in code is the three-hop wiring that carries it to the `if:`:
- * engine step output → `_matrix.yml` job output → `_matrix.yml` workflow_call
- * output → `release.yml`'s `needs.build.outputs`. Drop any hop and the
- * expression silently evaluates against an empty string: `contains('', ...)`
- * is `false`, so the exchange never runs and the *next* genuine crates
- * publish fails at `cargo publish` with a missing-credential error nowhere
- * near the edit that caused it. Silent in review, behaviour-affecting in
- * production — see AGENTS.md > "Workflow-contract tests are earned".
+ * #622: the crates.io OIDC exchange is gated on crates work *left to do*, not on
+ * the repo having a crates package. Guarded here is the three-hop wiring that
+ * carries it to the `if:` — engine output → `_matrix.yml` job output → its
+ * `workflow_call` output → `release.yml`. Drop a hop and `contains('', …)` is
+ * `false`: the exchange silently never runs, breaking the next real publish.
  */
 
 import { readFileSync } from 'node:fs';

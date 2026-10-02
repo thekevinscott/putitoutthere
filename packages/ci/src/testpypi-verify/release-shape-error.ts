@@ -1,11 +1,8 @@
 /**
  * Decision core for "the release exists, but is it the release we published?"
- * Returns the `::error::` line for a release whose file list is missing a
- * wheel or an sdist, or `null` when both are present. Pure.
- *
- * This is deliberately terminal rather than retried (#668): a release the
- * registry has already committed will not grow a missing artifact later, so
- * spending the propagation budget on it only delays an answer already known.
+ * Returns the `::error::` line for a release whose file list is missing a wheel
+ * or an sdist. Deliberately terminal rather than retried (#668): a release the
+ * registry has already committed will not grow a missing artifact later. Pure.
  */
 
 import type { ReleaseFiles } from './release-file-types.js';

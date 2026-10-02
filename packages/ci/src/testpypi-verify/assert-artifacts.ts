@@ -1,19 +1,8 @@
 /**
- * Decision core for the "Assert TestPyPI fixture artifacts exist" step. I/O-free:
- * given the basenames of the files under `dist/`, reproduce the bash's
- * `find dist -maxdepth 1 -type f -print | sort` listing (each as `dist/<name>`)
- * followed by the per-prefix guard that every fixture has both an sdist
- * (`<prefix>-*.tar.gz`) and a wheel (`<prefix>-*.whl`). The first missing
- * artifact emits the exact `::error::missing ...` line and stops with exit 1,
- * matching the bash loop order (maturin before hatch, sdist before wheel).
- *
- * Existence is then followed by provenance (#672): each project's artifacts must
- * agree on one version, and that version must be one the plan phase stamped for
- * *this* run. The upload runs with `skip-existing`, so a run that rebuilt the
- * fixtures at the `0.0.1` build-mode baseline no longer earns a duplicate-file
- * 400 — twine skips it, the metadata verify reads the previous run's files, and
- * the whole job goes green on a build nobody shipped. Refusing the stale version
- * before the upload is the canary that replaces it.
+ * Decision core for the "Assert TestPyPI fixture artifacts exist" step.
+ * I/O-free: lists `dist/` and guards that every fixture has both an sdist and a
+ * wheel, then that they agree on a version the plan phase stamped for *this*
+ * run (#672) — `skip-existing` lets a stale rebuild pass on a prior run's files.
  */
 
 import { buildRequirements } from './build-requirements.js';

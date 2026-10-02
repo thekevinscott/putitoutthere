@@ -1,10 +1,7 @@
 /**
  * Decision matrix for the fixture-materialize harness (#447), extracted from the
- * three "Materialize fixture" bash blocks in `e2e-fixture-job.yml`. Pins the
- * exact per-phase substitution list, git-init flag, and FIXTURE_VERSION-export
- * flag so the TypeScript reimplementation is provably equivalent. Pure — no I/O.
- * Assertions are exact (`toEqual` on the whole plan) so a dropped or altered
- * substitution or flag is caught.
+ * three "Materialize fixture" bash blocks in `e2e-fixture-job.yml`. Exact
+ * `toEqual` on the whole plan, so a dropped substitution or flag is caught.
  */
 
 import { describe, expect, it } from 'vitest';

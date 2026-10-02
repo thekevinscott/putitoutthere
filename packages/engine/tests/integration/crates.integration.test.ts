@@ -1,12 +1,6 @@
 /**
- * crates.io integration tests.
- *
- * Runs crates.isPublished against an msw-mocked registry. Covers:
- * - 404 → false (first release)
- * - 200 → true (already published)
- * - 5xx → TransientError (retry wrapper applies)
- *
- * Issue #27. Plan: §23.3.
+ * crates.isPublished against an msw-mocked registry: 404 → false, 200 →
+ * true, 5xx → TransientError. Issue #27.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

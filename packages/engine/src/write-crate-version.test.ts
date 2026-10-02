@@ -1,11 +1,6 @@
 /**
- * Unit tests for `writeCrateVersionForBuild` (#366).
- *
- * `node:fs` and the workspace-root walk (`findWorkspaceRoot`, itself an fs
- * collaborator) are mocked so each case isolates the read-manifest / route /
- * error branches; the pure `replaceCargoVersion` string rewriter runs for
- * real. Real on-disk manifest round-trips are covered by the integration +
- * e2e tiers.
+ * Unit tests for `writeCrateVersionForBuild` (#366). The pure
+ * `replaceCargoVersion` string rewriter runs for real.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';

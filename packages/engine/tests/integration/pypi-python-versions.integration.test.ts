@@ -1,16 +1,7 @@
 /**
- * pypi multi-version wheel matrix — integration test.
- *
- * Issue #369. `kind = "pypi"` builds a wheel for every CPython version
- * a package supports. The version set is resolved from the real
- * `putitoutthere.toml` (an explicit `python_versions` override) or,
- * failing that, the real `pyproject.toml` `[project].requires-python`.
- *
- * Lives in `tests/integration/` because the behavior is only observable
- * when the real config loader, the real planner, and the real
- * `pyproject.toml` reader run together against an on-disk repo — a
- * unit test with a stubbed config or stubbed pyproject cannot see the
- * config → plan → pyproject seam this exercises.
+ * pypi multi-version wheel matrix (#369): the CPython version set is
+ * resolved from the real `putitoutthere.toml` (`python_versions`) or, failing
+ * that, the real `pyproject.toml` `[project].requires-python`.
  */
 
 import { execFileSync } from 'node:child_process';

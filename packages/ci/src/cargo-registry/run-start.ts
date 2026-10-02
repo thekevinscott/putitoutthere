@@ -1,10 +1,8 @@
 /**
  * Composition root for the cargo-http-registry `start` mode (#454). Backgrounds
- * the registry as a detached process writing to a log file, exports its PID to
- * GITHUB_ENV, polls the git-smart-http endpoint until ready (curl + 1s sleep),
- * and on success appends the `git-fetch-with-cli` cargo config; on failure it
- * dumps the raw log and fails. curl/sleep run through the same subprocess
- * boundary the bash used. The readiness decision is `decide-start.ts`'s.
+ * the registry detached to a log file, exports its PID to GITHUB_ENV, polls the
+ * git-smart-http endpoint until ready, then appends the `git-fetch-with-cli`
+ * cargo config. The readiness decision is `decide-start.ts`'s.
  */
 
 import { spawn } from 'node:child_process';

@@ -1,10 +1,7 @@
 /**
  * Decision matrix for the changelog-check gate (#452), extracted from the
- * inline bash in `.github/workflows/changelog-check.yml`. Pins the exact
- * pass/fail decisions and every emitted line the bash produced, so the
- * TypeScript reimplementation is provably equivalent. Pure — no I/O — so
- * every branch is driven by plain inputs. Assertions are exact (`toEqual`
- * on the full line list) so a dropped or altered message is caught.
+ * inline bash in `.github/workflows/changelog-check.yml`. Exact `toEqual` on
+ * the full line list, so a dropped or altered message is caught.
  */
 
 import { describe, expect, it } from 'vitest';

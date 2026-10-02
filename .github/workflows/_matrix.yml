@@ -1,27 +1,9 @@
 name: putitoutthere matrix
 
-# Internal reusable workflow: plan + build jobs.
-#
-# Consumer-facing workflows (`release.yml`, `build.yml`) call this
-# workflow as `uses: thekevinscott/putitoutthere/.github/workflows/_matrix.yml@v0`
-# so the plan + build steps live in exactly one place. release.yml then
-# adds its own `publish` job that consumes the matrix + has_pypi outputs;
-# build.yml stops here. Single source of truth — every action pin, every
-# `if:` guard on `matrix.kind` / `matrix.build` / `matrix.target`, every
-# shell snippet — only exists in this file.
-#
-# Permissions: contents: read only. No `id-token: write`. The build path
-# must never grow publish-capable bytes — see issue #272 design notes.
-# A grep assertion in `actionlint.yml` guards against drift.
-#
-# Concurrency: callers own the concurrency group. release.yml uses a
-# repository-keyed group with cancel-in-progress: false; build.yml uses
-# a ref-keyed group with cancel-in-progress: true. Declaring concurrency
-# here would double-gate runs.
-#
-# The `uses: thekevinscott/putitoutthere@v0` call below resolves to the
-# same git ref the workflow itself was loaded from, matching the
-# contract release.yml documents in its own header.
+# Internal reusable workflow: plan + build, called by release.yml and
+# build.yml so every action pin and `if:` guard lives in one place.
+# `contents: read` only -- no `id-token: write`, guarded by a grep in
+# actionlint.yml (#272). Callers own concurrency, or runs double-gate.
 
 on:
   workflow_call:
@@ -140,32 +122,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # #391: prime ~/.cargo and target/ from the previous matching run's
-      # cache so per-target matrix cells don't cold-compile their full
-      # Cargo dep graph on every PR — the dominant cost on bundle_cli,
-      # napi, and maturin matrices (observed at 4-6 min per cell with no
-      # Rust changes on a downstream consumer; full release-precheck
-      # workflow ~8 min).
-      #
-      # Gated to fire only on rows that actually invoke cargo:
-      #   - pypi/maturin non-sdist: maturin shells out to cargo (and
-      #     covers the pypi bundle_cli sub-build, same row).
-      #   - npm/napi: the consumer's `napi build` script calls cargo.
-      #   - npm/bundled-cli non-main: engine's `cargo build` for the
-      #     staged CLI binary.
-      # Pure-Python sdist, pure-Python hatch wheels, npm vanilla, and
-      # the bundled-cli `main` row produce no cargo work and skip the
-      # cache.
-      #
-      # `shared-key: matrix.target` partitions the cache slot per target
-      # triple so a write to one target's slot doesn't blow away the
-      # next cell's. `workspaces` enumerates every Cargo.toml-bearing
-      # path the matrix may touch: `matrix.path` for the consumer's
-      # package crate (maturin / napi / single-crate bundled-cli) plus
-      # `matrix.bundle_cli.crate_path` for the bundle_cli crate when
-      # it lives in a separate dir from `matrix.path` (the dirsql shape).
-      # The second line resolves to empty when bundle_cli is unset and
-      # Swatinem silently skips it.
+      # #391: prime ~/.cargo and target/ from the previous matching run so
+      # matrix cells don't cold-compile the Cargo graph (4-6 min per cell).
+      # `shared-key: matrix.target` partitions per triple so one cell's
+      # write can't evict the next; the bundle_cli line is empty when unset.
       - if: (matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist') || (matrix.kind == 'npm' && matrix.build == 'napi') || (matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.target != 'main')
         name: cargo cache (#391)
         uses: Swatinem/rust-cache@v2
@@ -216,29 +176,10 @@ jobs:
           command: sdist
           args: --out dist
 
-      # #282: bundle_cli — cross-compile a Rust CLI per target and stage
-      # it into the package source tree so maturin's [tool.maturin].include
-      # glob picks it up as wheel data. Without these steps, wheels for
-      # consumers who declare `[package.bundle_cli]` ship without the
-      # binary and `pip install <pkg> && <pkg> ...` fails at runtime with
-      # FileNotFoundError. Sdist row is excluded — sdists are source-only.
-      #
-      # Targets resolve to native runners via `defaultRunsOn` in
-      # `src/plan.ts`, so cargo cross-compile linkers are not needed:
-      # x86_64-linux on ubuntu-latest, aarch64-linux on ubuntu-24.04-arm,
-      # darwin on macos-latest, windows on windows-2022 (pinned; see #354).
-      # Rust is pre-installed on all GHA runners; we only `rustup target add`
-      # to make the triple known.
-      # #603: compile the DECLARED triple — no gnu→musl mapping (the npm
-      # bundled-cli lane below reaches the same property via zigbuild,
-      # #605). A musl build is statically
-      # linked (static-pie), and a static binary cannot dlopen: consumer
-      # CLIs that load SQLite extensions fail at runtime with `Dynamic
-      # loading not supported` (dirsql#755). The #381 portability concern
-      # does not apply on pypi: the wheel's manylinux platform tag already
-      # encodes the glibc floor of runner-built artifacts and pip refuses
-      # to install the wheel anywhere older, so a dynamically-linked gnu
-      # binary has exactly the wheel's own reach.
+      # #282: cross-compile the CLI per target and stage it into the package
+      # tree for maturin's include glob, or wheels ship without the binary.
+      # #603: compile the DECLARED triple -- no gnu->musl mapping, since a
+      # static-pie musl binary cannot dlopen (`Dynamic loading not supported`).
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — add Rust target
         shell: bash
@@ -317,25 +258,10 @@ jobs:
           cp "$src" "$dst_dir/"
           echo "staged: $src -> $dst_dir/${BIN}${ext}"
 
-      # #369: build the wheel for this row's specific CPython version.
-      # When a manylinux container is in play it ships every CPython, so
-      # the interpreter has to be selected explicitly — `-i <version>`
-      # (a bare `3.12`) is resolved by maturin's interpreter scan (which
-      # also finds the setup-python host interpreter on containerless
-      # linux builds). macOS uses the host `python<version>` that
-      # setup-python provisioned. Windows omits `-i` entirely: maturin's
-      # non-container build there already uses the single host
-      # interpreter setup-python pinned to this row's version.
-      #
-      # #610: `manylinux` forwards the row's platform-tag baseline (set
-      # by `plan` from the package's `manylinux` config key, linux rows
-      # only). Non-empty, maturin-action builds inside the matching
-      # quay.io/pypa manylinux/musllinux container and passes
-      # `--manylinux <value>`, so the wheel is tagged with the requested
-      # baseline instead of the host's glibc (ubuntu-24.04 = 2.39 —
-      # thekevinscott/dirsql#818). Empty (the default when the key is
-      # absent), the input is a no-op and the build stays on the host,
-      # byte-identical to the pre-#610 behavior.
+      # #369: a manylinux container ships every CPython, so the interpreter
+      # is selected explicitly; Windows omits `-i` (single host interpreter).
+      # #610: non-empty `manylinux` builds in the matching quay.io/pypa
+      # container and tags that baseline, not the host's glibc. Empty = no-op.
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
         uses: PyO3/maturin-action@v1
         with:
@@ -347,52 +273,10 @@ jobs:
             ${{ runner.os == 'Linux' && format('--interpreter {0}', matrix.python_version)
                 || (runner.os == 'macOS' && format('--interpreter python{0}', matrix.python_version) || '') }}
 
-      # #282: wheel-content guard. Permanent defense-in-depth — the
-      # produced wheel must contain the staged binary at <stage_to>/<bin>.
-      # Catches the bug shape this issue tracks (no staging happened) and
-      # any future regression where the cross-compile silently routes the
-      # binary to the wrong path. Runs before upload-artifact, so a
-      # broken wheel never leaves the build runner.
-      #
-      # Path-inside-wheel notes: maturin rewrites paths from the package
-      # source root into the wheel's distribution layout. The exact path
-      # depends on the consumer's pyproject layout (`python/<pkg>/...`
-      # vs `src/<pkg>/...`), so we can't assert against a fully qualified
-      # in-wheel path. We assert that *some* directory inside the wheel
-      # ends in the consumer's `stage_to` and contains the named bin —
-      # which is the strongest cross-layout assertion that still catches
-      # "binary missing entirely."
-      #
-      # #338: when `[tool.maturin].python-source` is set (the standard
-      # `maturin new --mixed` layout), maturin strips that prefix from
-      # on-disk paths when rewriting them into the wheel's distribution
-      # layout. A binary that lives on disk at
-      # `<pkg.path>/<stage_to>/<bin>` = e.g. `packages/python/python/dirsql/_binary/dirsql`
-      # ends up in the wheel at `dirsql/_binary/dirsql` — `python/`
-      # stripped. The engine reads `python-source` from the consumer's
-      # pyproject and subtracts it from `stage_to`; when unset/empty the
-      # behaviour is identical.
-      #
-      # #595: this step used to carry the check inline — `unzip -l | awk |
-      # grep`, plus a `python3 - <<PY … import tomllib … PY` heredoc for the
-      # python-source parse. Both are gone; the engine has shipped the whole
-      # check as `verify bundle-cli` since #451 (same wheel selection, same
-      # python-source stripping, same match, same `::error::` / `ok
-      # bundle_cli:` strings and exit code), and #595 gave `action.yml` the
-      # `verify` surface that finally lets a reusable workflow call it. Two
-      # defects died with the heredoc:
-      #
-      #   - It ran under whatever interpreter `setup-python` provisioned for
-      #     this wheel row, and `tomllib` is stdlib only on CPython >= 3.11 —
-      #     so every fanned wheel row with a <= 3.10 floor crashed the
-      #     release build. The engine parses TOML on the action's own Node,
-      #     which no `requires-python` floor can reach.
-      #   - It was untested workflow YAML duplicating logic the engine
-      #     already owned (`readPythonSource` + `computeStageSuffix`). The
-      #     duplicate is deleted, not relocated — one tested implementation.
-      #
-      # The engine also reads the wheel with a pure-Node zip reader, so the
-      # step no longer depends on `unzip` being on the runner.
+      # #282: the wheel must contain the staged binary. Runs before
+      # upload-artifact so a broken wheel never leaves the runner. Layout
+      # varies, so the engine matches any dir ending in `stage_to` (#338
+      # strips `python-source`). Never re-inline: `tomllib` needs 3.11+ (#595).
       - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.bundle_cli && matrix.target != 'sdist'
         name: bundle_cli — verify wheel contains ${{ matrix.bundle_cli.stage_to }}/${{ matrix.bundle_cli.bin }}
         uses: thekevinscott/putitoutthere@v0
@@ -457,23 +341,10 @@ jobs:
           command: write-launcher
           working_directory: ${{ matrix.path }}
 
-      # #298: bundle_cli — cross-compile a Rust CLI per target and stage
-      # it under `${{ matrix.artifact_path }}` so the engine's npm-platform
-      # handler packages it into the per-platform tarball. Same shape as
-      # the maturin/pypi block above. Without these steps, npm bundled-cli
-      # consumers are still required to author a `scripts/build.cjs` that
-      # cargo-builds the binary themselves; absorbing the script removes
-      # the largest remaining piece of consumer integration surface for
-      # this recipe (#287 documented the seam between consumer scripts
-      # and the engine env contract; #298 closes the seam entirely).
-      #
-      # Targets resolve to native runners via `defaultRunsOn` in
-      # `src/plan.ts`, so cargo cross-compile linkers are not needed.
-      # The `main` target row is the noarch top-level package — it has
-      # no per-target binary to compile.
-      # #605: like the pypi lane, the DECLARED triple is compiled — but via
-      # cargo-zigbuild with a pinned glibc floor, since npm has no
-      # install-time glibc gate (see the add-target step below).
+      # #298: cross-compile the CLI per target and stage it under
+      # `matrix.artifact_path` for the npm-platform handler. The noarch
+      # `main` row has no binary. #605: declared triple via cargo-zigbuild
+      # with a pinned glibc floor -- npm has no install-time glibc gate.
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — add Rust target
         shell: bash
@@ -536,18 +407,10 @@ jobs:
           # cargo invocation byte-identical to its `--features`-less form.
           FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
           NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
-        # Build the cargo invocation in a single non-empty array, mirroring
-        # the pypi cargo-build step above. `cmd=()` followed by
-        # `"${cmd[@]}"` on an empty array errors out under bash 3.2 + set
-        # -u ("unbound variable") — and macOS runners ship bash 3.2 by
-        # default. The array always starts with `(cargo build --release
-        # ...)`, so the expansion is safe on every runner.
-        #
-        # #337: pin `--target-dir target` so the produced binary lands at
-        # `${CRATE_PATH}/target/<triple>/release/<bin>` regardless of
-        # whether `crate_path` points at a workspace root or a member
-        # crate. Mirrors the pypi cargo-build step's fix; same workspace
-        # target-dir bug shape, same resolution.
+        # Build the cargo invocation in one non-empty array: `cmd=()` then
+        # `"${cmd[@]}"` errors under bash 3.2 + set -u, and macOS runners
+        # ship bash 3.2. #337: pin `--target-dir target` so the binary lands
+        # predictably whether crate_path is a workspace root or a member.
         run: |
           set -euo pipefail
           # #387: matrix.rust_target is the engine-resolved Rust triple
@@ -581,25 +444,10 @@ jobs:
           if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
           "${cmd[@]}"
 
-      # #429: bump the napi crate's version to matrix.version before
-      # `napi build` (inside `npm run build`) bakes CARGO_PKG_VERSION into
-      # the compiled `.node`. Mirror of the bundled-cli write-crate-version
-      # step above (#366) and the maturin write-version step (#276): without
-      # it the per-triple `.node` ships the stale on-disk crate literal, so
-      # a library re-exposing the Rust core's version() through napi reports
-      # a version diverging from the published npm package (whose synthesized
-      # package.json version is already correct). #428: write-crate-version
-      # resolves `version.workspace = true` to the workspace root, so a
-      # polyglot-workspace napi crate is handled too.
-      #
-      # The bump runs only when the napi crate's Cargo.toml is COLOCATED at
-      # the package path (the napi-rs single-crate default: Cargo.toml beside
-      # package.json — the shape template-lib and the js-napi fixture use). A
-      # multi-mode package (napi + bundled-cli) or one whose napi crate lives
-      # elsewhere has no Cargo.toml at matrix.path, and there is no per-napi
-      # `crate_path` config to point at it yet, so the bump is skipped with a
-      # notice rather than guessed. The noarch `main` row compiles no
-      # `.node`, so it is excluded.
+      # #429: bump the napi crate's version before `napi build` bakes
+      # CARGO_PKG_VERSION in, or the `.node` reports a stale version (#428
+      # resolves `version.workspace = true`). Only when Cargo.toml is
+      # colocated at the package path; otherwise skipped with a notice.
       - if: matrix.kind == 'npm' && matrix.build == 'napi' && matrix.target != 'main'
         name: napi — detect colocated crate for ${{ matrix.name }}
         id: napi-crate
@@ -624,19 +472,10 @@ jobs:
 
       - if: matrix.kind == 'npm'
         working-directory: ${{ matrix.path }}
-        # Build matrix can target Windows runners; default shell there is
-        # pwsh, but `if [ -f ... ]` is bash. Force bash for portability.
-        #
-        # Strict installs (`npm ci`, `pnpm install --frozen-lockfile`) self-
-        # heal to their non-strict form on failure. Why: bundled-cli / napi
-        # consumers declare `optionalDependencies` for `<name>-<triple>@<version>`
-        # platform packages that this pipeline produces. On the first publish,
-        # those entries 404 on the registry; pnpm 10 silently drops 404'd
-        # optionals from the lockfile when it is regenerated locally, then
-        # `--frozen-lockfile` refuses on the next CI run because the lockfile
-        # and package.json disagree. The `::warning::` makes the fallback
-        # visible in the run log so the consumer understands the recovery.
-        # See README → Recipes → Bundled-CLI npm family.
+        # Force bash: Windows runners default to pwsh, and `if [ -f ... ]`
+        # is bash. Strict installs (`npm ci`, `--frozen-lockfile`) self-heal
+        # to their non-strict form: first-publish platform optionalDeps 404,
+        # pnpm drops them from the lockfile, and strict then refuses.
         shell: bash
         env:
           # #287: bundled-cli / napi consumers' build scripts read TARGET

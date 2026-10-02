@@ -1,17 +1,8 @@
 /**
- * Decision core for the patch-coverage gate (#468). I/O-free: given the added
- * `src/**` lines and a coverage lookup (`coverageFor`, which the composition
- * root binds to the real coverage JSON), decide pass/fail, the exact
- * stdout (`out`) / stderr (`err`) lines, and the exit code. Extracted from
- * `.github/workflows/patch-coverage.mjs`; the decisions, `::error::` text, and
- * exit codes match it exactly (pinned in `decide.test.ts`).
- *
- * Two fatal violation kinds, both exit 1: an added line with no statement hit
- * (uncovered new code), or an added line introducing a *bare* `v8 ignore`
- * block-comment escape hatch. A marker documented with a trailing `-- <reason>`
- * suffix (the v8/c8 reason syntax) is permitted instead — genuinely-unreachable
- * branches must justify themselves rather than silently drop coverage. No
- * additions, or every added line covered with no bare hatches, passes (exit 0).
+ * Decision core for the patch-coverage gate (#468), extracted from
+ * `.github/workflows/patch-coverage.mjs`. Two fatal violations, both exit 1: an
+ * added line with no statement hit, or an added line introducing a *bare*
+ * `v8 ignore` hatch — a trailing `-- <reason>` suffix is permitted instead.
  */
 
 import { hasIgnoreReason } from './has-ignore-reason.js';

@@ -1,10 +1,8 @@
 /**
- * Turns one file's istanbul-format coverage record into the sets of covered /
- * uncovered line numbers, for the patch-coverage gate (#468). Reproduces the
- * `.mjs`'s `coveredLines`: each statement spans start.line..end.line inclusive;
- * a hit count > 0 marks those lines covered, otherwise uncovered; a line
- * touched by both a covered and an uncovered statement is covered (the covered
- * set wins). A missing record yields null. Pure.
+ * Turns one file's istanbul-format coverage record into covered / uncovered
+ * line sets, for the patch-coverage gate (#468). Reproduces the `.mjs`'s
+ * `coveredLines`: a statement spans start.line..end.line inclusive, and a line
+ * touched by both a covered and an uncovered statement is covered. Pure.
  */
 
 import type { CoveredLines, FileCoverage } from './patch-coverage-types.js';

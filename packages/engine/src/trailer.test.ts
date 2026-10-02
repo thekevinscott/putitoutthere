@@ -1,11 +1,6 @@
 /**
- * Release-trailer parser tests. TDD-style.
- *
- * Grammar per plan.md §10.3.
- * Last-`release:`-wins per plan.md §10.6.
- * Examples per plan.md §10.5.
- *
- * Issue #6.
+ * Release-trailer parser tests (#6). Grammar per plan.md §10.3;
+ * last-`release:`-wins per §10.6.
  */
 
 import { describe, expect, it } from 'vitest';

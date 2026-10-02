@@ -1,32 +1,8 @@
 /**
- * Pre-build version bump reaches embedded workspace crates — e2e.
- *
- * Issue #621. The e2e twin of
- * `tests/integration/embedded-crate-version.integration.test.ts`: same
- * scenario, two fidelities. Where the integration test drives the engine
- * in-process and inspects manifests, this one **shells out to the built
- * CLI** (`node dist/cli-bin.js write-crate-version …`), then runs a **real
- * `cargo build`** and **executes the produced binary**, asserting on what it
- * prints.
- *
- * That last step is why this tier is not optional. The bug is about a
- * constant cargo bakes in at compile time, so the only assertion that
- * cannot be self-consistently wrong is "run it and read the output." A
- * manifest-only check is exactly the mock that lies here, in two directions:
- *
- *  - it passes while the compiled artifact still carries the stale literal
- *    (nothing proves the rewrite reached the crate cargo actually compiles);
- *  - worse, it passes on a tree that **cannot build at all**. Bumping a
- *    path dependency past a `version = "0.2"` requirement makes cargo refuse
- *    to resolve (`failed to select a version for the requirement`, exit
- *    101) before a single line compiles. Every manifest assertion still
- *    reads green.
- *
- * No registry is involved: the fixture is a self-contained two-crate cargo
- * workspace with no external dependencies, so `cargo build --offline` is
- * fast and hermetic.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * Pre-build version bump reaches embedded workspace crates (#621).
+ * `CARGO_PKG_VERSION` is baked in at compile time, so only running the built
+ * binary proves the rewrite landed — and a manifest-only assertion also reads
+ * green on a tree cargo refuses to resolve (`failed to select a version`, 101).
  */
 
 import { execFileSync } from 'node:child_process';

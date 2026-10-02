@@ -1,16 +1,8 @@
 /**
- * Every dependency entry declared by a parsed `Cargo.toml`, flattened
- * across the tables cargo resolves. #621.
- *
- * Cargo accepts a dependency in more places than `[dependencies]`, and a
- * stale version requirement in **any** of them fails resolution
- * identically — verified against cargo 1.94.1 for `[dev-dependencies]`,
- * `[build-dependencies]`, `[target.'cfg(…)'.dependencies]` and
- * `[workspace.dependencies]`. A version rewrite that walks only
- * `[dependencies]` therefore still leaves an unbuildable tree, so the
- * flattening happens here, once, rather than at each call site.
- *
- * Pure: takes an already-parsed manifest, touches no I/O.
+ * Every dependency entry declared by a parsed `Cargo.toml`, flattened across
+ * the tables cargo resolves (#621). A stale version requirement in
+ * `[dev-dependencies]`, `[build-dependencies]`, `[target.'cfg(…)'.dependencies]`
+ * or `[workspace.dependencies]` fails resolution identically.
  */
 
 /** One dependency declaration, normalized to its object form. */

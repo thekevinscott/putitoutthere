@@ -1,12 +1,7 @@
 /**
- * Composition root for the actionlint id-token gate (#452): reads the three
- * PR-time-path workflow files, feeds their contents to
- * `decideActionlintIdToken`, writes the lines, returns the exit code. Both
- * collaborators are mocked (the `node:fs` boundary and `decide`) so this
- * isolates the wiring. It asserts the *exact* files read (path + encoding),
- * that their contents are assembled into decide()'s input, and that decide()'s
- * lines + exit code are surfaced unchanged. The decisions themselves are
- * covered in `decide.test.ts`.
+ * Composition-root wiring for the actionlint id-token gate (#452): fs and
+ * `decide` are both mocked, so this pins the exact files read and that decide's
+ * lines + exit code surface unchanged. Decisions live in `decide.test.ts`.
  */
 
 import { readFile } from 'node:fs/promises';

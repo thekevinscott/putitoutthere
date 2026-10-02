@@ -1,11 +1,8 @@
 /**
- * The absolute post-image line number a unified-diff hunk header opens on —
- * the `+C` in `@@ -A,B +C,D @@`. Reproduces the `.mjs`'s
- * `/^@@ -\d+(?:,\d+)? \+(\d+)/` capture without a regex quantifier (which
- * would be an unkillable equivalent mutant): it takes the third
- * space-separated token, requires it to start with `+`, keeps the digits up to
- * the optional `,`, and validates them character-by-character before
- * converting. Returns null for a header it can't read. Pure.
+ * The absolute post-image line a unified-diff hunk header opens on — the `+C`
+ * in `@@ -A,B +C,D @@`. Reproduces the `.mjs`'s `/^@@ -\d+(?:,\d+)? \+(\d+)/`
+ * capture without a regex quantifier, which would be an unkillable equivalent
+ * mutant. Returns null for a header it can't read.
  */
 
 export function parseHunkStart(raw: string): number | null {

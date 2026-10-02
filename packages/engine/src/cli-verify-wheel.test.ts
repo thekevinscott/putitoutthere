@@ -1,12 +1,6 @@
 /**
  * CLI wiring for `verify wheel` (#450): subcommand dispatch and its required
- * flags. Isolated per the unit-suite convention: the engine
- * (`./verify/wheel/index.js`) and the posture fall-through
- * (`./verify/posture.js`) are bare-automocked so the doubles can't drift
- * from the source, and the dispatcher under test (`./cli.js`) is loaded via
- * dynamic import so the mocks are in place first. This asserts routing, not
- * engine behavior (covered in `verify/wheel/index.test.ts` and the e2e-cli
- * tier).
+ * flags.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

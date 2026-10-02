@@ -1,18 +1,8 @@
 /**
- * `publish` pipeline integration test.
- *
- * Exercises the real `publish()` orchestration end-to-end against a
- * real git repo, the default `handlerFor` (so the *actual* npm
- * handler dispatches), and a fake npm registry implemented by
- * mocking `execFileSync` — same shape `npm.integration.test.ts`
- * uses. The only seam stubbed out is the npm CLI subprocess; every
- * piece of putitoutthere's own code (config loader, plan, preflight,
- * completeness, handler dispatch, npm handler body) runs verbatim.
- *
- * Lives in `tests/integration/` so the unit-test config doesn't pick
- * it up. Invoked via `pnpm run test:integration`.
- *
- * Issue #280.
+ * `publish` pipeline integration test (#280): the real `publish()`
+ * orchestration against a real git repo and the default `handlerFor`, with
+ * only the npm CLI subprocess mocked. Lives in `tests/integration/` so the
+ * unit-test config does not pick it up.
  */
 
 import { EventEmitter } from 'node:events';

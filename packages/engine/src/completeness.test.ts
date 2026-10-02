@@ -1,18 +1,6 @@
 /**
- * Artifact completeness check tests. Default-on guardrail that refuses
+ * Artifact completeness check tests (#13). Default-on guardrail that refuses
  * to publish any package whose matrix didn't fully produce.
- *
- * The `node:fs` boundary is automocked so each case isolates the
- * branching logic in `completeness.ts` — `existsSync` / `readdirSync` /
- * `statSync` are driven to stage an artifact directory (present /
- * absent / empty / wrong-shape) and the completeness verdict is
- * asserted, not real temp files. `node:path` stays real so the
- * subject's `join` still builds paths; the test never imports it and
- * feeds a plain string root, so assertions stay separator-agnostic and
- * hold on Windows as well as POSIX.
- *
- * Plan: §13.2.
- * Issue #13.
  */
 
 import { readdir, stat } from 'node:fs/promises';
@@ -40,16 +28,10 @@ let entryNames: string[] = [];
 const root = 'artifacts';
 
 /**
- * Stage a virtual artifacts tree from a map of artifact-directory name
- * to the file entries it contains. A name mapped to `[]` is a present-
- * but-empty directory; a name absent from the map does not exist.
- *
- * Membership is matched by the trailing path segment so the test never
- * hard-codes a separator: the subject builds `join(root, artifact_name)`
- * and the dir path therefore ends with `artifact_name` on every OS.
- * Every listed entry is reported as a non-empty file (the completeness
- * check only recurses into subdirectories, which none of these cases
- * needs).
+ * Stage a virtual artifacts tree from a map of artifact-directory name to the
+ * file entries it contains. A name mapped to `[]` is a present-but-empty
+ * directory; a name absent from the map does not exist. Membership is matched
+ * by trailing path segment so no case hard-codes a separator.
  */
 function stageDirs(dirs: Record<string, string[]>): void {
   dirNames = Object.keys(dirs);

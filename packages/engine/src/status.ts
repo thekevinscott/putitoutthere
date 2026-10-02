@@ -1,22 +1,8 @@
 /**
- * `putitoutthere status` — read-only registry-vs-tag drift report.
- *
- * The registry is the source of truth; git tags are a cache. For each
- * configured package this reconciles the latest git tag (via the same
- * `lastTag` resolver the planner and the publish path use) against the
- * registry's latest published version (via the same per-kind handler the
- * publish path dispatches through), and classifies any drift. No auth,
- * no side effects — git + public registry metadata only.
- *
- * Shared engine, no parallel logic (design-commitments #7): a thin
- * reader over `lastTag` + `handler.latestVersion` + `classify`. It
- * carries no copy of the tag, version, or registry logic the release
- * path owns, so `status` and a real release can never disagree.
- *
- * Issue #403, phase 1. v1 reports the drift-defining pair only — latest
- * tag vs registry latest; the `manifest` and `publisher` columns from
- * the issue mockup are later enrichments. The drift taxonomy lives in
- * `status-classify.ts`; rendering in `status-format.ts`.
+ * `putitoutthere status` — read-only registry-vs-tag drift report (#403). The
+ * registry is the source of truth; git tags are a cache. A thin reader over the
+ * same `lastTag` and `handler.latestVersion` the release path uses, so `status`
+ * and a real release can never disagree. No auth, no side effects.
  */
 
 import { join } from 'node:path';

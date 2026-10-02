@@ -1,29 +1,8 @@
 /**
- * A failed publish keeps the tail of the tool's stderr — the part that
- * carries the error — inside GitHub's per-line log budget.
- *
- * #651. `cargo publish --verbose` under `CARGO_TERM_VERBOSE=true` emits
- * hundreds of KB of healthy build chatter before it says what went wrong.
- * The crates handler renders that whole stream into the message it throws,
- * and the engine logs that message as a single structured record. GitHub
- * Actions cuts a log line at 64KB — in the live view and in the downloaded
- * archive alike — and what survives is the *head*: index update, packaging,
- * the first seconds of `Compiling`. The tail, where cargo prints the actual
- * error, is what gets discarded. On testing-conventions Release run
- * 32420886012 the only diagnostic a consumer got was 64KB of successful
- * build output that stops mid-compile.
- *
- * The contract pinned here: when a tool's stderr is too large to survive
- * the line cut, the record the engine logs keeps the head *and* the tail,
- * announces the elided middle with a byte count, and stays under the
- * budget — while the job-summary dump, which is a file and not a log line,
- * still holds the stream whole.
- *
- * Same harness as `publish-crates.integration.test.ts`: a real git repo,
- * real config load / plan / preflight / handler dispatch, with only the
- * cargo subprocess and the crates.io HTTP boundary stubbed. The e2e twin
- * (`tests/e2e/publish-stderr-tail.e2e.test.ts`) drives the same scenario
- * through the built CLI over a real pipe.
+ * A failed publish keeps the tail of the tool's stderr inside GitHub's
+ * per-line log budget (#651). Actions cuts a log line at 64KB — in the live
+ * view and in the downloaded archive alike — and what survives is the *head*,
+ * not the tail where cargo prints the error. The summary dump stays whole.
  */
 
 import { EventEmitter } from 'node:events';

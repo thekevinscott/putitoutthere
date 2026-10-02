@@ -1,31 +1,8 @@
 /**
- * `command: verify-bundle-cli` through the GitHub Action adapter (#595).
- *
- * `_matrix.yml` is a **reusable** workflow: its jobs check out the
- * *consumer's* repo, so the engine is reachable there only as
- * `uses: thekevinscott/putitoutthere@v0` — never `pnpm exec putitoutthere`.
- * `action.yml` had no `verify` surface, which is exactly why the
- * "bundle_cli — verify wheel contains <stage_to>/<bin>" step still carried
- * an inline `python3 - <<PY … import tomllib … PY` heredoc parsing
- * `[tool.maturin].python-source` from the consumer's pyproject — a third
- * copy of logic the engine already owns (`readPythonSource` +
- * `computeStageSuffix`), and one that runs under whatever interpreter the
- * wheel row provisioned. `tomllib` is stdlib only on CPython >= 3.11, so
- * every maturin wheel row with a <= 3.10 floor crashed the release build
- * (#595 defect 1).
- *
- * This tier drives the **adapter itself** — `main()` from `src/action.ts`,
- * in-process, with the real dispatcher (`run`) behind it, against real
- * deflate `.whl` files and a real `pyproject.toml` on disk. That is the
- * whole point: the python-source parse must now happen in Node, inside the
- * engine, with no Python interpreter in the picture at any version. The
- * e2e twin (`tests/e2e/action-verify-bundle-cli.e2e.test.ts`) runs the
- * ncc-bundled action as a real subprocess against a wheel downloaded from
- * PyPI.
- *
- * Red before the surface exists: `verify-bundle-cli` is not a command the
- * adapter shapes argv for, so it falls through to the generic branch, `run`
- * rejects it as unknown, and no `ok bundle_cli:` line is ever emitted.
+ * `verify-bundle-cli` through the GitHub Action adapter (#595). `_matrix.yml`
+ * is reusable, so the engine is reachable only as `uses:` — and the step it
+ * replaced parsed pyproject in an inline `tomllib` heredoc, which is stdlib
+ * only on CPython >= 3.11, so every wheel row with a <= 3.10 floor crashed.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

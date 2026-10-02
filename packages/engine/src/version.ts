@@ -1,16 +1,8 @@
 /**
- * Version bumper.
- *
- * Strict semver — no pre-release suffixes in v0 (plan.md §26.2 defers
- * `-rc` / `-beta` / `-alpha` to v0.2). Pre-1.0 does *not* use the
- * "breaking minor bumps" convention; 0.1.5 + minor is 0.2.0, not 1.0.0.
- *
- * Issue #8. Plan: §14.3 (bump semantics), §14.4 (first version).
- *
- * Also exports the canonical `USER_AGENT` string used for all outbound
- * HTTP requests to registries (crates.io / npm / PyPI / GitHub).
- * Sourced from `package.json` at build time so new releases don't ship
- * a stale `putitoutthere/0.0.1` UA (#147).
+ * Version bumper (#8; plan.md §14.3 bump semantics, §14.4 first version).
+ * Strict semver, no pre-release suffixes in v0 (§26.2). Pre-1.0 does *not* use
+ * the "breaking minor bumps" convention: 0.1.5 + minor is 0.2.0, not 1.0.0.
+ * Also exports `USER_AGENT`, sourced from `package.json` at build time (#147).
  */
 
 import pkg from '../package.json' with { type: 'json' };

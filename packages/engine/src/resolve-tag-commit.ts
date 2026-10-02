@@ -1,16 +1,8 @@
 /**
- * Pick the commit a backfilled tag should point at.
- *
- * piot reads "changed since last release" from a tag's commit, so the
- * commit matters: tagging an old, already-published version at HEAD would
- * hide every change made since it actually shipped. Prefer a sibling
- * package already tagged at the same version — that tag marks the real
- * release commit (the canonical incident: npm/py tagged `v0.0.1` at the
- * merge the crate also published from). Fall back to HEAD only when no
- * sibling tag exists, matching the publish-path auto-heal, which tags the
- * run's HEAD.
- *
- * Issue #410, #403 slice 3.
+ * Pick the commit a backfilled tag should point at (#410, #403). piot reads
+ * "changed since last release" from a tag's commit, so tagging an
+ * already-published version at HEAD would hide every change made since it
+ * shipped. Prefer a sibling already tagged at the same version; else HEAD.
  */
 
 import type { Package } from './config.js';

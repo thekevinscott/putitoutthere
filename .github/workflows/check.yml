@@ -1,34 +1,9 @@
 name: putitoutthere check
 
-# Reusable workflow for PR-time config validation.
-#
-# Consumer integration (their own .github/workflows/check.yml):
-#
-#   on:
-#     pull_request: {}
-#
-#   jobs:
-#     putitoutthere-check:
-#       uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0
-#
-# Green = "a release run from this commit would not surface
-# configuration-level surprises." Runs every check that's knowable
-# from the consumer's repo state alone (TOML parse, schema, common-
-# mistakes detector, duplicate-name guard, depends_on cycle / dangling-
-# ref detection). The complete pre-merge check list lives in #319;
-# this file is the workflow shell (#317).
-#
-# Cheap: a couple of seconds per PR, no per-target build, no setup-
-# python / setup-rust. The sibling `build.yml` runs the full plan +
-# build matrix and is the heavier PR gate; `check.yml` is the
-# config-sanity gate that catches `putitoutthere.toml` mistakes the
-# build matrix wouldn't (since the build matrix only runs if the
-# config parses far enough to produce a plan).
-#
-# Permissions: contents: read only. The PR-time surface must not be
-# able to mint a publish token; emitting `id-token: write` here would
-# turn this workflow into a parallel diagnostic surface that can act,
-# which `notes/design-commitments.md` non-goal #8 forbids.
+# Reusable workflow for PR-time config validation. Green = "a release from
+# this commit would not surface configuration-level surprises." Runs only
+# checks knowable from the consumer's repo alone. `contents: read` only:
+# emitting `id-token: write` here would violate non-goal #8.
 
 on:
   workflow_call: {}

@@ -1,20 +1,7 @@
 /**
- * `publish` orchestration unit tests.
- *
- * `publish` is the subject: it re-runs plan, runs the pre-flight +
- * completeness gates, then publishes each package in dep order and tags
- * it. Every collaborator is isolated — `loadConfig`, `plan`, the
- * `preflight` gates, `checkCompleteness`, `normalizeArtifactLayout`,
- * `headCommit`, `ensureTag`, and `dumpFailure` are automocked and driven
- * per scenario; the handler is injected via `handlerFor`. `withRetry`
- * runs for real (retry is part of the orchestration under test). So each
- * case asserts the wiring — which gate aborts, publish order, tag-on-
- * success, no-tag-on-failure — without a real repo, network, or tool.
- *
- * The whole flow against real plan/preflight/completeness is pinned in
- * `tests/integration/publish.integration.test.ts` and the e2e tier.
- *
- * Issue #22.
+ * `publish` orchestration unit tests (#22). Every collaborator is mocked
+ * except `withRetry`, which runs for real — retry is part of the
+ * orchestration under test.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

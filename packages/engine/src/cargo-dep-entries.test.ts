@@ -1,14 +1,8 @@
 /**
- * Unit tests for `cargoDepEntries` (#621).
- *
- * The contract that matters is coverage of the tables cargo resolves: a
- * stale version requirement in ANY of them fails resolution identically
- * (verified against cargo 1.94.1), so a table missed here becomes an
- * unbuildable tree at release time.
- *
- * Fixtures are plain objects rather than parsed TOML. The unit under test
- * is the flattening, not the parser, so feeding it the parser's output
- * shape directly keeps the test isolated from `smol-toml` entirely.
+ * Unit tests for `cargoDepEntries` (#621). Coverage of every table cargo
+ * resolves is the contract: a stale version requirement in ANY of them fails
+ * resolution identically (verified against cargo 1.94.1), so a table missed
+ * here becomes an unbuildable tree at release time.
  */
 
 import { describe, expect, it } from 'vitest';

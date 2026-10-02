@@ -1,14 +1,8 @@
 /**
- * Verbose-on-failure dump.
- *
- * When a handler throws, this writes a rich diagnostic record to
- * `$GITHUB_STEP_SUMMARY` (as markdown) and to the structured log
- * stream (as a single error-level record). Both are passed through
- * the logger's redactor so env-matched secrets never leak.
- *
- * Per plan.md §22.4. Auto-emitted on failure; never on success.
- *
- * Issue #15.
+ * Verbose-on-failure dump (#15, plan.md §22.4). When a handler throws, writes a
+ * diagnostic record to `$GITHUB_STEP_SUMMARY` (markdown) and the structured log
+ * stream (one error record), both through the logger's redactor so env-matched
+ * secrets never leak. Auto-emitted on failure; never on success.
  */
 
 import { appendFile } from 'node:fs/promises';

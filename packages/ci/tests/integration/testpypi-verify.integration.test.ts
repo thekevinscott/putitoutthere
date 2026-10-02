@@ -1,13 +1,8 @@
 /**
  * Integration test for the TestPyPI verify/assert harness (#455, epic #442).
- *
- * Drives the real `piot-ci testpypi-verify <mode>` dispatch in-process — `run()`
- * → `runTestpypiVerify` → `runTestpypiAssert` / `runTestpypiMetadata` and every
- * real decision (requirements build, simple-index parse, member selection,
- * version match) — with only the OS/network boundary (`node:fs/promises`, the
- * exec seam) mocked. Unlike the colocated `*.test.ts` wiring tests (which mock
- * the decisions), this exercises the genuine parsing/matching, so the mock
- * cannot silently disagree with the pure cores.
+ * Drives the real `piot-ci testpypi-verify <mode>` dispatch in-process with
+ * only the OS/network boundary mocked, so — unlike the colocated wiring tests,
+ * which mock the decisions — the mock cannot disagree with the pure cores.
  */
 
 import { EventEmitter } from 'node:events';
@@ -289,25 +284,10 @@ describe('piot-ci testpypi-verify (integration)', () => {
 });
 
 /**
- * #668. TestPyPI's `/simple/{project}/` page is a hot, edge-cached URL: PyPI
- * renders it from the database at request time, so the origin is never stale
- * — only Fastly is, and every prior fixture run has already warmed that cache
- * object. Polling it harder cannot shorten a CDN TTL, which is why the budget
- * has been raised twice (#642, #643) and blown through anyway: 450s exhausted
- * on PR #645 (job 99631849738) and PR #663 (job 99635856349) with the publish
- * already successful.
- *
- * The gate's job is to prove the *published artifacts* carry the right
- * metadata, not to measure how fast an index page propagates. So it reads the
- * release from `/pypi/{project}/{version}/json` — a version-pinned URL that,
- * for a timestamped fixture version, has never been requested before this
- * publish and therefore cannot be served from a stale cache object — and pulls
- * the files from the immutable `test-files.pythonhosted.org` URLs it lists.
- * Same artifacts, same assertions, a surface that cannot lag.
- *
- * The two states the old gate could not tell apart are pinned separately
- * below: "the index has not caught up" (must still verify) and "this version
- * is not on TestPyPI" (must still fail, and say so).
+ * #668. TestPyPI's `/simple/{project}/` page is edge-cached, so polling it
+ * harder cannot shorten a CDN TTL — the budget was raised twice (#642, #643)
+ * and blown through anyway. The version-pinned `/pypi/{project}/{version}/json`
+ * cannot be served stale, and separates index lag from "version not published".
  */
 describe('piot-ci testpypi-verify metadata vs. TestPyPI index lag (#668)', () => {
   it('verifies the release even when the /simple/ index has not caught up', async () => {

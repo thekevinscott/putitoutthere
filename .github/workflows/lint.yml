@@ -1,16 +1,10 @@
 name: Lint
 
 on:
-  # Typecheck (`tsc --noEmit`, include: src/**/*.ts) and ESLint (`eslint src`)
-  # read the workspace and nothing else: both packages' sources, their
-  # tsconfig/eslint configs, and the dependency graph that supplies the type
-  # definitions and lint plugins. `packages/**` also carries the
-  # setup-node/setup-pnpm composites this job runs (#653 moved them out of
-  # .github/), so they are covered.
-  #
-  # `.github/workflows/**` is deliberately absent: no job here parses workflow
-  # YAML. actionlint.yml lints it and test.yml's test/workflows tier asserts
-  # against it.
+  # Typecheck and ESLint read the workspace only -- both packages' sources,
+  # their configs, and the setup-node/setup-pnpm composites #653 moved under
+  # packages/**. `.github/workflows/**` is deliberately absent: no job here
+  # parses workflow YAML (actionlint.yml and test.yml cover that).
   pull_request:
     paths:
       - 'packages/**'

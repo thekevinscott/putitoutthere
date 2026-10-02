@@ -1,19 +1,8 @@
 /**
- * Publish-path auto-heal (#407) against the real CLI + the real registry
- * — the e2e twin of `publish-autoheal.integration.test.ts`.
- *
- * Where the integration test mocks the publish boundary, this shells out
- * to the built CLI (`node dist/cli-bin.js publish`) and lets it hit
- * crates.io for real, pointed at the live, piot-owned fixture crate
- * `piot-fixture-zzz-poly-rust`. That version is already published with no
- * local git tag, so publish takes the skip path — it never actually
- * publishes (no OIDC/build needed: a throwaway token clears the auth
- * pre-flight, and crates rows need no staged artifact). The contract: the
- * heal still writes the missing tag.
- *
- * Red before the fix: the skip path writes no tag.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issues #403, #407.
+ * Publish-path auto-heal (#403, #407) against real crates.io: the live
+ * fixture crate's current version is already published with no local tag, so
+ * publish takes the skip path and never publishes. A throwaway token clears
+ * the auth pre-flight; crates rows need no staged artifact.
  */
 
 import { execFileSync } from 'node:child_process';

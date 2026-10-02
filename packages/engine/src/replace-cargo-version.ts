@@ -1,35 +1,8 @@
 /**
  * Rewrite the `version = "..."` assignment inside a manifest's `[package]`
- * table, preserving everything else byte-for-byte.
- *
- * String surgery rather than a TOML round-trip, matching
- * `replaceWorkspacePackageVersion` and `replaceDepVersionReq`: re-emitting
- * parsed TOML discards the comments and formatting of a file the consumer
- * owns.
- *
- * Lives in its own module rather than inside `handlers/crates.ts` so both
- * the crates publish path and `writeResolvedCargoVersion` can reach it
- * without an import cycle between the handler and the resolver it now
- * delegates to. #639.
- *
- * **The match is bounded to the `[package]` table.** The original expression
- *
- *     /(\[package\][\s\S]*?)(^\s*version\s*=\s*")([^"]*)(")/m
- *
- * was lazy and anchored only on the `[package]` *header*, so on a manifest
- * with no literal `[package].version` — one that inherits via
- * `version.workspace = true` — it walked past the table boundary and matched
- * the next `version = "..."` in the file, typically a dependency's
- * requirement in a section table. It then rewrote that requirement to the
- * release version, naming a release of someone else's crate that does not
- * exist, and reported success.
- *
- * Callers that need to handle inheritance go through
- * `writeResolvedCargoVersion`, which detects it first and rewrites
- * `[workspace.package].version` at the workspace root instead. This function
- * stays literal-only on purpose; bounding the table means it now fails loud
- * on a manifest it cannot legitimately rewrite instead of corrupting a
- * neighbouring field.
+ * table byte-preservingly (string surgery: re-emitting parsed TOML discards
+ * the consumer's comments). **Bounded to the `[package]` table** — an earlier
+ * lazy regex walked past it and silently rewrote a dependency's req (#639).
  */
 
 /**

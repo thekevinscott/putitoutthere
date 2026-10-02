@@ -1,14 +1,7 @@
 /**
  * `verifyBundleCli` — the bundled-CLI wheel-contents engine command (#451).
- * Unit-isolated: the wheel lookup (`findDistFile`), the zip reader
- * (`readZipEntry`), the pyproject read (`readPythonSource`) and
- * `node:fs/promises` are all mocked, so each case drives one branch — binary
- * present, absolute vs relative `--path`, Windows `.exe`, python-source
- * stripping, missing binary (+ the `wheel contents:` listing), and the
- * no-wheel short-circuit — without touching disk. Real deflate-`.whl` IO is
- * covered by the verify integration/e2e tiers. `computeStageSuffix` is left
- * real: it is a pure string transform this command composes, so the
- * python-source subtraction is exercised for real.
+ * `computeStageSuffix` is left real: it is a pure string transform this
+ * command composes, so the python-source subtraction is exercised for real.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

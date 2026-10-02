@@ -1,12 +1,8 @@
 /**
- * Materializes a fixture into a throwaway temp dir for the fixture-matrix
- * gate (#670): copy the fixture tree, stamp a fixed placeholder version,
- * and git-init + commit so `plan()` sees a real repo with a HEAD commit and
- * no tags (the first-release path). Mirrors `fixture-materialize`'s `plan`
- * phase minus the `-placeholder` → run-scoped rewrite: fixture-matrix
- * reports the row a first-publish fixture ships with literally, not a
- * run-scoped unique name (see the integration test's
- * `piot-fixture-zzz-poly-rust-placeholder` assertion).
+ * Materializes a fixture into a throwaway temp dir for the fixture-matrix gate
+ * (#670): copy, stamp a fixed placeholder version, git-init + commit so `plan()`
+ * sees a real repo with a HEAD commit and no tags. Mirrors fixture-materialize's
+ * `plan` phase minus the `-placeholder` rewrite — the row ships the literal name.
  */
 
 import { cp, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';

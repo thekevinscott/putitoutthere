@@ -1,11 +1,7 @@
 /**
- * Absolute paths of every regular file under `dir`, recursively. The
- * async analogue of the `find "$dir" -type f` the extracted bash
- * used for both the tarball-content file counts and the local-state
- * diagnostics (#443).
- *
- * Returns `[]` for a missing path, mirroring `find`'s tolerance
- * (`2>/dev/null`).
+ * Absolute paths of every regular file under `dir`, recursively — the async
+ * analogue of the `find "$dir" -type f` the extracted bash used (#443).
+ * Returns `[]` for a missing path, mirroring `find`'s `2>/dev/null` tolerance.
  */
 
 import { readdir } from 'node:fs/promises';

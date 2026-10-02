@@ -1,18 +1,8 @@
 /**
- * Registry-auth response fixtures, replayed against the engine.
- *
- * Sibling to the publish-shape integration tests (#293/#294/#295). Those
- * cover registry behavior that surfaces as a CLI exit or a tarball-
- * content failure — what the registry receives. This file covers
- * behavior that surfaces in the **response** the engine sees from a
- * registry's auth/publish endpoint — what the registry returns.
- *
- * Why a separate file: the response-fixture catalogue is grep-able as
- * one set, and the catalogue at `notes/upstream-behaviors.md` indexes
- * them. New registry-side behaviors land here as fixture+test+catalog
- * row.
- *
- * Issue #296. Parent: #292.
+ * Registry-auth response fixtures, replayed against the engine — behavior
+ * that surfaces in the *response* from a registry's auth/publish endpoint.
+ * `notes/upstream-behaviors.md` indexes them; new registry-side behaviors
+ * land here as fixture + test + catalog row. Issue #296. Parent: #292.
  */
 
 import { EventEmitter } from 'node:events';
@@ -295,19 +285,10 @@ describe('npm: provenance requires non-empty `repository` (#281)', () => {
 });
 
 describe('npm: E404 masks unauthorized on a first publish (#598)', () => {
-  // The bug: npm returns E404 — not E401/E403 — when a publish is
-  // unauthorized, because leaking "this package exists but you can't
-  // write to it" is itself an information disclosure. That collides with
-  // the bootstrap paradox: npm trusted publishing binds to an
-  // already-published package, so a consumer's very first publish has no
-  // OIDC path at all. The exchange fails, setup-node's placeholder
-  // `_authToken` survives in `.npmrc`, and the PUT comes back 404.
-  //
-  // Both conditions the bootstrap hint was written for hold — OIDC is in
-  // play, and the package genuinely is not on the registry — but
-  // `looksLikeAuthFailure` never matched E404, so the guard
-  // short-circuited and the consumer got a raw npm stderr dump instead of
-  // the one message that tells them what to do.
+  // npm returns E404 — not E401/E403 — on an unauthorized publish, because
+  // "exists but you cannot write to it" is itself an information disclosure.
+  // npm trusted publishing binds to an already-published package, so a first
+  // publish has no OIDC path: the PUT comes back 404 and the hint must fire.
 
   function wireNpm(stderrFixture: string): void {
     execMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
@@ -415,19 +396,10 @@ describe('npm: E404 masks unauthorized on a first publish (#598)', () => {
 });
 
 describe('npm: E403 name-too-similar (the moniker rule) on a first publish (#617)', () => {
-  // The bug: npm's registry refuses to *create* a name that collapses onto
-  // an existing one under its moniker rule (`will-run` exists => `willrun`
-  // is unregistrable). The refusal arrives auth-shaped — E403 / "Forbidden"
-  // — so `looksLikeAuthFailure` matches it, `isBootstrapPublish` confirms
-  // the package is genuinely absent, and the engine emits the
-  // NODE_AUTH_TOKEN bootstrap hint. Every precondition the hint checks is
-  // true and the hint is still wrong: no token can create this name. The
-  // reporter burned four runs and two fresh granular tokens before renaming
-  // the package fixed it on the first try.
-  //
-  // The fix has to read the stderr, because that is the only place the
-  // registry says *why*. Same shape as the crates-side
-  // `matchFirstPublishTpRejection`.
+  // npm's registry refuses to *create* a name that collapses onto an existing
+  // one under its moniker rule (`will-run` exists => `willrun` is
+  // unregistrable). The refusal arrives auth-shaped — E403 / "Forbidden" — so
+  // the bootstrap hint fires and is still wrong: no token can create the name.
 
   // Literal pinned here rather than imported from ErrorCodes so the test
   // commit can land before the constant exists in src/error-codes.ts.
@@ -596,18 +568,10 @@ describe('npm: the bootstrap hint keeps npm\'s stderr (#617)', () => {
 /* ------------------------------------------------------------------- pypi */
 
 describe('pypi: OIDC TP filter rejection for reusable-workflow callers (#252)', () => {
-  // The bug: PyPI's TP matcher filters candidate publishers by
-  // `repository_owner` BEFORE checking `job_workflow_ref`. OIDC tokens
-  // minted from inside a reusable workflow always carry the caller's
-  // repository_owner, so a TP registered against the reusable workflow's
-  // repo (thekevinscott/putitoutthere) is filtered out before the
-  // workflow-ref check. PyPI documents this at warehouse#11096; no
-  // timeline. The engine's reaction is architectural: the publish path
-  // does NOT call PyPI's mint endpoint or upload endpoint from inside
-  // the reusable workflow at all. Upload moves to a caller-side
-  // `pypi-publish` job (audit: 2026-04-28-pypi-tp-reusable-workflow-
-  // constraint.md). The engine just records the handoff — since #623 it
-  // does not even tag: a tag records what shipped, and nothing has.
+  // PyPI's TP matcher filters candidates by `repository_owner` BEFORE checking
+  // `job_workflow_ref`, and a token minted inside a reusable workflow carries
+  // the caller's owner, so a TP on the reusable workflow's repo is filtered
+  // out (warehouse#11096). Upload moves caller-side; since #623, no tag either.
 
   it('pypi.publish() makes no HTTP calls beyond the isPublished GET', async () => {
     // msw's onUnhandledRequest: 'error' guarantees that any unmocked
