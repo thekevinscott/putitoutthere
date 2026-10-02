@@ -25,23 +25,50 @@ name: putitoutthere pypi tag
 # the engine that it runs.
 #
 # The tag follows REGISTRY truth, not a step's exit code: `reconcile` reads
-# each package's live version and writes the tag only for a version that is
-# actually on the registry and has none. That makes it idempotent (a
-# re-run is a no-op), self-healing (it also backfills any tag an earlier
-# run failed to push), and incapable of recording an upload that silently
-# uploaded nothing.
+# the registry and writes the tag only for a version that is actually
+# there and has none. That makes it idempotent (a re-run is a no-op),
+# self-healing (it also backfills any tag an earlier run failed to push),
+# and incapable of recording an upload that silently uploaded nothing.
+#
+# `expect` is how it asks the right question (#694). Without it, reconcile
+# reads PyPI's MUTABLE project pointer (`/pypi/{name}/json` → the "latest
+# version"), which is Fastly-cached for 15 minutes and 404s for minutes
+# after a first publish — indistinguishably from "this project was never
+# released". This job starts seconds after the upload, so it read that
+# 404, concluded the package was unpublished, and exited 0 with nothing to
+# do: the tag was silently never written (`agent-transcript-viewer 0.0.0`,
+# twice). Given `expect`, reconcile instead asks the IMMUTABLE per-version
+# endpoint about exactly the versions the release run delegated — never
+# stale for a version that exists — and fails loudly if one really is not
+# there.
 #
 # Consumer usage (their own .github/workflows/release.yml) — see
 # README → "Publishing to PyPI":
 #
 #   pypi-tag:
-#     needs: pypi-publish
+#     needs: [release, pypi-publish]
+#     if: ${{ !cancelled() && needs.pypi-publish.result == 'success' }}
 #     uses: thekevinscott/putitoutthere/.github/workflows/pypi-tag.yml@v0
 #     permissions:
 #       contents: write
+#     with:
+#       expect: ${{ needs.release.outputs.delegated_packages }}
 
 on:
   workflow_call:
+    inputs:
+      expect:
+        description: >-
+          The release run's `delegated_packages` output — the
+          `[{name, version, tag}]` the planner handed to the caller's
+          `pypi-publish` job. Pass the caller's
+          needs.release.outputs.delegated_packages (see the usage block
+          above). Empty (the pre-#694 call shape) falls back to
+          latest-version discovery, which races PyPI's propagation on a
+          first publish.
+        required: false
+        type: string
+        default: ''
 
 jobs:
   tag:
@@ -70,3 +97,8 @@ jobs:
         uses: thekevinscott/putitoutthere@v0
         with:
           command: reconcile
+          # Forwarded even when empty: the action only appends
+          # `--expect` for a non-empty value, so a caller still on the
+          # pre-#694 shape keeps bare discovery rather than asserting an
+          # empty set of packages.
+          expect: ${{ inputs.expect }}

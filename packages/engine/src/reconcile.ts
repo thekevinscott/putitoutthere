@@ -29,9 +29,18 @@
  * `package@version`: `computeStatus`'s `latestVersion` reads a mutable,
  * CDN-cached pointer that can still name the previous release seconds
  * after a delegated PyPI upload, silently skipping the tag it was run to
- * cut. See `reconcile-expect.ts`.
+ * cut. See `reconcile-expect.ts`. It is also the only way to tag a FIRST
+ * publish promptly — the pointer 404s until it propagates, and a 404
+ * there is indistinguishable from "this project does not exist" (#694),
+ * so discovery cannot be made to see it at any retry budget.
  *
- * Issue #410, #403 slice 3, #623, #666.
+ * Every row discovery declines to act on for a reason that is not
+ * evidence of anything comes back in `skipped` (#694). `ok: true,
+ * actions: []` used to mean both "everything is already tagged" and "I
+ * could not read the registry"; a consumer whose PyPI tag went missing
+ * had only the first reading available.
+ *
+ * Issue #410, #403 slice 3, #623, #666, #694.
  */
 
 import { join } from 'node:path';
@@ -44,7 +53,12 @@ import { reconcileExpected } from './reconcile-expect.js';
 import { resolveTagCommit } from './resolve-tag-commit.js';
 import { computeStatus } from './status.js';
 import { formatTag } from './tag-template.js';
-import type { ReconcileAction, ReconcileOptions, ReconcileResult } from './reconcile-types.js';
+import type {
+  ReconcileAction,
+  ReconcileOptions,
+  ReconcileResult,
+  ReconcileSkip,
+} from './reconcile-types.js';
 
 export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult> {
   const cwd = opts.cwd;
@@ -56,19 +70,33 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
   const byName = new Map<string, Package>(config.packages.map((p) => [p.name, p]));
 
   if (opts.expect !== undefined) {
+    // No skips on this path by construction: the expectation names exact
+    // versions and `reconcileExpected` throws on one it cannot confirm,
+    // rather than quietly declining to decide.
     const actions = await reconcileExpected(opts.expect, config, byName, cwd, dryRun, log);
-    return { ok: true, dryRun, actions };
+    return { ok: true, dryRun, actions, skipped: [] };
   }
 
   const rows = await computeStatus({ cwd, configPath: cfgPath });
 
   const actions: ReconcileAction[] = [];
+  const skipped: ReconcileSkip[] = [];
   for (const row of rows) {
-    // Nothing to back-fill without a live version to back-fill to:
+    // An unreachable registry is not evidence of anything, so there is
+    // nothing to back-fill to — but it is also not evidence that there
+    // is nothing to do, which is how the miss in #694 stayed invisible.
+    // Record it so the result says "I could not tell" instead of
+    // "nothing to do"; the CLI turns each one into a `::warning`.
+    if (row.registryUnreachable) {
+      skipped.push({ package: row.package, kind: row.kind, reason: 'registry-unreachable' });
+      continue;
+    }
+    // A registry that answers "no such version" HAS answered.
     // `unreleased` and `tagged, unpublished` name versions that are not
-    // on the registry, and an unreachable registry is not evidence of
-    // anything. A missing tag would not fix either.
-    if (row.registryUnreachable || row.registry === null) {continue;}
+    // live, and a missing tag would not fix either — so this skip is
+    // ordinary, permanent for everything a repo has not shipped, and
+    // deliberately unreported.
+    if (row.registry === null) {continue;}
     const pkg = byName.get(row.package)!;
     const version = row.registry;
     const tag = formatTag(pkg.tag_format, { name: pkg.name, version });
@@ -85,5 +113,5 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
     actions.push({ package: pkg.name, kind: pkg.kind, version, tag, commit, source, created: !dryRun });
   }
 
-  return { ok: true, dryRun, actions };
+  return { ok: true, dryRun, actions, skipped };
 }
