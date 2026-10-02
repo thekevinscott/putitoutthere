@@ -82,11 +82,25 @@ PyPI publishes in **two phases**:
 
 1. The engine's `publish` job builds the wheels/sdist and hands the upload off.
 2. Your caller-side `pypi-publish` job uploads to PyPI **afterward**, and the
-   `pypi-tag` job cuts the git tag once PyPI reports the version live.
+   `pypi-tag` job cuts the git tag for the versions the release run delegated,
+   once PyPI confirms each one.
 
 Since [#623](https://github.com/thekevinscott/putitoutthere/issues/623) the tag
 belongs to phase 2, so a failed upload leaves the package **untagged** — which
 the next run re-plans and re-attempts. Nothing to recover by hand.
+
+One wrinkle specific to a **first** release, fixed in
+[#694](https://github.com/thekevinscott/putitoutthere/issues/694): phase 2 used
+to identify what to tag by reading PyPI's project-level "latest version"
+pointer, which **404s** until a brand-new project propagates — the same answer
+PyPI gives for a project that does not exist. `pypi-tag` runs seconds after the
+upload, so it read that 404, decided the package was unpublished, and exited
+green with no tag. The current template passes
+`expect: ${{ needs.release.outputs.delegated_packages }}` so phase 2 confirms
+the exact versions phase 1 delegated against PyPI's immutable per-version
+endpoint instead. If a repo's `pypi-tag` job has no `with: expect:` line, its
+first PyPI tag will be lost; re-paste the current template, and backfill the
+missing tag with `npx putitoutthere reconcile` once PyPI shows the version.
 
 On a repo whose `release.yml` predates that change — its `pypi-publish` gates on
 `has_pypi` and it has no `pypi-tag` job — phase 1 tagged before phase 2 ran, so
