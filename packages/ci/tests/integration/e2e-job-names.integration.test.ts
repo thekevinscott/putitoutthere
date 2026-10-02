@@ -10,7 +10,7 @@
  * the names that shipped before #655 were self-consistent too, and still
  * unusable.
  *
- * Three claims, none of which a reviewer reading a `name:` diff can check:
+ * Four claims, none of which a reviewer reading a `name:` diff can check:
  *
  *  1. `build` declares a name at all. Without one GitHub renders the whole
  *     matrix row, and two of its fields are stamped per run on purpose (a
@@ -21,9 +21,14 @@
  *     from `[[package]].path`); the one-character-different `artifact_name`
  *     is not (it derives from `[[package]].name`). Nothing in a diff
  *     distinguishes them.
- *  3. The name is injective over the rows `plan()` can emit — not merely
- *     over the rows today's fixtures happen to emit. Two live jobs reporting
- *     under one check name is silent: the check list just gets shorter.
+ *  3. Every slot reads a field present on *every* row the job dispatches
+ *     for. An optional field renders empty on GitHub — the job runs, the
+ *     name looks fine — but willfire drops the prediction outright, so the
+ *     cost is invisible everywhere except the predicted check set.
+ *  4. The name is injective over the rows the fixture lane actually plans,
+ *     and the one row shape that would break that is named and watched.
+ *     Two live jobs reporting under one check name is silent: the check
+ *     list just gets shorter.
  */
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -36,6 +41,7 @@ import { plan, type MatrixRow } from 'putitoutthere';
 
 import { parseJobNameTemplates } from '../../src/e2e-job-names/parse-job-name-templates.js';
 import { renderJobName } from '../../src/e2e-job-names/render-job-name.js';
+import { unresolvableSlots } from '../../src/e2e-job-names/unresolvable-slots.js';
 import { listFixtures } from '../../src/fixture-matrix/list-fixtures.js';
 import { materializeFixtureForMatrix } from '../../src/fixture-matrix/materialize-fixture.js';
 import { execInherit } from '../../src/utils/exec-inherit.js';
@@ -58,12 +64,17 @@ function track(dir: string): string {
   return dir;
 }
 
-/** The `build` check name every row of `rows` would dispatch under. */
-function buildNames(rows: readonly MatrixRow[]): string[] {
+function requireBuildTemplate(): string {
   if (typeof buildTemplate !== 'string') {
     throw new Error('e2e-fixture-job.yml: the `build` job declares no `name:`');
   }
-  return rows.map((row) => renderJobName(buildTemplate, row));
+  return buildTemplate;
+}
+
+/** The `build` check name every row of `rows` would dispatch under. */
+function buildNames(rows: readonly MatrixRow[]): string[] {
+  const template = requireBuildTemplate();
+  return rows.map((row) => renderJobName(template, row));
 }
 
 /** Names that more than one row in `rows` would report under. */
@@ -86,12 +97,12 @@ async function planFixture(fixture: string): Promise<MatrixRow[]> {
  * real planner — the resulting wheel rows differ from each other in
  * `python_version` and in nothing else a run-stable name could read.
  *
- * No e2e fixture has this shape today: every maturin fixture enables
- * `pyo3/abi3-py38`. That is why the collision is latent rather than live, and
- * why asserting injectivity over only the current fixtures would not catch
- * it. `python_versions` is documented `putitoutthere.toml` surface, and the
- * same fan arrives automatically from a `requires-python` spanning two
- * versions, so this is one config edit away in either direction.
+ * No e2e fixture has this shape today — every maturin fixture enables
+ * `pyo3/abi3-py38`, which `isVersionIndependentWheel` collapses to a single
+ * row — so the collision is latent, not live. It is built here from
+ * documented `putitoutthere.toml` surface rather than from a fixture because
+ * the point is reachability: `python_versions` is a config key, and the same
+ * fan arrives on its own from a `requires-python` that spans two releases.
  */
 async function planCPythonFan(): Promise<MatrixRow[]> {
   const dir = track(await mkdtemp(join(tmpdir(), 'piot-e2e-job-names-fan-')));
@@ -195,6 +206,38 @@ describe('e2e-fixture-job.yml check names (integration)', () => {
     },
   );
 
+  // The trap this catches, measured on this PR before it was caught: adding
+  // `${{ matrix.python_version }}` to the template looked like a strict
+  // improvement — it separates a CPython fan, every slot is run-stable, and
+  // GitHub renders the npm and crates rows perfectly well (the slot just comes
+  // out empty). willfire disagreed. `python_version` is absent on every npm
+  // and crates row, and a slot willfire cannot look up survives verbatim into
+  // the name, which it then reports unresolvable and drops. 53 of the lane's
+  // 84 build predictions vanished, with nothing red to show it: `CI Gate`
+  // aggregates what it can predict, so the names it lost simply stopped being
+  // gated. An ugly name is a cosmetic cost; an unpredictable one is the
+  // defect #655 was filed about.
+  it(
+    'reads only fields every row carries, so no slot survives into the name unresolved',
+    { timeout: 30_000 },
+    async () => {
+      const rows = await planFixture('polyglot-everything');
+      // The optional MatrixRow fields are optional *by kind* — `python_version`
+      // exists only on pypi rows — so a fixture spanning all three kinds is
+      // what makes this assertion bite.
+      expect(new Set(rows.map((row) => row.kind))).toEqual(new Set(['crates', 'npm', 'pypi']));
+
+      const template = requireBuildTemplate();
+      const unresolved = rows.flatMap((row) =>
+        unresolvableSlots(template, row).map(
+          (slot) => `${row.kind}/${row.target}/${row.artifact_path}: ${slot}`,
+        ),
+      );
+
+      expect(unresolved).toEqual([]);
+    },
+  );
+
   it(
     'renders a name that does not move when the fixture materializer restamps the run-scoped fields',
     { timeout: 30_000 },
@@ -234,14 +277,31 @@ describe('e2e-fixture-job.yml check names (integration)', () => {
     },
   );
 
+  // This test asserts the limit rather than hiding it, because the limit is
+  // the reason the test above it has teeth. A wheel build fanned across
+  // interpreters is the one row shape no run-stable, always-present field
+  // separates — `python_version` is the only thing that differs, and it is
+  // exactly the field that cannot go in the name. Both ways out are worse:
+  // widening the name costs 53 predictions (see above), and widening
+  // `MatrixRow` so `python_version` is always present changes `plan()`'s
+  // output, which is consumer-visible surface, to fix a collision no declared
+  // fixture produces.
+  //
+  // So the lane holds the precondition instead of the name: no fixture may
+  // plan a fan. 'gives every planned row of every declared fixture its own
+  // check name' is what enforces that, and this is the proof it is not a
+  // tautology — the shape it watches for is one `putitoutthere.toml` edit
+  // away, reachable from `python_versions` directly or from a
+  // `requires-python` that spans two releases, and it collides.
   it(
-    'keeps the names distinct when a maturin wheel build fans across CPython versions',
+    'collides when a maturin wheel build fans across CPython versions, which is what the per-fixture check guards',
     { timeout: 30_000 },
     async () => {
       const rows = await planCPythonFan();
 
       // Non-vacuity: the planner really did fan, and it disambiguated its own
-      // artifacts across the fan. The check name has to do the same.
+      // artifacts across the fan — so the rows are genuinely distinct jobs,
+      // not one job counted twice.
       expect(
         rows
           .filter((row) => row.target === 'x86_64-unknown-linux-gnu')
@@ -249,7 +309,7 @@ describe('e2e-fixture-job.yml check names (integration)', () => {
       ).toEqual(['3.11', '3.12']);
       expect(new Set(rows.map((row) => row.artifact_name)).size).toBe(rows.length);
 
-      expect(collidingNames(rows)).toEqual([]);
+      expect(collidingNames(rows)).toEqual(['build (pypi, x86_64-unknown-linux-gnu, dist)']);
     },
   );
 });
