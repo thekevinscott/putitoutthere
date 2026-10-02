@@ -8,8 +8,18 @@ name: Evidence check
 # the `piot-ci evidence-check` command), not inline bash — see AGENTS.md >
 # "Repo-internal CI gates" (#445, epic #442).
 
+# The gate diffs CHANGELOG.md against the PR base and validates only the
+# bullets that diff newly added (run.ts: one `git diff -- CHANGELOG.md`, one
+# `readFile('CHANGELOG.md')`, then `gh api` for each citation). With
+# CHANGELOG.md untouched there are no new bullets and the verdict is a
+# foregone pass, so the file is the trigger.
 on:
   pull_request:
+    paths:
+      - 'CHANGELOG.md'
+      - 'packages/ci/src/evidence-check/**'
+      - 'packages/ci/actions/**'
+      - '.github/workflows/evidence-check.yml'
 
 permissions:
   contents: read

@@ -18,8 +18,26 @@ name: Patch coverage
 # Aggregator (CI Gate) automatically requires this job once it appears, so
 # branch protection doesn't need updating to make it a merge prerequisite.
 
+# The gate counts added lines in `packages/engine/src/**/*.ts` only
+# (`is-counted-src-path.ts` rejects everything else, including .test.ts and
+# .d.ts), so that tree plus the machinery that produces the coverage JSON is
+# the whole trigger set. With no counted additions the gate prints
+# "no src/**/*.ts additions in this PR; passing" regardless of what else
+# changed.
+#
+# Keep `packages/engine/src/**` a superset of `is-counted-src-path.ts`'s
+# predicate — narrowing it would let new, uncovered engine lines merge
+# unchecked.
 on:
   pull_request:
+    paths:
+      - 'packages/engine/src/**'
+      - 'packages/engine/package.json'
+      - 'packages/engine/vitest.config.ts'
+      - 'packages/ci/src/patch-coverage/**'
+      - 'packages/ci/actions/**'
+      - 'package.json'
+      - '.github/workflows/patch-coverage.yml'
 
 concurrency:
   group: patch-coverage-${{ github.ref }}

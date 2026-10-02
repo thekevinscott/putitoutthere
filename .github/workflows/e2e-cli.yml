@@ -8,7 +8,22 @@ name: E2E (CLI)
 # reliable per-PR and its red->green is visible. See tests/e2e/README.md.
 
 on:
+  # Same input set as the integration tier, for the same reason:
+  # resolve.e2e.test.ts shells the built CLI at the real repo root, and
+  # `resolve` reads `.github/workflows/e2e-fixture-job.yml` and
+  # packages/engine/tests/fixtures/. `packages/**` (not just
+  # packages/engine/**) because `pnpm install --frozen-lockfile` runs every
+  # workspace package's `prepare` build — a broken packages/ci/src fails the
+  # install before a single test runs.
   pull_request:
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'action.yml'
+      - '.github/workflows/e2e-fixture-job.yml'
+      - '.github/workflows/e2e-cli.yml'
   push:
     branches: [main]
 

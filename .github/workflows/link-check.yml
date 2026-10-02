@@ -10,6 +10,9 @@ on:
       # `*.md` is redundant to GitHub but not to willfire (#632).
       - '**/*.md'
       - '*.md'
+      # Not markdown, so the globs above miss it: without this line an edit to
+      # the lychee invocation is never checked by the lychee it configures.
+      - '.github/workflows/link-check.yml'
   push:
     branches: [main]
     paths:
