@@ -6,8 +6,10 @@ import { defineConfig } from 'vitest/config';
 // gate (#476), which runs vitest rooted at packages/engine/src with its own
 // include and thresholds. Do NOT hardcode `include` / `thresholds` /
 // `coverage.include`: package-root-relative, they resolve wrong under that root
-// (zero tests → 0% → fail). `setupFiles` does not apply under the gate — vitest
-// 5 dropped the upward config search — so tests must stub their own env.
+// (zero tests → 0% → fail). `setupFiles` reaches the gate's run only via vitest
+// 4's upward config search from `--root`; vitest 5 dropped that search and we
+// are pinned to 4 only until the mutation gate can run on 5 (#715), so a test
+// needing an env var unset stubs it itself rather than relying on this.
 // `clearMocks` is load-bearing: vi.restoreAllMocks() does not reset automocks,
 // so without it vi.mock() call history leaks between tests.
 export default defineConfig({

@@ -75,14 +75,13 @@ beforeEach(() => {
   // `checkRepoUrlMatchFindings` reads `process.env.GITHUB_REPOSITORY`, so this
   // file must own that variable rather than inherit it from the environment.
   // `tests/setup.ts` (wired through `vitest.config.ts`'s `setupFiles`) strips
-  // it too, but it is not a dependable guard here: the testing-conventions
-  // coverage gate runs vitest rooted at `packages/engine/src`, and vitest 5
-  // dropped vitest 4's upward search for a config file — so at that root no
-  // config, and therefore no setup file, is discovered at all. Under GitHub
-  // Actions, which always sets GITHUB_REPOSITORY, the repo-URL check then
-  // fired against the real repo slug and these cases failed in CI while
-  // passing locally. Stubbing is explicit and root-independent; the
-  // `afterEach` below restores whatever the ambient environment supplied.
+  // it too, but that is not a dependable guard: it only applies when the run
+  // loads the config, and vitest 5 drops vitest 4's upward config search, so
+  // the gate's run (rooted at `packages/engine/src`) would find none. Under
+  // GitHub Actions, which always sets GITHUB_REPOSITORY, the repo-URL check
+  // then fires against the real repo slug — green locally, red under the gate.
+  // Stubbing is explicit and root-independent; the `afterEach` below restores
+  // whatever the ambient environment supplied.
   vi.stubEnv('GITHUB_REPOSITORY', undefined);
 
   // preflight (unmigrated) reads manifests via node:fs readFileSync.

@@ -9,6 +9,18 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Hold the vitest family at 4 until the TypeScript mutation gate can run on
+    # vitest 5 (#715): testing-conventions' Stryker vitest runner executes zero
+    # tests per mutant there, so the gate refuses to run and every PR touching
+    # source goes red. Without this, Dependabot re-proposes the 5 major each
+    # week and re-creates that deadlock. Remove this entry — not the group
+    # above — once #715 is resolved; the group must keep naming `major` so the
+    # version-locked family still upgrades as one PR.
+    ignore:
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/*"
+        update-types: ["version-update:semver-major"]
     groups:
       # `vitest` and `@vitest/*` must move as ONE PR, majors included:
       # @vitest/coverage-v8 is version-locked to the runtime it instruments
