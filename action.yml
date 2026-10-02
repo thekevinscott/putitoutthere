@@ -62,6 +62,19 @@ inputs:
       `command: verify-bundle-cli`; ignored otherwise.
     required: false
     default: ''
+  expect:
+    description: >-
+      Package/version pairs `reconcile` must confirm and tag, forwarded
+      as `--expect` (#694). Either `<name>@<version>` or the release
+      job's `delegated_packages` JSON verbatim. When set, reconcile
+      checks the registry's immutable per-version endpoint for exactly
+      these pairs instead of reading the mutable "latest version"
+      pointer — which 404s for minutes after a first publish,
+      indistinguishably from "never published", so discovery silently
+      skipped the tag. Empty => latest-version discovery. Ignored for
+      commands other than `reconcile`.
+    required: false
+    default: ''
   fail_on_error:
     description: 'If true, non-zero CLI exit codes fail the step.'
     required: false

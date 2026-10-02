@@ -21,6 +21,7 @@ export async function main(): Promise<void> {
   const stageTo = process.env.INPUT_STAGE_TO ?? '';
   const bin = process.env.INPUT_BIN ?? '';
   const target = process.env.INPUT_TARGET ?? '';
+  const expectInput = process.env.INPUT_EXPECT ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
@@ -69,6 +70,14 @@ export async function main(): Promise<void> {
     // `plan` / `publish` act on it; the flag parses harmlessly for the
     // other commands that land in this branch.
     if (releasePackages) {argv.push('--release-packages', releasePackages);}
+    // #694: `pypi-tag.yml` hands `reconcile` the release run's
+    // `delegated_packages`, so the tag follows what the upload reported
+    // rather than PyPI's project pointer — which 404s for minutes after
+    // a first publish, indistinguishably from "never published", and so
+    // silently skips the tag. Guarded on non-empty: a consumer on an
+    // older template passes nothing and must still get bare discovery,
+    // not an expectation of nothing.
+    if (expectInput) {argv.push('--expect', expectInput);}
   }
 
   const code = await run(argv);

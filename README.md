@@ -58,12 +58,18 @@ jobs:
 
   # Cuts the git tag for what the job above just uploaded. The release
   # job deliberately does not tag a PyPI package: a tag records what
-  # shipped, and until this upload lands, nothing has. Paste verbatim.
+  # shipped, and until this upload lands, nothing has. `expect` tells it
+  # which versions those were; without it the tag is read off PyPI's
+  # eventually-consistent "latest version" lookup, which does not yet
+  # know about a first publish. Paste verbatim.
   pypi-tag:
-    needs: pypi-publish
+    needs: [release, pypi-publish]
+    if: ${{ !cancelled() && needs.pypi-publish.result == 'success' }}
     uses: thekevinscott/putitoutthere/.github/workflows/pypi-tag.yml@v0
     permissions:
       contents: write
+    with:
+      expect: ${{ needs.release.outputs.delegated_packages }}
 ```
 
 Pinned action versions, `plan → build → publish` orchestration, and GitHub
@@ -720,8 +726,25 @@ template you pasted:
   that a failed run never uploaded, and a tag pointing at nothing has to
   be deleted by hand before a re-run does the right thing. So the
   `pypi-tag` job cuts it afterwards, and cuts it from *registry* truth:
-  it tags the version PyPI reports as live, so an upload that silently
-  uploaded nothing is not recorded as a release.
+  it asks PyPI whether each version is really there and tags only the
+  ones that are, so an upload that silently uploaded nothing is not
+  recorded as a release.
+- **It has to be told which versions to ask about.** That is the
+  `expect: ${{ needs.release.outputs.delegated_packages }}` line, and it
+  is why `pypi-tag` needs the `release` job as well as `pypi-publish`.
+  PyPI answers "which version is latest?" from a CDN-cached, eventually
+  consistent view that lags an upload by minutes — and for a project's
+  *first* release that view 404s, which is indistinguishable from "this
+  project does not exist". `pypi-tag` starts seconds after the upload, so
+  left to discover versions on its own it concluded the package was
+  unpublished and exited successfully having tagged nothing
+  ([#694](https://github.com/thekevinscott/putitoutthere/issues/694)).
+  `delegated_packages` is the `[{"name","version","tag"}, …]` the release
+  job handed your upload job — the same set `pypi_pending` is the boolean
+  for — and naming those versions explicitly makes `pypi-tag` query
+  PyPI's per-version endpoint, which is immutable and never stale. If a
+  named version genuinely is not on PyPI, the job fails loudly instead of
+  passing silently; re-run it once the upload is really there.
 - **The gate is `pypi_pending`, not `has_pypi`.** `has_pypi` is
   plan-time — "this repo has a PyPI package" — so a failure on npm or
   crates.io used to skip the PyPI upload entirely, even though the
@@ -752,7 +775,11 @@ downstream job on them exactly like the `pypi-publish` job composes on
 A **PyPI** package is not in either until its upload lands, because the
 release job doesn't perform that upload — see [Publishing to PyPI](#how-auth-flows).
 If your bookkeeping needs to run after a PyPI release, hang it off
-`pypi-tag` (`needs: pypi-tag`) rather than off `released`.
+`pypi-tag` (`needs: pypi-tag`) rather than off `released`. The set handed
+over is available as a third output, `delegated_packages` — the same
+`[{"name","version","tag"}, …]` shape, listing the PyPI packages this run
+delegated rather than published itself. The canonical template already
+pipes it into `pypi-tag`'s `expect` input.
 
 `released` is **publish-time** ("did we ship?"), not plan-time ("did we
 plan?") — so a push that re-runs the pipeline without new versions won't

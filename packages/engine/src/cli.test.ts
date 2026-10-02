@@ -143,7 +143,7 @@ beforeEach(() => {
   runChecksMock.mockResolvedValue([]);
   computeStatusMock.mockResolvedValue([]);
   publishMock.mockResolvedValue({ ok: true, published: [] });
-  reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+  reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [], skipped: [] });
   computeVerifyMock.mockResolvedValue([]);
   verifyNpmTarballMock.mockResolvedValue(0);
   verifyCrateMock.mockResolvedValue(0);
@@ -769,7 +769,7 @@ describe('cli: publish dispatch', () => {
 
 describe('cli: reconcile dispatch', () => {
   it('emits the reconcile result as JSON under --json and forwards --config', async () => {
-    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [], skipped: [] });
     const code = await run(argv('reconcile', '--cwd', '/x', '--json', '--config', '/x/piot.toml'));
     expect(code).toBe(0);
     const parsed = JSON.parse(stdout.join('').trim()) as { actions: unknown[] };
@@ -794,6 +794,7 @@ describe('cli: reconcile dispatch', () => {
           created: true,
         },
       ],
+      skipped: [],
     });
     const code = await run(argv('reconcile', '--cwd', '/x'));
     expect(code).toBe(0);
@@ -805,7 +806,7 @@ describe('cli: reconcile dispatch', () => {
   it('forwards --expect to reconcile, and omits the key entirely without it', async () => {
     // `expect` is spread in conditionally: absent means "discover", which is
     // a different code path from `expect: undefined`.
-    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [], skipped: [] });
 
     await run(argv('reconcile', '--cwd', '/x', '--expect', '@acme/widget@1.2.3'));
     expect(reconcileMock).toHaveBeenLastCalledWith(
@@ -819,12 +820,64 @@ describe('cli: reconcile dispatch', () => {
   it('forwards a JSON --expect array verbatim, without reshaping it', async () => {
     // `pypi-tag.yml` pipes the release job's `delegated_packages` output
     // straight through; the CLI must not parse or re-encode it.
-    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [] });
+    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [], skipped: [] });
     const raw = '[{"name":"demo","version":"1.2.3","tag":"demo-v1.2.3"}]';
 
     await run(argv('reconcile', '--cwd', '/x', '--expect', raw));
 
     expect(reconcileMock).toHaveBeenCalledWith(expect.objectContaining({ expect: raw }));
+  });
+
+  it('annotates every skipped row on both render branches (#694)', async () => {
+    // The hole this closes: `pypi-tag` printed
+    // `{"ok":true,"dryRun":false,"actions":[]}` and exited 0 for a package
+    // whose registry it could not read, so a silently missing tag looked
+    // exactly like "everything is already tagged". The annotation is the
+    // only thing distinguishing them, and it has to survive whichever
+    // render the caller gets — the action always passes `--json`, a human
+    // running the CLI never does.
+    reconcileMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      actions: [],
+      skipped: [
+        { package: 'demo-py', kind: 'pypi', reason: 'registry-unreachable' },
+        { package: 'demo-rs', kind: 'crates', reason: 'registry-unreachable' },
+      ],
+    });
+
+    expect(await run(argv('reconcile', '--cwd', '/x', '--json'))).toBe(0);
+    const jsonOut = stdout.join('');
+    const jsonWarnings = jsonOut.split('\n').filter((l) => l.startsWith('::warning::'));
+    expect(jsonWarnings).toHaveLength(2);
+    expect(jsonWarnings[0]).toContain('demo-py');
+    expect(jsonWarnings[1]).toContain('demo-rs');
+    // The JSON line still has to be parseable on its own: the action's
+    // consumers read it with JSON.parse, so an annotation must never be
+    // concatenated into it.
+    const jsonLine = jsonOut.split('\n').find((l) => l.startsWith('{'));
+    expect(JSON.parse(jsonLine ?? '')).toMatchObject({
+      skipped: [
+        { package: 'demo-py', kind: 'pypi', reason: 'registry-unreachable' },
+        { package: 'demo-rs', kind: 'crates', reason: 'registry-unreachable' },
+      ],
+    });
+
+    stdout.length = 0;
+    expect(await run(argv('reconcile', '--cwd', '/x'))).toBe(0);
+    const humanOut = stdout.join('');
+    expect(humanOut.split('\n').filter((l) => l.startsWith('::warning::'))).toHaveLength(2);
+    expect(humanOut).toContain('demo-py');
+  });
+
+  it('stays silent when nothing was skipped (#694)', async () => {
+    // Guards the other direction: every package a repo has not shipped yet
+    // produces no action forever, so a renderer that warned about those
+    // would bury the one row that matters.
+    reconcileMock.mockResolvedValue({ ok: true, dryRun: false, actions: [], skipped: [] });
+
+    expect(await run(argv('reconcile', '--cwd', '/x', '--json'))).toBe(0);
+    expect(stdout.join('')).not.toContain('::warning::');
   });
 
   it('uses "would create" verbs under --dry-run', async () => {
@@ -842,6 +895,7 @@ describe('cli: reconcile dispatch', () => {
           created: false,
         },
       ],
+      skipped: [],
     });
     const code = await run(argv('reconcile', '--cwd', '/x', '--dry-run'));
     expect(code).toBe(0);

@@ -55,6 +55,7 @@ import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
 import { reconcile } from './reconcile.js';
+import { reconcileSkipWarnings } from './reconcile-skip-warnings.js';
 import { releaseGithub } from './release-github/index.js';
 import { runResolve } from './resolve/run-resolve.js';
 import { formatStatusRow } from './status-format.js';
@@ -370,12 +371,22 @@ export async function run(argv: readonly string[]): Promise<number> {
         // primitive the publish path heals with, so reconcile can't act
         // on a drift status wouldn't show. Idempotent; `--dry-run`
         // previews without writing.
+        // `--expect` (#666) skips discovery for caller-named versions —
+        // the only way to tag a first publish whose project pointer has
+        // not propagated yet (#694).
         const result = await reconcile({
           cwd: flags.cwd,
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
           dryRun: flags.dryRun,
           ...(flags.expect !== undefined ? { expect: flags.expect } : {}),
         });
+        // #694: a row nobody could decide about must not read as
+        // "nothing to do". Annotations go out on both branches and
+        // before the result, so the reason survives whether the caller
+        // greps the JSON or reads the log.
+        for (const line of reconcileSkipWarnings(result.skipped)) {
+          process.stdout.write(`${line}\n`);
+        }
         if (flags.json) {
           process.stdout.write(JSON.stringify(result) + '\n');
         } else {
