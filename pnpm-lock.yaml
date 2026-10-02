@@ -20,6 +20,9 @@ importers:
       putitoutthere:
         specifier: workspace:*
         version: link:../engine
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
