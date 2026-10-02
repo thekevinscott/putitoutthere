@@ -1,42 +1,9 @@
 name: putitoutthere release
 
-# Reusable workflow for publishing to crates.io, PyPI, and npm.
-#
-# Consumer integration (their own .github/workflows/release.yml):
-#
-#   on:
-#     push: { branches: [main] }
-#
-#   jobs:
-#     release:
-#       uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v0
-#       permissions:
-#         contents: write
-#         id-token: write
-#
-# That is the entire surface a consumer touches. `putitoutthere.toml`
-# at the repo root is the config; nothing about that is configurable.
-#
-# Auth: OIDC trusted publishers on all three registries (crates.io,
-# PyPI, npm) are the default and recommended path. Trusted Publishing
-# binds to an *already-published* package on crates.io and npm, so the
-# very first publish has no OIDC path available; callers can pass a
-# long-lived `CARGO_REGISTRY_TOKEN` (crates.io) or `NPM_TOKEN` (npm)
-# via `secrets:` and the OIDC exchange is skipped when present. See
-# README → "Trusted publishers".
-#
-# This file delegates the plan + build matrix to `_matrix.yml`
-# (`uses: thekevinscott/putitoutthere/.github/workflows/_matrix.yml@v0`)
-# so the same matrix runs on PR-time `build.yml` invocations and at
-# release time. The `publish` job below is the only piece that lives
-# in this file — keeping it isolated to the release path is what makes
-# `build.yml` a structural-not-runtime guarantee against accidental
-# publishes (publish-capable bytes simply do not exist there).
-#
-# The `uses: thekevinscott/putitoutthere@v0` calls inside this file
-# (and inside `_matrix.yml`) resolve to the same git ref the workflow
-# itself was loaded from, so the workflow + engine always agree on a
-# single version.
+# Reusable workflow for publishing to crates.io, PyPI, and npm. Consumers
+# call it with `contents: write` + `id-token: write`; config is
+# putitoutthere.toml. Trusted Publishing binds to an already-published
+# package on crates.io and npm, so a first publish needs a token secret.
 
 on:
   workflow_call:
@@ -217,24 +184,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      # crates.io OIDC trusted publisher exchange: ID-token -> short-
-      # lived CARGO_REGISTRY_TOKEN. Only fires when the plan still has a
-      # crates version to publish AND the caller did not supply
-      # CARGO_REGISTRY_TOKEN via `secrets:` (issue #283). Pure JS/Python
-      # repos skip the action entirely so they don't need a configured
-      # trusted publisher on crates.io; callers passing a long-lived token
-      # also skip it so the OIDC-minted token doesn't clobber theirs.
-      #
-      # #622: the gate reads `unpublished_kinds`, not the matrix. A crates
-      # row is in the matrix whenever the repo has a crate — published or
-      # not — so gating on the matrix ran the exchange on idempotent re-runs
-      # the crates handler would skip via `isPublished`, and a failing
-      # exchange (trusted publisher not registered yet, or a record that
-      # hasn't propagated) killed the whole publish job before the engine
-      # action ran, taking npm and PyPI with it. `unpublished_kinds` is the
-      # same publish/skip determination the handler makes, hoisted ahead of
-      # auth by `plan`; a kind whose registry was unreachable stays listed,
-      # so a blip never silently drops a credential the publish needs.
+      # crates.io OIDC exchange: ID-token -> short-lived
+      # CARGO_REGISTRY_TOKEN. #622: gated on `unpublished_kinds`, not the
+      # matrix -- a failing exchange for an already-published crate used to
+      # kill the whole publish job, taking npm and PyPI down with it.
       - name: Authenticate with crates.io (OIDC)
         if: contains(needs.build.outputs.unpublished_kinds, '"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN == ''
         id: crates-auth
@@ -246,39 +199,18 @@ jobs:
           CRATES_IO_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: echo "CARGO_REGISTRY_TOKEN=$CRATES_IO_TOKEN" >> "$GITHUB_ENV"
 
-      # Caller-provided token path (issue #283). Trusted Publishing on
-      # crates.io binds to an already-published crate, so the first
-      # publish of a brand-new crate has no OIDC path; this step lets
-      # the caller supply a long-lived token via `secrets:` and have
-      # the engine's crates handler pick it up through $GITHUB_ENV
-      # exactly as it would the OIDC-minted one. The secret is read
-      # through the job-level `CALLER_CARGO_REGISTRY_TOKEN` env var
-      # because step-level `if:` cannot reference the `secrets` context.
-      #
-      # Deliberately still gated on the matrix, not on `unpublished_kinds`
-      # (#622): this step only writes an env var, so running it with
-      # nothing to publish costs nothing and cannot fail the job — the
-      # narrowing above exists because a *failing OIDC exchange* took the
-      # run down, and there is no exchange here to fail.
+      # Caller token path (#283): crates.io Trusted Publishing binds to an
+      # already-published crate, so a first publish has no OIDC path. Read
+      # via the job-level env var because step-level `if:` cannot see
+      # `secrets`. Still matrix-gated (#622) -- no exchange here can fail.
       - name: Export CARGO_REGISTRY_TOKEN (caller-provided)
         if: contains(needs.build.outputs.matrix, '"kind":"crates"') && env.CALLER_CARGO_REGISTRY_TOKEN != ''
         run: echo "CARGO_REGISTRY_TOKEN=$CALLER_CARGO_REGISTRY_TOKEN" >> "$GITHUB_ENV"
 
-      # Caller-provided npm token path (issue #302). Mirror of the
-      # CARGO_REGISTRY_TOKEN fallback above. Trusted Publishing on npm
-      # binds to an already-published package, so the first publish of
-      # a brand-new package has no OIDC path; this step lets the caller
-      # supply a long-lived token via `secrets:` and have the npm CLI
-      # pick it up through $GITHUB_ENV (setup-node@v6 already wires
-      # NODE_AUTH_TOKEN into the .npmrc auth template). The secret is
-      # read through the job-level `CALLER_NPM_TOKEN` env var because
-      # step-level `if:` cannot reference the `secrets` context. When
-      # NODE_AUTH_TOKEN is set, the npm CLI prefers it over the OIDC
-      # path — there's no separate OIDC step to skip, just the env-var
-      # presence that switches the CLI's auth mode. Drop the secret
-      # once Trusted Publishing is registered against the (now-existing)
-      # package; for bundled-cli / napi families each per-platform sub-
-      # package needs its own TP registration.
+      # Caller npm token path (#302), mirroring the crates fallback above:
+      # npm Trusted Publishing also binds to an already-published package.
+      # setup-node wires NODE_AUTH_TOKEN into .npmrc and the CLI prefers it
+      # over OIDC. For bundled-cli/napi, every sub-package needs its own TP.
       - name: Export NODE_AUTH_TOKEN (caller-provided)
         if: contains(needs.build.outputs.matrix, '"kind":"npm"') && env.CALLER_NPM_TOKEN != ''
         run: echo "NODE_AUTH_TOKEN=$CALLER_NPM_TOKEN" >> "$GITHUB_ENV"
@@ -332,19 +264,9 @@ jobs:
               npm install
             fi
             # #287: export TARGET / BUILD so consumer build scripts that
-            # dispatch on them (bundled-cli / napi) see a defined value
-            # rather than `undefined`. The publish-time rebuild only runs
-            # for the *main* package row (per-platform sub-packages stage
-            # from artifacts/ via the engine's npm-platform handler and
-            # are unaffected here), so TARGET is fixed at "main" — build
-            # scripts written against the documented contract no-op on
-            # TARGET=main and run vanilla TS/JS compilation otherwise.
-            # BUILD is left empty because there is no single matrix-row
-            # `build` mode at this point: a multi-mode package is both
-            # napi and bundled-cli; the rebuild is the union view.
-            #
-            # #627: VERSION is a real value, not a sentinel — every row of
-            # an npm package shares one version, so the first match wins.
+            # dispatch on them see defined values. Only the main row
+            # rebuilds here, so TARGET=main and BUILD is empty (a multi-mode
+            # package has no single build). #627: VERSION is a real value.
             version=$(printf '%s' "$MATRIX" | jq -r --arg p "$path" 'first(.[] | select(.kind == "npm" and .path == $p) | .version)')
             TARGET=main BUILD='' VERSION="$version" npm run build --if-present
             popd > /dev/null
@@ -365,19 +287,10 @@ jobs:
           # disagree on the matrix.
           release_packages: ${{ inputs.release_packages }}
 
-      # The engine creates annotated git tags + publishes to npm /
-      # crates.io but does NOT cut GitHub Releases. Backfill that here so
-      # the project's /releases page tracks the tag history. A pypi
-      # package is absent from both halves at this point: its upload and
-      # its tag both belong to the caller's jobs (#623), so its GitHub
-      # Release is cut by the next run of this step (the tag exists by
-      # then) — same idempotent backfill this step already performs.
-      #
-      # The no-fetch / ref-scoped-push / idempotent-create contract (#436,
-      # #437) now lives in the `release-github` engine command as tested
-      # code (`src/release-github/`), not inline bash — this step is pure
-      # wiring. `GH_TOKEN` authenticates `gh`; the checkout's persisted
-      # credentials authenticate the ref-scoped `git push`.
+      # The engine cuts tags but not GitHub Releases; backfill them here.
+      # A pypi package's upload and tag belong to the caller's jobs (#623),
+      # so its Release is cut by the next run, once the tag exists. The
+      # no-fetch / ref-scoped-push contract lives in code (#436, #437).
       - name: Create GitHub Release(s) for new tag(s)
         uses: thekevinscott/putitoutthere@v0
         env:

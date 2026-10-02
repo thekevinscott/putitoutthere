@@ -1,22 +1,8 @@
 /**
- * `piot verify` — per-package publish/trust posture (integration).
- *
- * Answers "do I still need the registry token, or is OIDC trusted
- * publishing active?" For each package it reads the latest published
- * version (the same `latestVersion` `status` uses) and then the trust
- * attribution of that release from PUBLIC registry data — no secrets —
- * classifying `oidc` (trusted publisher / provenance) vs `token`
- * (no trusted-publisher attestation) vs `unpublished` / `unreachable`.
- *
- * The trust signal each registry exposes (confirmed against live piot
- * fixtures, #414):
- *   crates.io  GET /api/v1/crates/{c}/{v}        -> version.trustpub_data
- *   npm        GET /-/npm/v1/attestations/{p}@{v} -> 200 (provenance) / 404
- *   PyPI       GET /integrity/{p}/{v}/{file}/provenance -> 200 / 404
- *
- * Real config + real per-kind handler dispatch; only the registry HTTP
- * boundary is mocked (msw). The e2e twin shells out to the real CLI
- * against the live fixtures. Issue #414, #403 slice 5.
+ * `piot verify` — per-package publish/trust posture (#414, #403 slice 5).
+ * The trust signal each registry exposes, confirmed against live fixtures:
+ * crates.io `/api/v1/crates/{c}/{v}` -> `version.trustpub_data`; npm
+ * `/-/npm/v1/attestations/{p}@{v}` -> 200/404; PyPI `/integrity/…/provenance`.
  */
 
 import { execFileSync } from 'node:child_process';

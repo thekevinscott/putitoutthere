@@ -1,21 +1,8 @@
 /**
- * `putitoutthere verify wheel` — assert the built wheel/sdist carries the
- * planned version (#450, epic #442).
- *
- * Extraction of the inline "Verify wheel/sdist version matches
- * matrix.version" bash block (#276) in `.github/workflows/e2e-fixture-job.yml`.
- * The contract, per that step: "the build artifact carries matrix.version",
- * verified directly against the produced files — independent of which
- * mechanism (write-version, SETUPTOOLS_SCM_PRETEND_VERSION, …) set the
- * manifest, so it catches a divergence regardless of which build path
- * silently regressed.
- *
- * For an sdist row (`--target sdist`) the sdist filename must end
- * `-<version>.tar.gz`; for a wheel row the first `*.whl`'s
- * `*.dist-info/METADATA` `Version:` must equal `--version`. The wheel is
- * read with a pure-Node zip reader (no `unzip`), so this runs on every
- * platform the maturin matrix builds on. Async throughout. Returns the
- * process exit code (0 ok, 1 on any miss).
+ * `putitoutthere verify wheel` — assert the built wheel/sdist carries the planned
+ * version (#450, #276), whatever set the manifest. An sdist filename must end
+ * `-<version>.tar.gz`; a wheel's `*.dist-info/METADATA` `Version:` must equal
+ * `--version`, read with a pure-Node zip reader so Windows rows work too.
  */
 
 import { stat } from 'node:fs/promises';

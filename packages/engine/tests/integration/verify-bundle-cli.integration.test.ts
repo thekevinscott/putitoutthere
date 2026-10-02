@@ -1,30 +1,8 @@
 /**
- * `piot verify bundle-cli` — bundled-CLI wheel-contents verification
- * (integration). Epic #442, sub-issue #451.
- *
- * Extraction of the inline "bundle_cli — verify wheel contains
- * <stage_to>/<bin>" bash block in `.github/workflows/_matrix.yml` (#282/#358)
- * into one tested engine subcommand — the last member of the `verify`
- * family after npm-tarball (#443), crate (#449), and wheel (#450). The
- * contract, per that step: a maturin bundled-CLI build must stage its
- * cross-compiled binary into the wheel at a path ending `<stage_to>/<bin>`
- * (with `[tool.maturin].python-source` subtracted from the front of
- * `stage_to`, and a `.exe` suffix on Windows targets). Without it, a build
- * that silently failed to stage the binary would still ship a wheel and go
- * green — the release surprise the no-surprises commitment exists to catch.
- *
- * This tier drives the CLI in-process (`run([...])`) against real `.whl`
- * files (genuine deflate-compressed zips, built here in pure Node) on disk
- * — deterministic, no network, cross-platform (no `unzip`). The e2e twin
- * (`tests/e2e/verify-bundle-cli.e2e.test.ts`) shells out to the built CLI
- * against a real published wheel downloaded from PyPI.
- *
- * Contract preserved verbatim from the bash: same wheel selection, same
- * python-source stripping, same `(^|/)<stage_suffix>/<expected>$` match,
- * same `::error::` / `ok bundle_cli:` strings, same exit code.
- *
- * Red before the command exists: `verify bundle-cli` is an unrecognized
- * subcommand, so `run` errors and no `ok bundle_cli:` line is emitted.
+ * `piot verify bundle-cli` (epic #442, #451), extracted from the inline bash
+ * in `_matrix.yml` (#282/#358): the staged binary must land at a path ending
+ * `<stage_to>/<bin>`, with `[tool.maturin].python-source` subtracted from the
+ * front of `stage_to` and `.exe` appended on Windows targets.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

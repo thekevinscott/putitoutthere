@@ -1,15 +1,8 @@
 /**
- * Unit tests for the npm bundled-cli launcher author (#299).
- *
- * `node:fs` and the config loader (`loadConfig`, an fs collaborator) are
- * mocked so each case isolates the launcher-generation / override / bin-field
- * logic: `readFileSync` is driven with the package.json bytes and
- * `writeFileSync` is asserted against, with no real temp dir. `normalizeBuild`
- * and the pure generators run for real. The real on-disk round trip is
- * covered by the integration + e2e tiers.
- *
- * Path assertions use basename `endsWith` only — never a separator-bearing
- * literal — so they hold on Windows, macOS, and Linux alike.
+ * Unit tests for the npm bundled-cli launcher author (#299). `normalizeBuild`
+ * and the pure generators run for real. Path assertions use basename
+ * `endsWith` only — never a separator-bearing literal — so they hold on
+ * Windows, macOS, and Linux alike.
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

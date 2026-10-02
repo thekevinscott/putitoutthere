@@ -1,20 +1,8 @@
 /**
- * Publish-path auto-heal (#407) — integration test (the deterministic
- * CI red gate; the e2e twin shells out to the real CLI against a live
- * fixture).
- *
- * The bug: when a version is already live on the registry but has no git
- * tag, `publish()`'s per-package loop skips it (`isPublished → continue`)
- * *before* the tag-creation block — so the missing tag never heals and
- * the package stays stuck (the #403 incident).
- *
- * This drives the real `publish()` + the real npm handler with only the
- * npm CLI subprocess mocked (same seam as `publish.integration.test.ts`).
- * `npm view` is mocked to SUCCEED, so `isPublished` returns true and the
- * package takes the skip path. The contract: publish must still write
- * the package's tag — without re-publishing.
- *
- * Red before the fix: the skip path creates no tag.
+ * Publish-path auto-heal (#407, the #403 incident): a version already live
+ * with no git tag is skipped by `publish()`'s loop (`isPublished → continue`)
+ * *before* the tag-creation block, so the tag never heals. `npm view` is
+ * mocked to SUCCEED so the package takes that skip path.
  */
 
 import { EventEmitter } from 'node:events';

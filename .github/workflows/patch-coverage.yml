@@ -1,22 +1,9 @@
 name: Patch coverage
 
-# Per-PR diff coverage gate. Aggregate coverage thresholds (vitest.config.ts)
-# pass as long as the overall numbers stay above 95/95/94/95 — but a PR can
-# add new code without tests as long as it doesn't drag the aggregate below
-# the floor. This gate closes that hole: every line and branch *introduced
-# by this PR's diff* in src/**/*.ts must be exercised by the unit suite, no
-# escape hatches.
-#
-# Strict 100%: no `/* v8 ignore */` markers may be introduced. Existing
-# markers in unchanged code are grandfathered; touching their region is
-# treated as a new introduction.
-#
-# The gate logic lives in tested TypeScript (`packages/ci/src/patch-coverage/`,
-# the `piot-ci patch-coverage` command), not authored `.mjs` in `.github/` —
-# see AGENTS.md > "Repo-internal CI gates" (#468, epic #442).
-#
-# Aggregator (CI Gate) automatically requires this job once it appears, so
-# branch protection doesn't need updating to make it a merge prerequisite.
+# Per-PR diff coverage gate: every line and branch introduced by this PR's
+# diff in src/**/*.ts must be exercised, strict 100%, with no newly
+# introduced `/* v8 ignore */` markers. CI Gate requires this job
+# automatically once it appears, so branch protection needs no update.
 
 # The gate counts added lines in `packages/engine/src/**/*.ts` only
 # (`is-counted-src-path.ts` rejects everything else, including .test.ts and

@@ -1,10 +1,8 @@
 /**
  * Composition root for the Verdaccio-auth harness (#453). Performs the real I/O
- * the "Configure Verdaccio auth (first-publish)" bash did: poll `/-/ping` until
- * Verdaccio binds, PUT the user-create request, parse the token, then hand the
- * matrix + token to `decideVerdaccioAuth`, write the per-package `.npmrc`
- * files, emit the lines, and return the exit code. curl/sleep run through the
- * same subprocess boundary the bash used so the tools + flags are identical.
+ * the "Configure Verdaccio auth (first-publish)" bash did: poll `/-/ping`, PUT
+ * the user-create request, parse the token, write the per-package `.npmrc`s.
+ * curl/sleep go through the same subprocess boundary, so tools + flags match.
  */
 
 import { writeFile } from 'node:fs/promises';

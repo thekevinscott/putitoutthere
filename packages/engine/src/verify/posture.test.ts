@@ -1,18 +1,8 @@
 /**
- * `computeVerify` unit coverage — the colocated unit under test. Isolated:
- * the config loader (`loadConfig`), the handler registry (`handlerFor`) and
- * the logger (`createLogger`) are mocked, so each case drives one posture
- * branch off the mocked handler's `latestVersion` / `trustPosture` returns:
- * `oidc` / `token` / `unpublished` (no release, trust never read) /
+ * `computeVerify` unit coverage (#414, #403 slice 5). Each case drives one
+ * posture branch off the mocked handler's `latestVersion` / `trustPosture`
+ * returns: `oidc` / `token` / `unpublished` (no release, trust never read) /
  * `unreachable` (a read throws, on either the version or the trust probe).
- *
- * The CLI wiring this once drove end-to-end — `--json` / `--check` /
- * rendering, the live crates reads, cross-registry behaviour — is exercised
- * at the integration + e2e tiers (`tests/integration/verify.integration.test.ts`)
- * and the renderer at `posture-format.test.ts`, so this stays a focused unit
- * over the classification the engine owns.
- *
- * Issue #414, #403 slice 5.
  */
 
 import { describe, expect, it, vi } from 'vitest';

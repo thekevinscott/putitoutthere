@@ -1,22 +1,8 @@
 /**
- * `piot verify npm-tarball` — published-artifact `files[]` verification
- * (integration).
- *
- * Extraction of the two inline bash blocks in
- * `.github/workflows/e2e-fixture-job.yml` ("Verify published npm tarballs
- * honor package.json files" + its per-triple near-duplicate) into one
- * tested engine subcommand (epic #442, sub-issue #443).
- *
- * The subcommand shells out to `npm view` (tarball URL), `curl`
- * (download) and `tar` (extract); this tier mocks only the Node built-in
- * `execFile` under the real exec seam. `npm view` + `curl` are
- * faked (registry state); `tar` is the REAL binary, so extraction is
- * exercised for real. The e2e twin
- * (`tests/e2e/verify-npm-tarball.e2e.test.ts`) shells out to the built CLI
- * against the real `@putitoutthere/piot-fixture-zzz-js-vanilla` package.
- *
- * Contract preserved verbatim from the bash: same row selection, same
- * `::error::` strings, same stdout, same exit code.
+ * `piot verify npm-tarball` (epic #442, #443), extracted from two inline bash
+ * blocks in `e2e-fixture-job.yml`. Only the Node built-in `execFile` under
+ * the real exec seam is mocked: `npm view` and `curl` are faked for registry
+ * state, while `tar` is the REAL binary, so extraction runs for real.
  */
 
 import type * as ChildProcess from 'node:child_process';

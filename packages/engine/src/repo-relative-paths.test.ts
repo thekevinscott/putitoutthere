@@ -1,12 +1,8 @@
 /**
- * Unit tests for `repoRelativePaths` / `toPosixPath` (#639).
- *
- * No `node:path` import: the unit suite isolates the unit under test, and
- * mocking `relative()` would leave nothing real to assert on. Every case is
- * therefore written with *relative* inputs, which `relative()` resolves
- * against the process cwd — so the same strings mean the same thing on
- * ubuntu, macos and windows, and the separator conversion is exercised on a
- * literal rather than on whatever the host happens to emit.
+ * Unit tests for `repoRelativePaths` / `toPosixPath` (#639). No `node:path`
+ * import: every case is written with *relative* inputs, which `relative()`
+ * resolves against the process cwd, so the same strings mean the same thing on
+ * ubuntu, macos and windows.
  */
 
 import { describe, expect, it } from 'vitest';

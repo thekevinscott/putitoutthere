@@ -1,14 +1,7 @@
 /**
- * Glob matcher. Thin wrapper over minimatch with the flags putitoutthere
- * needs everywhere.
- *
- * Flags per plan.md §11.4:
- *   - dot: true       — real repos keep config under .github/, .config/, etc.
- *   - matchBase: false — patterns anchor at the repo root
- *
- * Double-star crosses directory boundaries; brace expansion is on.
- *
- * Issue #10.
+ * Glob matcher. Thin wrapper over minimatch with the flags putitoutthere needs
+ * everywhere (plan.md §11.4, #10): `dot: true` because real repos keep config
+ * under `.github/`, and `matchBase: false` so patterns anchor at the repo root.
  */
 
 import { readdir } from 'node:fs/promises';

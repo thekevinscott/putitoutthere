@@ -1,15 +1,7 @@
 /**
- * `piot plan` manylinux baseline stamping — the e2e twin of
- * `tests/integration/pypi-manylinux.integration.test.ts` (issue #610,
- * upstream symptom thekevinscott/dirsql#818).
- *
- * Shells out to the built CLI (`node dist/cli-bin.js plan --json`)
- * against a temp repo whose maturin pypi package sets
- * `manylinux = "2_28"`. Asserts the emitted matrix rows carry the
- * baseline on linux-gnu wheel rows and nowhere else — the exact JSON
- * the reusable workflow's maturin step consumes.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * `plan` manylinux baseline stamping — the baseline lands on linux-gnu wheel
+ * rows and nowhere else. Issue #610, upstream symptom
+ * thekevinscott/dirsql#818.
  */
 
 import { execFileSync } from 'node:child_process';

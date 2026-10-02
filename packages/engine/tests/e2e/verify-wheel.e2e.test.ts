@@ -1,26 +1,8 @@
 /**
- * `piot verify wheel` against a REAL published wheel — the e2e twin of
- * `tests/integration/verify-wheel.integration.test.ts`. Epic #442, #450.
- *
- * Where the integration test drives the engine in-process against wheels it
- * builds locally, this one **shells out to the built CLI**
- * (`node dist/cli-bin.js verify wheel …`) against a **real, build-tool-
- * produced** wheel downloaded from PyPI. This is the tier that proves the
- * engine's pure-Node zip reader inspects a genuine (deflate-compressed)
- * wheel's `dist-info/METADATA` — a mock, or a locally hand-built zip, only
- * assumes that shape.
- *
- * Package choice: piot's own python fixtures publish to TestPyPI, whose
- * download host is not reachable through this repo's policy egress proxy
- * (a 403 CONNECT denial), so it can't run locally. `iniconfig` is a tiny,
- * ubiquitous, pure `py3-none-any` wheel on real PyPI (files.pythonhosted.org
- * is allowlisted), reachable both locally and on CI runners; the version is
- * read from the same PyPI response, so there is nothing to hard-code.
- *
- * Red before the feature: `verify wheel` is an unrecognized subcommand, so
- * no `ok wheel:` line is emitted and the CLI exits non-zero.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * `verify wheel` against a REAL published wheel. Epic #442, #450.
+ * `iniconfig` rather than piot's own python fixtures: those publish to
+ * TestPyPI, whose download host this repo's egress proxy blocks with a 403
+ * CONNECT denial. The version is read from the same PyPI response.
  */
 
 import { execFileSync } from 'node:child_process';

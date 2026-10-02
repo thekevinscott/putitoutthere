@@ -1,12 +1,7 @@
 /**
  * `forceMoveTag` — the shared local-write + ref-scoped force-push both
- * floating-tag advancers use (#446).
- *
- * The git collaborators (`forceTag`, `pushTagRefForce`) are mocked so this
- * isolates the delegation contract — the local move then the ref-scoped
- * force-push, in that order. The real git + bare-remote round trip (the tag
- * actually overwriting a diverged remote) is covered by
- * tests/integration/tag-plumbing.integration.test.ts and the e2e tier.
+ * floating-tag advancers use (#446). The order is the contract: the local move
+ * first, then the ref-scoped force-push.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

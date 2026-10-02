@@ -1,28 +1,8 @@
 /**
- * A publish must not be killed by its own subprocess output, and what it
- * keeps of that output must be bounded and legible (#664).
- *
- * `execCapture` hands `maxBuffer` straight to `node:child_process
- * .execFile`, whose overflow policy is not truncation: Node raises
- * `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` and SIGTERMs the child. A `cargo
- * publish --verbose` that was going to succeed dies partway through and
- * the engine reports a failure cargo never produced — on a possibly
- * half-completed registry upload, which is the partial-publish state the
- * all-or-nothing commitment exists to prevent.
- *
- * Today no call site passes `maxBuffer`, and passing `undefined`
- * *disables* Node's default rather than inheriting it (`execFile` spreads
- * the caller's options over its own, and `len > undefined` is never
- * true). So the engine's capture is currently unbounded — safe from the
- * kill by accident, and unbounded in memory as a consequence. Both halves
- * are one refactor from flipping.
- *
- * Real config loader, real plan, real preflight, real handler dispatch,
- * and — unlike its siblings — the **real process seam**: `cargo` is a stub
- * script on `PATH`, not a mocked `execFile`, because the bug lives in
- * `execFile`'s own buffering. Only crates.io HTTP is mocked (msw).
- *
- * The e2e twin is `tests/e2e/publish-output-ceiling.e2e.test.ts`.
+ * A publish must not be killed by its own subprocess output (#664). `execFile`
+ * overflow is not truncation — Node raises `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`
+ * and SIGTERMs the child — and `maxBuffer: undefined` *disables* the default
+ * rather than inheriting it. `cargo` is a stub on `PATH`, not a mocked seam.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,11 +1,8 @@
 /**
- * Composition-root wiring test for the fixture-materialize harness (#447). Both
- * collaborators are mocked — the OS boundary (`node:fs/promises`, the exec
- * seam) and `./decide.js` — so this isolates the plumbing: the argv/env guards,
- * the exact wipe + copy, the manifest walk + rewrite, the FIXTURE_VERSION
- * export, and the exact git command sequence. The per-phase decisions are
- * covered in `decide.test.ts`; the literal-replace itself in
- * `apply-substitutions.test.ts`.
+ * Composition-root wiring test for the fixture-materialize harness (#447). The
+ * OS boundary and `./decide.js` are mocked, isolating the plumbing: the
+ * argv/env guards, the wipe + copy, the manifest walk + rewrite, the
+ * FIXTURE_VERSION export, and the exact git command sequence.
  */
 
 import { appendFile, cp, readdir, readFile, rm, writeFile } from 'node:fs/promises';

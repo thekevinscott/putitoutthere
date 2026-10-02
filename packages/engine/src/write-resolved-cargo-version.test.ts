@@ -1,11 +1,8 @@
 /**
- * Unit tests for `writeResolvedCargoVersion` (#428).
- *
- * `node:fs` and the workspace-root walk (`findWorkspaceRoot`, itself an fs
- * collaborator) are mocked so this isolates the inheritance-detection and
- * literal-vs-workspace routing; the pure `replaceCargoVersion` /
- * `replaceWorkspacePackageVersion` string rewriters run for real. Real
- * on-disk manifests are exercised by the integration + e2e tiers.
+ * Unit tests for `writeResolvedCargoVersion` (#428). Isolates the
+ * inheritance-detection and literal-vs-workspace routing; the pure
+ * `replaceCargoVersion` / `replaceWorkspacePackageVersion` string rewriters
+ * run for real.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';

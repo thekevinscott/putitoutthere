@@ -1,16 +1,5 @@
 /**
- * npm handler (vanilla) tests.
- *
- * Issue #18. Plan: §7.4, §12.2 (vanilla mode), §13.1, §14.5, §16.1.
- *
- * Unit-suite isolation: the subprocess boundary (the process seam,
- * `execCapture`) and the filesystem (`node:fs/promises`) are both mocked.
- * `node:fs/promises` is backed by a small in-memory tree (below) shared
- * between test setup and the unit under test, so package.json rewrites,
- * artifact reads, and synthesized platform staging dirs all observe the
- * same state without a real temp tree. Real end-to-end file behavior is
- * covered by the npm integration tier
- * (tests/integration/npm.integration.test.ts).
+ * npm handler (vanilla) tests (#18).
  */
 
 import { chmod, cp, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';

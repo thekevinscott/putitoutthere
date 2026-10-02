@@ -3,27 +3,15 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 // Minimal, gate-compatible config for the testing-conventions unit-coverage
-// gate (#476). The gate runs vitest rooted at the scan path
-// (packages/engine/src) and supplies its own test-discovery include and 100%
-// thresholds. So this file must NOT hardcode `include` / `thresholds` /
-// `coverage.include` — those are package-root-relative and would resolve wrong
-// under the gate's root (finding zero tests → 0% → fail). It names only the
-// provider, the reporters the gate reads, and the env-isolation setup file —
-// the last via an ABSOLUTE path so it resolves regardless of the vitest root.
-// The engine's own runs pass the test dirs positionally (see test:unit /
-// test:unit:coverage in package.json). Mirrors packages/ci's minimal config.
-//
-// Don't rely on `setupFiles` to neutralise a GitHub-runner env var. vitest 4
-// searches upward from `--root` for a config file, so the gate's run (rooted
-// at packages/engine/src) does pick this file up — but vitest 5 removed that
-// upward search, and we are pinned to 4 only until the mutation gate can run
-// on 5 (#715). A test whose assertion needs such a var unset stubs it itself
-// (see the `vi.stubEnv` in src/check.test.ts), which is root-independent and
-// stays correct across that upgrade.
-//
-// `clearMocks` (vitest 4): vi.restoreAllMocks() no longer resets automocks, so
-// clearMocks runs vi.clearAllMocks() before each test to clear vi.mock()'d call
-// history between tests regardless of how the mock was created.
+// gate (#476), which runs vitest rooted at packages/engine/src with its own
+// include and thresholds. Do NOT hardcode `include` / `thresholds` /
+// `coverage.include`: package-root-relative, they resolve wrong under that root
+// (zero tests → 0% → fail). `setupFiles` reaches the gate's run only via vitest
+// 4's upward config search from `--root`; vitest 5 dropped that search and we
+// are pinned to 4 only until the mutation gate can run on 5 (#715), so a test
+// needing an env var unset stubs it itself rather than relying on this.
+// `clearMocks` is load-bearing: vi.restoreAllMocks() does not reset automocks,
+// so without it vi.mock() call history leaks between tests.
 export default defineConfig({
   test: {
     setupFiles: [fileURLToPath(new URL('./tests/setup.ts', import.meta.url))],

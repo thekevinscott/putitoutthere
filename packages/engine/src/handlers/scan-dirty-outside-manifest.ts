@@ -1,15 +1,8 @@
 /**
- * The narrowed dirty-tree check the crates handler runs before cargo (#135).
- *
- * `--allow-dirty` is required for our writeVersion-then-publish model, but
- * cargo's default dirty-check is exactly the safety net that catches shipping
- * uncommitted stray edits. This restores a narrower version of it: scan the
- * working tree via `git status --porcelain` and refuse to publish if anything
- * is dirty outside the manifests writeVersion just wrote. "Manifests", plural,
- * for two reasons: an inheriting crate's version lives at the workspace root
- * (#639), and bumping a crate also moves the in-repo requirements that point at
- * it (#640), which live in other crates' files. Either way the write can land
- * outside the package directory entirely.
+ * The narrowed dirty-tree check the crates handler runs before cargo (#135):
+ * refuse to publish anything dirty outside the manifests writeVersion wrote.
+ * Plural — an inheriting crate's version lives at the workspace root (#639),
+ * and a bump also moves in-repo requirements in other crates' files (#640).
  */
 
 import { execCapture } from '../utils/exec-capture.js';

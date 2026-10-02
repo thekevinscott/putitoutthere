@@ -1,10 +1,8 @@
 /**
- * Decision core for the version assertion, reproducing the bash's
- * `if actual != version: print(f"{name} {LABEL} Version={actual!r}, expected
- * {version!r}", file=sys.stderr); sys.exit(1)` followed by
- * `print(f"ok: {name} {LABEL} Version={actual}")`. `label` is `METADATA` for
- * wheels and `PKG-INFO` for sdists; `actual` is the parsed version or `null`
- * when no `Version:` line was found. Pure.
+ * Decision core for the version assertion, reproducing the bash's stderr
+ * mismatch line and its `ok: …` success line. `label` is `METADATA` for wheels
+ * and `PKG-INFO` for sdists; `actual` is the parsed version, or `null` when no
+ * `Version:` line was found. Pure.
  */
 
 import { pyRepr } from './py-repr.js';

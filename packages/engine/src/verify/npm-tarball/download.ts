@@ -1,14 +1,8 @@
 /**
- * Download a published npm tarball and extract it, returning the path to
- * the unpacked `package/` directory (#443).
- *
- * `curl --retry 5 --retry-all-errors` absorbs the tarball-blob CDN race
- * that is independent of the packument race `resolveNpmTarballUrl` handles:
- * a cold-edge tarball miss surfaces as HTTP 404, which curl's default
+ * Download a published npm tarball and extract it, returning the unpacked
+ * `package/` directory (#443). `curl --retry 5 --retry-all-errors` absorbs the
+ * tarball-blob CDN race: a cold-edge miss is an HTTP 404, which curl's default
  * `--retry` ignores, so `--retry-all-errors` is load-bearing (PR #323).
- * `retryDelay` seconds matches the call site's original schedule.
- *
- * Caller owns cleanup of the returned `root`.
  */
 
 import { mkdir, mkdtemp } from 'node:fs/promises';

@@ -1,18 +1,8 @@
 /**
- * `releaseGithub` — the "Create GitHub Release(s) for new tag(s)" engine
- * command (#444, epic #442). Colocated unit tests pinning the #436/#437
- * contract that used to live only as a YAML-text test:
- *
- * - **no-fetch** — never runs `git fetch`.
- * - **ref-scoped-push** — `git push origin refs/tags/<tag>` per tag, before
- *   the Release is created.
- * - **idempotent-create** — the `gh release view` guard skips an existing
- *   Release.
- *
- * The subprocess boundary is mocked at the async seam: git.ts and the gh
- * view guard both go through `execCapture`, and the gh create through
- * `execInherit`. Both mocks record into one ordered `calls` list for
- * ordering / absence assertions.
+ * `releaseGithub` — the GitHub-Release engine command (#444, epic #442). Pins
+ * the #436/#437 contract that used to live only as a YAML-text test: never
+ * runs `git fetch`; pushes `git push origin refs/tags/<tag>` per tag before
+ * the Release is created; the `gh release view` guard keeps create idempotent.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

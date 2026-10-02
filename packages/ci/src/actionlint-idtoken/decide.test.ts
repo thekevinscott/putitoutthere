@@ -1,11 +1,8 @@
 /**
  * Decision matrix for the actionlint id-token gate (#452), extracted from the
  * `Assert PR-time path has no id-token permission` step in
- * `.github/workflows/actionlint.yml`. Pins the exact pass/fail decisions and
- * every emitted line (the `grep -n` `<lineNumber>:<line>` echoes and the
- * `::error file=…::` message), so the TypeScript reimplementation is provably
- * equivalent to the grep it replaces. Pure — no I/O. Assertions are exact
- * (`toEqual` on the full line list) so a dropped or altered message is caught.
+ * `.github/workflows/actionlint.yml`. Exact `toEqual` on the full line list, so
+ * a dropped or altered message is caught.
  */
 
 import { describe, expect, it } from 'vitest';

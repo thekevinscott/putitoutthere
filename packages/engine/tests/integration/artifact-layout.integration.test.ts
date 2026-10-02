@@ -1,27 +1,8 @@
 /**
- * Single-artifact download layout normalization.
- *
- * `actions/download-artifact@v8` is count-sensitive when invoked with
- * `path:` and no `name`/`pattern` filter: a *single* artifact extracts
- * directly into the path with no `<artifact_name>/` subdir, while
- * *multiple* artifacts each get their own subdir (the layout the
- * engine's completeness check assumes; see `src/completeness.ts`).
- *
- * Consumers whose plan emits exactly one expected artifact — the
- * canonical case being a pure-Python package with `build = "setuptools"`
- * (sdist row only) — therefore hit the bug: the publish job downloads
- * artifacts, gets `artifacts/<file>.tar.gz` with no subdir, and the
- * completeness check aborts with `missing artifact directory
- * <pkg>-sdist/`.
- *
- * This test plants the exact dumped-into-root layout and asserts
- * publish() recovers — i.e., gets past completeness and reaches the
- * pypi handler. Today it fails with the completeness error; after the
- * fix it succeeds.
- *
- * Issue #311. (#324 split hatch into sdist + wheel-any, so this test
- * uses setuptools — still single-artifact — to keep the
- * single-artifact-normalize codepath exercised.)
+ * `actions/download-artifact@v8` with `path:` and no `name`/`pattern` is
+ * count-sensitive: a single artifact extracts straight into the path with no
+ * `<artifact_name>/` subdir, which `src/completeness.ts` assumes. #311.
+ * (#324 split hatch into sdist + wheel-any, so this uses setuptools.)
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -152,18 +133,9 @@ afterEach(() => {
 
 describe('#311 download-artifact@v8 single-artifact layout', () => {
   it('publish() recovers when the only artifact was dumped into artifacts/ root with no subdir', async () => {
-    // Plant the exact filesystem shape produced by
-    // `actions/download-artifact@v8` when invoked with `path: artifacts`
-    // and the upstream build job uploaded exactly one artifact:
-    //
-    //   artifacts/single-pkg-0.1.0.tar.gz          <-- the dump
-    //
-    // The documented (multi-artifact) layout the engine assumes is:
-    //
-    //   artifacts/single-pkg-sdist/single-pkg-0.1.0.tar.gz
-    //
-    // Without normalization, `checkCompleteness` walks
-    // `artifacts/single-pkg-sdist/`, doesn't find it, and throws.
+    // The dumped-into-root layout `actions/download-artifact@v8` produces
+    // for a single artifact: `artifacts/<file>.tar.gz`, with no
+    // `artifacts/single-pkg-sdist/` subdir for `checkCompleteness` to walk.
     const artifactsRoot = join(repo, 'artifacts');
     mkdirSync(artifactsRoot, { recursive: true });
     writeFileSync(

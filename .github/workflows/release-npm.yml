@@ -1,18 +1,9 @@
 name: Release (dogfood)
 
-# putitoutthere releases itself using itself.
-#
-# On push to main OR manual dispatch:
-#   1. `putitoutthere plan` against the committed putitoutthere.toml
-#      + the current HEAD trailer, emit matrix JSON to GITHUB_OUTPUT.
-#   2. If the plan is non-empty, the publish job rebuilds the ncc
-#      action bundle, folds it into a release-only commit (the bundle
-#      is gitignored on main and lives only on tag commits), then
-#      `putitoutthere publish` does the npm publish, writeVersion,
-#      and tagging — tag points at the bundle-bearing commit.
-#   3. The floating `v<major>` tag is moved to the new release commit
-#      so scaffolded consumer workflows (`uses: ...@v1`) resolve to a
-#      ref that has `dist-action/index.js` under it.
+# putitoutthere releases itself using itself. `dist-action/` is gitignored
+# on main, so publish folds the bundle into a release-only commit and
+# points the tag at it; the floating `v<major>` tag moves to that commit so
+# scaffolded consumer workflows resolve to a ref with the bundle under it.
 
 on:
   push:
@@ -90,18 +81,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # `dist-action/` is gitignored on main; the action bundle exists only on
-      # tag commits. Fold the freshly-built bundle into a release-only commit
-      # so the per-package tag (and the floating `v<major>` tag that tracks
-      # it) resolve to a commit that contains `dist-action/index.js`. The
-      # commit is not pushed to main — it lives only as the tag's target.
-      #
-      # The stage / empty-index guard / trailer-forwarding commit — and the
-      # reason the parent body must survive (else the publish-time plan
-      # re-derivation silently downgrades `release: minor` to a patch; the
-      # 0.1.51 → 0.2.0 attempt that landed as 0.1.52) — now live in the
-      # `fold-bundle` engine command as tested code (`src/fold-action-bundle.ts`),
-      # not inline bash. See notes/handoff/2026-04-24-dist-action.md.
+      # Fold the built bundle into a release-only commit so the tags resolve
+      # to a commit containing `dist-action/index.js`; it is never pushed to
+      # main. The parent commit body must survive, or the publish-time plan
+      # re-derivation downgrades `release: minor` to a patch (0.1.51 case).
       - name: Fold action bundle into release commit
         run: |
           pnpm exec putitoutthere fold-bundle --subject 'chore(release): bundle action'
@@ -112,25 +95,10 @@ jobs:
           # API; an authenticated call gets 5000 req/hr instead of the
           # unauthenticated 60, so a busy runner never rate-limits.
           GITHUB_TOKEN: ${{ github.token }}
-          # npm's trusted-publishing (OIDC) exchange never throws: every
-          # failure path in npm's `lib/utils/oidc.js` is
-          # `log.verbose(...); return undefined`. When the exchange fails,
-          # setup-node's placeholder `_authToken`
-          # (`XXXXX-XXXXX-XXXXX-XXXXX`) survives in `.npmrc`, the PUT goes
-          # out with a bogus bearer, and npm masks the rejection as a bare
-          # `E404 Not Found - PUT`. Nothing at the default loglevel says
-          # why — see run 30456638828, where 0.2.80 failed exactly this
-          # way with no diagnosable cause in the log.
-          #
-          # `verbose` surfaces the one line that names it:
-          #   npm verbose oidc Failed token exchange request with body
-          #   message: <reason>
-          #
-          # Safe to leave on: npm logs the id-token *request* URL (the
-          # bearer is a header, not a query param) and logs
-          # "Successfully retrieved and set token" without the token
-          # itself. The engine captures npm's stderr and only dumps it on
-          # failure, so green runs are unchanged.
+          # npm's OIDC exchange never throws: on failure setup-node's
+          # placeholder `_authToken` survives in `.npmrc` and npm masks the
+          # rejection as a bare `E404 Not Found - PUT`. `verbose` surfaces
+          # `npm verbose oidc Failed token exchange request`. Logs no token.
           NPM_CONFIG_LOGLEVEL: verbose
         run: pnpm exec putitoutthere publish
 

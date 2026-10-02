@@ -1,36 +1,8 @@
 /**
  * Classify a pypi package's declared dynamic version source by whether a
- * release run can actually reach it.
- *
- * `[project].dynamic = ["version"]` is a promise that *something* will
- * supply the version at build time. putitoutthere has exactly three ways
- * to keep that promise:
- *
- *   - **hatch-vcs** — `[tool.hatch.version] source = "vcs"` with
- *     `hatch-vcs` in `[build-system].requires`. Honours
- *     `SETUPTOOLS_SCM_PRETEND_VERSION`, which the reusable workflow sets
- *     on the build step to the planned version.
- *   - **setuptools-scm** — `[tool.setuptools_scm]` with `setuptools-scm`
- *     in `[build-system].requires`. Same env-var handoff.
- *   - **maturin** — the sibling `Cargo.toml`'s `[package].version`,
- *     which the `write-version` step does bump. Handled by the caller,
- *     which skips this classification entirely for `build = "maturin"`.
- *
- * Everything else is a dead end, and the dead end that bit us looks
- * correct: plain hatchling with `[tool.hatch.version] path = "..."`
- * declares `dynamic`, so the static-literal gate passes, and declares a
- * version table, so a presence-only backend gate passes. But hatchling
- * reads a literal off that file, ignores `SETUPTOOLS_SCM_PRETEND_VERSION`,
- * and no release step rewrites the file (`write-version` is
- * maturin-only). `agent-transcript-viewer` published `0.0.0` to PyPI
- * that way while the plan said `0.1.0`, and nothing failed. #696.
- *
- * Two codes, because the two remedies differ: `PIOT_PYPI_HATCH_VERSION_PATH`
- * means "switch the source", `PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND` means
- * "wire up the plugin".
- *
- * Pure — operates on already-parsed TOML tables, so it stays sync per the
- * engine's async convention.
+ * release run can reach it (#696). Only hatch-vcs / setuptools-scm (which
+ * honour `SETUPTOOLS_SCM_PRETEND_VERSION`) and maturin keep the `dynamic`
+ * promise; plain hatchling `[tool.hatch.version] path` reads a literal off disk.
  */
 
 import { buildRequiresDeclares } from './build-requires-declares.js';

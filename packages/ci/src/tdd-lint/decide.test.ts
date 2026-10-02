@@ -1,11 +1,7 @@
 /**
- * Decision matrix for the tdd-lint gate (#452), extracted from the inline
- * bash in `.github/workflows/tdd-lint.yml`. Pins the exact pass/fail
- * decisions and every emitted line the bash produced (the `::notice` skip
- * annotation, the `::error` block, and the skip/OK messages), so the
- * TypeScript reimplementation is provably equivalent. Pure — no I/O — so
- * every branch is driven by plain inputs. Assertions are exact (`toEqual`
- * on the full line list) so a dropped or altered message is caught.
+ * Decision matrix for the tdd-lint gate (#452), extracted from the inline bash
+ * in `.github/workflows/tdd-lint.yml`. Exact `toEqual` on the full line list,
+ * so a dropped or altered message is caught.
  */
 
 import { describe, expect, it } from 'vitest';

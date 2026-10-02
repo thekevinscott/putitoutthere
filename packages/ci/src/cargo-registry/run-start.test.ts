@@ -1,10 +1,7 @@
 /**
- * Composition-root wiring test for cargo-registry `start` (#454). Mocks the OS
- * boundary (`node:child_process` for spawn, `node:fs/promises`), the process
- * seam (`../utils/exec-capture.js`, `../utils/sleep.js`), `./decide-start.js`,
- * and `./read-raw.js`, isolating the plumbing: the env guard, the detached
- * spawn + log redirect + PID export, the bounded readiness poll (curl + sleep),
- * and the success (config write) / failure (raw log dump) branches decide selects.
+ * Composition-root wiring test for cargo-registry `start` (#454). The OS and
+ * process seams plus `decide-start` are mocked, isolating the plumbing: the env
+ * guard, detached spawn + log redirect + PID export, bounded readiness poll.
  */
 
 import { spawn } from 'node:child_process';

@@ -1,11 +1,7 @@
 /**
  * GitHub Actions wrapper. Bundled to `dist-action/index.js` via ncc.
- *
- * ~50-line adapter: read `INPUT_COMMAND` / `INPUT_FAIL_ON_ERROR` →
- * invoke the SDK's run() → surface the exit code. No GHA-specific
- * logic lives here beyond input parsing.
- *
- * Issue #24. Plan: §5.2, §5.3.
+ * Adapter only: read `INPUT_COMMAND` / `INPUT_FAIL_ON_ERROR` → invoke the
+ * SDK's run() → surface the exit code. Issue #24.
  */
 
 import { pathToFileURL } from 'node:url';
@@ -32,23 +28,10 @@ export async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // #276: write-version uses a different argv shape — `--path` (the
-  // package dir, sourced from `working_directory`) and `--version`.
-  // #366: write-crate-version shares that shape — `--path` (the
-  // bundled-cli crate dir, sourced from `working_directory`) and
-  // `--version`.
-  // #299: write-launcher takes `--path` (the matrix row's package dir,
-  // sourced from `working_directory`) and reads `--cwd` from
-  // process.cwd() — the runner working dir is the repo root, where
-  // `putitoutthere.toml` lives.
-  // #595: verify-bundle-cli takes `--path` (the matrix row's package dir,
-  // sourced from `working_directory`) plus `--stage-to` / `--bin` /
-  // `--target`. It is the one input whose CLI form is two argv tokens
-  // (`verify bundle-cli`), because `verify` is a command with
-  // subcommands; Actions inputs are flat, so the hyphenated spelling is
-  // the input and the split happens here.
-  // No `--json` on any of them: these subcommands emit a single human
-  // line; there's no structured output to consume.
+  // Actions inputs are flat, so the hyphenated `verify-bundle-cli` input
+  // splits into two argv tokens here (#595). Per-command argv shapes:
+  // #276 write-version / #366 write-crate-version / #299 write-launcher
+  // each take `--path` from `working_directory`; none take `--json`.
   const argv = command === 'verify-bundle-cli'
     ? ['node', 'putitoutthere', 'verify', 'bundle-cli']
     : ['node', 'putitoutthere', command];

@@ -1,26 +1,8 @@
 /**
- * `putitoutthere check` must reject a `dynamic = ["version"]` whose
- * version source no release step can reach — the e2e twin of
- * `tests/integration/check-pypi-version-source.integration.test.ts`.
- *
- * Shells out to the built CLI (`node dist/cli-bin.js check --cwd … --json`)
- * against a real git repo on disk carrying the pyproject shape that
- * actually shipped a wrong wheel: `[tool.hatch.version] path = "…"`.
- * Plain hatchling reads a literal off that file and ignores
- * `SETUPTOOLS_SCM_PRETEND_VERSION` — the only version handoff the
- * reusable workflow has — and nothing rewrites the file, so
- * `agent-transcript-viewer` published `0.0.0` while the plan said
- * `0.1.0` (#696).
- *
- * This is the tier that catches the integration test being
- * self-consistently wrong about the *CLI's* half of the contract: the
- * real `check` subcommand has to surface the finding on a non-zero exit
- * and in `--json` output, not merely compute it in-process. `check`
- * reads only the working tree, so no registry and no auth are involved.
- *
- * Red before the fix: the CLI exits 0 with `check: no findings`.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #696.
+ * `check` must reject a `dynamic = ["version"]` whose version source no
+ * release step can reach: plain hatchling reads `[tool.hatch.version] path`
+ * and ignores `SETUPTOOLS_SCM_PRETEND_VERSION`, the only version handoff the
+ * reusable workflow has. #696.
  */
 
 import { execFileSync } from 'node:child_process';

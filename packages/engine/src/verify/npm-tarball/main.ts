@@ -1,18 +1,8 @@
 /**
- * Verify each published main/noarch npm tarball contains the directory
- * entries its `package.json` `files[]` declares (#443).
- *
- * The load-bearing check: the build job produces `dist/`, the publish job
- * ships from a fresh source tree, and `npm publish` returns 0 even when
- * that tree is missing the compiled output — so the registry receives a
- * tarball without `dist/` and nothing upstream complains. This step
- * downloads the published tarball back and asserts the declared dirs are
- * present and non-empty. Extracted verbatim from the "Verify published npm
- * tarballs honor package.json files" bash block.
- *
- * `files[]` entries without a dot are treated as directories (`dist`,
- * `lib`); dotted entries (`README.md`) are individual files and need no
- * per-tree assertion. Returns the process exit code (0 ok, 1 on any miss).
+ * Verify each published main/noarch npm tarball contains the directory entries
+ * its `package.json` `files[]` declares (#443) — `npm publish` returns 0 even
+ * when the tree it ships from lacks the compiled output. Dotless `files[]`
+ * entries are treated as directories; dotted ones are individual files.
  */
 
 import { readFile, rm, stat } from 'node:fs/promises';

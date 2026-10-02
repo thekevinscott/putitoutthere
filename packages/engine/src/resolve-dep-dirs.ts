@@ -1,18 +1,8 @@
 /**
- * Resolve a manifest's dependency entries to the on-disk directories they
- * point at. #621.
- *
- * Two indirections have to be followed before a `path` is in hand, and
- * missing either one silently drops a crate from the version rewrite:
- *
- *  - a member may defer to the workspace (`demo-core.workspace = true`),
- *    which puts both the `path` and the version requirement in the
- *    workspace root's `[workspace.dependencies]`, a different file;
- *  - `path` is relative to the *declaring manifest's* directory, and for
- *    an inherited entry that is the workspace root, not the member.
- *
- * Shared by the discovery walk and the requirement rewrite so the two can
- * never disagree about which crates are in scope.
+ * Resolve a manifest's dependency entries to the directories they point at
+ * (#621). Two indirections, either silently dropping a crate: `.workspace = true`
+ * moves both `path` and the requirement into the root's `[workspace.dependencies]`,
+ * and `path` is relative to the *declaring* manifest's dir — the root, if inherited.
  */
 
 import { isAbsolute, resolve } from 'node:path';

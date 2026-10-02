@@ -1,28 +1,8 @@
 /**
- * pypi version-independent wheels collapse the version fan — integration.
- *
- * Issue #401. A `kind = "pypi"` `build = "maturin"` package whose wheel is
- * Python-version-independent builds ONE wheel per platform that is
- * byte-identical no matter which interpreter built it:
- *
- *  - `[tool.maturin].bindings = "bin"` → a Rust-binary wheel tagged
- *    `py3-none-<platform>` (no Python ABI at all);
- *  - a pyo3 `abi3` / `abi3-pyXY` feature → a single stable-ABI extension
- *    tagged `cp3x-abi3-<platform>` that loads on every CPython >= X.Y.
- *
- * The planner still fans the maturin wheel build across every CPython
- * version `requires-python` (or an explicit `python_versions`) allows.
- * For a version-independent wheel that produces N *identical* wheels —
- * wasted build time, and N artifacts carrying the same filename that
- * then race-corrupt at the consumer's documented `merge-multiple: true`
- * download (`twine check` → `zipfile.BadZipFile`). The fix: collapse the
- * fan to a single wheel row per target for these packages.
- *
- * This lives in `tests/integration/` because the behavior is only
- * observable when the real config loader, the real planner, and the real
- * `pyproject.toml` / `Cargo.toml` readers run together against an on-disk
- * repo — the config → plan → manifest seam a unit test with stubbed
- * inputs cannot exercise.
+ * pypi version-independent wheels collapse the version fan (#401):
+ * `[tool.maturin].bindings = "bin"` (`py3-none-<platform>`) and a pyo3 `abi3`
+ * feature both yield one wheel per platform. Fanning them produced N
+ * artifacts sharing a filename that race-corrupt under `merge-multiple: true`.
  */
 
 import { execFileSync } from 'node:child_process';

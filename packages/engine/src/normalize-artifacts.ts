@@ -1,23 +1,8 @@
 /**
- * Single-artifact layout normalization.
- *
- * `actions/download-artifact@v8` is count-sensitive when called with
- * `path:` and no `name`/`pattern` filter: multiple artifacts get
- * per-artifact subdirectories (the documented multi-case the engine
- * relies on), but a *single* artifact extracts directly into the path
- * with no `<artifact_name>/` subdir. The completeness check
- * (`src/completeness.ts`) and every downstream handler reach for
- * `artifacts/<artifact_name>/...`, so consumers whose plan emits one
- * row — canonical case: pure-Python + `build = "setuptools"`, sdist
- * only — fail before any side effect runs.
- *
- * Rather than fight the action's per-count behavior in YAML (where the
- * subdir-vs-flat decision lives in upstream code we don't control),
- * normalize the layout in-process before completeness so the engine's
- * own contract is the single source of truth. The reusable workflow
- * calls into this via `publish.ts`; no consumer-facing surface.
- *
- * Issue #311.
+ * Single-artifact layout normalization (#311). `actions/download-artifact@v8`
+ * is count-sensitive with `path:` and no `name`/`pattern`: multiple artifacts
+ * get per-artifact subdirs, a *single* artifact extracts flat. Downstream
+ * expects `artifacts/<artifact_name>/...`, so one-row plans would fail.
  */
 
 import { mkdir, readdir, rename } from 'node:fs/promises';

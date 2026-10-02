@@ -1,15 +1,8 @@
 /**
- * Integration test for the patch-coverage gate (#468, epic #442).
- *
- * Drives the real `piot-ci patch-coverage` dispatch in-process — `run()` from
- * `cli.ts` → `runPatchCoverage` → the real parseAddedLines / coveredLines /
- * decidePatchCoverage — with only the git-subprocess (the exec seam) and
- * file-read (`node:fs/promises`) boundaries mocked. Unlike
- * `src/patch-coverage/run.test.ts` (which mocks the decision modules to isolate
- * the composition root's wiring), this exercises the real strict-100% /
- * no-escape-hatch decision end to end: the no-additions pass, the clean pass,
- * the uncovered `::error`, and the escape-hatch `::error`, all asserted through
- * the actual command and streams.
+ * Integration test for the patch-coverage gate (#468, epic #442). Drives the
+ * real `piot-ci patch-coverage` dispatch in-process with only the git
+ * subprocess and file-read boundaries mocked, so the real strict-100% /
+ * no-escape-hatch decision is asserted end to end across both streams.
  */
 
 import type * as ChildProcess from 'node:child_process';

@@ -1,11 +1,7 @@
 /**
- * npm handler — vanilla mode.
- *
- * Issue #18. Plan: §7.4, §12.2 (vanilla), §13.1, §14.5, §16.1.
- *
- * The matrix-using modes (napi, bundled-cli) layer on top of this in
- * #19; they share isPublished and writeVersion, and add a platform-
- * package orchestration step before the main publish.
+ * npm handler — vanilla mode. Issue #18. Plan: §7.4, §12.2 (vanilla), §13.1,
+ * §14.5, §16.1. The matrix modes (napi, bundled-cli, #19) share `isPublished`
+ * and `writeVersion` and add platform-package orchestration before this.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -136,18 +132,10 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     return { status: 'already-published' };
   }
 
-  // napi / bundled-cli: publish platform packages first, then rewrite
-  // the main package.json to add optionalDependencies, then fall through
-  // to the normal main-package publish path below. §13.7.
-  //
-  // #625: `publishPlatforms` reports which platform packages it
-  // published and which were already live, and that has to reach the
-  // caller. Discarding it made a six-package release indistinguishable
-  // from a one-package one in the run report — and on a re-run after a
-  // partial failure, hid the fact that the missing packages were already
-  // safely on the registry. `platforms` stays undefined for a package
-  // with no family so a vanilla publish reports nothing rather than an
-  // empty summary.
+  // napi / bundled-cli: publish platform packages first, then rewrite the main
+  // package.json's optionalDependencies, then fall through to the main publish
+  // below (§13.7). `platforms` carries what `publishPlatforms` published vs.
+  // found already live (#625); it stays undefined for a family-less package.
   let platforms: PlatformPublishSummary | undefined;
   const buildEntries = normalizeBuild(pkg.build);
   if (buildEntries.length > 0 && pkg.targets !== undefined && pkg.targets.length > 0) {
@@ -346,32 +334,10 @@ async function assertRepositoryField(path: string): Promise<void> {
 }
 
 /**
- * Heuristic match on npm's auth-related stderr shapes.
- *
- * `E404` belongs here, counterintuitive as a not-found code in an
- * auth matcher reads: npm answers an **unauthorized publish** with
- * not-found rather than 401/403, because confirming that a package
- * exists but is not writable by you is itself an information
- * disclosure. A publish that comes back 404 has been declined, not
- * mislaid. npm never says "unauthorized" on this path — see the
- * captured stderr in
- * `tests/integration/fixtures/registry-responses/npm/publish-e404-unauthorized.txt`.
- *
- * That makes E404 ambiguous, and this predicate deliberately does not
- * try to resolve the ambiguity — its one caller does. The bootstrap
- * hint fires only when OIDC is the auth path *and* `isBootstrapPublish`
- * confirms against the packument endpoint that the package is genuinely
- * absent. A 404 on a package that IS on the registry falls through to
- * the raw stderr: piot's own 0.2.80 was exactly that shape (a transient
- * OIDC token-exchange failure on a package published 80 times over),
- * and telling that operator "the package does not exist, bootstrap with
- * NODE_AUTH_TOKEN" would send them to abandon trusted publishing over a
- * blip. #598.
- *
- * Typed as a predicate (`stderr is string`) because it already returns false
- * for absent or empty stderr: the caller appends that stderr to the hint it
- * raises (#617), and narrowing here is what keeps that append from needing a
- * second, unreachable emptiness check of its own.
+ * Heuristic match on npm's auth-related stderr shapes. `E404` belongs here:
+ * npm answers an unauthorized publish with not-found, not 401/403, since
+ * confirming a package exists but is unwritable is itself disclosure. The
+ * ambiguity is the caller's to resolve, not this predicate's (#598).
  */
 function looksLikeAuthFailure(stderr: string | undefined): stderr is string {
   if (!stderr) {return false;}

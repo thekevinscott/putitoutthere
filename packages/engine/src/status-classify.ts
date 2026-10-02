@@ -1,10 +1,7 @@
 /**
- * Classify one package's drift state from its {latest tag version,
- * registry latest}. Pure — the registry/tag reads happen in
- * `computeStatus`. `DRIFT_STATES` is the subset a `status --check` gate
- * fails on.
- *
- * Issue #403.
+ * Classify one package's drift state from its {latest tag version, registry
+ * latest}. Pure — the registry/tag reads happen in `computeStatus`.
+ * `DRIFT_STATES` is the subset a `status --check` gate fails on. Issue #403.
  */
 
 import type { StatusState } from './status-types.js';

@@ -2,11 +2,7 @@
  * Decision core for the Verdaccio-auth harness (#453, epic #442). I/O-free:
  * given the plan matrix, the token the Verdaccio user-create returned, and the
  * raw response body, decide whether the token is usable, which per-package
- * `.npmrc` files to write (and their contents), and the exact log lines.
- * Extracted from the "Configure Verdaccio auth (first-publish)" bash in
- * `e2e-fixture-job.yml`; the decisions and `::error::`/`::add-mask::`/`Wrote`
- * text match it exactly (pinned in `decide.test.ts`). The ping poll and the
- * user-create PUT are the composition root's I/O (`run.ts`).
+ * `.npmrc` files to write, and the exact log lines. The ping + PUT are run.ts's.
  */
 
 import { parseNpmPaths } from './npm-paths.js';

@@ -1,11 +1,8 @@
 /**
- * Decision core for the tdd-lint gate (#452). I/O-free: given the PR's
- * commit log and the `packages/engine/src/` files it changed, decide
- * pass/fail and the lines to emit. Extracted from the inline bash in
- * `.github/workflows/tdd-lint.yml` (the three-step Skip-Gates / src-vs-test
- * check, collapsed into one command); the decisions and every emitted line
- * — the `::notice`, the `::error` block, the skip/OK messages — match it
- * exactly (pinned in `decide.test.ts`).
+ * Decision core for the tdd-lint gate (#452). I/O-free: given the PR's commit
+ * log and the `packages/engine/src/` files it changed, decide pass/fail and the
+ * lines to emit. Extracted from the inline bash in
+ * `.github/workflows/tdd-lint.yml`, collapsing its three steps into one command.
  */
 
 export interface TddLintInput {

@@ -1,28 +1,14 @@
 name: Conventions
 
-# NOTE — we deliberately do NOT use the `e2e-verify` gate / e2e attestations.
-# That gate is for repos that can't run e2e in CI; piot runs its full e2e
-# suite in CI directly (e2e-cli.yml runs every tests/e2e/**/*.e2e.test.ts per
-# PR; e2e-fixture.yml does the real-OIDC-publish runs), which is strictly
-# stronger than an attestation receipt. `e2e-verify` is default-off until an
-# `e2e-attestation` baseline is committed — we never commit one, so it stays
-# dormant (a `skipped` e2e-verify job is the intended, correct state). Do not
-# commit under e2e-attestations/ or set `run_e2e`. See AGENTS.md > "We do not
-# use e2e attestations" and #521.
+# We deliberately do NOT use the `e2e-verify` gate / e2e attestations: piot
+# runs its full e2e suite in CI, which is strictly stronger than a receipt.
+# A `skipped` e2e-verify job is the intended state -- never commit under
+# e2e-attestations/ or set `run_e2e`. See AGENTS.md and #521.
 
-# Gate scope is the two `source:` trees below, but two of the gates reach
-# wider than that:
-#   - `workflow-lint` (no logic in CI YAML) scans `.github/workflows/**`, so
-#     every workflow edit — including an edit to this file — must run the lane.
-#   - unit coverage / mutation run the project's own vitest and build, so the
-#     lockfile and root manifests are inputs.
-# `packages/**` carries both sources, their colocated tests, the integration
-# tiers `integration-lint` reads, and packages/engine/testing-conventions.toml
-# (the engine job's `config:`).
-#
-# CHANGELOG.md / MIGRATIONS.md are NOT triggers: the `changelog` gate only
-# demands them when the scoped source changed, so it passes vacuously on a
-# docs-only diff.
+# Gate scope is the two `source:` trees below, but two gates reach wider:
+# `workflow-lint` scans .github/workflows/** (so every workflow edit must
+# run the lane), and unit coverage / mutation run vitest + build, making the
+# lockfile and root manifests inputs.
 on:
   pull_request:
     paths:

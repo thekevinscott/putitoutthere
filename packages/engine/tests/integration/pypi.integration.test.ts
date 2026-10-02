@@ -1,11 +1,7 @@
 /**
- * PyPI integration tests. Runs pypi.isPublished against msw.
- *
- * Covers 404 / 200 / 5xx paths. publish/writeVersion stay in unit
- * tests — they shell out to `twine` and read from the filesystem, not
- * HTTP endpoints.
- *
- * Issue #27.
+ * pypi.isPublished against msw: 404 / 200 / 5xx. publish and writeVersion
+ * stay in unit tests — they shell out to `twine` and read the filesystem,
+ * not HTTP endpoints. Issue #27.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

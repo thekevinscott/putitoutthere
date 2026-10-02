@@ -1,20 +1,8 @@
 /**
- * Retry with exponential backoff + jitter.
- *
- * Applied uniformly by the orchestrator rather than per-handler (plan.md
- * §13.3 / §7.3):
- *
- *   retries:        3
- *   initial_delay:  1s
- *   multiplier:     2          (1s, 2s, 4s)
- *   jitter:         ±25%
- *   retry_on:       TransientError, fetch 5xx, ECONNRESET, ETIMEDOUT, 429
- *   no_retry_on:    AuthError, other errors, 4xx (except 429)
- *
- * 429 honors the error's `retryAfter` hint (seconds) when present, so
- * registries asking us to back off get respected.
- *
- * Issue #10.
+ * Retry with exponential backoff + jitter, applied uniformly by the
+ * orchestrator rather than per-handler (#10; plan.md §13.3 / §7.3). Retries
+ * `TransientError`, fetch 5xx, ECONNRESET, ETIMEDOUT and 429; never
+ * `AuthError` or any other 4xx. A 429 honours the error's `retryAfter` hint.
  */
 
 import { AuthError, TransientError } from './types.js';

@@ -1,24 +1,8 @@
 /**
- * `piot plan` with npm unreachable, against the real CLI — the e2e twin of
- * `tests/integration/plan-offline-verdict.integration.test.ts` (#650).
- *
- * Shells out to the built CLI (`node dist/cli-bin.js plan --json`) with
- * `npm_config_registry` pointed at a hostname under the reserved `.invalid`
- * TLD (RFC 2606), so the real `npm view` the npm handler runs gets a real
- * NXDOMAIN from the real resolver. That is the sandbox condition from #650
- * — `docker run --network none` — reproduced without a container, and it is
- * the only tier that exercises the actual npm CLI's actual retry behaviour.
- * A mock cannot tell you what npm does with a dead name; this can.
- *
- * Red before the fix: `npm view` burns npm's own retry ladder
- * (`fetch-retries=2` → ~10s then ~60s) before failing, and the handler reads
- * that failure as "the version is not published", so `plan` takes ~70s and
- * then claims the package WOULD PUBLISH — an assertion it has no evidence
- * for. Green after: one bounded probe, `verdict: unknown`, ~1s.
- *
- * No publish, no auth, no writes — `plan` only reads.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #650.
+ * `plan` with npm unreachable (#650). `npm_config_registry` points at a
+ * hostname under the reserved `.invalid` TLD (RFC 2606) so the real `npm
+ * view` gets a real NXDOMAIN. Red: npm's own `fetch-retries=2` ladder (~10s
+ * then ~60s) runs and the handler reads the failure as "not published".
  */
 
 import { execFileSync } from 'node:child_process';

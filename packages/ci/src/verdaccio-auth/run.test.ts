@@ -1,11 +1,8 @@
 /**
- * Composition-root wiring test for the Verdaccio-auth harness (#453). All
- * collaborators are mocked — the OS boundary (the exec seam,
- * `node:fs/promises`), `./ping-once.js`, and `./decide.js` — so this isolates
- * the plumbing: the bounded `/-/ping` poll (pingOnce + sleep), the user-create
- * PUT (exact curl flags), the token parse ('null' when absent), the `.npmrc`
- * writes, and how decide()'s lines + exit code surface. The ping curl contract
- * lives in `ping-once.test.ts`; the decisions live in `decide.test.ts`.
+ * Composition-root wiring test for the Verdaccio-auth harness (#453). Every
+ * collaborator is mocked, isolating the plumbing: the bounded `/-/ping` poll,
+ * the user-create PUT (exact curl flags), the token parse ('null' when absent),
+ * the `.npmrc` writes, and how decide's lines + exit code surface.
  */
 
 import { writeFile } from 'node:fs/promises';

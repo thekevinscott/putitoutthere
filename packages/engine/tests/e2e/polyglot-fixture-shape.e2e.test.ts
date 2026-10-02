@@ -1,35 +1,8 @@
 /**
- * `polyglot-everything` structurally exercises the shape it claims — e2e.
- *
- * Issue #641. The fixture's own comment positions it as the reference
- * polyglot canary ("rust crate → python wheels (maturin) + multi-mode npm"),
- * and `notes/design-commitments.md` positions that shape as the v0 success
- * criterion. Structurally it does not mirror it, and that is plausibly why
- * the embedded-workspace-crate version bug shipped **twice** — #374, then
- * #621 — without either fixture suite catching it.
- *
- * The preconditions of that bug class, and what the fixture had:
- *
- *   pyo3 extension module path-deps the core   ->  depends only on pyo3
- *   everything in one cargo workspace          ->  no workspace root at all
- *   the core owns the version-bearing symbol   ->  main.rs prints "canary"
- *
- * With none of them present, "the artifact reports the release version" is
- * not a test anyone could have written here: there is nothing in the tree
- * whose `CARGO_PKG_VERSION` could ever diverge from the artifact's own.
- *
- * These tests are the canary that was missing. They copy the real fixture
- * tree, run the **real CLI's** maturin pre-build writer over it — the exact
- * command `_matrix.yml` runs before `maturin build` — and then ask **real
- * cargo** what the tree says. Cargo is the authority on purpose: the bug is
- * about a per-crate compile-time constant, so the reader that matters is the
- * one that would compile it.
- *
- * `cargo metadata --no-deps` reads manifests and resolves workspace
- * inheritance without touching the dependency graph, so this stays offline
- * and fast even though the fixture declares pyo3.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * The embedded-workspace-crate version bug shipped twice (#374, #621) because
+ * `polyglot-everything` had no cargo workspace root and no version-bearing
+ * core crate to diverge from. These run the real CLI's maturin pre-build
+ * writer over the fixture and ask real cargo what the tree says. #641.
  */
 
 import { execFileSync } from 'node:child_process';

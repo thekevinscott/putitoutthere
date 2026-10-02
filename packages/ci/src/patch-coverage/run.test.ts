@@ -1,13 +1,8 @@
 /**
  * Composition-root coverage for the patch-coverage gate (#468). The decision
- * modules (parseAddedLines, coveredLines, decidePatchCoverage) and the I/O
- * boundary (the exec seam, node:fs/promises) are mocked, so this isolates run's
- * wiring: the env guard, the SHA-reachability `git cat-file` probes, the exact
- * `git diff` invocation (with its `maxBuffer`), how the diff is fed to
- * parseAddedLines, the conditional coverage read (skipped when there are no
- * additions), the cwd-relative coverage key resolution, the read-failure
- * guard, and how decide()'s out/err lines + exit code surface to the two
- * streams. The decisions themselves live in their own tests.
+ * modules and the I/O boundary are mocked, isolating run's wiring: the env
+ * guard, the SHA-reachability `git cat-file` probes, the `git diff` invocation
+ * and its `maxBuffer`, the conditional coverage read, the cwd-relative key.
  */
 
 import { readFile } from 'node:fs/promises';

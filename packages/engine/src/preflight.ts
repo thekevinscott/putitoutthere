@@ -1,24 +1,8 @@
 /**
- * Pre-flight checks. Run before any publish side effect.
- *
- * Auth (`requireAuth` / `checkAuth`) — every cascaded package has a
- * viable credentials path. Per plan.md §16.3: each handler accepts
- * OIDC (detected by `ACTIONS_ID_TOKEN_REQUEST_TOKEN`) or a specific
- * long-lived env var.
- *
- * npm provenance metadata (`requireProvenanceMetadata` /
- * `checkProvenanceMetadata`) — every npm package's `package.json`
- * carries a non-empty `repository` field. `npm publish --provenance`
- * (the OIDC trusted-publisher path) hard-requires this; failing
- * here, before runner work, beats failing deep inside the npm CLI
- * after artifact upload + OIDC negotiation. #280.
- *
- * Each function reports; callers decide whether to throw. The
- * `require*` variants are the publish path; the `check*` variants
- * exist so future diagnostic surfaces can render tables instead of
- * aborting.
- *
- * Issue #14, #280.
+ * Pre-flight checks, run before any publish side effect (#14, #280; plan §16.3).
+ * Auth: each handler accepts OIDC (detected via `ACTIONS_ID_TOKEN_REQUEST_TOKEN`)
+ * or a specific long-lived env var. `npm publish --provenance` hard-requires a
+ * non-empty `package.json#repository`. `require*` throws; `check*` reports.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -124,18 +108,10 @@ export interface ProvenanceFinding {
 }
 
 /**
- * Scan every npm package's `package.json` for a non-empty `repository`
- * field. Returns the list of findings; an empty list means every npm
- * package is well-formed.
- *
- * `repository` is accepted in either the canonical object form
- * (`{ type, url, directory? }`) or the legacy single-string form
- * (`"git+https://…"`). The string form must be non-empty after
- * trimming; the object form must carry a non-empty `url`.
- *
- * Non-npm packages and a malformed `package.json` (parse error) are
- * skipped — other parts of the pipeline already cover those failure
- * modes; this check is scoped to the `repository` field alone.
+ * Scan every npm package's `package.json` for a non-empty `repository` field;
+ * an empty finding list means all are well-formed. Both forms are accepted: the
+ * canonical object (`{ type, url, directory? }`, needing a non-empty `url`) and
+ * the legacy string (`"git+https://…"`, non-empty after trimming).
  */
 export async function checkProvenanceMetadata(
   packages: readonly Package[],
@@ -241,18 +217,10 @@ export interface CratesMetadataFinding {
 }
 
 /**
- * Scan every crates package's `Cargo.toml` for the metadata fields
- * crates.io hard-requires at publish time:
- *
- *   - `[package].description` — non-empty string.
- *   - `[package].license` OR `[package].license-file` — non-empty string.
- *
- * Returns the list of findings; an empty list means every crates
- * package is well-formed.
- *
- * Non-crates packages, missing `Cargo.toml`, and malformed TOML are
- * skipped — other parts of the pipeline already cover those failure
- * modes; this check is scoped to the metadata fields alone.
+ * Scan every crates package's `Cargo.toml` for the metadata crates.io
+ * hard-requires at publish time: a non-empty `[package].description`, and
+ * either `[package].license` or `[package].license-file`. Non-crates packages,
+ * a missing `Cargo.toml` and malformed TOML are skipped.
  */
 export async function checkCratesMetadata(
   packages: readonly Package[],
@@ -323,24 +291,10 @@ export interface PypiVersionFinding {
 }
 
 /**
- * Scan every pypi package's `pyproject.toml` for a static
- * `[project].version = "..."` literal. Returns the list of findings;
- * an empty list means every pypi package declares
- * `[project].dynamic = ["version"]` (or has no `[project]` table at
- * all — that case is reported by a different check).
- *
- * Why: a static literal silently ships the previous release. The build
- * backend reads pyproject.toml at build time and putitoutthere does not
- * rewrite the literal (per design-commitment #1, no version
- * computation). hatch-vcs / setuptools-scm derive the version from a
- * git tag or `SETUPTOOLS_SCM_PRETEND_VERSION`; for maturin, the
- * version flows from `Cargo.toml`'s `[package].version`. All three
- * accept `dynamic = ["version"]`.
- *
- * Non-pypi packages, a missing `pyproject.toml`, malformed TOML, and a
- * `pyproject.toml` with no `[project]` table are skipped — other parts
- * of the pipeline (`checkPyprojectAndBundleCli`, the handler's own
- * read) already surface those failure modes.
+ * Scan every pypi package's `pyproject.toml` for a static `[project].version`
+ * literal, which silently ships the previous release: the backend reads it at
+ * build time and piot does not rewrite it (non-goal: version computation).
+ * hatch-vcs / setuptools-scm / maturin all accept `dynamic = ["version"]`.
  */
 export async function checkPypiVersionSource(
   packages: readonly Package[],

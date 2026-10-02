@@ -1,15 +1,6 @@
 /**
  * `advanceFloatingMajor` — move the floating `v<major>` tag to the newest
  * release in its major line (#446).
- *
- * The config loader and git collaborators (`loadConfig`, `fetchTagsForce`,
- * `lastTag`, `tagCommit`, `tagList`, `forceMoveTag`) are mocked so this
- * isolates the three branches — move, idempotent "already at" no-op, and
- * "no release tag yet" no-op — with stdout captured for the log lines. The
- * real semver selection lives in `lastTag` (see git.test.ts) and the real
- * git round trip in tests/integration/tag-plumbing.integration.test.ts + the
- * e2e tier. The floating major reads straight off `lastTag`'s parsed
- * `version`, so there's no separate version parse to stub.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

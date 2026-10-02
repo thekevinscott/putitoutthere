@@ -1,13 +1,8 @@
 /**
- * `putitoutthere resolve` (#683): willfire's callback map for the e2e
- * plan job (epic thekevinscott/willfire#152). One JSON line on stdout,
- * keyed per the frozen thekevinscott/willfire#153 format, one entry per
- * fixture directory. All matrix computation is delegated to the
- * `fixture-matrix` core in `@putitoutthere/ci` (#670) — no parallel
- * plan logic here, per design-commitments.md non-goal 7. The core is a
- * private workspace package, so the map is only answerable from a
- * checkout of this repo — which is also the only checkout defining the
- * workflow the key names.
+ * `putitoutthere resolve` (#683): willfire's callback map for the e2e plan job.
+ * One JSON line on stdout, keyed per the frozen thekevinscott/willfire#153
+ * format, one entry per fixture directory. Matrix computation is delegated to
+ * `fixture-matrix` in `@putitoutthere/ci` (#670) — no parallel plan logic here.
  */
 
 import { readdir } from 'node:fs/promises';

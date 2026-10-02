@@ -1,26 +1,8 @@
 /**
- * `putitoutthere resolve` against the built CLI — the e2e twin of
- * `tests/integration/resolve.integration.test.ts` (#683,
- * thekevinscott/willfire#152).
- *
- * Shells out to `node dist/cli-bin.js resolve --cwd …` from this repo's
- * own checkout and asserts the same contract the integration twin pins:
- * one JSON map on stdout keyed `<owner>/<repo>/<workflow-path>:<job-id>`
- * (format frozen on thekevinscott/willfire#153), one entry per fixture
- * enumerable from the checkout, `outputs` carrying the exact strings the
- * live plan job's `$GITHUB_OUTPUT` would. Everything is local and
- * deterministic: fixture sources on disk, throwaway git repos in tmp, no
- * network.
- *
- * The js-vanilla `matrix` expectation is pinned byte-exact against
- * `JSON.stringify` of the real `plan()` matrix over the materialized
- * fixture (`__VERSION__` → 0.0.0) — the same bytes `emitPlanOutputs`
- * writes after `matrix=` into `$GITHUB_OUTPUT`. The one deliberate
- * divergence from a live run is the version: the live plan job stamps a
- * run-scoped `0.0.{unix_seconds}` no static resolver can reproduce, and
- * `resolve` pins 0.0.0 so its output is deterministic.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * `resolve` against the built CLI (#683, thekevinscott/willfire#152): one
+ * JSON map keyed `<owner>/<repo>/<workflow-path>:<job-id>`, format frozen on
+ * thekevinscott/willfire#153. The live plan job stamps a run-scoped
+ * `0.0.{unix_seconds}`; `resolve` pins 0.0.0 to stay deterministic.
  */
 
 import { execFileSync } from 'node:child_process';

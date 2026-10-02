@@ -1,10 +1,7 @@
 /**
  * Decision core for the cargo-http-registry `start` mode (#454, epic #442).
- * I/O-free: given whether the readiness poll succeeded, decide the exit code,
- * the failure header line (or none), and whether to write the cargo config.
- * Extracted from the "Start cargo-http-registry (#331)" bash in
- * `e2e-fixture-job.yml`; the `::error::` text matches it exactly. The raw log
- * dump that follows the header on failure is the composition root's I/O.
+ * I/O-free; the `::error::` text matches the "Start cargo-http-registry (#331)"
+ * bash in `e2e-fixture-job.yml` exactly.
  */
 
 export interface CargoRegistryStartInput {

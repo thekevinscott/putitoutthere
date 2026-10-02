@@ -1,27 +1,8 @@
 /**
- * `putitoutthere check` — pre-merge configuration validation.
- *
- * Implements the "No release surprises" goal from
- * `notes/design-commitments.md`: every check knowable from the
- * consumer's repo state alone runs at PR time, before a release run
- * could fail mid-publish on a precondition checkable in milliseconds.
- *
- * Each check function (one per module under `check/`) returns
- * findings; the top-level `runChecks` aggregates them so the consumer
- * fixes everything in one round-trip rather than chasing one error at
- * a time across re-runs. `require-` style throwing helpers live in
- * `preflight.ts` for the publish path; this entry point is read-only
- * diagnostic.
- *
- * Non-goal #8 (parallel diagnostic surfaces): every check here either
- * already runs at publish time via `preflight.ts` / `plan.ts` /
- * `cascade.ts`, or — for the genuinely-new checks (path exists, globs
- * match a tracked file, tag-template collisions, pyproject.toml +
- * bundle_cli) — is a thin pre-pass of state the publish path already
- * relies on. No parallel diagnostic code path; the engine entry point
- * is shared with the publish phase.
- *
- * Issue #319.
+ * `putitoutthere check` — pre-merge configuration validation (#319). Every
+ * check knowable from the consumer's repo state alone runs at PR time, and
+ * `runChecks` aggregates findings so the consumer fixes everything in one
+ * round-trip. Read-only; the throwing publish-path helpers live in `preflight.ts`.
  */
 
 import { isAbsolute, join, resolve } from 'node:path';

@@ -1,14 +1,8 @@
 /**
- * Composition root for the patch-coverage gate (#468). Reads BASE_SHA /
- * HEAD_SHA from the env, checks both SHAs are reachable, runs the rename-aware
- * `git diff` the decision needs, reads the engine's coverage-final.json (only
- * when there are added lines to check), then feeds the settled state to
- * `decidePatchCoverage`, writes its stdout / stderr lines, and returns the exit
- * code. The only I/O lives here; every decision is a pure module under this
- * directory.
- *
- * Exit codes mirror the extracted `.mjs`: 2 for the I/O guards (missing env,
- * unreachable SHA, unreadable coverage file), 1 for violations, 0 for a pass.
+ * Composition root for the patch-coverage gate (#468). The only I/O lives here
+ * — SHA-reachability checks, the rename-aware `git diff`, the engine's
+ * coverage-final.json (read only when there are added lines). Exit codes mirror
+ * the extracted `.mjs`: 2 for I/O guards, 1 for violations, 0 for a pass.
  */
 
 import { readFile } from 'node:fs/promises';

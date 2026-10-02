@@ -1,10 +1,8 @@
 /**
- * Decision core for the fixture-matrix gate (#670). I/O-free: given the
- * fixture argv and the fixture names actually present on disk, decide
- * whether the run proceeds and which fixture to materialize. Extracted so
- * the three failure messages (missing arg, unknown fixture, non-directory
- * fixtures-root entry) are pinned independent of how `run.ts` gathers
- * `availableFixtures`.
+ * Decision core for the fixture-matrix gate (#670). I/O-free: given the fixture
+ * argv and the names present on disk, decide whether the run proceeds and which
+ * fixture to materialize. Extracted so the three failure messages are pinned
+ * independent of how `run.ts` gathers `availableFixtures`.
  */
 
 export interface DecideFixtureMatrixInput {

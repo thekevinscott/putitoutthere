@@ -1,10 +1,8 @@
 /**
- * Composition root for the fixture-matrix gate (#670): resolve the fixture
- * argument, materialize it into a throwaway repo, and hand it to the real
- * `plan()` — the same function the reusable workflow's `plan` job calls —
- * so a fixture's matrix can be inspected without a GitHub Actions run.
- * Design-commitments non-goal #7: a thin reader over the release path's own
- * function, never a parallel reimplementation of matrix logic.
+ * Composition root for the fixture-matrix gate (#670): materialize the fixture
+ * into a throwaway repo and hand it to the real `plan()` — the same function the
+ * reusable workflow's `plan` job calls. Design-commitments non-goal #7: a thin
+ * reader over the release path's own function, never a parallel reimplementation.
  */
 
 import { rm } from 'node:fs/promises';

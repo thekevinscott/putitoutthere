@@ -1,24 +1,8 @@
 /**
- * Tag-plumbing engine commands — `advance-v0`, `advance-floating-major`,
- * and `fold-bundle` (integration). Epic #442, sub-issue #446.
- *
- * Consolidation of the repo's two hand-rolled tag-move implementations
- * (`release-npm.yml`'s "Move floating major tag", `advance-v0.yml`'s
- * "Force-move v0") and the two identical action-bundle folds
- * (`release-npm.yml` + `advance-v0.yml`) into one tested engine path. Same
- * inputs, same outputs, same error messages — now colocated-tested rather
- * than inline bash.
- *
- * This tier drives the CLI in-process (`run([...])`) against a **real git
- * repo with a real bare remote**. There is no registry or network surface
- * to mock here — the only external surface these commands touch is `git`,
- * and a real `git` over throwaway temp dirs is fully deterministic, so it
- * runs unmocked (mirroring `src/git.test.ts`). The e2e twin
- * (`tests/e2e/tag-plumbing.e2e.test.ts`) shells out to the built CLI against
- * the same real-git shape.
- *
- * Red before the commands exist: each is an unknown subcommand, so `run`
- * prints "unknown command" and returns 1 — no tag moves, no fold commit.
+ * Tag-plumbing commands — `advance-v0`, `advance-floating-major`,
+ * `fold-bundle` (epic #442, #446). Drives the CLI in-process against a real
+ * git repo with a real bare remote; `git` is the only external surface and a
+ * real `git` over throwaway temp dirs is deterministic, so it runs unmocked.
  */
 
 import { execFileSync } from 'node:child_process';

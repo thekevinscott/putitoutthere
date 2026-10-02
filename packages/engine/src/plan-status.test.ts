@@ -1,13 +1,7 @@
 /**
- * `computePlanStatus` unit coverage (#412, #403 slice 4).
- *
- * The subject layers a per-package verdict (PUBLISH / SKIP / UNKNOWN)
- * over the build matrix and derives dependency skew. Its collaborators
- * are isolated: `loadConfig`, `plan`, and `handlerFor` are automocked and
- * driven per scenario, so each case exercises the verdict loop and the
- * degrade-to-`unknown` catch without a real repo or registry. The pure
- * `computeSkew` runs for real. End-to-end behaviour (and the CLI's
- * `--json` / human rendering) is pinned at the integration + e2e tiers.
+ * `computePlanStatus` unit coverage (#412, #403 slice 4): the per-package
+ * verdict loop (PUBLISH / SKIP / UNKNOWN), the derived dependency skew, and
+ * the degrade-to-`unknown` catch.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

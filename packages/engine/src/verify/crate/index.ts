@@ -1,20 +1,8 @@
 /**
- * `putitoutthere verify crate` — assert each published `.crate` ships its
- * source tree (#449, epic #442).
- *
- * Extraction of the inline "Verify published .crate tarballs honor expected
- * files" bash block (#334) in `.github/workflows/e2e-fixture-job.yml`. The
- * crates-side sibling of `verify npm-tarball` (#443): where npm downloads
- * the tarball over HTTP, crates reads the `.crate` straight off the
- * `cargo-http-registry` disk root the engine just published to — same host,
- * same job, no fetch. For each crates row it finds `<name>-<version>.crate`
- * under the registry root, asserts it is present and non-empty, extracts it
- * with the real `tar`, and asserts `src/lib.rs` or `src/main.rs` surfaces.
- *
- * The diagnostic this gate gives (the rust-vanilla-first-publish fixture):
- * without it, a publish that silently no-op'd or produced an empty `.crate`
- * would still go green. Async throughout, per the engine convention.
- * Returns the process exit code (0 ok, 1 on any miss).
+ * `putitoutthere verify crate` — assert each published `.crate` ships its source
+ * tree (#449, #334): read it off the `cargo-http-registry` disk root just
+ * published to (no fetch, unlike `verify npm-tarball`, #443), extract with real
+ * `tar`, assert `src/lib.rs` or `src/main.rs`. An empty `.crate` would go green.
  */
 
 import { rm } from 'node:fs/promises';

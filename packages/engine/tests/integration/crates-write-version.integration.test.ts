@@ -1,49 +1,8 @@
 /**
- * The crates publish path bumps the crate's OWN version — integration.
- *
- * Issue #639. `handlers/crates.ts`'s `writeVersionImpl` is the one
- * version-writing path that calls the literal-only rewriter
- * `replaceCargoVersion` directly instead of going through
- * `writeResolvedCargoVersion` (#428), which every other writer
- * (`write-version.ts` for maturin, `write-crate-version.ts` for
- * bundled-cli/napi) uses. That rewriter's regex is
- *
- *     /(\[package\][\s\S]*?)(^\s*version\s*=\s*")([^"]*)(")/m
- *
- * — lazy, and anchored only on the `[package]` *header*, not on the table's
- * extent. When the crate has no literal `[package].version` because it
- * inherits one (`version.workspace = true`), the match walks straight past
- * the table boundary and lands on the next `version = "…"` in the file,
- * which is typically a **dependency's requirement** in a section table.
- *
- * The result is silent and worse than a no-op: the package's own version is
- * never bumped, a dependency's requirement is rewritten to a version of that
- * dependency which does not exist, and the function returns success. A crate
- * released from that manifest fails to resolve — or, if the rewritten
- * requirement happens to be satisfiable, resolves to something nobody chose.
- *
- * Two contracts are pinned here:
- *
- *  1. an inheriting crate has its version bumped at its real source — the
- *     workspace root's `[workspace.package].version` — and every dependency
- *     requirement is left exactly as written;
- *  2. the publish still goes through. Routing to the resolver moves the
- *     write *out* of the package directory, and the handler's pre-publish
- *     dirty-tree guard (#135) refuses on any dirty file outside the manifest
- *     it manages. A fix that swaps silent corruption for a hard refusal is
- *     not a fix, so the guard has to learn about the manifests the resolver
- *     actually wrote.
- *
- * This lives in `tests/integration/` because the corruption is only
- * observable when the real config loader, the real plan, the real workspace-
- * root walk and the real handler dispatch run together against an on-disk
- * cargo workspace. A unit test that hands `replaceCargoVersion` a string
- * proves the regex does what it does; it cannot show that the *publish path*
- * reaches for the wrong writer.
- *
- * Real config loader, real plan, real preflight, real handler dispatch, real
- * git. Mocked seams: the `cargo` subprocess (recorded, never invoked) and
- * crates.io HTTP via msw.
+ * The crates publish path bumps the crate's OWN version (#639): its literal-
+ * only rewriter anchors on the `[package]` header, not the table's extent, so
+ * under `version.workspace = true` it lands on a dependency's requirement.
+ * The #135 dirty-tree guard had to learn the resolver's out-of-package writes.
  */
 
 import { EventEmitter } from 'node:events';

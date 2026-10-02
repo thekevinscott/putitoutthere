@@ -1,20 +1,8 @@
 /**
- * `runChecks` crate-size pre-merge check — integration test.
- *
- * Issue #362. A tracked symlink (or a missing `[package].exclude`) can
- * drag a crate's build tree into the `.crate` that `cargo package`
- * produces. crates.io rejects any upload over 10 MiB with `413 Payload
- * Too Large` — but only mid-release, inside `cargo publish`, after the
- * verification build. This check runs `cargo package` at PR time and
- * fails before merge instead, so the regression is caught on the PR
- * that introduces it rather than on a release run weeks later.
- *
- * Real config loader, real git walk, real check dispatch, real exec seam.
- * Only the Node built-in `execFile` is mocked, and only for the `cargo
- * package` call: the integration CI job has no Rust toolchain, and the size
- * signal is cargo's own reported compressed figure, so faking that one
- * subprocess is necessary and sufficient. Every other `execFile` (git
- * ls-files) delegates to the real binary.
+ * `runChecks` crate-size pre-merge check (#362). crates.io rejects any upload
+ * over 10 MiB with `413 Payload Too Large`, but only mid-release inside
+ * `cargo publish`. Only the Node built-in `execFile` is mocked, and only for
+ * the `cargo package` call — the integration job has no Rust toolchain.
  */
 
 import type * as ChildProcess from 'node:child_process';

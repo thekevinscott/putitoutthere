@@ -1,10 +1,8 @@
 /**
  * Whether the extracted crate tree surfaces `src/lib.rs` or `src/main.rs`
- * (#449). cargo packs into `<name>-<version>/{Cargo.toml,src/…}`, so any
- * file path ending in `/src/lib.rs` or `/src/main.rs` counts — the
- * analogue of the bash `find … -path` check on those two source entries.
- * This is the crates-side of the npm verify's "files[] dir is populated"
- * check: proof the publish shipped the source tree, not an empty tarball.
+ * (#449). cargo packs into `<name>-<version>/{Cargo.toml,src/…}`, so any path
+ * ending `/src/lib.rs` or `/src/main.rs` counts. This is proof the publish
+ * shipped the source tree, not an empty tarball.
  */
 
 import { basename, dirname } from 'node:path';

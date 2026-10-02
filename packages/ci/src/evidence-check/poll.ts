@@ -2,13 +2,7 @@
  * Race-aware wait, matching the bash poll loop. evidence-check fires on
  * `pull_request:` in parallel with every workflow whose evidence it cites, so
  * on a fresh push the cited runs are still queued/in_progress (or not yet
- * indexed) when first queried. Poll per-citation resolution until every
- * citation is settled (`passed`/`failed`) or the bounded deadline elapses,
- * reloading run/job state each iteration, and only then let the caller decide.
- *
- * All time and I/O are injected (`now`, `sleep`, `log`, `loadRuns`,
- * `jobsForRun`, `resetCaches`), and the deadline magnitude is passed in, so
- * this orchestration is fully unit-testable and carries no magic constants.
+ * indexed) when first queried. All time and I/O are injected.
  */
 import { citationResolution } from './citation-resolution.js';
 import type { WorkflowJob, WorkflowRun } from './evidence-check-types.js';

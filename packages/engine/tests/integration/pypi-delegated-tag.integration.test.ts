@@ -1,35 +1,8 @@
 /**
- * Delegated PyPI publishes must not be tagged by the publish job (#623).
- *
- * The bug: the pypi handler does not upload — PyPI Trusted Publishers
- * cannot validate an OIDC token minted inside a cross-repo reusable
- * workflow (warehouse#11096), so the upload is delegated to a caller-side
- * `pypi-publish` job. The handler nevertheless reported `published`, so
- * `publish()` cut and pushed the package's git tag the moment it
- * *delegated*. When anything later in the run failed — a different
- * registry, a different package — the caller-side job (`needs: release`)
- * never ran, and the repo was left with `<pkg>-py-v<version>` pointing at
- * a distribution nobody ever uploaded. A tag is the record of what
- * shipped; that one recorded a lie, and only a manual tag deletion could
- * undo it.
- *
- * The contract, at two levels:
- *  1. A delegated package is reported as `delegated`, not `published`,
- *     and no tag is cut for it in the publish job.
- *  2. The delegation is still *announced* — `$GITHUB_OUTPUT` carries
- *     `delegated` / `delegated_packages` — and it survives a later
- *     handler failure, so the caller-side upload job can gate on "PyPI's
- *     own path succeeded" rather than on whole-job success.
- *
- * Tier: the deterministic CI red gate. Real config loader, real plan,
- * real preflight, real handler dispatch, real git; only the registry
- * boundary is mocked (msw for PyPI's HTTP read, the `execFile` beneath
- * the process seam for the npm CLI). The e2e twin
- * (`tests/e2e/pypi-delegated-tag.e2e.test.ts`) shells out to the built
- * CLI against the live PyPI.
- *
- * Red before the fix: the publish path tags the delegated package, and
- * `$GITHUB_OUTPUT` has no `delegated*` keys at all.
+ * Delegated PyPI publishes must not be tagged by the publish job (#623):
+ * PyPI Trusted Publishers cannot validate an OIDC token minted inside a
+ * cross-repo reusable workflow (warehouse#11096), so the upload is delegated
+ * to a caller-side job and `$GITHUB_OUTPUT`, not a tag, announces it.
  */
 
 import { EventEmitter } from 'node:events';

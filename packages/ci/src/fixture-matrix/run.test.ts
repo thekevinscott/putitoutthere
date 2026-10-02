@@ -1,12 +1,7 @@
 /**
- * Composition-root wiring test for the fixture-matrix gate (#670). Mocks
- * every collaborator — `./list-fixtures.js`, `./decide.js`,
- * `./materialize-fixture.js`, the real engine `plan()`, and
- * `./build-document.js` — so this isolates the plumbing: argv parsing, the
- * stdout/stderr/exit-code contract, and that cleanup always runs. The real
- * listing, decision, and materialization are covered in their own colocated
- * tests; end-to-end fidelity against the real engine is the integration
- * tier's job.
+ * Composition-root wiring test for the fixture-matrix gate (#670). Every
+ * collaborator is mocked, isolating the plumbing: argv parsing, the
+ * stdout/stderr/exit-code contract, and that cleanup always runs.
  */
 
 import { rm } from 'node:fs/promises';

@@ -8,18 +8,10 @@ import { replaceCargoVersion } from './replace-cargo-version.js';
 import { replaceWorkspacePackageVersion } from './replace-workspace-package-version.js';
 
 /**
- * Rewrite a crate's version to `version`, following Cargo workspace
- * inheritance (#428):
- *
- *  - a literal `[package].version = "x.y.z"` is rewritten in place;
- *  - a member that inherits via `version.workspace = true` has the
- *    workspace root's `[workspace.package].version` rewritten instead.
- *
- * `crateDir` is the crate's directory and `cargoSource` its already-read
- * `Cargo.toml` (callers own the file-missing error message and hand the
- * bytes here). Returns the absolute path(s) actually modified. Throws when
- * the crate declares no resolvable version source (via `replaceCargoVersion`),
- * or when it inherits but no ancestor `[workspace]` exists.
+ * Rewrite a crate's version to `version`, following Cargo workspace inheritance
+ * (#428): a literal `[package].version` in place, or — for a member with
+ * `version.workspace = true` — the root's `[workspace.package].version`. Throws
+ * with no resolvable version source, or on inheritance with no `[workspace]`.
  */
 export async function writeResolvedCargoVersion(
   crateDir: string,

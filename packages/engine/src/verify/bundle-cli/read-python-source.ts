@@ -1,16 +1,8 @@
 /**
- * Read `[tool.maturin].python-source` (or the legacy `python_source`
- * spelling) from a package's `pyproject.toml`, normalized (#451).
- *
- * The engine analogue of the inline `python3 - <<PY … tomllib …` block in
- * `.github/workflows/_matrix.yml`'s "bundle_cli — verify wheel contains …"
- * step. maturin strips this directory from the wheel layout, so it is
- * subtracted from the front of `stage_to` before the binary path is built
- * (see `computeStageSuffix`). Missing file, missing table, or missing key
- * all resolve to `""` — the same "unset ⇒ leave stage_suffix unchanged"
- * behaviour as the bash. Both spellings are honoured because maturin has
- * accepted either across releases. Normalization mirrors the bash: drop a
- * single leading `./` and any trailing slashes.
+ * Read `[tool.maturin].python-source` (or the legacy `python_source`) from a
+ * package's `pyproject.toml`, normalized (#451). maturin strips this dir from
+ * the wheel layout, so it is subtracted from `stage_to`. Missing file, table or
+ * key all resolve to `""`; both spellings exist because maturin accepted either.
  */
 
 import { readFile } from 'node:fs/promises';

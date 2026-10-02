@@ -1,15 +1,8 @@
 /**
- * A minimal, dependency-free zip writer for `.whl` test fixtures.
- *
- * The `verify wheel` (#450) and `verify bundle-cli` (#451) integration tiers
- * both need genuine **deflate-compressed** zips on disk: the engine reads
- * wheels with its own pure-Node zip reader, so a fixture built by stashing
- * stored (uncompressed) entries would not exercise the same path a real
- * build-tool wheel takes. Each of those suites carried a byte-identical copy
- * of this writer; the action-surface suite would have made a third, so it
- * lives here instead.
- *
- * Test-only. Not shipped, not reachable from `src/`.
+ * A minimal, dependency-free zip writer for `.whl` test fixtures (#450,
+ * #451). The entries must be genuinely **deflate-compressed**: the engine
+ * reads wheels with its own pure-Node zip reader, so stored (uncompressed)
+ * entries would not exercise the path a real build-tool wheel takes.
  */
 
 import { deflateRawSync } from 'node:zlib';

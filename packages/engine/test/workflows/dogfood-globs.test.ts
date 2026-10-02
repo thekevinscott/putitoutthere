@@ -1,27 +1,8 @@
 /**
- * Self-config glob-coverage invariant.
- *
- * For each `globs` entry in this repo's `putitoutthere.toml`, derive
- * a representative file path that matches the pattern, touch that
- * file in a temp repo seeded with the same config, and assert
- * `plan()` cascades the `putitoutthere` package. The structural
- * regression cover for two failure modes that bit us in two days:
- *
- *  - PR #258 caught the fact that `release.yml` wasn't in `globs`,
- *    so the v0.1.51 release never picked up that fix.
- *  - PR #262 caught that `release-npm.yml` and `putitoutthere.toml`
- *    weren't either — the trailer-forward fix from #261 sat
- *    dormant on main because its diff matched no glob.
- *
- * Both gaps were silent: the publish job's gate skipped publish on
- * an empty cascade and the workflow went green. This test fires
- * before merge if a glob entry stops matching its intended files,
- * or if a new file class needs a glob entry.
- *
- * Note: the test walks the *actual* config file, not a copy. Adding
- * a new glob entry automatically extends coverage; removing one
- * shrinks it. The test asserts the contract every entry must hold:
- * "touching a file at this pattern cascades the package."
+ * Self-config glob-coverage invariant. For each `globs` entry in this repo's
+ * `putitoutthere.toml`, derive a matching path, touch it in a temp repo seeded
+ * with the same config, and assert `plan()` cascades the package. A missing
+ * glob is silent (#258, #262): the empty cascade skips publish and CI goes green.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,13 +1,8 @@
 /**
  * Decision core for the requirements-building heredoc of the "Verify TestPyPI
- * artifact metadata" step. I/O-free: given the basenames under `dist/`, derive
- * one `pinned` requirement per fixture package by collecting the version from
- * every matching sdist/wheel and demanding exactly one, reproducing the bash's
- *
- *   for artifact in dist.glob(f"{stem}-*"):
- *     if name.endswith(".tar.gz"): versions.add(name.removeprefix(f"{stem}-").removesuffix(".tar.gz"))
- *     elif name.endswith(".whl"):  versions.add(name.split("-")[1])
- *   if len(versions) != 1: <error>; version = versions.pop(); print(f"{package}=={version}")
+ * artifact metadata" step. I/O-free: derive one `pinned` requirement per fixture
+ * package by collecting the version from every matching sdist/wheel (sdist
+ * suffix-strip, wheel `name.split("-")[1]`) and demanding exactly one.
  */
 
 import { pyStrList } from './py-str-list.js';

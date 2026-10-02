@@ -1,28 +1,8 @@
 /**
- * `publish` report → per-platform publish summary (#625) against the
- * real CLI and the real `npm` — the e2e twin of
- * `tests/integration/publish-platform-report.integration.test.ts`.
- *
- * Where the integration test mocks the npm boundary, this shells out to
- * the built CLI (`node dist/cli-bin.js publish --json`) as a real
- * subprocess and lets it drive the **real `npm` CLI**: real `npm view`
- * probes, real `npm publish` PUTs, real tarballs over real HTTP.
- *
- * The registry is a local one this file serves over `node:http` —
- * the same role Verdaccio plays for the `*-first-publish` fixtures in
- * `e2e-fixture-job.yml`, reached through the engine's existing
- * `PIOT_NPM_REGISTRY` seam (#304). It has to be local: this is the one
- * publish-path behaviour that cannot be observed without actually
- * publishing, and the CLI e2e tier does not publish to real registries.
- * Everything between the CLI and the wire is unmocked, which is the
- * point — a mocked `npm` cannot prove the report matches what the
- * registry received, and that discrepancy IS the bug (#625: "the report
- * says one package, the registry has six").
- *
- * So each scenario asserts both halves: what the report claims, and what
- * the registry actually got.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #625.
+ * `publish` report → per-platform publish summary (#625) driving the real
+ * `npm` CLI against a local registry served over `node:http`, reached through
+ * the engine's `PIOT_NPM_REGISTRY` seam (#304) — this behaviour cannot be
+ * observed without publishing. Each scenario asserts report *and* registry.
  */
 
 import { execFile, execFileSync } from 'node:child_process';
@@ -150,22 +130,10 @@ let repo: string;
 let npmrc: string;
 
 /**
- * The `.npmrc` the CLI subprocess points npm at.
- *
- * Two lines, both load-bearing. `registry=` is what `npm view` reads —
- * the engine's probe passes no `--registry`, so without it the probe
- * would go to registry.npmjs.org and report every local package as
- * unpublished. The per-host auth entry is what `npm publish` reads: npm
- * declines to PUT at all when no auth is configured for the host, even
- * against a registry that would accept the request unauthenticated
- * (verified by dropping the line — the publish never reaches the wire).
- *
- * The value is inert. The local registry never looks at it, and the
- * entry is scoped to `127.0.0.1`, so it cannot authenticate anything
- * anywhere. It is assembled here rather than written as a literal so
- * the file carries no `<key>=<opaque-value>` pair for a secret scanner
- * to flag — gitleaks' `generic-api-key` rule reads one as a leak, and a
- * scanner exemption is not a thing to spend on a fixture.
+ * Both lines are load-bearing: `registry=` is what `npm view` reads (the
+ * probe passes no `--registry`), and npm declines to PUT at all with no auth
+ * entry for the host. The value is inert and 127.0.0.1-scoped; assembled
+ * rather than written literal so gitleaks' `generic-api-key` rule stays quiet.
  */
 function npmrcFor(registryUrl: string): string {
   const host = registryUrl.replace(/^http:/, '');

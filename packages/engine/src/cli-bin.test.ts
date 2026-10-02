@@ -1,12 +1,8 @@
 /**
- * Unit suite for the CLI binary entry (`cli-bin.ts`). Isolated per the
- * unit-suite convention: `./cli.js` — the dispatcher this entry point
- * drives — is mocked (bare automock, so the double can't drift from the
- * source), leaving only `cli-bin.ts`'s own wiring under test: it forwards
+ * Unit suite for the CLI binary entry (`cli-bin.ts`): it forwards
  * `process.argv` to `run`, drains stdio, exits with the resolved code, and
- * maps a rejection to a fatal exit 4. The real dispatch behaviour is covered
- * at the integration and e2e-cli tiers. See #201 for why the entry point is
- * a separate module from `cli.ts` (ncc bundling of `action.ts`).
+ * maps a rejection to a fatal exit 4. See #201 for why the entry point is a
+ * separate module from `cli.ts` (ncc bundling of `action.ts`).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

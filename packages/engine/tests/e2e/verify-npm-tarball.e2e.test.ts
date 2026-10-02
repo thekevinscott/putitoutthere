@@ -1,27 +1,8 @@
 /**
- * `piot verify npm-tarball` against the REAL npm registry — the e2e twin
- * of `tests/integration/verify-npm-tarball.integration.test.ts`.
- *
- * Shells out to the built CLI (`node dist/cli-bin.js verify npm-tarball …`)
- * pointed at piot's own stable, OIDC-published fixture package
- * `@putitoutthere/piot-fixture-zzz-js-vanilla`, whose `package.json`
- * declares `files: ["dist"]` and whose published tarball ships a real
- * `dist/`. This is the tier that proves the real `npm view` → `curl` →
- * `tar` pipeline actually downloads and inspects a live tarball — a mock
- * that returns the shape we assumed cannot.
- *
- * The `--per-triple` case (#633) needs a live platform tarball whose payload
- * sits NESTED under `package/`, and no `piot-fixture-zzz-*` package ships one
- * — piot's own synthesis has only ever staged flat, which is why the bug went
- * unnoticed. `@esbuild/linux-x64` is the stand-in: a real, version-pinned
- * (hence byte-immutable) published platform package whose binary lives at
- * `package/bin/esbuild`, exactly the layout the issue describes. `npm view` →
- * `curl` → `tar` run for real against it.
- *
- * Red before the feature: `verify npm-tarball` is an unrecognized
- * subcommand, so no `ok: package/dist/` line is emitted.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Epic #442, #443.
+ * `verify npm-tarball` against the REAL npm registry. Epic #442, #443.
+ * The `--per-triple` case (#633) needs a live platform tarball with its
+ * payload NESTED under `package/`, and no `piot-fixture-zzz-*` ships one:
+ * `@esbuild/linux-x64` is version-pinned (byte-immutable) and nests.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,33 +1,9 @@
 /**
- * Bump every in-repo crate an artifact compiles, plus the version
- * requirements that point at them. #621.
- *
- * The three pre-build writers each bump the crate the build tool reads as
- * its version source — maturin's `matrix.path`, `bundle_cli.crate_path`,
- * the napi crate. That answers "what version is this artifact?" but not
- * "whose `CARGO_PKG_VERSION` is observable *from* this artifact?" Those
- * sets coincide only when the artifact is one crate deep. Embed a sibling
- * by path, let the sibling own the version-bearing symbol (clap's
- * `#[command(version)]` expands `env!("CARGO_PKG_VERSION")` inside the
- * crate where the attribute is written), and nothing bumps the sibling.
- *
- * `CARGO_PKG_VERSION` is a compile-time constant scoped per crate and has
- * no env override — not `CARGO_PKG_VERSION=… cargo build`, not
- * `.cargo/config.toml [env]` with `force = true`. Rewriting the manifest
- * before the build is the only lever there is.
- *
- * **Semantics: the artifact's version wins.** Every in-repo crate the
- * artifact compiles is stamped with the artifact's release version, so a
- * user who installs `dirsql 0.4.2` sees `0.4.2` from every surface the
- * artifact exposes. The alternative — giving each declared `[[package]]`
- * its own planned version — is indistinguishable for a repo whose crates
- * cascade together at one version, and differs only where a repo keeps
- * crates on deliberately separate version lines. It can be layered on
- * later using this same requirement-rewrite machinery.
- *
- * The rewrites are ephemeral: the build job's checkout is thrown away and
- * `publish` runs in a separate job off a fresh checkout, so nothing here
- * reaches the crates handler's dirty-tree check or a published manifest.
+ * Bump every in-repo crate an artifact compiles, plus the requirements pointing
+ * at them (#621). `CARGO_PKG_VERSION` is a compile-time constant scoped per
+ * crate with no env override (not `CARGO_PKG_VERSION=… cargo build`, not
+ * `.cargo/config.toml [env] force = true`), so an embedded sibling owning the
+ * version symbol (clap's `#[command(version)]`) stays stale. Artifact's version wins.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -47,17 +23,10 @@ interface Manifest {
 }
 
 /**
- * Walk the path-dependency graph out of `startDir`, bump every crate
- * reached to `version`, and rewrite every in-repo version requirement
- * that points at one of them. Returns the absolute paths modified.
- *
- * `startDir` itself is assumed already bumped by the caller (that is the
- * pre-existing writer's job); it is still included when rewriting
- * requirements, since a sibling may depend on it.
- *
- * Reachability from the built crate is the criterion, not workspace
- * membership: a sibling member nobody depends on is not in the artifact
- * and is left alone.
+ * Walk the path-dependency graph out of `startDir`, bump every crate reached to
+ * `version`, and rewrite every in-repo requirement pointing at one; returns the
+ * absolute paths modified. `startDir` is assumed already bumped by the caller.
+ * Reachability, not workspace membership: a member nobody depends on is skipped.
  */
 export async function writeEmbeddedCrateVersions(
   startDir: string,

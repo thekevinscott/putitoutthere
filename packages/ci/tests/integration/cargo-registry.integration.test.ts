@@ -1,12 +1,8 @@
 /**
  * Integration test for the cargo-http-registry harness (#454, epic #442).
- *
- * Drives the real `piot-ci cargo-registry <mode>` dispatch in-process — `run()`
- * → `runCargoRegistry` → `runCargoRegistryStart` / `runCargoRegistryDiagnose`
- * + `decideCargoRegistryStart` / `diagnoseOutput` — with only the OS boundary
- * (`node:child_process` for spawn, `node:fs/promises`, the exec seam) mocked.
- * Exercises the real decisions, so the success/failure branches and the
- * byte-exact diagnostic dump are asserted through the actual command.
+ * Drives the real `piot-ci cargo-registry <mode>` dispatch in-process with only
+ * the OS boundary (`node:child_process`, `node:fs/promises`, the exec seam)
+ * mocked, so the real branches and the byte-exact diagnostic dump are asserted.
  */
 
 import { execFile, spawn } from 'node:child_process';

@@ -1,14 +1,8 @@
 /**
  * Pins which trimmed added lines the patch-coverage gate (#468) treats as
- * non-statements and skips (they carry no v8-instrumented statement, so
- * demanding coverage of them would be a false positive). Reproduces the
- * `.mjs`'s skip chain applied to `text.trim()`:
- *   - empty line,
- *   - `//` line comment,
- *   - `/*` block-comment open,
- *   - `*` block-comment continuation,
- *   - pure punctuation (`}`, `});`, …).
- * Pure; exact boolean assertions.
+ * non-statements and skips: blank, `//`, block-comment open/continuation, and
+ * pure punctuation. They carry no v8-instrumented statement, so demanding
+ * coverage of them would be a false positive.
  */
 
 import { describe, expect, it } from 'vitest';

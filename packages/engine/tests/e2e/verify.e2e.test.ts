@@ -1,20 +1,8 @@
 /**
- * `piot verify` against the REAL registries — the e2e twin of
- * `tests/integration/verify.integration.test.ts`.
- *
- * Shells out to the built CLI (`node dist/cli-bin.js verify …`) pointed at
- * piot's own fixture packages, all published to the real registries via
- * **OIDC trusted publishers** by the CI e2e suite. So each must classify
- * `oidc` — read from public trust attribution with no secrets:
- *   crates.io  version.trustpub_data
- *   npm        provenance attestations endpoint
- *   PyPI       integrity/provenance endpoint
- * This is the tier that fails if a registry's real trust-signal shape
- * diverges from the mocked one.
- *
- * Red before the feature: `verify` is an unknown subcommand.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issues #403, #414.
+ * `piot verify` against the REAL registries; fixtures are OIDC-published, so
+ * each must classify `oidc` from public trust attribution, no secrets:
+ * crates.io `version.trustpub_data`, npm provenance-attestations endpoint,
+ * PyPI integrity/provenance endpoint. Issues #403, #414.
  */
 
 import { execFileSync } from 'node:child_process';

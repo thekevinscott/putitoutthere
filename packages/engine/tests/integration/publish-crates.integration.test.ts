@@ -1,27 +1,8 @@
 /**
- * `publish` pipeline integration test for the crates preflight.
- *
- * Sibling to `publish.integration.test.ts` (#280's npm `repository`
- * preflight); this file covers #290 — the same shape for crates.io's
- * required `[package].description` and `[package].license` /
- * `[package].license-file` Cargo.toml metadata.
- *
- * The bug: cargo publish refuses with
- *   `400 Bad Request: missing or empty metadata fields: description.`
- * after `cargo publish`'s verification build has compiled the crate
- * and every transitive dep — wasting the entire publish job on a
- * precondition checkable in milliseconds. Same wasted-work argument
- * as #280; same fix shape (preflight that refuses before any side
- * effect).
- *
- * Real config loader, real plan, real preflight, real handler
- * dispatch. Mocked seams:
- *   - `cargo` subprocess (recorded; should never be invoked when
- *     preflight rejects).
- *   - crates.io HTTP via msw (only relevant for the sanity-check
- *     test where preflight passes and `isPublished` is reached).
- *
- * Issue #290.
+ * `publish` crates preflight (#290): cargo publish refuses with
+ * `400 Bad Request: missing or empty metadata fields: description.` only
+ * after its verification build has compiled the crate and every transitive
+ * dep, so the preflight refuses before any side effect.
  */
 
 import { EventEmitter } from 'node:events';

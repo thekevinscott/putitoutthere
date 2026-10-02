@@ -1,20 +1,7 @@
 /**
- * `putitoutthere plan` tests. The planner composes config loading,
- * trailer parsing, cascade, and version bumping into a matrix-row
- * array consumed by the `build` job (and re-validated by `publish`).
- *
- * Issue #21. Plan: §12.4 (matrix contract), §11 (cascade), §10
- * (trailer), §14 (version).
- *
- * Isolation: this suite drives `plan`'s real config parse, cascade,
- * version-bump, and row-building logic while mocking only its I/O
- * collaborators — `readFileSync` (so `loadConfig` sees each test's
- * TOML), the `git.js` observers (`headCommit`/`lastTag`/`diffNames`/
- * `commitBody`/`commitParents`), and the two pypi helpers
- * (`resolvePythonVersions`, `isVersionIndependentWheel`). `config.js`,
- * `cascade.js`, `version.js`, `tag-template.js`, and the npm-platform
- * helpers run for real, so every assertion below exercises the
- * planner's genuine output.
+ * `putitoutthere plan` tests (#21). The planner's real config parse, cascade,
+ * version-bump and row-building logic all run; only its I/O collaborators
+ * (`readFile`, the `git.js` observers, and the two pypi helpers) are mocked.
  */
 
 import { readFile } from 'node:fs/promises';

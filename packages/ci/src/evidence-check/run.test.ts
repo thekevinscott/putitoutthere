@@ -1,13 +1,8 @@
 /**
- * Composition-root coverage for the evidence-check gate (#445). The decision
- * modules (addedUnreleasedBullets, citedRunNeedles, decideEvidenceCheck,
- * pollUntilResolved, passedEvidence) and the I/O boundary (the exec seam, the
- * sleep seam, node:fs/promises) are mocked, so this isolates run's wiring: the
- * env guard, the exact `git diff` invocation, the CHANGELOG.md read, how
- * git/file output is parsed into decide()'s input, the exact poll deps
- * (deadline magnitude + the injected clock/sleep/log and the gh-api reader that
- * prefetches jobs so `jobsForRun` stays a sync cache read), and how decide()'s
- * lines + exit code surface. The decisions themselves live in their own tests.
+ * Composition-root coverage for the evidence-check gate (#445). Every decision
+ * module and the I/O boundary are mocked, so this isolates run's wiring: the
+ * env guard, the exact `git diff`, the poll deps (deadline magnitude, injected
+ * clock/sleep/log, the gh-api prefetch that keeps `jobsForRun` a sync read).
  */
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

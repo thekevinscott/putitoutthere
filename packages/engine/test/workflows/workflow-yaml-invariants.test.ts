@@ -1,14 +1,6 @@
 /**
- * Workflow YAML invariant checks. Catches the @v1-typo class of bug
- * (#243) without the trusted-publisher overhead of a live workflow
- * self-test (#244).
- *
- * Asserts:
- * - Every inner `uses: thekevinscott/putitoutthere*` ref pins `@v0`.
- * - Every external `uses:` ref pins a major (`@v4`, ...) or full SHA.
- * - Every `uses: ./...` local-path ref resolves to an existing file.
- * - The reusable workflow's path matches the README + CHANGELOG.
- *
+ * Workflow YAML invariant checks. Catches the @v1-typo class of bug (#243)
+ * without the trusted-publisher overhead of a live workflow self-test (#244).
  * Issue #246.
  */
 
@@ -112,19 +104,10 @@ describe('#246 workflow YAML invariants', () => {
     expect(readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')).toContain(expected);
   });
 
-  // The publish step throws PIOT_PUBLISH_EMPTY_PLAN when reached with an
-  // empty matrix; the gate is what keeps `release: skip` (and any other
-  // empty-plan reason) from running publish to a non-zero exit. Lock the
-  // gate's presence in so a future edit can't quietly delete it and turn
-  // every skip-trailer commit into a red release run.
-  //
-  // The gate's `needs.<job>.outputs.matrix` reference depends on which
-  // job exposes the matrix in the file under test:
-  // - `release.yml` delegates plan + build to `_matrix.yml`; the publish
-  //   job reads `needs.build.outputs.matrix` from the reusable-workflow
-  //   caller.
-  // - `release-npm.yml` keeps an inline plan job; the publish job reads
-  //   `needs.plan.outputs.matrix`.
+  // The publish step throws PIOT_PUBLISH_EMPTY_PLAN when reached with an empty
+  // matrix, so this gate is what keeps `release: skip` (and any other empty-plan
+  // reason) from turning every skip-trailer commit into a red release run.
+  // Which `needs.<job>.outputs.matrix` it reads differs per file (table below).
   it.each([
     [
       '.github/workflows/release.yml',
@@ -141,23 +124,10 @@ describe('#246 workflow YAML invariants', () => {
 });
 
 // #283: the reusable workflow must accept a caller-provided
-// `CARGO_REGISTRY_TOKEN` via `secrets:` and prefer it over OIDC when
-// present. Trusted Publishing on crates.io is configured per-crate
-// against an *already-published* crate, so the very first publish
-// has no OIDC path available — without this fallback, every Rust
-// consumer's first release through `putitoutthere` is blocked at
-// `rust-lang/crates-io-auth-action@v1`. The contract this test pins:
-//
-//  1. `on.workflow_call.secrets.CARGO_REGISTRY_TOKEN` is declared and
-//     optional (no `required: true`); callers without a token still
-//     get the OIDC path unchanged.
-//  2. The OIDC step (`rust-lang/crates-io-auth-action`) is skipped
-//     when the secret is provided. Running both paths would clobber
-//     the caller's token in `$GITHUB_ENV` with the OIDC-minted one.
-//  3. A step exports the caller-provided secret to `$GITHUB_ENV` as
-//     `CARGO_REGISTRY_TOKEN`, gated on the secret being non-empty,
-//     so the engine's crates handler (which reads the env var) sees
-//     it without caring which path produced it.
+// `CARGO_REGISTRY_TOKEN` via `secrets:` and prefer it over OIDC — crates.io
+// Trusted Publishing binds to an *already-published* crate, so without it every
+// Rust consumer's first release is blocked. The OIDC step must be *skipped* when
+// the secret is present: running both clobbers the caller's token in `$GITHUB_ENV`.
 describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => {
   interface Step {
     name?: string;
@@ -297,32 +267,11 @@ describe('#283 release.yml accepts caller-provided CARGO_REGISTRY_TOKEN', () => 
   });
 });
 
-// #302: mirror of #283 for npm. Trusted Publishing on npm binds to an
-// *already-published* package, so the very first publish of a brand-new
-// package has no OIDC path available — consumers were forced to hand-publish
-// `0.0.0-bootstrap` stubs of every per-platform sub-package with a
-// long-lived NODE_AUTH_TOKEN before they could register Trusted Publishers
-// and use this workflow. Hit in the wild on the maintainer's own dirsql
-// project (`@dirsql/cli-linux-x64-gnu` first version on npm is
-// `0.0.0-bootstrap`, 2026-04-30; real `0.2.8` lands the next day) and on
-// `darkfactory`'s first publish. The contract this test pins:
-//
-//  1. `on.workflow_call.secrets.NPM_TOKEN` is declared and optional
-//     (no `required: true`); callers without a token still get the
-//     OIDC path unchanged.
-//  2. The publish job promotes `secrets.NPM_TOKEN` to a job-level
-//     env var so step-level `if:` conditions can gate on it (the
-//     `secrets` context isn't available in step-level `if:`).
-//  3. A step exports the caller-provided secret to `$GITHUB_ENV` as
-//     `NODE_AUTH_TOKEN`, gated on the secret being non-empty and the
-//     planned matrix containing at least one `kind = "npm"` row, so
-//     the engine's npm handler (and the npm CLI itself) sees it
-//     instead of attempting OIDC.
-//
-// Mirror of #283 in shape, byte-for-byte. The npm side has no separate
-// OIDC step to "skip" (npm CLI handles OIDC internally via the runner's
-// id-token); presence of NODE_AUTH_TOKEN in the env makes the CLI prefer
-// the long-lived token over the OIDC path.
+// #302: mirror of #283 for npm. npm Trusted Publishing binds to an
+// *already-published* package, so a brand-new package's first publish has no
+// OIDC path — consumers had to hand-publish `0.0.0-bootstrap` stubs first. The
+// secret is promoted to a job-level env var because the `secrets` context is not
+// available in step-level `if:`; npm has no separate OIDC step to skip.
 describe('#302 release.yml accepts caller-provided NPM_TOKEN', () => {
   interface Step {
     name?: string;
@@ -443,20 +392,10 @@ describe('#302 release.yml accepts caller-provided NPM_TOKEN', () => {
   });
 });
 
-// #276: every PyO3/maturin-action invocation in `_matrix.yml`'s build job
-// must be preceded by a step that bumps the package's version source to
-// `${{ matrix.version }}`. Without this, maturin reads whatever literal
-// is on disk in pyproject.toml and ships wheels at the stale version
-// — the registered package fails to upload because PyPI rejects
-// duplicate filenames.
-//
-// Other build paths bump elsewhere:
-//  - crates: writeVersion runs at publish.
-//  - npm:    writeVersion runs at publish.
-//  - pypi (setuptools-scm/hatch-vcs): SETUPTOOLS_SCM_PRETEND_VERSION env.
-// Maturin is the only build path where the artifact (wheel) leaves the
-// build runner pre-versioned, so the bump must happen here, before the
-// maturin call. See #276.
+// #276: every maturin-action invocation in `_matrix.yml`'s build job must be
+// preceded by a step bumping the version source to `${{ matrix.version }}`, or
+// maturin reads the on-disk pyproject literal and ships stale wheels that PyPI
+// rejects as duplicate filenames. It is the only path pre-versioned at build.
 describe('#276 _matrix.yml maturin pre-build version bump', () => {
   interface Step {
     if?: string;
@@ -517,21 +456,10 @@ describe('#276 _matrix.yml maturin pre-build version bump', () => {
   });
 });
 
-// #282: `[package.bundle_cli]` is parsed by config, attached to per-target
-// wheel rows by the planner, and documented in the README — but
-// `_matrix.yml` never consumes it. Wheels for maturin packages that
-// declare `bundle_cli` ship without the bundled binary, and the
-// consumer's `pip install` flow fails at runtime.
-//
-// MIGRATIONS.md (#217) promised two scaffolded build steps gated on
-// `matrix.kind == 'pypi' && matrix.bundle_cli.bin != '' && matrix.target != 'sdist'`:
-//   - Setup Rust + cross-compile the binary for matrix.target
-//   - Stage the resulting binary into ${{ matrix.path }}/${{ matrix.bundle_cli.stage_to }}/
-// Plus a permanent post-build guard: the maturin-produced wheel must
-// contain the staged binary, or upload-artifact is refused. The guard
-// is independent of staging — it catches any future regression where
-// the cross-compile silently writes to the wrong path, and it stays
-// useful even after the staging step lands.
+// #282: `[package.bundle_cli]` is parsed by config and attached to per-target
+// wheel rows by the planner, but `_matrix.yml` must consume it or those wheels
+// ship without the bundled binary and `pip install` fails at runtime. The
+// wheel-content guard is independent of staging: it catches a mis-pathed build.
 describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
   interface Step {
     if?: string;
@@ -668,22 +596,10 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
     ).toEqual([]);
   });
 
-  // #338: the wheel-content guard's regex asserts a literal
-  // `<stage_to>/<bin>` suffix inside the produced wheel — but maturin
-  // strips `[tool.maturin].python-source` from on-disk paths when it
-  // rewrites them into the wheel's distribution layout. For consumers
-  // with `python-source = "python"` (the layout `maturin new --mixed`
-  // generates), the binary on disk lives at
-  // `<pkg.path>/<stage_to>/<bin>` = `packages/python/python/dirsql/_binary/dirsql`
-  // but in the wheel ends up at `dirsql/_binary/dirsql` — `python/`
-  // stripped. The guard's regex `(^|/)python/dirsql/_binary/dirsql$`
-  // never matches, so the guard fires red on every per-target build
-  // row even though the binary is correctly bundled.
-  //
-  // The guard step must read the consumer's pyproject and subtract the
-  // `[tool.maturin].python-source` prefix from `stage_to` before
-  // constructing the regex. When unset/empty the behaviour is
-  // identical to today.
+  // #338: maturin strips `[tool.maturin].python-source` from on-disk paths when
+  // rewriting them into the wheel layout, so a binary staged at
+  // `<path>/python/dirsql/_binary/dirsql` lands at `dirsql/_binary/dirsql`. The
+  // guard must subtract that prefix from `stage_to`, or it reds a correct build.
   it('wheel-content guard accounts for [tool.maturin].python-source path stripping', () => {
     const guardSteps = buildSteps.filter(isWheelGuardStep);
     expect(guardSteps.length).toBeGreaterThan(0);
@@ -712,38 +628,10 @@ describe('#282 _matrix.yml bundle_cli staging + wheel-content guard', () => {
   });
 });
 
-// #298: mirror of #282 for npm. `[package.bundle_cli]` should be parsed
-// by config and attached to per-target npm bundled-cli rows by the
-// planner, then consumed by `_matrix.yml` — same shape as the maturin
-// wiring landed in #282. Without this, npm bundled-cli consumers are
-// still required to author `scripts/build.cjs` that performs the
-// cross-compile (rustup target add / cargo build / cp into
-// build/<triple>/<bin>); every consumer of this recipe to date has
-// written essentially the same script, and every one has hit bugs at
-// the seam between their script and the engine (#287 was the most
-// recent). Absorbing the script into the workflow closes the largest
-// remaining piece of consumer integration surface that exists for no
-// architectural reason.
-//
-// Expected wiring, for every per-target row with
-// `matrix.kind == 'npm' && matrix.build == 'bundled-cli' &&
-//  matrix.bundle_cli && matrix.target != 'main'`:
-//   - `rustup target add ${{ matrix.target }}`
-//   - `cargo build --release --target ${{ matrix.target }} --bin ${{ matrix.bundle_cli.bin }}`
-//     against `crate_path`
-//   - copy binary (with `.exe` on Windows) to
-//     `${{ matrix.artifact_path }}/${{ matrix.bundle_cli.bin }}`
-//     (which is `${{ matrix.path }}/build/<triple>` for single-mode rows
-//     and `${{ matrix.path }}/build/<mode>-<triple>` for multi-mode rows;
-//     plan.ts already encodes the right directory in `artifact_path`)
-//   - defense-in-depth: assert the staged binary exists before
-//     `actions/upload-artifact` runs, so a broken row never leaves the
-//     build runner
-//
-// The post-build guard mirrors the wheel-content guard in #282: it
-// stays useful after the staging step lands, catching any future
-// regression where the cross-compile silently routes the binary to
-// the wrong path.
+// #298: mirror of #282 for npm. Without `_matrix.yml` consuming
+// `[package.bundle_cli]`, npm bundled-cli consumers must author their own
+// `scripts/build.cjs` cross-compile, and every one written to date has hit bugs
+// at the seam with the engine (#287 most recently). The guard mirrors #282's.
 describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => {
   interface Step {
     if?: string;
@@ -903,24 +791,10 @@ describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => 
   });
 });
 
-// #317: pre-merge `check.yml` reusable workflow. Pins the file's shape
-// so it stays consumable in one line by a downstream PR-CI workflow:
-//
-//   jobs:
-//     putitoutthere-check:
-//       uses: thekevinscott/putitoutthere/.github/workflows/check.yml@v0
-//
-// Acceptance from the issue:
-//   - the file exists,
-//   - it is a reusable workflow (`on: workflow_call`),
-//   - it drives the engine through the same JS action `release.yml`
-//     uses (no new step-level action shape — non-goal #10 from #316's
-//     reframe), with `command: check`,
-//   - the README documents it the same way `release.yml` is documented.
-//
-// What's deliberately NOT pinned here: the set of checks the workflow
-// runs. Those are #319's contract and get their own integration tests.
-// This test guards the shell only.
+// #317: pre-merge `check.yml` reusable workflow. Pins the file's shape so it
+// stays consumable in one line by a downstream PR-CI workflow: a reusable
+// workflow (`on: workflow_call`) driving the engine through the same JS action
+// `release.yml` uses, with `command: check`. The checks it runs are #319's.
 describe('#317 check.yml reusable workflow shape', () => {
   interface Step {
     name?: string;
@@ -1018,21 +892,10 @@ describe('#317 check.yml reusable workflow shape', () => {
   });
 });
 
-// Post-publish tarball-verify step (#304) retries `npm view` to handle
-// npm packument-metadata propagation lag across CDN edges, but until
-// this fix the `curl` that fetched the tarball blob itself had no
-// retry. npm's packument index and tarball blobs propagate
-// independently — `npm view` can mint a tarball URL at the origin
-// before that blob reaches the CloudFlare edge a runner happens to
-// route to, so `curl --fail` would 404 even though the publish
-// succeeded and the metadata claimed the artifact was available.
-//
-// Reproduced empirically on PR #322 (commit 0ceb36c): two consecutive
-// `e2e (polyglot-everything) / publish` runs failed at this exact
-// step with `curl` exit 22, while the very same tarball URL returned
-// HTTP 200 (cf-cache-status: HIT) on a probe a few minutes later. The
-// `npm view` retry guard was correctly handling the packument race;
-// the tarball-fetch race was a separate gap.
+// #304: npm's packument index and tarball blobs propagate independently, so
+// `npm view` can mint a tarball URL at the origin before that blob reaches the
+// CDN edge a runner routes to — `curl --fail` then exits 22 on a publish that
+// succeeded. The `npm view` retry guard does not cover the tarball fetch.
 describe('e2e-fixture-job.yml verify step: tarball-fetch retry', () => {
   const path = join(repoRoot, '.github/workflows/e2e-fixture-job.yml');
   const text = readFileSync(path, 'utf8');

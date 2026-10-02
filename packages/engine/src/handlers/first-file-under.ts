@@ -1,16 +1,8 @@
 /**
  * Depth-first search for the first of `candidates` under `dir` that is an
- * actual file, returned as a **posix** path relative to `dir` (or
- * `undefined` when the whole subtree holds no file).
- *
- * Exists because a build step may stage a payload either flat
- * (`<artifact>/<bin>`) or nested (`<artifact>/bin/<bin>`), and callers that
- * name that payload in a package manifest — or chmod it — need a file, not
- * whichever directory `readdir` happened to list first (#626).
- *
- * Posix separators on purpose: the result lands in `package.json#main`,
- * which npm reads on every platform, so a back-slashed `join` would ship a
- * manifest that only resolves on Windows.
+ * actual file, as a **posix** path relative to `dir` (#626) — a build step may
+ * stage a payload flat or nested, and the result lands in `package.json#main`,
+ * so a back-slashed `join` would ship a manifest that only resolves on Windows.
  */
 
 import { readdir, stat } from 'node:fs/promises';

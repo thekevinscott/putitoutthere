@@ -1,14 +1,7 @@
 /**
- * Registry mocks for integration tests.
- *
- * Uses msw (node-level fetch interception) to stand in for:
- * - crates.io: GET /api/v1/crates/{name}/{version}
- * - PyPI:      GET /pypi/{name}/{version}/json
- *
- * npm uses execFileSync (not fetch), so its mock lives with the
- * individual test files via vi.mock('node:child_process', ...).
- *
- * Issue #27. Plan: §23.3.
+ * msw registry mocks for integration tests: crates.io and PyPI. npm shells
+ * out instead of using fetch, so msw cannot intercept it — its mock lives
+ * with the individual test files. Issue #27.
  */
 
 import { http, HttpResponse } from 'msw';

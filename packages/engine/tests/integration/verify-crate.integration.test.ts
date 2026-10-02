@@ -1,28 +1,8 @@
 /**
- * `piot verify crate` — published `.crate` tarball-contents verification
- * (integration). Epic #442, sub-issue #449.
- *
- * Extraction of the inline "Verify published .crate tarballs honor expected
- * files" bash block in `.github/workflows/e2e-fixture-job.yml` (#334) into
- * one tested engine subcommand. Where the npm sibling (#443) downloads a
- * tarball over HTTP, the crates path reads `.crate` files straight off the
- * `cargo-http-registry` disk root the engine just published to — same host,
- * same job, no fetch. So this command takes a `--registry-root <dir>` and
- * `find`s `<name>-<version>.crate` under it, extracts with the REAL `tar`,
- * and asserts the fixture source tree (`src/lib.rs` or `src/main.rs`)
- * surfaces.
- *
- * This tier drives the CLI in-process (`run([...])`) against real `.crate`
- * files it builds on disk with the real `tar` — deterministic, no network.
- * The e2e twin (`tests/e2e/verify-crate.e2e.test.ts`) shells out to the
- * built CLI against the real published fixture crate downloaded from
- * crates.io.
- *
- * Contract preserved verbatim from the bash: same row selection, same
- * `::error::` strings, same `ok:` line, same exit code.
- *
- * Red before the command exists: `verify crate` is an unrecognized
- * subcommand, so `run` errors and no `ok:` line is emitted.
+ * `piot verify crate` (epic #442, #449), extracted from the inline bash in
+ * `e2e-fixture-job.yml` (#334). Unlike the npm sibling it does not fetch: the
+ * `.crate` files are read straight off the `cargo-http-registry` disk root
+ * the engine just published to, hence `--registry-root <dir>`.
  */
 
 import { execFileSync } from 'node:child_process';

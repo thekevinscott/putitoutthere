@@ -1,29 +1,8 @@
 /**
- * `piot plan` must publish an "unpublished kinds" $GITHUB_OUTPUT key so the
- * reusable workflow can gate registry auth on *work left to do* rather than
- * on *packages that exist* (#622).
- *
- * The bug: `release.yml`'s `Authenticate with crates.io (OIDC)` step is gated
- * on `contains(needs.build.outputs.matrix, '"kind":"crates"')`, which asks
- * "does this repo have a crates package?". On a re-run whose crates version
- * is already live — the ordinary re-run-after-partial-failure state that
- * `isPublished` exists to make safe — the OIDC exchange still fires. When it
- * fails (no trusted publisher registered yet, or the record hasn't propagated)
- * the whole publish job dies before the engine action runs, taking npm and
- * PyPI down with it for crates.io work that will never happen.
- *
- * The fix hoists the determination the publish path already makes: `plan`
- * emits `unpublished_kinds`, the distinct kinds carrying at least one package
- * whose version is NOT already on the registry. `unknown` (registry
- * unreachable) counts as unpublished, so a blip never silently drops auth the
- * publish would then need.
- *
- * Only the registry boundary is mocked: crates.io over msw (fetch), npm via
- * `execFile` underneath the real process seam. Config, plan, cascade, version,
- * handler dispatch and the $GITHUB_OUTPUT write are all real. This is the
- * integration twin of `tests/e2e/crates-auth-gate.e2e.test.ts`.
- *
- * Issue #622.
+ * `plan` emits `unpublished_kinds` so the reusable workflow gates registry
+ * auth on work left to do, not on packages that exist (#622). `unknown`
+ * (registry unreachable) counts as unpublished, so a blip never drops auth
+ * the publish would then need. Only the registry boundary is mocked.
  */
 
 import { EventEmitter } from 'node:events';

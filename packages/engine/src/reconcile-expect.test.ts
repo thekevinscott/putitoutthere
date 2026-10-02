@@ -1,17 +1,9 @@
 /**
- * `reconcileExpected` unit coverage — the `--expect` arm of reconcile.
- *
- * The contract that matters is negative: this path must never consult a
- * registry's mutable latest-version pointer. It asks `isPublished` about
- * the exact version the caller named (the immutable per-version endpoint)
- * and refuses to tag anything it cannot confirm, which is what stops a
- * CDN-cached pointer from turning a missed tag into a silent exit 0
- * (#666).
- *
- * `handlerFor`, `tagList`, `resolveTagCommit`, and `ensureTag` are
- * automocked so each case exercises the loop — confirm, resolve, tag —
- * without a repo or a registry. `parseReconcileExpect` and `formatTag`
- * stay real; both are pure.
+ * `reconcileExpected` unit coverage — the `--expect` arm of reconcile (#666).
+ * The contract is negative: never consult a registry's mutable latest-version
+ * pointer. It asks `isPublished` about the exact version the caller named and
+ * refuses to tag what it cannot confirm, so a CDN-cached pointer cannot turn
+ * a missed tag into a silent exit 0.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

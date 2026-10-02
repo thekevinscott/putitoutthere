@@ -1,37 +1,10 @@
 /**
- * Structured logger for putitoutthere.
- *
- * JSON-per-line output in CI; human-readable text in TTYs. Every emitted
- * line is passed through a redactor that replaces any occurrence of a
- * known-secret env value (keys matching *TOKEN* / *SECRET* / *PASSWORD*
- * / *KEY* / *PASS* / *PAT*, case-insensitive) with `[REDACTED:<digest>]`,
- * where `<digest>` is a stable 8-hex-char SHA-256 prefix (#134).
- * Operators can correlate rotated tokens across log lines without ever
- * seeing the value.
- *
- * Substring redaction (rather than Pino-style field-path redaction) is
- * deliberate: handlers capture child-process stdout/stderr and feed it
- * through the logger. A token leaked inside that stream must not escape
- * to CI logs regardless of which field it ended up in.
- *
- * Sources scanned:
- *  - `process.env` (always)
- *  - any additional `envSources` passed to `createLogger` (#136), so
- *    credentials injected into a per-call `ctx.env` object (rather than
- *    the process env) are redacted too.
- *
- * Performance (#141): the redaction set is cached per-source object by
- * identity in a WeakMap, keyed by a cheap content signature. Back-to-back
- * log calls re-use the cached entries; env is re-walked only when a
- * source object's size/contents change.
- *
- * Length floor (#137): values shorter than 8 chars are skipped even when
- * their env-var name matches a known-secret pattern. Real registry
- * tokens comfortably clear this; short values (`CI=1`, a boolean flag)
- * cause far more harm by mangling every occurrence of that character in
- * the log stream than they are worth defending as credentials.
- *
- * Issue #11. Plan: §22.2, §22.5.
+ * Structured logger (#11). JSON-per-line in CI, text in TTYs. Redaction is
+ * substring-based, not field-path based, since handlers pipe child-process
+ * output through here: secret-shaped env values (from `process.env` plus any
+ * `envSources` given to `createLogger`, #136) become `[REDACTED:<digest>]`, a
+ * stable 8-hex SHA-256 prefix (#134). Values under 8 chars are skipped —
+ * mangling `CI=1` costs more than it protects (#137).
  */
 
 import { createHash } from 'node:crypto';
@@ -111,46 +84,19 @@ function formatScalar(v: unknown): string {
 /* ----------------------------- redaction ----------------------------- */
 
 /**
- * Credential-shaped env-var name matcher. Requires word boundaries
- * (`_` or start/end of string) so non-credential names that happen to
- * contain a credential substring aren't caught as false positives.
- *
- * Matches (spot-check):
- *   GITHUB_TOKEN, PYPI_API_TOKEN, NODE_AUTH_TOKEN, CARGO_REGISTRY_TOKEN,
- *   SECRET, JWT_SECRET, CLIENT_SECRET, NPM_PASSWORD, MY_PAT, GH_PAT,
- *   SSH_KEY, API_KEY, SECRET_KEY, PRIVATE_KEY.
- *
- * Explicitly rejects (regression fixtures for #196):
- *   KEYCLOAK_URL, KEYCLOAK_REALM, TOKENIZER_MODEL, TOKENS_PER_SECOND,
- *   PUBLIC_KEY_PATH, PUBLIC_KEY_FILE, PASSTHROUGH, PASSPORT_URL,
- *   PATHWAY_URL, PATS_COUNT (prefix `PATS`, not a word-boundary `PAT`).
- *
- * Components:
- *   - `(^|_)(TOKEN|SECRET|PASSWORD|PAT)(_|$)` — the four unambiguous
- *     credential shapes, anchored by word boundaries on both sides.
- *   - `(^|_)[A-Z0-9]*KEY$` — trailing `KEY` segment. Allows `API_KEY`,
- *     `SECRET_KEY`, `SSH_KEY`, `APP_KEY_2048`-style. Rejects
- *     `KEY_PATH`, `KEYCLOAK_URL`, `PUBLIC_KEY_ALGORITHM`.
- *
- * `PASS` was previously in the substring set; dropped here because it
- * collides with every `PASSTHROUGH` / `BYPASS*` / `PASSPORT*` name.
- * Real credentials use `PASSWORD` or `PAT`; those remain matched.
+ * Credential-shaped env-var name matcher. Word boundaries (`_` or string
+ * edges) keep false positives out — `KEYCLOAK_URL`, `TOKENIZER_MODEL`,
+ * `PUBLIC_KEY_PATH`, `PASSTHROUGH`, `PATS_COUNT` must not match (#196).
+ * `PASS` is deliberately absent; `PASSWORD` and `PAT` cover real credentials.
  */
 const SECRET_KEY = /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PAT)(?:_|$)|(?:^|_)[A-Z0-9]*KEY$/i;
 const MIN_OPAQUE_LEN = 8;
 
 /**
- * Per-source cache of extracted secret values. Keyed by the source
- * object's identity so repeated log calls against the same `process.env`
- * / `ctx.env` pair don't rewalk every entry (#141). Entries drop out
- * automatically when the source object becomes unreachable.
- *
- * Mutation detection uses a cheap signature (key count + total value
- * length). When the signature matches, the cached values are returned
- * without a second iteration. When it differs, we rebuild. This lets
- * process.env be mutated mid-run (tests do this constantly) without
- * leaking the old credentials in logs, while keeping steady-state log
- * cost O(1) in the number of env vars.
+ * Per-source cache of extracted secret values, keyed by source-object identity
+ * so repeated log calls don't rewalk every entry (#141). Mutation detection
+ * uses a cheap signature (key count + total value length), so a mid-run
+ * `process.env` mutation cannot leak old credentials into later lines.
  */
 interface Scanned {
   sig: string;

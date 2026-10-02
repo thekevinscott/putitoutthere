@@ -1,17 +1,8 @@
 /**
- * pypi maturin manylinux baseline — integration test.
- *
- * Issue #610. Linux wheels built on native runners are tagged with the
- * runner's glibc (`manylinux_2_39` on ubuntu-24.04 — see
- * thekevinscott/dirsql#818). An optional per-package `manylinux` key on
- * `kind = "pypi"` / `build = "maturin"` packages selects an older
- * baseline: the planner stamps it on each per-target linux wheel row,
- * and the reusable workflow forwards it to maturin-action's `manylinux`
- * input (which builds inside the matching manylinux container).
- *
- * Lives in `tests/integration/` because the behavior is only observable
- * when the real config loader and the real planner run together against
- * an on-disk repo — the config → plan seam is what carries the key.
+ * pypi maturin manylinux baseline (#610): linux wheels built on native
+ * runners are tagged with the runner's glibc (`manylinux_2_39` on
+ * ubuntu-24.04, see thekevinscott/dirsql#818), so a per-package `manylinux`
+ * key selects an older baseline the planner stamps on each linux wheel row.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,10 +1,8 @@
 /**
- * Whether a CHANGELOG.md line is the `## Unreleased` heading. Mirrors the
- * bash `/^##\s+Unreleased\s*$/`: exactly two hashes, then at least one
- * whitespace, then `Unreleased`, then only trailing whitespace. Implemented
- * with explicit string ops rather than a `\s+` quantifier regex — under
- * `RegExp.test()` the `\s`/`\s*`/`\s+` variants are indistinguishable and
- * would become unkillable equivalent mutants (see AGENTS.md #442 / #520).
+ * Whether a CHANGELOG.md line is the `## Unreleased` heading, mirroring the
+ * bash `/^##\s+Unreleased\s*$/`. Explicit string ops rather than that regex:
+ * under `RegExp.test()` the `\s`/`\s*`/`\s+` variants are indistinguishable
+ * equivalent mutants (AGENTS.md, #442 / #520).
  */
 export function isUnreleasedHeading(line: string): boolean {
   if (!line.startsWith('##')) {

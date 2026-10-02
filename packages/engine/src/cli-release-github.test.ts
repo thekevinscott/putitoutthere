@@ -1,12 +1,7 @@
 /**
- * CLI wiring for the `release-github` command (#444): dispatch routes to
- * the engine with the parsed `--cwd`, and the engine's exit code is passed
- * through. Isolated per the unit-suite convention: the engine
- * (`./release-github/index.js`) is bare-automocked so the double can't
- * drift from the source, and the dispatcher under test (`./cli.js`) is
- * loaded via dynamic import so the mock is in place first. This asserts
- * routing, not engine behavior (covered in `release-github/index.test.ts`
- * and the e2e-cli tier).
+ * CLI wiring for the `release-github` command (#444): dispatch routes to the
+ * engine with the parsed `--cwd`, and the engine's exit code is passed
+ * through.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

@@ -1,24 +1,8 @@
 /**
- * `piot verify wheel` — built wheel/sdist version verification (integration).
- * Epic #442, sub-issue #450.
- *
- * Extraction of the inline "Verify wheel/sdist version matches
- * matrix.version" bash block (#276) in `.github/workflows/e2e-fixture-job.yml`
- * into one tested engine subcommand. The contract: the build artifact under
- * `<path>/dist` carries the planned version — a wheel's `*.dist-info/METADATA`
- * `Version:` must equal it, and an sdist's filename must contain it.
- *
- * This tier drives the CLI in-process (`run([...])`) against real `.whl`
- * (a real deflate-compressed zip, built here in pure Node) and `.tar.gz`
- * files on disk — deterministic, no network, cross-platform (no `unzip`).
- * The e2e twin (`tests/e2e/verify-wheel.e2e.test.ts`) shells out to the
- * built CLI against a real published wheel.
- *
- * Contract preserved verbatim from the bash: same file selection, same
- * `::error::` strings, same `ok wheel:` / `ok sdist:` lines, same exit code.
- *
- * Red before the command exists: `verify wheel` is an unrecognized
- * subcommand, so `run` errors and no `ok` line is emitted.
+ * `piot verify wheel` (epic #442, #450), extracted from the inline bash in
+ * `e2e-fixture-job.yml` (#276): a wheel's `*.dist-info/METADATA` `Version:`
+ * must equal the planned version and an sdist's filename must contain it.
+ * Real deflate zips built here in pure Node — no network, no `unzip`.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

@@ -1,28 +1,8 @@
 /**
- * Workflow-YAML contract: every `bundle_cli` cargo-build path in the
- * reusable workflow must rewrite the cross-compiled crate's
- * `[package].version` to `matrix.version` BEFORE the `cargo build` step
- * runs.
- *
- * Why this exists (#366): `cargo build` bakes `CARGO_PKG_VERSION` into
- * the binary at compile time from whatever literal sits in the crate's
- * `Cargo.toml`. There is no env override. The pypi/maturin path already
- * handles this — `_matrix.yml` runs a `write-version` step before
- * `maturin build` so wheels carry `matrix.version`. The npm
- * `bundled-cli` path had no equivalent, so `@scope/cli-<triple>@0.3.5`'s
- * bundled binary reported the stale on-disk crate literal (e.g. `0.2.7`)
- * from `--version` — a silent version skew between the published
- * package and the artifact it ships.
- *
- * #374: the same bug applies to pypi `[package.bundle_cli]` rows. The
- * maturin `write-version` step bumps the Python package version source,
- * not the separate CLI crate at `bundle_cli.crate_path`, so the staged
- * binary can still report the stale crate literal.
- *
- * The fix: a `write-crate-version` step on both npm and pypi bundle_cli
- * paths, invoked against `matrix.bundle_cli.crate_path` with
- * `matrix.version`, immediately before the matching `bundle_cli — cargo
- * build` step in the build matrix.
+ * Workflow-YAML contract (#366, #374): every npm and pypi `bundle_cli` cargo
+ * path must rewrite the crate's `[package].version` to `matrix.version` BEFORE
+ * `cargo build`, which bakes `CARGO_PKG_VERSION` at compile time with no env
+ * override — otherwise the shipped binary reports a stale literal, silently.
  */
 
 import { readFileSync } from 'node:fs';

@@ -1,13 +1,8 @@
 /**
- * Integration test for the changelog-check gate (#452, epic #442).
- *
- * Drives the real `piot-ci changelog-check` dispatch in-process — `run()`
- * from `cli.ts` → `runChangelogCheck` → `decideChangelogCheck` — with only
- * the git-subprocess boundary (the exec seam) mocked. Unlike
- * `src/changelog-check/run.test.ts` (which also mocks `decide` to isolate the
- * composition root's wiring), this exercises the real decision, so the
- * skip-trailer bypass, the missing-file `::error`, and the OK/skip messages
- * are asserted through the actual command.
+ * Integration test for the changelog-check gate (#452, epic #442). Drives the
+ * real `piot-ci changelog-check` dispatch in-process with only the git
+ * subprocess seam mocked, so — unlike `src/changelog-check/run.test.ts`, which
+ * also mocks `decide` — the real skip-trailer and `::error` output is asserted.
  */
 
 import type * as ChildProcess from 'node:child_process';

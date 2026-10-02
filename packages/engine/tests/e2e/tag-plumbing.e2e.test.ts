@@ -1,22 +1,7 @@
 /**
- * Tag-plumbing engine commands against the real CLI + real git — the e2e
- * twin of `tests/integration/tag-plumbing.integration.test.ts`. Epic #442,
- * sub-issue #446.
- *
- * Where the integration test drives the engine in-process, this one
- * **shells out to the built CLI** (`node dist/cli-bin.js …`) against a
- * **real git repo with a real bare remote**. The whole tag-move surface —
- * `git fetch --tags --force`, `git tag -f`, ref-scoped
- * `git push --force origin refs/tags/<tag>` — runs unmocked and lands in a
- * real bare remote.
- *
- * Consolidates the repo's two hand-rolled tag-move implementations
- * (`release-npm.yml`'s "Move floating major tag", `advance-v0.yml`'s
- * "Force-move v0") plus the two identical action-bundle folds into one
- * tested path. Red before the commands exist: they are unknown
- * subcommands, so the CLI exits 1 and no tag moves.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * Tag-plumbing commands against real git + a real bare remote — `git fetch
+ * --tags --force`, `git tag -f`, ref-scoped `git push --force origin
+ * refs/tags/<tag>`, all unmocked. Epic #442, sub-issue #446.
  */
 
 import { execFileSync } from 'node:child_process';

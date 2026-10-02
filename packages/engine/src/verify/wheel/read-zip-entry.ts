@@ -1,13 +1,8 @@
 /**
  * Extract the first zip entry whose name satisfies `matches`, returning its
- * decompressed bytes (or null if none matches) (#450).
- *
- * A minimal pure-Node zip reader for the stored (method 0) and deflate
- * (method 8) entries a wheel uses — enough to read `dist-info/METADATA`
- * without an `unzip` / `tar` subprocess, so `verify wheel` runs on every
- * platform the maturin matrix builds on (Windows included). Wheels are not
- * ZIP64 and carry no archive comment, so the common-case layout is all that
- * is handled.
+ * decompressed bytes (or null) (#450). A minimal pure-Node reader for the
+ * stored (method 0) and deflate (method 8) entries a wheel uses, so no
+ * `unzip`/`tar` subprocess. Wheels are never ZIP64 and carry no comment.
  */
 
 import { inflateRawSync } from 'node:zlib';

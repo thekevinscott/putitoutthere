@@ -1,21 +1,8 @@
 /**
- * `computeStatus` unit tests.
- *
- * `computeStatus` is the subject here: it reconciles each configured
- * package's latest git tag against its registry latest and classifies
- * the drift. Its collaborators are isolated — `loadConfig` and `lastTag`
- * are automocked and driven per scenario, the registry is an injected
- * handler, and the pure `parseTagVersion` / `classify` math runs for
- * real. The wiring — tag resolution, the per-package registry call, the
- * unreachable catch — is what this tier covers.
- *
- * The pure `classify` and `formatStatusRow` functions are unit-tested
- * directly in their own colocated suites (`status-classify.test.ts`,
- * `status-format.test.ts`); the registry-vs-tag drift the feature exists
- * to catch is pinned end-to-end in
- * `tests/integration/status.integration.test.ts`.
- *
- * Issue #403.
+ * `computeStatus` unit tests (#403). It reconciles each configured package's
+ * latest git tag against its registry latest and classifies the drift; this
+ * tier covers the wiring — tag resolution, the per-package registry call, the
+ * unreachable catch.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

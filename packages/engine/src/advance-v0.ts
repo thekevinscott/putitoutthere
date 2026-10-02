@@ -1,16 +1,8 @@
 /**
  * `putitoutthere advance-v0` — force-move the floating `v0` tag to HEAD
- * (#446, epic #442).
- *
- * Extraction of `advance-v0.yml`'s inline "Force-move v0 to bundle commit"
- * bash. `v0` tracks main HEAD (not the latest release), so every push to
- * main advances it to a fresh bundle commit so
- * `uses: thekevinscott/putitoutthere@v0` resolves to a runnable action.
- * The workflow's Fold step (`fold-bundle`) synthesizes that commit first;
- * this then points `v0` at it.
- *
- * Reuses the shared `forceMoveTag` so the local `git tag -f` + ref-scoped
- * force-push match the floating-major mover exactly.
+ * (#446, epic #442). `v0` tracks main HEAD, not the latest release, so every
+ * push to main advances it to the fresh bundle commit the workflow's Fold
+ * step (`fold-bundle`) synthesizes first.
  */
 
 import { forceMoveTag } from './force-move-tag.js';

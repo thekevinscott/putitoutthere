@@ -1,11 +1,8 @@
 /**
- * Composition root for the evidence-check gate (#445). Reads BASE_SHA /
- * HEAD_SHA (and the ambient GITHUB_REPOSITORY) from the env, runs the real
- * I/O the decision needs — the `git diff` of CHANGELOG.md, the file read, the
- * `gh api` run/job queries (cached), the bounded poll (`sleep`, clock) — then
- * feeds the settled state to `decideEvidenceCheck`, writes the lines, and
- * returns the exit code. The only I/O lives here; every decision is a pure
- * module under this directory.
+ * Composition root for the evidence-check gate (#445). The only I/O lives here
+ * — the `git diff` of CHANGELOG.md, the file read, the cached `gh api` run/job
+ * queries, the bounded poll — then `decideEvidenceCheck` makes the call. Every
+ * decision is a pure module under this directory.
  */
 import { readFile } from 'node:fs/promises';
 

@@ -1,22 +1,9 @@
 /**
- * `putitoutthere plan` publish/skip + skew view (#412, #403 slice 4).
- *
- * Layers a per-package verdict over the build matrix: for each planned
- * package, would a release from this ref PUBLISH (version not yet on the
- * registry), SKIP (already published), or is the registry UNKNOWN
- * (unreachable). Plus dependency skew — a dependent that would PUBLISH
- * while a `depends_on` dependency SKIPs.
- *
- * Thin reader, no parallel logic (design-commitments #7): the real
- * planner (`plan` — cascade + version) gives the matrix, and the same
- * `handler.isPublished` the publish path dispatches through gives the
- * verdict. So the preview can't disagree with what a release would do.
- * The read degrades, never aborts: an unreachable registry yields
- * `unknown` and the matrix is still returned — same posture as `status`.
- *
- * The `matrix` field is byte-identical to bare `plan` output, so the
- * reusable workflow's matrix contract is unchanged; verdicts are
- * additive.
+ * `putitoutthere plan` publish/skip + skew view (#412, #403 slice 4). Layers a
+ * per-package verdict over the build matrix — PUBLISH / SKIP / UNKNOWN — via
+ * the same `handler.isPublished` the publish path uses, so the preview cannot
+ * disagree with what a release would do. `matrix` stays byte-identical to bare
+ * `plan`, and an unreachable registry degrades to `unknown` rather than abort.
  */
 
 import { join } from 'node:path';

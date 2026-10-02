@@ -1,30 +1,8 @@
 /**
- * Verify each published per-triple npm tarball ships a synthesized binary,
- * not just metadata (#443).
- *
- * `npm-platform`'s `synthesizePlatformPackage` emits `files: <readdir of
- * the artifact dir>`, so an empty artifact dir yields a tarball with only
- * `package.json` and `npm publish` still returns 0. This step downloads the
- * published platform tarball back and asserts at least one non-`package.json`
- * file is present — shipping that binary is the whole point of the
- * synthesis. Extracted verbatim from the "Verify published per-triple npm
- * tarballs honor expected files" bash block.
- *
- * The count is RECURSIVE (#633). A consumer whose build stages the binary
- * nested — `artifacts/<name>-<triple>/bin/<binary>` rather than flat —
- * publishes a tarball whose top level is `package.json` plus the `bin/`
- * directory, and a top-level file count discards that directory along with
- * the payload inside it. The nested layout is legal all the way to publish
- * (`checkCompleteness` lists recursively, so it accepts either shape), so
- * this check has to see it too. Paths are reported relative to `package/`,
- * which is what makes a nested payload legible in the log. One walk decides
- * the verdict, so the failure message can no longer name a file the verdict
- * called absent.
- *
- * The platform package name is reconstructed as `{name}-{triple}` — the
- * default template every fixture uses — because the matrix row carries the
- * main package name (synthesis is a publish-time concern). Returns the
- * process exit code (0 ok, 1 on any metadata-only tarball).
+ * Verify each published per-triple npm tarball ships a synthesized binary, not
+ * just metadata (#443): an empty artifact dir yields a `package.json`-only
+ * tarball and `npm publish` still returns 0. The count is RECURSIVE (#633) — a
+ * nested `bin/<binary>` layout is legal to publish, and a flat count misses it.
  */
 
 import { rm } from 'node:fs/promises';

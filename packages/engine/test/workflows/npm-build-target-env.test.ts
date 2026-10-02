@@ -1,30 +1,8 @@
 /**
- * Workflow-YAML contract: the `matrix.kind == 'npm'` build step in the
- * reusable workflow must set `TARGET` and `BUILD` env variables so a
- * consumer's `npm run build` script can read them.
- *
- * Why this exists: bundled-cli / napi consumers cross-compile a Rust
- * binary per target and stage it under `build/<triple>/<bin>`. The
- * cross-compile is consumer-owned (npm bundled-cli does not have a
- * maturin-equivalent on the engine side; the build script in the
- * consumer's `package.json` does the work). Without `TARGET` the
- * script has no signal of which triple to build for, so every per-
- * platform matrix row produces an empty `build/<triple>/` directory
- * and `actions/upload-artifact@v7` reports
- * `No files were found with the provided path: ...`.
- *
- * The internal `e2e-fixture-job.yml` already passes
- * `env: { TARGET: ${{ matrix.target }}, BUILD: ${{ matrix.build }} }`
- * (lines 264-270) and the `js-bundled-cli` fixture's
- * `scripts/build.cjs` reads `process.env.TARGET` to know which stub
- * to stage. The reusable workflow's `_matrix.yml` and `release.yml`
- * never picked up that env block — meaning the fixture passes but
- * a real consumer's first publish fails. Hit in the wild on
- * `thekevinscott/darkfactory`'s first release; tracked at #287.
- *
- * The fix: mirror the e2e fixture's env block onto the
- * `matrix.kind == 'npm'` build step in `_matrix.yml` (build matrix)
- * and `release.yml` (publish-job rebuild for npm packages).
+ * Workflow-YAML contract (#287): the `matrix.kind == 'npm'` build step must set
+ * `TARGET` and `BUILD`. The cross-compile is consumer-owned, so without `TARGET`
+ * every per-platform row produces an empty `build/<triple>/` and
+ * `actions/upload-artifact` reports `No files were found with the provided path`.
  */
 
 import { readFileSync } from 'node:fs';
@@ -125,18 +103,9 @@ describe('reusable workflow: npm build step exposes TARGET / BUILD env', () => {
 
 /**
  * Workflow-YAML contract (#627): the same npm build step must also set
- * `VERSION`, the version the run is publishing.
- *
- * `TARGET` / `BUILD` say which triple and which mode, but not which
- * version. On the roll-your-own path (`build = "bundled-cli"` with no
- * `[package.bundle_cli]`) no engine-side writer runs, so every version
- * source on disk is still the committed literal when `cargo build` bakes
- * `CARGO_PKG_VERSION` in — and nothing fails: the publish succeeds and
- * only the installed binary's `--version` disagrees.
- *
- * Checked at all three sites the pipeline runs a consumer build script,
- * because a value present at one and absent at another is the drift that
- * kept #287 invisible until a real consumer's first publish hit it.
+ * `VERSION`. On the roll-your-own path (`build = "bundled-cli"` with no
+ * `[package.bundle_cli]`) no engine-side writer runs, so `cargo build` bakes the
+ * committed literal and nothing fails — only the installed `--version` disagrees.
  */
 describe('reusable workflow: npm build step exposes VERSION env (#627)', () => {
   it('_matrix.yml build-matrix npm step sets VERSION=${{ matrix.version }}', () => {

@@ -1,18 +1,8 @@
 /**
  * Decision core for the fixture-materialize harness (#447, epic #442). I/O-free:
- * given the phase (`plan` / `build` / `publish`), the fixture name, the resolved
- * version, and the per-run identifiers, decide which text substitutions to apply
- * across the materialized manifest files, whether to init a throwaway git repo,
- * and whether to export `FIXTURE_VERSION`. Extracted from the three "Materialize
- * fixture" bash blocks in `.github/workflows/e2e-fixture-job.yml`; the decisions
- * match them exactly (pinned in `decide.test.ts`).
- *
- * The three call sites differ only along these axes:
- *   - plan:    version = 0.0.<epoch> (computed in run.ts), exports FIXTURE_VERSION,
- *              rewrites the `-placeholder` suffix on first-publish fixtures, git init.
- *   - build:   version = 0.0.1 literal, no export, no placeholder rewrite, no git.
- *   - publish: version from FIXTURE_VERSION (computed in run.ts), rewrites the
- *              `-placeholder` suffix on first-publish fixtures, git init.
+ * per phase, which text substitutions to apply across the materialized
+ * manifests, whether to init a throwaway git repo, and whether to export
+ * `FIXTURE_VERSION`. Extracted from `e2e-fixture-job.yml`'s three bash blocks.
  */
 
 export type FixtureMaterializeMode = 'plan' | 'build' | 'publish';

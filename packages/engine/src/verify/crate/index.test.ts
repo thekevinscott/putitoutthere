@@ -1,12 +1,5 @@
 /**
  * `verifyCrate` — the `.crate` contents-verification engine command (#449).
- * Isolated: its collaborators (`findCrateFile`, `extractCrate`,
- * `hasCrateSource`, `listFilesRecursive`, `node:fs/promises`) are mocked, so
- * this unit test drives every branch — source present (lib.rs / main.rs),
- * missing crate, empty crate, missing source, and the no-rows short-circuit —
- * through return values rather than real tarballs. Real end-to-end extraction
- * over a live registry root is covered by
- * tests/integration/verify-crate.integration.test.ts and e2e.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

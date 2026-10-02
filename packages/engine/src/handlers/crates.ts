@@ -1,39 +1,8 @@
 /**
- * crates.io handler.
- *
- * Issue #16. Plan: §7.4, §13.1, §14.5, §16.1.
- *
- * - isPublished: GET /api/v1/crates/{name}/{version}; 200 → true, 404 →
- *   false, 5xx → TransientError (retry-wrapped at call site).
- * - writeVersion: delegates to `writeResolvedCargoVersion`, which
- *   rewrites a literal `[package].version` in place or, for a crate
- *   that inherits (`version.workspace = true`), the workspace root's
- *   `[workspace.package].version` instead (#428, #639). Regex-based to
- *   preserve comments and whitespace; the alternative (TOML
- *   round-trip) loses formatting.
- * - publish: `cargo publish --allow-dirty --verbose` with stderr
- *   captured for the failure dump. Short-circuits on
- *   already-published (idempotent).
- *
- * A failure message carries cargo's stderr through `elideMiddle`
- * (#651). `--verbose` plus `CARGO_TERM_VERBOSE=true` makes a cold
- * verify build run to hundreds of KB, and the whole message lands on
- * one log line, which GitHub cuts at 64KB from the *front* — so the
- * unelided version threw away cargo's error and kept the successful
- * build chatter. Only the rendered message is bounded: `stderr` itself
- * stays whole for the predicates below (`isRateLimited`,
- * `matchFirstPublishTpRejection`) and for the job-summary dump, which
- * reads it off the ExecError and writes to a file with no line cut.
- *
- * --allow-dirty is required for our writeVersion-then-publish model
- * (#135), so `scanDirtyOutsideManifest` restores a narrowed version of
- * cargo's own dirty-check before we invoke it. A null scan (e.g. no git
- * repo) means we can't verify, and we fall back to cargo's --allow-dirty.
- *
- * OIDC: the crates-io-auth-action GHA step exchanges the OIDC JWT for
- * a short-lived CARGO_REGISTRY_TOKEN in the env. The handler doesn't
- * drive the exchange -- it just reads the env var the workflow wired
- * up (same for classic token fallback).
+ * crates.io handler (#16; plan §7.4, §13.1, §14.5, §16.1). `--allow-dirty`
+ * is required by the writeVersion-then-publish model (#135), so
+ * `scanDirtyOutsideManifest` reinstates a narrowed dirty-check. stderr is
+ * elided mid-message (#651): GitHub cuts a log line at 64KB from the *front*.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -133,18 +102,10 @@ async function publishImpl(
     return { status: 'already-published' };
   }
 
-  // #135: --allow-dirty disarms cargo's own "is the tree clean?" guard.
-  // Reinstate a narrower check: only the Cargo.toml we just wrote may
-  // be dirty. Anything else = a bug or a stray edit that would end up
-  // in the crate tarball. Published crates can't be unpublished.
-  //
-  // Sibling package paths are whitelisted: a polyglot consumer with
-  // rust + js packages will have install state (node_modules/, dist/,
-  // package-lock.json) inside the js package's path during publish
-  // (the reusable workflow's `Build npm packages` step runs
-  // `npm install + npm run build` per npm package before the engine
-  // publishes). cargo only packs files inside its own package dir, so
-  // sibling-package state can't end up in the crate tarball anyway.
+  // #135: --allow-dirty disarms cargo's own clean-tree guard, so reinstate a
+  // narrower one — only the Cargo.toml we just wrote may be dirty. Sibling
+  // package paths are whitelisted: a polyglot consumer's js package carries
+  // install state during publish, and cargo only packs its own package dir.
   const unexpected = await scanDirtyOutsideManifest(
     ctx.cwd,
     pkg.path,

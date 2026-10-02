@@ -1,18 +1,8 @@
 /**
- * Tag-name template: how putitoutthere derives the git tag from a
- * `(name, version)` pair and how it parses a version back out of a tag.
- *
- * Template placeholders:
- *   - `{version}` — required. Replaced with the semver string on format,
- *     captured on parse.
- *   - `{name}` — optional. Replaced with the package name when present.
- *     Useful to distinguish packages in polyglot repos; omit it when a
- *     single-package repo wants the classic `v{version}` shape.
- *
- * Defaults to `{name}-v{version}` (matches the historical shape this
- * tool emitted before the template became configurable).
- *
- * Issue #TBD (tag-format config).
+ * Tag-name template: how putitoutthere derives a git tag from `(name, version)`
+ * and parses a version back out. `{version}` is required (captured on parse);
+ * `{name}` is optional — omit it for a single-package repo's classic
+ * `v{version}`. Defaults to `{name}-v{version}`, the historical shape.
  */
 
 import { parseSemver } from './version.js';

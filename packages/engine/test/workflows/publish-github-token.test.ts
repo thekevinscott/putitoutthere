@@ -1,16 +1,8 @@
 /**
- * Every workflow step that runs `putitoutthere publish` must expose
- * `GITHUB_TOKEN` in its `env:` block.
- *
- * Why: the `requireRepoPublic` preflight check (`src/preflight.ts`)
- * calls `https://api.github.com/repos/{owner}/{repo}` to confirm the
- * repo is public. `publish.ts` passes `githubToken:
- * process.env.GITHUB_TOKEN` to it — but GitHub Actions does not put
- * the token in the environment automatically. Without an explicit
- * `env: GITHUB_TOKEN:` on the step, the call goes out unauthenticated
- * (60 req/hr), and a multi-fixture e2e run blows that limit and gets a
- * 403 — which previously hard-failed the publish. Authenticated calls
- * get 5000 req/hr.
+ * Every workflow step running `putitoutthere publish` must expose `GITHUB_TOKEN`
+ * in its `env:`. Actions does not put it in the environment automatically, so
+ * without it the `requireRepoPublic` preflight call goes out unauthenticated
+ * (60 req/hr vs 5000) and a multi-fixture e2e run 403s. Silent in review.
  */
 
 import { readFileSync } from 'node:fs';

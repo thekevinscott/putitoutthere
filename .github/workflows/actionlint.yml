@@ -1,13 +1,9 @@
 name: Actionlint
 
-# Lints every workflow file under .github/workflows/. Catches:
-#   - Bad action references
-#   - Expression syntax errors
-#   - Job/step dependency typos
-#   - Shell script issues inside `run:` blocks (via shellcheck)
-#
-# Workflow YAML drift is expensive to debug -- the feedback loop is
-# push → wait for runner → wait for step. Lint locally first.
+# Lints every workflow under .github/workflows/ -- bad action refs,
+# expression syntax, job/step dependency typos, and shellcheck over `run:`
+# blocks. Workflow drift is expensive to debug (push -> wait for runner),
+# so lint locally first.
 
 on:
   # Inputs beyond the workflow dir, all of which actionlint genuinely reads:
@@ -57,19 +53,9 @@ jobs:
           bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
 
-      # Structural-safety invariant for the PR-time path
-      # (issue #272 for build/_matrix; issue #317 for check). These
-      # files must never grow `id-token: write` — that's what makes
-      # it impossible for a PR-time invocation to inadvertently mint
-      # an OIDC token capable of publishing. Any future patch that
-      # adds OIDC there belongs in a new file on the publish path,
-      # not these.
-      #
-      # The assertion logic lives in tested TypeScript
-      # (`packages/ci/src/actionlint-idtoken/`, the
-      # `piot-ci actionlint-idtoken` command), not inline bash — see
-      # AGENTS.md > "Repo-internal CI gates" (#452, epic #442). The
-      # `pnpm install` above links the `piot-ci` bin into
-      # node_modules/.bin (its `prepare` builds dist at install time).
+      # Structural-safety invariant: build.yml / _matrix.yml / check.yml
+      # must never grow `id-token: write`, so a PR-time run cannot mint a
+      # publish-capable OIDC token (#272, #317). `pnpm install` above links
+      # the `piot-ci` bin -- its `prepare` builds dist at install time.
       - name: Assert PR-time path has no id-token permission
         run: pnpm exec piot-ci actionlint-idtoken

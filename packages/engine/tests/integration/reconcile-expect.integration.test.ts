@@ -1,30 +1,8 @@
 /**
- * `piot reconcile --expect <name>@<version>` — the post-upload assertion
- * that a CDN-cached latest-version pointer cannot defeat (#666).
- *
- * `pypi-tag.yml` runs `reconcile` seconds after the caller's
- * `pypi-publish` job uploads. Bare reconcile *discovers* what to tag by
- * reading each registry's **mutable latest-version pointer** — for PyPI,
- * `GET /pypi/{name}/json` -> `info.version`, which pypi.org serves with
- * `cache-control: max-age=900, public` from multi-tier Fastly. In that
- * window the pointer can still name the PREVIOUS release, which in
- * steady state already carries its tag: reconcile skips it, reports
- * `created 0 tag(s)`, and exits 0 with the tag it was run to cut absent.
- * A silent no-op reported as success is the exact failure mode #623
- * exists to prevent.
- *
- * `--expect` removes the discovery step: the caller states what it
- * uploaded, and reconcile confirms it against the **immutable
- * per-version endpoint** (`/pypi/{name}/{version}/json`, the same read
- * `isPublished` performs on the publish path) rather than the cached
- * pointer. Confirmed and untagged -> tag it. Not confirmed -> fail
- * loudly, non-zero, rather than exit 0 having done nothing.
- *
- * Only the registry HTTP boundary is mocked (msw); config, tags, handler
- * dispatch, and the git tag writes are real. This is the in-process twin
- * of `tests/e2e/reconcile-expect.e2e.test.ts`.
- *
- * Issue #666.
+ * `reconcile --expect <name>@<version>` (#666): bare reconcile discovers what
+ * to tag from PyPI's mutable `info.version`, which pypi.org serves with
+ * `cache-control: max-age=900, public`, so inside that window it can still
+ * name the previous release and reconcile exits 0 having cut no tag.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -40,19 +18,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { run } from '../../src/cli.js';
 
 /* --------------------------- registry mocks --------------------------- *
- * Two PyPI reads, deliberately allowed to disagree — that disagreement IS
- * the bug under test:
- *
- *   GET /pypi/{name}/json            -> info.version    (mutable pointer,
- *                                       CDN-cached 900s; `pointer` below)
- *   GET /pypi/{name}/{version}/json  -> 200 | 404       (immutable, and
- *                                       pypi.org does not cache the 404;
- *                                       `published` below)
- *
- * `pointer` is what a stale edge would serve; `published` is registry
- * truth. Absent from `pointer` -> 404 (never published). `pointerStatus`
- * forces an error on the pointer read alone, so a test can prove the
- * expectation path never depends on it.
+ * Two PyPI reads deliberately allowed to disagree — that disagreement IS the
+ * bug: `/pypi/{name}/json` -> `info.version` is the mutable, CDN-cached 900s
+ * pointer (`pointer`); `/pypi/{name}/{version}/json` is immutable and its 404
+ * is uncached (`published`). `pointerStatus` errors the pointer read alone.
  */
 const pointer = new Map<string, string>();
 const published = new Map<string, Set<string>>();
