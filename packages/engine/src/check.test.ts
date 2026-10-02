@@ -26,7 +26,7 @@
 
 import { readFileSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runChecks } from './check.js';
 import { execCapture } from './utils/exec-capture.js';
@@ -91,6 +91,19 @@ beforeEach(() => {
   vi.clearAllMocks();
   build({});
 
+  // `checkRepoUrlMatchFindings` reads `process.env.GITHUB_REPOSITORY`, so this
+  // file must own that variable rather than inherit it from the environment.
+  // `tests/setup.ts` (wired through `vitest.config.ts`'s `setupFiles`) strips
+  // it too, but it is not a dependable guard here: the testing-conventions
+  // coverage gate runs vitest rooted at `packages/engine/src`, and vitest 5
+  // dropped vitest 4's upward search for a config file — so at that root no
+  // config, and therefore no setup file, is discovered at all. Under GitHub
+  // Actions, which always sets GITHUB_REPOSITORY, the repo-URL check then
+  // fired against the real repo slug and these cases failed in CI while
+  // passing locally. Stubbing is explicit and root-independent; the
+  // `afterEach` below restores whatever the ambient environment supplied.
+  vi.stubEnv('GITHUB_REPOSITORY', undefined);
+
   // preflight (unmigrated) reads manifests via node:fs readFileSync.
   vi.mocked(readFileSync).mockImplementation((p) => {
     const key = rel(p);
@@ -143,6 +156,10 @@ beforeEach(() => {
     }
     return Promise.reject(new ExecError('cargo package failed', '', '', 1));
   });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 /* ------------------------------ short-circuits ------------------------------ */
@@ -997,13 +1014,13 @@ globs = ["packages/ts/**"]
 
   it('passes when GITHUB_REPOSITORY matches the manifest URL', async () => {
     buildOneNpmPkg('git+https://github.com/acme/widget.git');
-    process.env.GITHUB_REPOSITORY = 'acme/widget';
+    vi.stubEnv('GITHUB_REPOSITORY', 'acme/widget');
     expect(await runChecks({ cwd: ROOT })).toEqual([]);
   });
 
   it('flags PIOT_REPO_URL_MISMATCH when GITHUB_REPOSITORY disagrees with the manifest URL', async () => {
     buildOneNpmPkg('git+https://github.com/wrong/repo.git');
-    process.env.GITHUB_REPOSITORY = 'acme/widget';
+    vi.stubEnv('GITHUB_REPOSITORY', 'acme/widget');
     const findings = await runChecks({ cwd: ROOT });
     expect(
       findings.some(
@@ -1014,7 +1031,10 @@ globs = ["packages/ts/**"]
 
   it('skips the URL-match check when GITHUB_REPOSITORY is unset (local CLI run)', async () => {
     buildOneNpmPkg('git+https://github.com/wrong/repo.git');
-    // setup.ts already deletes GITHUB_REPOSITORY; assert no PIOT_REPO_URL_MISMATCH.
+    // Restate the precondition this case is named for, rather than leaning on
+    // the file-level `beforeEach` stub: "GITHUB_REPOSITORY is unset" is the
+    // input under test, so it belongs in the test body.
+    vi.stubEnv('GITHUB_REPOSITORY', undefined);
     const findings = await runChecks({ cwd: ROOT });
     expect(findings.some((f) => f.message.includes('PIOT_REPO_URL_MISMATCH'))).toBe(false);
   });
