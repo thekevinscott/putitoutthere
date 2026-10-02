@@ -964,11 +964,16 @@ dynamic = ["version"]
     expect(findings.some((f) => f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND')).toBe(true);
   });
 
-  it('accepts dynamic version when [tool.hatch.version] is present', async () => {
+  it('flags PIOT_PYPI_HATCH_VERSION_PATH when [tool.hatch.version] reads a file in the tree', async () => {
+    // Presence of a version table is not enough: hatchling's default
+    // source reads a literal off `path`, which no release step rewrites
+    // and which ignores SETUPTOOLS_SCM_PRETEND_VERSION, so the wheel
+    // ships the previous release's version (#696).
     const p = j(dir, 'a');
     writePyproject(
       p,
       `[build-system]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
@@ -980,7 +985,58 @@ path = "a/__init__.py"
 `,
     );
     const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })]);
-    expect(findings.filter((f) => f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND')).toEqual([]);
+    expect(findings.some((f) => f.code === 'PIOT_PYPI_HATCH_VERSION_PATH')).toBe(true);
+  });
+
+  it('accepts dynamic version when [tool.hatch.version] source = "vcs" and hatch-vcs is declared', async () => {
+    const p = j(dir, 'a');
+    writePyproject(
+      p,
+      `[build-system]
+requires = ["hatchling", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "a"
+dynamic = ["version"]
+
+[tool.hatch.version]
+source = "vcs"
+`,
+    );
+    const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })]);
+    expect(
+      findings.filter(
+        (f) =>
+          f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND' ||
+          f.code === 'PIOT_PYPI_HATCH_VERSION_PATH',
+      ),
+    ).toEqual([]);
+  });
+
+  it('flags PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND when source = "vcs" but hatch-vcs is not in requires', async () => {
+    // hatchling resolves `source = "vcs"` through hatch-vcs's plugin entry
+    // point; without the plugin in requires the build dies mid-release
+    // with `Unknown version source: vcs` (#696).
+    const p = j(dir, 'a');
+    writePyproject(
+      p,
+      `[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "a"
+dynamic = ["version"]
+
+[tool.hatch.version]
+source = "vcs"
+`,
+    );
+    const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })]);
+    const found = findings.find((f) => f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND');
+    expect(found).toBeDefined();
+    expect(found!.detail).toContain('hatch-vcs');
   });
 
   it('accepts dynamic version on a maturin package without [tool.hatch.version] / [tool.setuptools_scm]', async () => {
@@ -1008,6 +1064,7 @@ dynamic = ["version"]
     writePyproject(
       p,
       `[build-system]
+requires = ["setuptools>=61", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -1020,6 +1077,28 @@ write_to = "a/_version.py"
     );
     const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'setuptools' })]);
     expect(findings.filter((f) => f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND')).toEqual([]);
+  });
+
+  it('flags PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND when setuptools-scm is not in requires', async () => {
+    const p = j(dir, 'a');
+    writePyproject(
+      p,
+      `[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a"
+dynamic = ["version"]
+
+[tool.setuptools_scm]
+write_to = "a/_version.py"
+`,
+    );
+    const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'setuptools' })]);
+    const found = findings.find((f) => f.code === 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND');
+    expect(found).toBeDefined();
+    expect(found!.detail).toContain('setuptools-scm');
   });
 
   it('flags PIOT_PYPI_MATURIN_INCLUDE_MISSING when bundle_cli stage_to is not covered by [tool.maturin].include', async () => {
