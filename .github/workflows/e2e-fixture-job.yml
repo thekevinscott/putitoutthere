@@ -103,13 +103,25 @@ jobs:
     needs: plan
     # Required: the default name interpolates run-scoped matrix fields
     # (`version`, and `name` on first-publish fixtures), so no predictor can
-    # match it. Every slot here is run-stable, and together they are unique
-    # per row — `python_version` because a maturin wheel build fans across
-    # interpreters and those rows differ in nothing else stable. That slot
-    # renders empty on non-pypi rows; willfire substitutes bare matrix paths
-    # and evaluates no expressions, so it cannot be omitted conditionally.
-    # Pinned by packages/ci/tests/integration/e2e-job-names (#655).
-    name: build (${{ matrix.kind }}, ${{ matrix.target }}, ${{ matrix.python_version }}, ${{ matrix.artifact_path }})
+    # match it. Three constraints bind every slot below, and all three are
+    # pinned by packages/ci/tests/integration/e2e-job-names (#655):
+    #
+    #   1. Run-stable. `artifact_path` derives from [[package]].path;
+    #      `artifact_name` is one character away and derives from the
+    #      per-run-stamped name.
+    #   2. A bare `matrix.<path>`. willfire evaluates no expressions, so a
+    #      `format()`/`&&` slot is unresolvable however well GitHub renders it.
+    #   3. Present on *every* row. An optional field renders empty on GitHub
+    #      but is a miss for willfire, which then drops the whole name from the
+    #      predicted set. Adding `matrix.python_version` cost 53 of 84 build
+    #      predictions, silently, because it is absent on npm and crates rows.
+    #
+    # Constraint 3 is why a maturin wheel build fanned across interpreters is
+    # not separated here: `python_version` is the only field that differs, and
+    # it is exactly the field that cannot go in the name. No declared fixture
+    # fans, and the per-fixture injectivity test goes red at PR time on the one
+    # that would.
+    name: build (${{ matrix.kind }}, ${{ matrix.target }}, ${{ matrix.artifact_path }})
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
     strategy:
       fail-fast: false
