@@ -1,20 +1,22 @@
 /**
  * Composition root for the evidence-check gate (#445). The only I/O lives here
- * — the `git diff` of CHANGELOG.md, the file read, the cached `gh api` run/job
- * queries, the bounded poll — then `decideEvidenceCheck` makes the call. Every
- * decision is a pure module under this directory.
+ * — the `git diff` listing added `changelog.d/` fragments (#730), their reads,
+ * the cached `gh api` run/job queries, the bounded poll — then
+ * `decideEvidenceCheck` makes the call. Every decision is a pure module under
+ * this directory.
  */
 import { readFile } from 'node:fs/promises';
 
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
+import { isFragment } from '../utils/is-fragment.js';
 import { isTransientGhError } from '../utils/is-transient-gh-error.js';
 import { retryTransient } from '../utils/retry-transient.js';
 import { sleep } from '../utils/sleep.js';
-import { addedUnreleasedBullets } from './added-bullets.js';
 import { citedRunNeedles } from './cited-needles.js';
 import { decideEvidenceCheck } from './decide.js';
-import type { WorkflowJob, WorkflowRun } from './evidence-check-types.js';
+import type { Fragment, WorkflowJob, WorkflowRun } from './evidence-check-types.js';
+import { fragmentBullets } from './fragment-bullets.js';
 import { passedEvidence } from './passed-evidence.js';
 import { pollUntilResolved } from './poll.js';
 
@@ -32,6 +34,8 @@ const GH_API_BACKOFF_MS = 2000;
 // hit 116), so the jobs listing pages until a batch comes back short.
 const GH_API_PAGE_SIZE = 100;
 
+const CHANGELOG_DIR = 'changelog.d';
+
 export async function runEvidenceCheck(): Promise<number> {
   const base = process.env.BASE_SHA;
   const head = process.env.HEAD_SHA;
@@ -41,10 +45,20 @@ export async function runEvidenceCheck(): Promise<number> {
   }
   const repository = process.env.GITHUB_REPOSITORY;
 
-  const { stdout: diff } = await execCapture('git', ['diff', '--unified=0', base, head, '--', 'CHANGELOG.md']);
-  const patch = diff.split(/\r?\n/);
-  const changelog = (await readFile('CHANGELOG.md', 'utf8')).split(/\r?\n/);
-  const bullets = addedUnreleasedBullets(changelog, patch);
+  const { stdout: added } = await execCapture('git', [
+    'diff',
+    '--name-only',
+    '--diff-filter=A',
+    base,
+    head,
+    '--',
+    `${CHANGELOG_DIR}/`,
+  ]);
+  const fragments: Fragment[] = [];
+  for (const path of added.split(/\r?\n/).filter((p) => isFragment(p, CHANGELOG_DIR))) {
+    fragments.push({ path, bullets: fragmentBullets(path, await readFile(path, 'utf8')) });
+  }
+  const bullets = fragments.flatMap((fragment) => fragment.bullets);
 
   // `gh` stderr was inherited to the terminal under execFileSync; execCapture
   // captures it, so surface it in the thrown message to keep diagnosability.
@@ -130,7 +144,7 @@ export async function runEvidenceCheck(): Promise<number> {
     runs = await runsForHead();
   }
   const result = decideEvidenceCheck({
-    bullets,
+    fragments,
     baseSha: base,
     headSha: head,
     passedEvidence: (citation) => passedEvidence(citation, runs, jobsForRun),

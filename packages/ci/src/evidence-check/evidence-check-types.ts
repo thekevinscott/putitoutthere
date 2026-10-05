@@ -1,14 +1,21 @@
 /**
  * Shared types for the evidence-check gate (#445), which enforces AGENTS.md's
- * "Verification policy": every newly-added `## Unreleased` CHANGELOG.md bullet
- * carries a `(verified by: <bucket>/<name>)` or `(no fixture: <reason>)`
+ * "Verification policy": every bullet in a newly-added `changelog.d/` fragment
+ * (#730) carries a `(verified by: <bucket>/<name>)` or `(no fixture: <reason>)`
  * clause, and each cited bucket has a passing run/job on the PR HEAD.
  */
 
-/** A newly-added bullet under `## Unreleased`, with its 1-based new-file line. */
+/** A bullet in an added fragment, with the fragment path and its 1-based line. */
 export interface Bullet {
+  path: string;
   line: number;
   text: string;
+}
+
+/** A `changelog.d/` fragment the PR added, and the bullets it carries. */
+export interface Fragment {
+  path: string;
+  bullets: readonly Bullet[];
 }
 
 /** The parsed trailing evidence clause of a bullet. */

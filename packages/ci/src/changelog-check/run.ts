@@ -35,9 +35,9 @@ export async function runChangelogCheck(): Promise<number> {
     (await execCapture('git', ['--glob-pathspecs', 'diff', '--name-only', base, head, '--', ...SURFACE_PATHSPECS]))
       .stdout,
   );
-  const changedFiles = lines((await execCapture('git', ['diff', '--name-only', base, head])).stdout);
+  const addedFiles = lines((await execCapture('git', ['diff', '--name-only', '--diff-filter=A', base, head])).stdout);
 
-  const result = decideChangelogCheck({ commitLog, surfaceFiles, changedFiles });
+  const result = decideChangelogCheck({ commitLog, surfaceFiles, addedFiles });
   for (const line of result.lines) {process.stdout.write(`${line}\n`);}
   return result.exitCode;
 }
