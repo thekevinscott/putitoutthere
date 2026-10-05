@@ -127,6 +127,7 @@ interface PublishReport {
 
 let registry: LocalRegistry;
 let repo: string;
+let remote: string;
 let npmrc: string;
 
 /**
@@ -200,6 +201,11 @@ beforeEach(async () => {
   git(['config', 'user.name', 'Test']);
   git(['config', 'commit.gpgsign', 'false']);
   git(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-platform-report-e2e-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  git(['remote', 'add', 'origin', remote]);
 
   writeRepoFile(
     'putitoutthere.toml',
@@ -245,6 +251,7 @@ first_version = "${VERSION}"
 
 afterEach(async () => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
   await registry.stop();
 });
 

@@ -108,6 +108,18 @@ export async function pushTag(name: string, opts: GitOptions = {}): Promise<void
 }
 
 /**
+ * Whether `origin` already carries this tag — `git ls-remote --tags origin
+ * refs/tags/<name>`. The only source of truth `ensureTag` (#407) can use for
+ * "already done": `tagList` is local-only, so a tag created but never
+ * successfully pushed reads as present there even though `origin` has
+ * nothing, which is exactly the state a failed push leaves behind (#717).
+ */
+export async function remoteTagExists(name: string, opts: GitOptions = {}): Promise<boolean> {
+  const out = await run(['ls-remote', '--tags', 'origin', `refs/tags/${name}`], opts);
+  return out.trim().length > 0;
+}
+
+/**
  * `git fetch --tags --force origin` — refresh every remote tag, forcing
  * updates for tags that moved on the remote. The `--force` is load-bearing
  * (#199): without it a tag the remote force-moved since checkout is

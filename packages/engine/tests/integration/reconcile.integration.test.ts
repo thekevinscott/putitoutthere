@@ -59,6 +59,7 @@ afterAll(() => server.close());
 /* ------------------------------- git repo ------------------------------- */
 
 let repo: string;
+let remote: string;
 const stdoutChunks: string[] = [];
 
 function gitInRepo(args: string[]): string {
@@ -108,6 +109,11 @@ beforeEach(() => {
   gitInRepo(['config', 'user.name', 'Test']);
   gitInRepo(['config', 'commit.gpgsign', 'false']);
   gitInRepo(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-reconcile-int-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  gitInRepo(['remote', 'add', 'origin', remote]);
 
   stdoutChunks.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
@@ -126,6 +132,7 @@ afterEach(() => {
   latest.npm.clear();
   latest.pypi.clear();
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
 });
 
 describe('piot reconcile: backfill missing tags (#410)', () => {
