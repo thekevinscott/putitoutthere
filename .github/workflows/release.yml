@@ -264,12 +264,25 @@ jobs:
           for path in $paths; do
             echo "::group::npm install + build at ${path}"
             pushd "${path}" > /dev/null
-            if [ -f package-lock.json ]; then
+            # #721: same ancestor_has helper as _matrix.yml's build step.
+            # Here a fall-through to bare `npm install` is worse: it walks
+            # a node_modules an earlier path already installed via pnpm,
+            # dies on a lifecycle script, and blocks every registry below.
+            ancestor_has() {
+              local file="$1" dir="$PWD" boundary="${GITHUB_WORKSPACE:-/}"
+              while true; do
+                [ -f "$dir/$file" ] && return 0
+                [ "$dir" = "$boundary" ] && return 1
+                [ "$dir" = "/" ] && return 1
+                dir=$(dirname "$dir")
+              done
+            }
+            if [ -f package-lock.json ] || ancestor_has package-lock.json; then
               npm ci || {
                 echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
                 npm install
               }
-            elif [ -f pnpm-lock.yaml ]; then
+            elif [ -f pnpm-lock.yaml ] || ancestor_has pnpm-lock.yaml || ancestor_has pnpm-workspace.yaml; then
               # pnpm for the *consumer's* checkout, not ours. Deliberately a
               # literal and not ./packages/ci/actions/setup-pnpm: that action installs
               # our build toolchain, this installs theirs, and a `uses:` step

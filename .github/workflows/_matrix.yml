@@ -495,12 +495,25 @@ jobs:
           # Cargo.toml from $VERSION before cargo bakes CARGO_PKG_VERSION in.
           VERSION: ${{ matrix.version }}
         run: |
-          if [ -f package-lock.json ]; then
+          # #721: a workspace member's lockfile lives at the workspace
+          # root, not beside its own package.json, so a local-only check
+          # falls through to a bare `npm install`. Walk ancestors up to
+          # $GITHUB_WORKSPACE (the checkout root) before giving up.
+          ancestor_has() {
+            local file="$1" dir="$PWD" boundary="${GITHUB_WORKSPACE:-/}"
+            while true; do
+              [ -f "$dir/$file" ] && return 0
+              [ "$dir" = "$boundary" ] && return 1
+              [ "$dir" = "/" ] && return 1
+              dir=$(dirname "$dir")
+            done
+          }
+          if [ -f package-lock.json ] || ancestor_has package-lock.json; then
             npm ci || {
               echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
               npm install
             }
-          elif [ -f pnpm-lock.yaml ]; then
+          elif [ -f pnpm-lock.yaml ] || ancestor_has pnpm-lock.yaml || ancestor_has pnpm-workspace.yaml; then
             # pnpm for the *consumer's* checkout, not ours. Deliberately a
             # literal and not ./packages/ci/actions/setup-pnpm: that action installs
             # our build toolchain, this installs theirs, and a `uses:` step

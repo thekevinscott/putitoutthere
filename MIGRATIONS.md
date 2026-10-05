@@ -21,6 +21,56 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### npm install step now walks up for a workspace-root lockfile (#721)
+
+**Summary.** Two reusable-workflow steps choose an installer for an
+npm-kind package by checking for `package-lock.json` or `pnpm-lock.yaml`
+in that package's own directory: `_matrix.yml`'s `build` job (before
+`npm run build --if-present`) and `release.yml`'s `publish` job (the
+`Build npm packages` step, run against an npm-kind row immediately before
+upload). A package that is a member of a pnpm (or npm) workspace keeps no
+lockfile of its own — only the workspace root does — so the local-only
+check fell through to the unconditional `else` branch: a bare
+`npm install`.
+
+In the publish job that bare `npm install` is especially destructive. If
+an earlier row in the same job had already installed a different npm
+package with pnpm, `npm install` walked the pnpm-populated, symlinked
+`node_modules` left behind and tried to run dependency lifecycle scripts
+it doesn't know how to satisfy, dying with `sh: 1: wireit: not found`
+(exit 127) before the step could emit the PyPI hand-off output the rest
+of the job depends on — blocking every registry in the release, not just
+npm. Observed on a real consumer (`thekevinscott/telelux`, release run
+37050020677, job `release / publish`).
+
+Both steps now check for a `package-lock.json`, `pnpm-lock.yaml`, or
+`pnpm-workspace.yaml` in the current directory **or any ancestor up to
+`$GITHUB_WORKSPACE`** (the checkout root) before falling back to a bare
+`npm install`. Finding the marker only changes which branch runs — pnpm
+itself already resolves the workspace root once invoked from a member
+directory, so the fix is choosing the right installer, not teaching it to
+find the workspace root a second time.
+
+**Required changes.** None. No workflow input, config key, or trailer
+changes. A standalone npm package — no ancestor lockfile at all — runs
+the exact same bare `npm install` it always did.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** One. A pnpm (or npm) workspace
+member that previously fell through to a bare `npm install` now runs
+`pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile` (or
+the npm-strict `npm ci || npm install` branch, if an ancestor
+`package-lock.json` is what's found) instead. A package with no ancestor
+workspace marker at all is unaffected.
+
+**Verification.**
+`packages/engine/test/workflows/npm-install-workspace-root-lockfile.test.ts`
+asserts both steps' `run:` bodies contain a `$GITHUB_WORKSPACE`-bounded
+ancestor walk, that the walk precedes the bare `npm install` fallback, and
+that the pnpm branch's condition is reachable via an ancestor
+`pnpm-lock.yaml` or `pnpm-workspace.yaml` — not just a local one.
+
 ### `pypi-tag` now takes an `expect` input (#694)
 
 **Summary.** `pypi-tag` cut the tag for whatever PyPI reported as a
