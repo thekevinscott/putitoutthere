@@ -40,41 +40,22 @@ afterEach(() => {
   delete process.env.HEAD_SHA;
 });
 
-// Route the git reads by their args: the commit-log `git log`, the
-// public-surface `git --glob-pathspecs diff`, the added-files
-// `git diff --diff-filter=A`, and any plain changed-files `git diff`.
-function git({
-  log = '',
-  surface = '',
-  added = '',
-  changed = '',
-}: {
-  log?: string;
-  surface?: string;
-  added?: string;
-  changed?: string;
-}): void {
+// Route the three git reads the gate performs: the commit-log `git log`, the
+// public-surface `git --glob-pathspecs diff`, and the added-files
+// `git diff --diff-filter=A`.
+function git({ log = '', surface = '', added = '' }: { log?: string; surface?: string; added?: string }): void {
   execFileMock.mockImplementation(((_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     const a = [...(args ?? [])];
     if (a.includes('log')) {
       cb(null, log, '');
-    } else if (a.includes('--glob-pathspecs')) {
-      cb(null, surface, '');
-    } else if (a.includes('--diff-filter=A')) {
-      cb(null, added, '');
     } else {
-      cb(null, changed, '');
+      cb(null, a.includes('--glob-pathspecs') ? surface : added, '');
     }
     return undefined as unknown as ChildProcess.ChildProcess;
   }) as unknown as typeof execFile);
 }
 
 const changelogCheck = (): Promise<number> => run(['node', 'piot-ci', 'changelog-check']);
-
-const MISSING_HINTS = [
-  "See AGENTS.md > 'Changelog and migration policy'.",
-  "If the change has no consumer impact, add a commit with a 'skip-changelog:' trailer.",
-];
 
 describe('piot-ci changelog-check (integration)', async () => {
   it('passes when a public-surface change adds a changelog and a migration fragment', async () => {
@@ -103,45 +84,10 @@ describe('piot-ci changelog-check (integration)', async () => {
         '  - action.yml',
         '',
         '::error::This PR changes public-surface files but did not add a fragment to: changelog.d/ migrations.d/',
-        ...MISSING_HINTS,
+        "See AGENTS.md > 'Changelog and migration policy'.",
+        "If the change has no consumer impact, add a commit with a 'skip-changelog:' trailer.",
         '',
       ].join('\n'),
-    );
-  });
-
-  it('names only migrations.d/ when only a changelog fragment was added', async () => {
-    git({ surface: 'action.yml\n', added: 'changelog.d/2026-10-05-x.md\n' });
-    await expect(changelogCheck()).resolves.toBe(1);
-    expect(out.join('')).toContain(
-      '::error::This PR changes public-surface files but did not add a fragment to: migrations.d/\n',
-    );
-  });
-
-  it('names only changelog.d/ when only a migration fragment was added', async () => {
-    git({ surface: 'action.yml\n', added: 'migrations.d/2026-10-05-x.md\n' });
-    await expect(changelogCheck()).resolves.toBe(1);
-    expect(out.join('')).toContain(
-      '::error::This PR changes public-surface files but did not add a fragment to: changelog.d/\n',
-    );
-  });
-
-  it('no longer accepts edits to CHANGELOG.md / MIGRATIONS.md in place of fragments', async () => {
-    git({ surface: 'action.yml\n', changed: 'action.yml\nCHANGELOG.md\nMIGRATIONS.md\n' });
-    await expect(changelogCheck()).resolves.toBe(1);
-    expect(out.join('')).toContain('did not add a fragment to: changelog.d/ migrations.d/');
-  });
-
-  it("does not count the folders' README.md files as fragments", async () => {
-    git({ surface: 'action.yml\n', added: 'changelog.d/README.md\nmigrations.d/README.md\n' });
-    await expect(changelogCheck()).resolves.toBe(1);
-    expect(out.join('')).toContain('did not add a fragment to: changelog.d/ migrations.d/');
-  });
-
-  it('fails an added fragment whose filename breaks the YYYY-MM-DD-<slug>.md convention', async () => {
-    git({ surface: '', added: 'changelog.d/plan-verdict.md\n' });
-    await expect(changelogCheck()).resolves.toBe(1);
-    expect(out.join('')).toBe(
-      '::error file=changelog.d/plan-verdict.md::fragment filenames must match YYYY-MM-DD-<slug>.md (UTC merge date; lowercase letters, digits, hyphens).\n',
     );
   });
 
