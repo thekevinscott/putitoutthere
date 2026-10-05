@@ -152,6 +152,12 @@ export const ErrorCodes = {
    *  same source-visibility expectation underpins the trusted-publisher
    *  story on the other registries. */
   REPO_PRIVATE: 'PIOT_REPO_PRIVATE',
+  /** `ensureTag` (#407) found a package live on the registry with no
+   *  matching tag on `origin`, tried to write and push one, and the push
+   *  failed. Thrown rather than downgraded to a warning (#717): a release
+   *  is not done until its tag is visible on the remote, so `publish` and
+   *  `reconcile` must not exit 0 having silently left one unpushed. */
+  TAG_PUSH_FAILED: 'PIOT_TAG_PUSH_FAILED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -181,4 +187,5 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.CRATES_PACKAGE_TOO_LARGE,
   ErrorCodes.REPO_URL_MISMATCH,
   ErrorCodes.REPO_PRIVATE,
+  ErrorCodes.TAG_PUSH_FAILED,
 ];

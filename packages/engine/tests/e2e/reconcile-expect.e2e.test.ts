@@ -20,6 +20,7 @@ const LIVE_VERSION = '0.0.1';
 const ABSENT_VERSION = '999.999.999';
 
 let repo: string;
+let remote: string;
 
 function git(args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -60,6 +61,11 @@ beforeEach(() => {
   git(['config', 'user.name', 'Test']);
   git(['config', 'commit.gpgsign', 'false']);
   git(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-reconcile-expect-e2e-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  git(['remote', 'add', 'origin', remote]);
 
   // reconcile reads only config + tags + the registry — no manifest, no
   // preflight — so a bare config naming the live project is enough.
@@ -83,6 +89,7 @@ globs = ["packages/py/**"]
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
 });
 
 describe('piot reconcile --expect against pypi.org (#666)', () => {

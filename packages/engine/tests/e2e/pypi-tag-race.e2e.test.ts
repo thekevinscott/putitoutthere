@@ -27,8 +27,9 @@
  * publishes again mid-run.
  *
  * No publish, no auth, no build: reconcile only reads the registry and
- * writes a git tag. The throwaway repo has no `origin`, so the tag push is
- * warned-not-fatal — the local tag is the observable contract.
+ * writes a git tag. The repo gets a real, local bare-repo `origin` (#717
+ * requires the push to actually succeed), so the tag landing on that
+ * origin is the observable contract.
  *
  * Red before #694: the action has no `expect` input, so it discovers from
  * the latest pointer and cuts a tag for whatever that names (or nothing);
@@ -58,6 +59,7 @@ const LIVE_VERSION = '0.0.1';
 const ABSENT_VERSION = '999.999.999';
 
 let repo: string;
+let remote: string;
 
 function git(args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trimEnd();
@@ -152,10 +154,16 @@ beforeEach(() => {
   git(['config', 'user.name', 'Test']);
   git(['config', 'commit.gpgsign', 'false']);
   git(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-pypi-tag-race-e2e-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  git(['remote', 'add', 'origin', remote]);
 });
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
 });
 
 describe('pypi-tag tags the upload it was told about (#694)', () => {
