@@ -25,6 +25,7 @@ function setup(files: string[], failing: string[] = []): string[] {
 }
 
 beforeEach(() => {
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
   out = '';
   vi.spyOn(process.stdout, 'write').mockImplementation((s) => ((out += String(s)), true));
 });
