@@ -62,6 +62,8 @@ describe('action', () => {
     delete process.env.INPUT_BIN;
     delete process.env.INPUT_TARGET;
     delete process.env.INPUT_EXPECT;
+    delete process.env.INPUT_BUILD;
+    delete process.env.INPUT_MATRIX;
   });
 
   it('fails when INPUT_COMMAND is missing', async () => {
@@ -198,6 +200,29 @@ describe('action', () => {
       '--cwd',
       '/repo',
     ]);
+  });
+
+  it('npm-build: forwards the row as --path / --target / --build / --version (#721)', async () => {
+    process.env.INPUT_COMMAND = 'npm-build';
+    process.env.INPUT_WORKING_DIRECTORY = 'packages/ts';
+    process.env.INPUT_TARGET = 'linux-x64-gnu';
+    process.env.INPUT_BUILD = 'napi';
+    process.env.INPUT_VERSION = '1.2.3';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith([
+      'node', 'putitoutthere', 'npm-build',
+      '--path', 'packages/ts',
+      '--target', 'linux-x64-gnu',
+      '--build', 'napi',
+      '--version', '1.2.3',
+    ]);
+  });
+
+  it('npm-build: forwards matrix as --matrix and omits unset inputs (#721)', async () => {
+    process.env.INPUT_COMMAND = 'npm-build';
+    process.env.INPUT_MATRIX = '[{"kind":"npm"}]';
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenCalledWith(['node', 'putitoutthere', 'npm-build', '--matrix', '[{"kind":"npm"}]']);
   });
 
   it('verify-bundle-cli: splits the command and forwards the four flags (#595)', async () => {

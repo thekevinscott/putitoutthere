@@ -102,7 +102,7 @@ describe('npm-build e2e', () => {
     expect(built('packages/a')).toEqual({ TARGET: 'linux-x64-gnu', BUILD: 'napi', VERSION: '1.2.3' });
   }, TIMEOUT);
 
-  it('a member with only an ancestor pnpm-workspace.yaml installs with pnpm, healing the missing lockfile', () => {
+  it('a member with only an ancestor pnpm-workspace.yaml installs with pnpm', () => {
     pkg('.', {});
     write('pnpm-workspace.yaml', "packages:\n  - 'packages/*'\n");
     pkg('packages/a');
@@ -110,9 +110,24 @@ describe('npm-build e2e', () => {
     const r = npmBuild(root, ['--path', 'packages/a', ...ROW]);
 
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/::warning::pnpm-lock\.yaml drift/);
     expect(existsSync(join(root, 'pnpm-lock.yaml'))).toBe(true);
+    expect(existsSync(join(root, 'node_modules/.modules.yaml'))).toBe(true);
     expect(existsSync(join(root, 'packages/a/package-lock.json'))).toBe(false);
+  }, TIMEOUT);
+
+  it('pnpm refusing a drifted lockfile falls back to --no-frozen-lockfile', () => {
+    pkg('.', {});
+    write('pnpm-workspace.yaml', "packages:\n  - 'packages/*'\n");
+    pkg('packages/a');
+    pkg('packages/b');
+    sh('pnpm', ['install'], root);
+    pkg('packages/a', { dependencies: { 'packages-b': 'workspace:*' } });
+
+    const r = npmBuild(root, ['--path', 'packages/a', ...ROW]);
+
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/::warning::pnpm-lock\.yaml drift.*--no-frozen-lockfile/);
+    expect(existsSync(join(root, 'packages/a/node_modules/packages-b'))).toBe(true);
   }, TIMEOUT);
 
   it('a local package-lock.json installs with npm ci', () => {

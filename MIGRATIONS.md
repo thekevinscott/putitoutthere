@@ -43,10 +43,12 @@ of the job depends on — blocking every registry in the release, not just
 npm. Observed on a real consumer (`thekevinscott/telelux`, release run
 37050020677, job `release / publish`).
 
-Both steps now check for a `package-lock.json`, `pnpm-lock.yaml`, or
-`pnpm-workspace.yaml` in the current directory **or any ancestor up to
-`$GITHUB_WORKSPACE`** (the checkout root) before falling back to a bare
-`npm install`. Finding the marker only changes which branch runs — pnpm
+Both steps now run a new engine subcommand, `putitoutthere npm-build`,
+in place of their inline bash. It checks for a `package-lock.json`,
+`pnpm-lock.yaml`, or `pnpm-workspace.yaml` in the package directory **or
+any ancestor up to the checkout root** (`$GITHUB_WORKSPACE`) before
+falling back to a bare `npm install`. The nearest directory with any of
+the three wins; within one directory `package-lock.json` is checked first. Finding the marker only changes which branch runs — pnpm
 itself already resolves the workspace root once invoked from a member
 directory, so the fix is choosing the right installer, not teaching it to
 find the workspace root a second time.
@@ -64,12 +66,14 @@ the npm-strict `npm ci || npm install` branch, if an ancestor
 `package-lock.json` is what's found) instead. A package with no ancestor
 workspace marker at all is unaffected.
 
-**Verification.**
-`packages/engine/test/workflows/npm-install-workspace-root-lockfile.test.ts`
-asserts both steps' `run:` bodies contain a `$GITHUB_WORKSPACE`-bounded
-ancestor walk, that the walk precedes the bare `npm install` fallback, and
-that the pnpm branch's condition is reachable via an ancestor
-`pnpm-lock.yaml` or `pnpm-workspace.yaml` — not just a local one.
+**Verification.** In a release run, the npm step's log names the
+installer it picked (`npm-build: <dir>: installer pnpm`) for a workspace
+member, and the publish job no longer dies with `wireit: not found`.
+`packages/engine/tests/integration/npm-build.integration.test.ts` covers
+installer selection, the boundary, the self-heal, the build env, and the
+`--matrix` rebuild through the SDK; `packages/engine/tests/e2e/npm-build.e2e.test.ts`
+runs the same cases against real npm and pnpm@11, including a real
+`ERR_PNPM_OUTDATED_LOCKFILE` falling back to `--no-frozen-lockfile`.
 
 ### A failed tag push during `publish`/`reconcile` now fails the job (#717)
 

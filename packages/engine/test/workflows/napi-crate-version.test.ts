@@ -31,13 +31,12 @@ function loadSteps(file: string, jobKey: string): Step[] {
   return job.steps ?? [];
 }
 
-/** The consolidated `if: matrix.kind == 'npm'` step that runs `npm run build`. */
+/** The `if: matrix.kind == 'npm'` step that runs `npm run build`, inline or via `npm-build`. */
 function isNpmRunBuild(s: Step): boolean {
   return (
     typeof s.if === 'string' &&
     /matrix\.kind\s*==\s*['"]npm['"]/.test(s.if) &&
-    typeof s.run === 'string' &&
-    /npm\s+run\s+build/.test(s.run)
+    (s.with?.command === 'npm-build' || (typeof s.run === 'string' && /npm\s+run\s+build/.test(s.run)))
   );
 }
 

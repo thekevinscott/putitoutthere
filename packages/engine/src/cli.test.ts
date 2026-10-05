@@ -6,6 +6,7 @@
  */
 
 import { appendFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,6 +15,8 @@ import { advanceV0 } from './advance-v0.js';
 import { parseFlags, run } from './cli.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
+import { npmBuildMatrix } from './npm-build/npm-build-matrix.js';
+import { npmBuildPackage } from './npm-build/npm-build-package.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
@@ -39,6 +42,8 @@ vi.mock('./advance-floating-major.js');
 vi.mock('./advance-v0.js');
 vi.mock('./check.js');
 vi.mock('./fold-action-bundle.js');
+vi.mock('./npm-build/npm-build-matrix.js');
+vi.mock('./npm-build/npm-build-package.js');
 vi.mock('./plan-status.js');
 vi.mock('./publish.js');
 vi.mock('./publish-progress.js');
@@ -57,6 +62,8 @@ vi.mock('./write-version.js');
 
 const runChecksMock = vi.mocked(runChecks);
 const computePlanStatusMock = vi.mocked(computePlanStatus);
+const npmBuildMatrixMock = vi.mocked(npmBuildMatrix);
+const npmBuildPackageMock = vi.mocked(npmBuildPackage);
 const publishMock = vi.mocked(publish);
 const computeStatusMock = vi.mocked(computeStatus);
 const reconcileMock = vi.mocked(reconcile);
@@ -243,6 +250,11 @@ describe('cli: top-level dispatch', () => {
 });
 
 describe('parseFlags', () => {
+  it('reads --build (#721)', () => {
+    expect(parseFlags(['--build', 'napi']).build).toBe('napi');
+    expect(parseFlags([]).build).toBeUndefined();
+  });
+
   it('resolves a relative --cwd to an absolute path (#244)', () => {
     // Downstream handlers run subprocesses with `cwd: ctx.cwd` and pass
     // file paths derived from `join(cwd, 'artifacts', ...)`. If the parsed
@@ -614,6 +626,55 @@ describe('cli: write-launcher dispatch', () => {
     expect(code).toBe(1);
     expect(stderr.join('')).toMatch(/--path/);
     expect(writeLauncherMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('cli: npm-build dispatch', () => {
+  it('builds one package from --path, bounded by --cwd, with the row env (#721)', async () => {
+    const code = await run(argv(
+      'npm-build', '--cwd', '/tree', '--path', 'packages/a',
+      '--target', 'linux-x64-gnu', '--build', 'napi', '--version', '1.2.3',
+    ));
+    expect(code).toBe(0);
+    expect(npmBuildPackageMock).toHaveBeenCalledWith({
+      dir: resolve('/tree', 'packages/a'),
+      boundary: resolve('/tree'),
+      target: 'linux-x64-gnu',
+      build: 'napi',
+      version: '1.2.3',
+    });
+    expect(npmBuildMatrixMock).not.toHaveBeenCalled();
+  });
+
+  it('defaults BUILD to empty when --build is absent (#721)', async () => {
+    const code = await run(argv('npm-build', '--cwd', '/tree', '--path', 'p', '--target', 'main', '--version', '1.0.0'));
+    expect(code).toBe(0);
+    expect(npmBuildPackageMock).toHaveBeenCalledWith(expect.objectContaining({ build: '' }));
+  });
+
+  it('hands --matrix to the matrix rebuild instead (#721)', async () => {
+    const code = await run(argv('npm-build', '--cwd', '/tree', '--matrix', '[]', '--path', 'ignored'));
+    expect(code).toBe(0);
+    expect(npmBuildMatrixMock).toHaveBeenCalledWith('[]', resolve('/tree'));
+    expect(npmBuildPackageMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [['--target', 'main', '--version', '1.0.0'], /--path/],
+    [['--path', 'p', '--version', '1.0.0'], /--target/],
+    [['--path', 'p', '--target', 'main'], /--version/],
+  ])('errors naming the missing flag (%j)', async (flags, message) => {
+    const code = await run(argv('npm-build', '--cwd', '/tree', ...flags));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(message);
+    expect(npmBuildPackageMock).not.toHaveBeenCalled();
+  });
+
+  it('fails when the build fails (#721)', async () => {
+    npmBuildPackageMock.mockRejectedValue(new Error('Command failed: npm run build --if-present'));
+    const code = await run(argv('npm-build', '--cwd', '/tree', '--path', 'p', '--target', 'main', '--version', '1.0.0'));
+    expect(code).toBe(1);
+    expect(stderr.join('')).toMatch(/npm run build/);
   });
 });
 

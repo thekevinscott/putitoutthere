@@ -471,62 +471,14 @@ jobs:
           version: ${{ matrix.version }}
 
       - if: matrix.kind == 'npm'
-        working-directory: ${{ matrix.path }}
-        # Force bash: Windows runners default to pwsh, and `if [ -f ... ]`
-        # is bash. Strict installs (`npm ci`, `--frozen-lockfile`) self-heal
-        # to their non-strict form: first-publish platform optionalDeps 404,
-        # pnpm drops them from the lockfile, and strict then refuses.
-        shell: bash
-        env:
-          # #287: bundled-cli / napi consumers' build scripts read TARGET
-          # to know which triple to cross-compile and stage under
-          # `build/<triple>/<bin>`. Multi-mode (napi + bundled-cli)
-          # consumers also read BUILD so a single script can dispatch
-          # on the mode. Vanilla / `target == 'main'` rows ignore both.
-          # Mirrors what `e2e-fixture-job.yml` passes to the same step
-          # for the `js-bundled-cli` / `js-napi` fixtures; without this
-          # block, the reusable workflow's contract diverged from the
-          # fixture and consumers' first publish produced empty
-          # `build/<triple>/` artifacts.
-          TARGET: ${{ matrix.target }}
-          BUILD: ${{ matrix.build }}
-          # #627: the planned version. No engine-side writer runs on the
-          # roll-your-own path, so a Rust build script must stamp its
-          # Cargo.toml from $VERSION before cargo bakes CARGO_PKG_VERSION in.
-          VERSION: ${{ matrix.version }}
-        run: |
-          # #721: a workspace member's lockfile lives at the workspace
-          # root, not beside its own package.json, so a local-only check
-          # falls through to a bare `npm install`. Walk ancestors up to
-          # $GITHUB_WORKSPACE (the checkout root) before giving up.
-          ancestor_has() {
-            local file="$1" dir="$PWD" boundary="${GITHUB_WORKSPACE:-/}"
-            while true; do
-              [ -f "$dir/$file" ] && return 0
-              [ "$dir" = "$boundary" ] && return 1
-              [ "$dir" = "/" ] && return 1
-              dir=$(dirname "$dir")
-            done
-          }
-          if [ -f package-lock.json ] || ancestor_has package-lock.json; then
-            npm ci || {
-              echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
-              npm install
-            }
-          elif [ -f pnpm-lock.yaml ] || ancestor_has pnpm-lock.yaml || ancestor_has pnpm-workspace.yaml; then
-            # pnpm for the *consumer's* checkout, not ours. Deliberately a
-            # literal and not ./packages/ci/actions/setup-pnpm: that action installs
-            # our build toolchain, this installs theirs, and a `uses:` step
-            # cannot appear inside a run: script anyway.
-            npm install -g pnpm@11
-            pnpm install --frozen-lockfile || {
-              echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-              pnpm install --no-frozen-lockfile
-            }
-          else
-            npm install
-          fi
-          npm run build --if-present
+        name: npm-build — install and build ${{ matrix.name }}
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: npm-build
+          working_directory: ${{ matrix.path }}
+          target: ${{ matrix.target }}
+          build: ${{ matrix.build }}
+          version: ${{ matrix.version }}
 
       # #384: stage the engine-built binary AFTER npm run build so it
       # always wins over anything a consumer build script stages to
