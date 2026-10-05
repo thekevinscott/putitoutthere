@@ -257,6 +257,32 @@ GitHub Release creation, tag moves). Dogfood workflows invoke it through
 its declared bin (`pnpm exec putitoutthere <cmd>`), not a `dist/` path,
 for the same reason.
 
+### No logic in any workflow YAML
+
+The rule above is not limited to repo-internal gates. It covers **every**
+workflow and composite action in the repo, including the reusable
+workflows consumers call (`release.yml`, `_matrix.yml`, and the rest of
+the release path). Those are the highest-stakes `run:` blocks we have,
+and inline bash there is the hardest to test: it only executes inside a
+consumer's release.
+
+A `run:` step may hold a few straight-line commands or a lone early-exit
+guard. Extract it the moment it grows iteration (`for` / `while` /
+`until`), a shell function, multi-branch dispatch (`case`, `if`/`elif`
+chains), or text-munging (`awk` / `sed` / chained `grep`). The trigger is
+logic, not line count.
+
+Where it goes:
+
+- Logic a consumer's release runs: a `putitoutthere` subcommand in
+  `packages/engine`, tested at the integration and e2e tiers like any
+  other engine code.
+- Logic only this repo's CI runs: a `piot-ci` gate in `packages/ci`.
+
+Never copy the same block into two workflows; that is two untested copies
+that will drift. A `test/workflows/` regex over a `run:` body is not a
+substitute for extraction — it pins the text, not the behaviour.
+
 ### Start every PR with an e2e test against the real CLI
 
 Behaviour work starts at the **e2e tier**: a test that **shells out to
