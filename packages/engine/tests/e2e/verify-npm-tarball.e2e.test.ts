@@ -24,6 +24,13 @@ const NESTED_BASE = '@esbuild/linux';
 const NESTED_TRIPLE = 'x64';
 const NESTED_VERSION = '0.25.0';
 
+// #716: the path segment a scoped name occupies on the registry — `@` stays
+// literal, `/` stays percent-encoded.
+const PKG_PATH = encodeURIComponent(PKG).replaceAll('%40', '@');
+// The fixture's real versions are epoch-derived (`0.0.<unix-seconds>`), so a
+// prerelease spelling can never collide with one and stays absent forever.
+const ABSENT_VERSION = '0.0.0-never-published';
+
 let repo: string;
 
 function runCli(args: string[]): { code: number; stdout: string; stderr: string } {
@@ -99,5 +106,34 @@ describe('piot verify npm-tarball against the live npm registry (#443)', () => {
 
     expect(stdout, `output:\n${stdout}\n${stderr}`).toContain('bin/esbuild');
     expect(code).toBe(0);
+  });
+
+  it('answers an absent version from the immutable per-version document, with no propagation wait (#716)', () => {
+    // Against live npm this is the whole of #716. Resolving off the MUTABLE
+    // packument cannot tell "never published" from "published but not
+    // propagated", so the old path burned a 5m20s budget and then guessed in
+    // prose; three successful publishes in two days landed 46s / 103s / 110s
+    // on the wrong side of it. `GET /<name>/<version>` is written at publish
+    // time, so its 404 is a verdict available on the first read.
+    const matrix = JSON.stringify([
+      { name: PKG, kind: 'npm', version: ABSENT_VERSION, target: 'main', path: 'packages/npm' },
+    ]);
+
+    const started = Date.now();
+    const { code, stdout, stderr } = runCli([
+      'verify', 'npm-tarball', '--matrix', matrix, '--cwd', repo,
+    ]);
+    const elapsedMs = Date.now() - started;
+
+    const text = `${stdout}${stderr}`;
+    expect(text, `output:\n${text}`).toContain(
+      `https://registry.npmjs.org/${PKG_PATH}/${ABSENT_VERSION}`,
+    );
+    expect(text).toContain('404');
+    expect(code).toBe(1);
+    // The duration is the assertion the issue asked for, inverted: there is
+    // no propagation budget left to outlast, so a wrong endpoint choice (or a
+    // reintroduced "retry until it appears" ladder) shows up here as minutes.
+    expect(elapsedMs, `elapsed ${elapsedMs}ms`).toBeLessThan(30_000);
   });
 });
