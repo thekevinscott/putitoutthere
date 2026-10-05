@@ -145,6 +145,18 @@ on:
           set from pushed tags. See README → "Post-release bookkeeping"
           (#461). Empty string when the publish job is skipped.
         value: ${{ jobs.publish.outputs.released_packages }}
+      delegated_packages:
+        description: >-
+          JSON array of the PyPI packages this run handed to the caller-
+          side `pypi-publish` job — `[{"name","version","tag"}, …]`.
+          Pass it straight into `pypi-tag.yml`'s `expect` input so the
+          tag names the version that was uploaded (#694). The sibling
+          `pypi_pending` is the boolean gate for the same set; this is
+          the set itself. Narrower than `released_packages`, which lists
+          what this run published ITSELF and therefore never contains a
+          delegated PyPI row. Empty string when the publish job is
+          skipped, which `expect` reads as "fall back to discovery".
+        value: ${{ jobs.publish.outputs.delegated_packages }}
 
 concurrency:
   group: putitoutthere-release-${{ github.repository }}
@@ -179,6 +191,13 @@ jobs:
       # fails, which is what lets the caller's job gate on "PyPI's own
       # path succeeded" rather than on this job's exit code.
       delegated: ${{ steps.publish.outputs.delegated }}
+      # #694: the same delegation, as the list rather than the boolean.
+      # `pypi-tag.yml` needs the versions, not just "there were some":
+      # PyPI's latest-version pointer 404s for minutes after a first
+      # publish, so discovery could not see what had just shipped and
+      # skipped the tag. The engine has always written this key; it just
+      # had no route out of the workflow.
+      delegated_packages: ${{ steps.publish.outputs.delegated_packages }}
     env:
       # Promote the optional caller-provided crates.io token to a job-
       # level env var so step `if:` conditions can gate on it. The

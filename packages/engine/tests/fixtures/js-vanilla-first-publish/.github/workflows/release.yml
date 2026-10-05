@@ -39,9 +39,15 @@ jobs:
 
   # Cuts the git tag for what the job above just uploaded. The release
   # job deliberately does not tag a PyPI package: a tag records what
-  # shipped, and until this upload lands, nothing has. Paste verbatim.
+  # shipped, and until this upload lands, nothing has. `expect` tells it
+  # which versions those were; without it the tag is read off PyPI's
+  # eventually-consistent "latest version" lookup, which does not yet
+  # know about a first publish. Paste verbatim.
   pypi-tag:
-    needs: pypi-publish
+    needs: [release, pypi-publish]
+    if: ${{ !cancelled() && needs.pypi-publish.result == 'success' }}
     uses: thekevinscott/putitoutthere/.github/workflows/pypi-tag.yml@v0
     permissions:
       contents: write
+    with:
+      expect: ${{ needs.release.outputs.delegated_packages }}

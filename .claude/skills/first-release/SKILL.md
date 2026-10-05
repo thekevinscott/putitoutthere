@@ -267,16 +267,31 @@ First-release failures are almost always real, not flakes. Work them per
 - **The PyPI partial-tag trap is closed (#623), as long as the template is
   current.** A pypi package's upload runs in your caller-side `pypi-publish`
   job, so the engine no longer tags it in the publish job — the `pypi-tag` job
-  cuts the tag after the upload, from the version PyPI reports as live. A
-  failed upload therefore leaves the package *untagged*, which the next run
-  re-plans and re-attempts. If you are looking at a repo whose `release.yml`
-  predates this (its `pypi-publish` gates on `has_pypi` and there is no
-  `pypi-tag` job), the old trap still applies: the **tag exists but PyPI is
+  cuts the tag after the upload, confirming each version against PyPI before
+  writing it. A failed upload therefore leaves the package *untagged*, which
+  the next run re-plans and re-attempts. If you are looking at a repo whose
+  `release.yml` predates this (its `pypi-publish` gates on `has_pypi` and there
+  is no `pypi-tag` job), the old trap still applies: the **tag exists but PyPI is
   empty** — `status` shows `tagged, unpublished` — and the next run excludes
   the now-tagged package from the plan → stuck. `reconcile` does **not** fix
   that (the tag is already there; the *publish* is what's missing). Recover
   with the **`release_packages` override at a bumped version** (`my-py@0.0.2`),
   and re-paste the current template so it can't recur.
+- **A first PyPI publish needs the `expect` wiring (#694).** `pypi-tag` used
+  to work out what to tag by asking PyPI for the package's *latest version* —
+  a CDN-cached, eventually-consistent pointer that **404s** until a brand-new
+  project propagates, which is indistinguishable from "this project does not
+  exist". Running seconds after the upload, it concluded the package was
+  unpublished and exited green having tagged nothing; the next run then
+  re-planned the same version. The current template passes
+  `expect: ${{ needs.release.outputs.delegated_packages }}` (and adds `release`
+  to the job's `needs` plus an explicit
+  `if: ${{ !cancelled() && needs.pypi-publish.result == 'success' }}`), which
+  makes it confirm the versions the release run actually delegated against
+  PyPI's immutable per-version endpoint. **Check for that `with: expect:` line
+  before a first PyPI release** — without it the first tag is silently lost.
+  Recovery if it already happened: `npx putitoutthere reconcile` once the
+  version is visible on PyPI, which backfills the tag.
 - **Scoped-env limits:** git access may be branch-scoped (`403` on tag pushes
   or other branches). `reconcile` belongs in CI with the release job's
   permissions; from a scoped agent, route tag backfills to the user or sidestep

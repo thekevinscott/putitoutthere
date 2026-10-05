@@ -254,6 +254,37 @@ describe('reconcile', () => {
     expect(ensureTag).not.toHaveBeenCalled();
   });
 
+  it('reports the registry it could not read, and stays quiet about the unpublished (#694)', async () => {
+    // The silent-success hole. "I could not reach the registry" and
+    // "every live version already has its tag" are different facts and
+    // must not share one output: a consumer whose PyPI tag went missing
+    // read `ok: true, actions: []` and had nothing to go on.
+    //
+    // The distinction matters in the other direction too. A package that
+    // was simply never published is skipped for a completely ordinary
+    // reason — it is the steady state of everything a repo has not
+    // shipped yet — so it must NOT be reported, or the signal is noise.
+    configWith(pkg('core-rust'), pkg('other-rust'));
+    vi.mocked(computeStatus).mockResolvedValue([
+      statusRow({
+        package: 'core-rust',
+        registry: null,
+        registryUnreachable: true,
+        state: 'registry unreachable',
+      }),
+      statusRow({ package: 'other-rust', registry: null, state: 'unreleased' }),
+    ]);
+
+    const result = await reconcile({ cwd: '/repo' });
+
+    expect(result).toEqual({
+      ok: true,
+      dryRun: false,
+      actions: [],
+      skipped: [{ package: 'core-rust', kind: 'crates', reason: 'registry-unreachable' }],
+    });
+  });
+
   it('--dry-run reports the heal without writing a tag', async () => {
     configWith(pkg('core-rust'));
     vi.mocked(computeStatus).mockResolvedValue([
@@ -310,10 +341,15 @@ describe('reconcile --expect (#666)', () => {
       false,
       expect.anything(),
     );
+    // `skipped: []` on this path too, and not by accident: the
+    // expectation names exact versions and confirms them against the
+    // immutable per-version endpoint, so there is no "could not tell"
+    // outcome to report. Unconfirmed throws (#666) rather than skipping.
     expect(result).toEqual({
       ok: true,
       dryRun: false,
       actions: [expect.objectContaining({ tag: 'core-rust-v9.9.9', created: true })],
+      skipped: [],
     });
   });
 
@@ -331,7 +367,7 @@ describe('reconcile --expect (#666)', () => {
       true,
       expect.anything(),
     );
-    expect(result).toEqual({ ok: true, dryRun: true, actions: [] });
+    expect(result).toEqual({ ok: true, dryRun: true, actions: [], skipped: [] });
   });
 
   it('keys the package map by name so the expectation can look a package up', async () => {
