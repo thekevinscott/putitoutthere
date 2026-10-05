@@ -16,6 +16,10 @@ describe('isFragment', () => {
     expect(isFragment('migrations.d/2026-10-05-x.md', 'changelog.d')).toBe(false);
   });
 
+  it('rejects a same-length folder whose remainder is a valid fragment name', () => {
+    expect(isFragment('changelog-d/2026-10-05-x.md', 'changelog.d')).toBe(false);
+  });
+
   it('rejects a folder name that only shares a prefix', () => {
     expect(isFragment('changelog.d.old/2026-10-05-x.md', 'changelog.d')).toBe(false);
   });

@@ -34,8 +34,6 @@ const GH_API_BACKOFF_MS = 2000;
 // hit 116), so the jobs listing pages until a batch comes back short.
 const GH_API_PAGE_SIZE = 100;
 
-const CHANGELOG_DIR = 'changelog.d';
-
 export async function runEvidenceCheck(): Promise<number> {
   const base = process.env.BASE_SHA;
   const head = process.env.HEAD_SHA;
@@ -45,6 +43,7 @@ export async function runEvidenceCheck(): Promise<number> {
   }
   const repository = process.env.GITHUB_REPOSITORY;
 
+  const changelogDir = 'changelog.d';
   const { stdout: added } = await execCapture('git', [
     'diff',
     '--name-only',
@@ -52,10 +51,10 @@ export async function runEvidenceCheck(): Promise<number> {
     base,
     head,
     '--',
-    `${CHANGELOG_DIR}/`,
+    `${changelogDir}/`,
   ]);
   const fragments: Fragment[] = [];
-  for (const path of added.split(/\r?\n/).filter((p) => isFragment(p, CHANGELOG_DIR))) {
+  for (const path of added.split(/\r?\n/).filter((p) => isFragment(p, changelogDir))) {
     fragments.push({ path, bullets: fragmentBullets(path, await readFile(path, 'utf8')) });
   }
   const bullets = fragments.flatMap((fragment) => fragment.bullets);
