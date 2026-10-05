@@ -37,10 +37,15 @@ describe('parseDistribution', () => {
     ['an sdist with a stray extra field', 'pkg-1.0-extra.tar.gz'],
     ['an sdist with no version', 'pkg.tar.gz'],
     ['a wheel with too few fields', 'pkg-1.0-none-any.whl'],
+    ['a wheel with only a version field', 'pkg-1.0.whl'],
     ['a wheel with too many fields', 'pkg-1.0-7-py3-none-any-extra.whl'],
     ['an empty project name', '-1.0.tar.gz'],
     ['an empty version', 'pkg-.tar.gz'],
+    ['an empty version in a wheel', 'pkg--py3-none-any.whl'],
     ['a file that is neither', 'pkg-1.0.zip'],
+    // Wheel-shaped field count, no wheel extension. The extension check is
+    // what rejects it; the field count alone would wave it through.
+    ['a wheel-shaped name with no extension', 'pkg-1.0-py3-none-any'],
   ])('returns null for %s', (_label, filename) => {
     expect(parseDistribution(filename)).toBeNull();
   });

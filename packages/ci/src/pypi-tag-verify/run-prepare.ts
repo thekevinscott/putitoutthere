@@ -16,19 +16,21 @@ import { execInherit } from '../utils/exec-inherit.js';
 import { fixtureConfigToml } from './fixture-config-toml.js';
 import { decideUploadedExpectations } from './uploaded-expectations.js';
 
-// Mirrors fixture-materialize's throwaway repo: `ensureTag` tags a commit, so
-// the tree needs a HEAD, and signing is off because the runner holds no key.
-const GIT_STEPS: readonly (readonly string[])[] = [
-  ['init', '-q', '-b', 'main'],
-  ['config', 'user.email', 'e2e@putitoutthere.dev'],
-  ['config', 'user.name', 'piot e2e'],
-  ['config', 'commit.gpgsign', 'false'],
-  ['config', 'tag.gpgsign', 'false'],
-  ['add', '.'],
-  ['commit', '-q', '-m', 'e2e: pypi-tag fixture'],
-];
-
 export async function runPypiTagPrepare(): Promise<number> {
+  // Mirrors fixture-materialize's throwaway repo: `ensureTag` tags a commit,
+  // so the tree needs a HEAD, and signing is off because the runner holds no
+  // key. Function-scope rather than module-scope on purpose: Stryker
+  // evaluates a module-scope initialiser once, before the test activates its
+  // mutant, so every mutant in this table would survive unkillably there.
+  const gitSteps: readonly (readonly string[])[] = [
+    ['init', '-q', '-b', 'main'],
+    ['config', 'user.email', 'e2e@putitoutthere.dev'],
+    ['config', 'user.name', 'piot e2e'],
+    ['config', 'commit.gpgsign', 'false'],
+    ['config', 'tag.gpgsign', 'false'],
+    ['add', '.'],
+    ['commit', '-q', '-m', 'e2e: pypi-tag fixture'],
+  ];
   const tree = process.env.TAG_TREE;
   if (tree === undefined || tree === '') {
     process.stdout.write('::error::pypi-tag-verify: TAG_TREE must be set.\n');
@@ -52,7 +54,7 @@ export async function runPypiTagPrepare(): Promise<number> {
   await rm(tree, { recursive: true, force: true });
   await mkdir(tree, { recursive: true });
   await writeFile(`${tree}/putitoutthere.toml`, fixtureConfigToml(decided.expectations));
-  for (const args of GIT_STEPS) {
+  for (const args of gitSteps) {
     await execInherit('git', [...args], { cwd: tree });
   }
 
