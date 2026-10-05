@@ -198,13 +198,16 @@ jobs:
     # fails on permissions rather than landing a fixture tag on main.
     permissions:
       contents: read
-    env:
-      # Outside the checkout deliberately. A tree that somehow lacked `.git`
-      # would let git walk UP to the repo and tag that; RUNNER_TEMP has no
-      # repository above it.
-      TAG_TREE: ${{ runner.temp }}/piot-pypi-tag
     steps:
       - uses: actions/checkout@v7
+      # Outside the checkout deliberately. A tree that somehow lacked `.git`
+      # would let git walk UP to the repo and tag that; RUNNER_TEMP has no
+      # repository above it. Exported here rather than in a job-level `env:`
+      # because the `runner` context is not available at job level — see the
+      # `${RUNNER_TEMP}` precedent in e2e-fixture-job.yml. Via GITHUB_ENV so
+      # both the `run:` steps and the action's `with:` can read it.
+      - name: Site the throwaway tag tree outside the checkout
+        run: echo "TAG_TREE=${RUNNER_TEMP}/piot-pypi-tag" >> "$GITHUB_ENV"
       - uses: ./packages/ci/actions/setup-node
       - uses: ./packages/ci/actions/setup-pnpm
       - name: Install dependencies
