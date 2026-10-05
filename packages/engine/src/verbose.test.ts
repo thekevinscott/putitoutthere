@@ -1,23 +1,7 @@
 /**
- * Verbose-on-failure dump tests.
- *
- * Plan: §22.4.
- * Issue #15.
- *
- * Unit-isolated: `verbose.ts`'s two collaborators are mocked so this
- * suite exercises only `dumpFailure`'s own branching.
- *  - `node:fs/promises` is automocked; the markdown written to
- *    `$GITHUB_STEP_SUMMARY` is asserted through the captured
- *    `appendFile` call rather than a real temp file.
- *  - `./log.js` is automocked; the pure `redact` helper is restored with
- *    a tiny faithful reimplementation (env-key secret match + length
- *    floor + longest-first replacement with an 8-hex marker) so the
- *    redaction contract is still exercised, and the structured record is
- *    asserted through a fake logger's `error` mock instead of parsing
- *    JSON off a real stream.
- *
- * The GHA-annotation cases capture `process.stdout.write` directly, as
- * the implementation writes there and it is not a module boundary.
+ * Verbose-on-failure dump tests (#15). `./log.js` is automocked but the pure
+ * `redact` helper is restored with a tiny faithful reimplementation, so the
+ * redaction contract is still exercised against the fake logger.
  */
 
 import { appendFile } from 'node:fs/promises';

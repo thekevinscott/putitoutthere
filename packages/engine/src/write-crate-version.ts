@@ -1,21 +1,8 @@
 /**
- * Pre-build version bump for the npm `bundled-cli` path. #366.
- *
- * `cargo build` bakes `CARGO_PKG_VERSION` into the compiled binary at
- * build time, sourced from `[package].version` in the crate's
- * `Cargo.toml`. There is no env override. The npm `bundled-cli` path in
- * `_matrix.yml` cross-compiles a Rust CLI and ships it inside the
- * per-platform package; without rewriting the crate manifest first, the
- * binary reports whatever literal sits on disk — diverging from the
- * planned release version (a `@scope/cli-<triple>@0.3.5` package whose
- * `--version` says `0.2.7`).
- *
- * The maturin/pypi path already solves the equivalent problem with
- * `write-version` (#276), but that command is tied to maturin's
- * dynamic-version contract — it requires a `pyproject.toml` declaring
- * `dynamic = ["version"]`. The npm bundled-cli crate has only a
- * `Cargo.toml`, so it needs a manifest-direct bump with no pyproject
- * gate. This is that command.
+ * Pre-build version bump for the npm `bundled-cli` path (#366). `cargo build`
+ * bakes `CARGO_PKG_VERSION` into the binary from `[package].version` with no
+ * env override, so without rewriting the manifest a `@scope/cli-<triple>@0.3.5`
+ * ships a `--version` of `0.2.7`. `write-version` (#276) gates on pyproject.
  */
 
 import { readFile } from 'node:fs/promises';

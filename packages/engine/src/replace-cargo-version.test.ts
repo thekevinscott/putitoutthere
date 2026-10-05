@@ -1,11 +1,8 @@
 /**
- * `replaceCargoVersion` — the literal-only `[package].version` rewriter.
- *
- * The interesting cases are the ones where the `[package]` table ends: the
- * match must not escape it. Before #639 the expression was lazy and anchored
- * only on the header, so a manifest with no literal version had the match
- * land on whatever `version = "…"` came next — typically a dependency's
- * requirement — which it then rewrote, silently, reporting success.
+ * `replaceCargoVersion` — the literal-only `[package].version` rewriter. The
+ * interesting cases are where the `[package]` table ends: before #639 the
+ * expression was lazy and anchored only on the header, so a manifest with no
+ * literal version had the match land on a dependency's requirement instead.
  */
 
 import { describe, expect, it } from 'vitest';

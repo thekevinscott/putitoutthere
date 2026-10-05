@@ -1,35 +1,8 @@
 /**
- * Workflow-YAML contract: every cargo-heavy step in the reusable
- * build matrix must be preceded by `Swatinem/rust-cache` so per-target
- * matrix cells don't cold-compile every Rust dep on every PR.
- *
- * Why this exists (#391): `_matrix.yml`'s build job runs `cargo build`
- * (for `bundle_cli` paths) and `maturin build` (for every pypi/maturin
- * target row) without any cargo cache. Each matrix cell starts from a
- * cold `~/.cargo/registry` and an empty `target/`, so every dep in the
- * graph (pyo3, napi, libsqlite3-sys, etc.) is downloaded and recompiled
- * from scratch on every PR — even PRs that touch nothing Rust-side.
- *
- * Observed at thekevinscott/dirsql (release-precheck.yml run #125, a
- * typical no-Rust-change PR): individual cells run 4-6 min, full
- * workflow ~8 min. That leaves a downstream CI gate one bad runner-
- * queue minute from tripping a 10-min budget with no headroom.
- *
- * The fix: a `Swatinem/rust-cache@v2` step on the build job, placed
- * before each cargo-invoking step. The cache must be partitioned by
- * `matrix.target` via `shared-key` so each per-target cell keeps its
- * own slot — without partitioning, the last writer's cache contents
- * leak into the next target and trigger a near-miss recompile of every
- * dep (the registry cache is shared, but the per-target `target/` dir
- * is not).
- *
- * The contract this test enforces is the *visible existence* of a
- * cache step before each cargo cost center, plus `shared-key`
- * partitioning. It deliberately does not pin the exact placement (one
- * combined step early in the job, or one step per path, both pass) or
- * the `workspaces` value — those are implementation details. What
- * matters is that no cargo step in the build job is reached without a
- * cache step ahead of it.
+ * Workflow-YAML contract (#391): every cargo-heavy step in the build matrix must
+ * be preceded by `Swatinem/rust-cache@v2`, partitioned by `matrix.target` via
+ * `shared-key` — the registry cache is shared but the per-target `target/` is
+ * not, so without partitioning the last writer leaks into the next target.
  */
 
 import { readFileSync } from 'node:fs';
@@ -175,26 +148,10 @@ describe('reusable workflow: cargo-heavy build steps run with Swatinem/rust-cach
 });
 
 /**
- * The same contract, asserted against the e2e mirror.
- *
- * `e2e-fixture-job.yml` is the in-PR mirror of `_matrix.yml` — it reproduces
- * the engine's per-target build steps against the fixture suite so PR CI can
- * catch divergence before consumers do. The mirror exists precisely so a
- * regression in the engine path surfaces here, in PR CI, instead of in a
- * downstream consumer's release pipeline.
- *
- * The cache step #391 added to `_matrix.yml` therefore has to land in the
- * mirror too. Without it:
- *
- *   1. PR CI here exercises a cargo path consumers don't run (cold), so any
- *      future change that depends on a populated `~/.cargo/registry` or
- *      `target/` dir would pass here and break in the wild — the exact
- *      failure mode the mirror was built to prevent.
- *   2. #391's acceptance criterion ("a second matrix run with no Cargo.lock
- *      change finishes the Rust compile step in < 1 min per cell on cache
- *      hit") has no in-repo measurement. The only way to verify warm-cache
- *      behavior on the same matrix shape consumers run is to mirror the
- *      cache here too.
+ * The same contract, asserted against the e2e mirror. `e2e-fixture-job.yml`
+ * reproduces `_matrix.yml`'s per-target build steps so PR CI catches divergence
+ * before consumers do — so without the cache step here, PR CI exercises a cold
+ * cargo path consumers never run, the exact divergence the mirror prevents.
  */
 describe('e2e mirror: cargo-heavy build steps run with Swatinem/rust-cache (#391)', () => {
   it('e2e-fixture-job.yml: a Swatinem/rust-cache step precedes the npm bundled-cli `cargo build`', () => {

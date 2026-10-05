@@ -1,10 +1,8 @@
 /**
- * Shared types for the evidence-check gate (#445). Extracted from the inline
- * bash in `.github/workflows/evidence-check.yml`; the gate enforces AGENTS.md's
- * "Verification policy" — every newly-added `## Unreleased` CHANGELOG.md bullet
- * must carry a `(verified by: <bucket>/<name>)` or `(no fixture: <reason>)`
- * clause, and each cited bucket must have a passing GitHub Actions run/job on
- * the PR HEAD.
+ * Shared types for the evidence-check gate (#445), which enforces AGENTS.md's
+ * "Verification policy": every newly-added `## Unreleased` CHANGELOG.md bullet
+ * carries a `(verified by: <bucket>/<name>)` or `(no fixture: <reason>)`
+ * clause, and each cited bucket has a passing run/job on the PR HEAD.
  */
 
 /** A newly-added bullet under `## Unreleased`, with its 1-based new-file line. */

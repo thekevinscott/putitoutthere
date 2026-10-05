@@ -1,28 +1,8 @@
 /**
- * `piot release-github` against the real CLI + real git — the e2e twin of
- * `tests/integration/release-github.integration.test.ts`. Epic #442, #444.
- *
- * Where the integration test drives the engine in-process with the
- * subprocess boundary mocked, this one **shells out to the built CLI**
- * (`node dist/cli-bin.js release-github …`) against a **real git repo with
- * a real bare remote**. The git side — the whole #436/#437 fragility — runs
- * unmocked: a real `git tag --points-at HEAD`, a real ref-scoped
- * `git push origin refs/tags/<tag>` landing in a real bare remote. Only
- * `gh` is stubbed (a recording script on `PATH`), because cutting throwaway
- * GitHub Releases in a test loop is not hermetic; the stub still lets us
- * assert the `release view` → `release create` order and args.
- *
- * The scenario reproduces the #436 incident verbatim: the remote's floating
- * `v0` tag is force-moved to a commit that diverges from the local `v0`, so
- * a blanket `git fetch --tags` is *rejected* (self-checked below). A correct
- * `release-github` never fetches, so it publishes the new tag and its
- * Release regardless — that resilience is the contract this test pins.
- *
- * Red before the command exists: `release-github` is an unknown subcommand,
- * so the CLI exits 1, the remote never receives the tag, and gh is never
- * called.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * `release-github` against real git + a real bare remote. Epic #442, #444.
+ * Only `gh` is stubbed (a recording script on `PATH`). The scenario is #436
+ * verbatim: the remote's floating `v0` is force-moved so a blanket `git fetch
+ * --tags` is rejected, and a correct `release-github` never fetches.
  */
 
 import { execFileSync } from 'node:child_process';

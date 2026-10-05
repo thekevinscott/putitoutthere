@@ -1,19 +1,8 @@
 /**
  * Absolute paths rendered the way `git status --porcelain` renders them:
- * relative to the repository root, forward-slashed. #639.
- *
- * The crates pre-publish dirty-tree check compares engine-managed paths
- * against porcelain output, and porcelain names every file relative to the
- * repo root with forward slashes on every platform. Comparing an absolute,
- * platform-separated path against that never matches, so the conversion has
- * to happen first — and it happens for three different sets of paths (the
- * manifests `writeVersion` wrote, the sibling package directories, the
- * artifacts root), which is why it lives here rather than inline three times.
- *
- * Paths that do not sit under `cwd` are dropped rather than returned in
- * `../…` form: porcelain can never name a file outside the repository, so
- * such an entry could only ever fail to match, and keeping it would suggest
- * to a reader that it might match something.
+ * relative to the repo root, forward-slashed on every platform (#639). Paths
+ * outside `cwd` are dropped rather than returned in `../…` form — porcelain
+ * can never name a file outside the repo, so they could only fail to match.
  */
 
 import { relative } from 'node:path';

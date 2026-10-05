@@ -1,25 +1,8 @@
 /**
- * `polyglot-everything` structurally exercises the shape it claims —
- * integration.
- *
- * Issue #641. The in-process twin of
- * `tests/e2e/polyglot-fixture-shape.e2e.test.ts`: same fixture, same
- * scenario, two fidelities. The e2e shells out to the real CLI and lets real
- * cargo read the result; this one drives `writeVersionForBuild` directly and
- * parses the manifests, so the contract has a deterministic gate that needs
- * neither a built `dist/` nor a cargo toolchain.
- *
- * The fixture is positioned — by its own comment, and by
- * `notes/design-commitments.md`'s v0 success criterion — as the canary for
- * exactly one bug class: an artifact that embeds a sibling crate by path
- * shipping that sibling's stale `CARGO_PKG_VERSION`. That bug shipped twice
- * (#374, then #621). The fixture lacked every structural precondition for
- * catching it: no cargo workspace, no path-dependency from the pyo3
- * extension module to the core, and a `main.rs` printing a literal string
- * rather than a version.
- *
- * This is not a consumer-visible bug — nothing shipped wrong because of it.
- * It is the safety net for that failure mode having no net in it.
+ * `polyglot-everything` structurally exercises the shape it claims (#641).
+ * The bug class it is the canary for — an artifact embedding a sibling crate
+ * by path and shipping that sibling's stale `CARGO_PKG_VERSION` — shipped
+ * twice (#374, #621) while the fixture had no workspace and no path-dep.
  */
 
 import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

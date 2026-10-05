@@ -1,15 +1,8 @@
 /**
- * Unit tests for `writeDependentVersionReqs` (#640).
- *
- * `node:fs` and the workspace-root walk are mocked so each case isolates one
- * routing branch; the real on-disk walk is covered by the integration tier
- * and cargo's own verdict on the result by the e2e tier.
- *
- * Manifests are matched by path SUFFIX rather than equality: the unit suite
- * also runs on windows-latest, where the code under test resolves "/r/host"
- * into a drive-lettered, backslash-separated path. Comparing the tail keeps
- * the assertions honest on both. Workspace members are spelled literally so
- * the real `expandDirGlob` resolves them without touching the filesystem.
+ * Unit tests for `writeDependentVersionReqs` (#640). Manifests are matched by
+ * path SUFFIX rather than equality: the unit suite also runs on
+ * windows-latest, where "/r/host" resolves to a drive-lettered,
+ * backslash-separated path. Members are spelled literally so no fs is needed.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';

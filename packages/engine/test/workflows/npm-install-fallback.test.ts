@@ -1,35 +1,8 @@
 /**
- * Workflow-YAML contract: the npm dependency-install step in the
- * reusable workflow must fall back from a strict install (`npm ci`,
- * `pnpm install --frozen-lockfile`) to a non-strict install on
- * failure.
- *
- * Why this exists: bundled-cli / napi npm packages declare
- * `optionalDependencies` for `<name>-<triple>@<version>` platform
- * packages that are produced by *this* pipeline. On the very first
- * publish (or any time the planned version is not yet on the
- * registry), those entries 404. pnpm 10 and recent npm CLIs silently
- * drop 404'd optionals from the lockfile when it is regenerated
- * locally; the lockfile then drifts from `package.json`. A subsequent
- * CI run with `npm ci` / `pnpm install --frozen-lockfile` refuses
- * because the two disagree.
- *
- * The right semantics for a build matrix is "install enough deps to
- * run `npm run build`, accept lockfile drift caused by pre-existence
- * of artifacts this pipeline itself publishes". Strict installs are
- * preserved for the clean case; on failure we fall back with a
- * `::warning::` line so the consumer sees what happened.
- *
- * Hit in the wild on `thekevinscott/darkfactory`'s first release
- * (#integration-2026-05-bundled-cli). All six per-platform npm
- * build jobs failed with `pnpm install --frozen-lockfile` after
- * pnpm had silently dropped the four still-404 platform deps from
- * the consumer's committed lockfile.
- *
- * The fix lives in `.github/workflows/_matrix.yml` (build matrix)
- * and `.github/workflows/release.yml` (the publish-job rebuild step
- * for npm packages added in #256). Both must self-heal for the
- * recipe to "just work out of the box" on first publish.
+ * Workflow-YAML contract: the npm install step must fall back from a strict
+ * install (`npm ci`, `--frozen-lockfile`) to a lenient one. On a first publish
+ * the platform `optionalDependencies` this pipeline publishes itself 404, so
+ * the lockfile drifts and strict refuses — dropping the `||` is invisible (#256).
  */
 
 import { readFileSync } from 'node:fs';

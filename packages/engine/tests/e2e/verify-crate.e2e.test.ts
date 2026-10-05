@@ -1,20 +1,7 @@
 /**
- * `piot verify crate` against a REAL published `.crate` — the e2e twin of
- * `tests/integration/verify-crate.integration.test.ts`. Epic #442, #449.
- *
- * Where the integration test drives the engine in-process against `.crate`
- * files it builds locally, this one **shells out to the built CLI**
- * (`node dist/cli-bin.js verify crate …`) against the **real, cargo-produced
- * `.crate`** for piot's own stable fixture crate `piot-fixture-zzz-poly-rust`,
- * downloaded from crates.io and dropped under a temp registry root exactly
- * as `cargo-http-registry` lays it out on disk. This is the tier that proves
- * the real `tar` pipeline inspects a genuine cargo `.crate` — whose layout
- * (`<name>-<version>/src/…`) a hand-rolled tarball only assumes.
- *
- * Red before the feature: `verify crate` is an unrecognized subcommand, so
- * no `ok:` line is emitted and the CLI exits non-zero.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * `verify crate` against the REAL cargo-produced `.crate` for piot's fixture
+ * crate, downloaded from crates.io and dropped under a temp registry root
+ * exactly as `cargo-http-registry` lays it out. Epic #442, #449.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,22 +1,8 @@
 /**
- * `putitoutthere publish` — the big integration.
- *
- * Flow per plan.md §13:
- *  1. Re-run plan (registry state may have moved since build).
- *  2. Pre-flight auth check (#14). Abort on any missing creds.
- *  3. Artifact completeness check (#13). Abort per-package on missing
- *     targets.
- *  4. For each package (in cascade / depends-on order):
- *       writeVersion → handler.publish → git tag + push.
- *     A handler that reports `delegated` (pypi, #623) uploaded nothing,
- *     so it is deliberately NOT tagged here — see the branch below.
- *  5. On handler failure: verbose dump (#15); attach the partial
- *     progress to the error (#623); re-throw and stop.
- *
- * No-push tag model (§13.6): tag points at the merge commit; no bump
- * commit is pushed to main.
- *
- * Issue #22.
+ * `putitoutthere publish` — the big integration (#22, plan.md §13). Re-runs
+ * plan, pre-flight auth (#14) and completeness (#13), then per package in
+ * cascade order: writeVersion → handler.publish → tag + push. A `delegated`
+ * handler result (pypi, #623) uploaded nothing and is deliberately NOT tagged.
  */
 
 import { isAbsolute, join, resolve } from 'node:path';

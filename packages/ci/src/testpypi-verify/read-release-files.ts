@@ -1,13 +1,8 @@
 /**
- * One read of TestPyPI's release-metadata document. Fetches the version-pinned
- * `/pypi/{package}/{version}/json` URL and hands the body to the parser,
- * reporting a 404 distinctly from every other way the read can fail — that
- * distinction is what lets the caller say "this version is not on TestPyPI"
- * instead of blaming index lag (#668).
- *
- * Reads through `fetch` rather than the `curl` exec seam because the status
- * code is the signal: `curl -f` collapses 404 and a transport error into the
- * same non-zero exit.
+ * One read of TestPyPI's release-metadata document, reporting a 404 distinctly
+ * from every other way the read can fail — that distinction is what lets the
+ * caller say "this version is not on TestPyPI" instead of blaming index lag
+ * (#668). Via `fetch`: `curl -f` collapses 404 and transport into one exit.
  */
 
 import { errorMessage } from './error-message.js';

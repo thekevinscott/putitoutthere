@@ -1,18 +1,7 @@
 /**
- * Fixture plan snapshot tests. For each fixture, initialize a git
- * repo from the source tree, call `plan()`, and assert the matrix
- * shape matches expectations.
- *
- * Exercises:
- * - #29 pure-language shapes (1 row per package, no targets).
- * - #30 rust-in-language shapes (5 target rows + sdist / main).
- * - #31 polyglot cascades (depends_on transitivity).
- *
- * Not a byte-identical snapshot — we assert *shape*, which is what
- * changes when the plan logic breaks. Byte-identical snapshots are
- * brittle across version bumps.
- *
- * Issues #29, #30, #31.
+ * Fixture plan snapshot tests: init a git repo per fixture, call `plan()`,
+ * assert the matrix *shape* — not a byte-identical snapshot, which is brittle
+ * across version bumps. Issues #29, #30, #31.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -182,19 +171,9 @@ describe('#30 rust-in-language fixtures', () => {
 });
 
 // #276: artifact-version vs plan-version contract for the build phase.
-//
-// The bug class: the build job produces an artifact whose embedded
-// version disagrees with `matrix.version`. We hit this on maturin —
-// wheels shipped at the literal pyproject.toml version regardless of
-// what plan computed. The same shape could open up in any build path.
-//
-// This is the unit-tier check: against each fixture, confirm the
-// version-source manifest the build phase would read carries the
-// planned version *after* running the bump that the build phase is
-// responsible for. Doesn't run maturin / cargo / npm itself; that's
-// the e2e tier (`.github/workflows/e2e-fixture-job.yml`). What it
-// does cover is the contract that the bump exists, targets the right
-// file, and produces the expected on-disk state.
+// Confirms the version-source manifest the build phase reads carries the
+// planned version after the bump. Doesn't run maturin / cargo / npm — that is
+// the e2e tier (`.github/workflows/e2e-fixture-job.yml`).
 describe('#276 build-phase version bump bumps the manifest the build tool reads', () => {
   it('python-rust-maturin → Cargo.toml carries the planned version, pyproject is unchanged', async () => {
     // After #333, every pypi pyproject declares `dynamic = ["version"]`

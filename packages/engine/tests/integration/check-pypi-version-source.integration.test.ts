@@ -1,48 +1,8 @@
 /**
- * `runChecks` must reject a `dynamic = ["version"]` declaration whose
- * version source no release step can reach — integration test for #696.
- *
- * The bug: `checkPypiVersionSource` rejects a static `[project].version`
- * literal, and `checkPyprojectShape` rejects `dynamic = ["version"]` with
- * no version block at all. Neither rejects the shape that actually
- * shipped a wrong wheel:
- *
- *   [build-system]
- *   requires = ["hatchling"]
- *
- *   [project]
- *   dynamic = ["version"]
- *
- *   [tool.hatch.version]
- *   path = "src/agent_transcript_viewer/_version.py"
- *
- * `dynamic` is declared so the static-literal check passes, and
- * `[tool.hatch.version]` is present so the no-backend check passes. But
- * plain hatchling reads a literal off that file and ignores
- * `SETUPTOOLS_SCM_PRETEND_VERSION` — the only version handoff the
- * reusable workflow has — and no release step rewrites the file (the
- * `write-version` step is maturin-only). `agent-transcript-viewer`
- * published `0.0.0` to PyPI this way while the plan said `0.1.0`, and
- * nothing failed.
- *
- * Only three shapes are reachable from a release run:
- *
- *   - `[tool.hatch.version] source = "vcs"` with `hatch-vcs` in
- *     `[build-system].requires` (honours `SETUPTOOLS_SCM_PRETEND_VERSION`)
- *   - `[tool.setuptools_scm]` with `setuptools-scm` in
- *     `[build-system].requires` (same env-var handoff)
- *   - `build = "maturin"`, where the sibling `Cargo.toml`'s
- *     `[package].version` is the source and piot does bump it
- *
- * Everything else is unreachable and must be a finding.
- *
- * Lives in `tests/integration/` because the miss is an *upstream* check
- * failing to observe something the downstream build tool silently
- * tolerates. A unit test with a mock pyproject reader cannot observe
- * that the real config loader + real TOML parse + real shape check let
- * this through; this tier runs all three for real against a seeded repo.
- *
- * Issue #696.
+ * `runChecks` must reject a `dynamic = ["version"]` whose version source no
+ * release step can reach (#696): `dynamic` satisfies the static-literal
+ * check and `[tool.hatch.version]` satisfies the no-backend check, yet plain
+ * hatchling ignores `SETUPTOOLS_SCM_PRETEND_VERSION` and nothing rewrites it.
  */
 
 import { execFileSync } from 'node:child_process';

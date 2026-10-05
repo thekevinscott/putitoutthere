@@ -1,11 +1,7 @@
 /**
- * Retry-wrapper round-trip. Exercises the full isPublished → retry
- * chain: a transient 5xx from the registry should succeed on a
- * subsequent call (after msw flips the status). Stands in for the
- * real withRetry + jitter behavior the handlers compose at the
- * publish-orchestrator layer.
- *
- * Issue #27.
+ * Retry-wrapper round-trip: the full isPublished → retry chain, where a
+ * transient 5xx from the registry succeeds on a later call after msw flips
+ * the status. Issue #27.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

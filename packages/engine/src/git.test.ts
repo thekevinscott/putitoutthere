@@ -1,13 +1,6 @@
 /**
- * Git wrapper tests (#9). The file under test is `git.ts`; its only
- * collaborator is the `git` CLI via the async process seam (`execCapture`),
- * mocked here so each case isolates one wrapper's argv-construction and
- * stdout-parsing without a real repo. `tag-template` / `version` (pure) run
- * for real so `lastTag`'s highest-semver selection is genuinely exercised.
- *
- * The real git round trip — tags actually landing on a repo + bare remote —
- * is covered by tests/integration/tag-plumbing.integration.test.ts and the
- * e2e tier.
+ * Git wrapper tests (#9). `tag-template` / `version` (pure) run for real so
+ * `lastTag`'s highest-semver selection is genuinely exercised.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

@@ -1,17 +1,8 @@
 /**
- * Contract for the evidence-check workflow (#309, #354). The gate's decision
- * logic — the CHANGELOG.md diff, the Unreleased-bullet parsing, the accepted
- * evidence buckets, and the race-aware poll of cited workflow runs — was
- * extracted from inline bash into tested TypeScript under
- * `packages/ci/src/evidence-check/` (the `piot-ci evidence-check` command,
- * #445, epic #442); that behaviour is now pinned in the colocated
- * decide/run/unit tests there, not by scanning this YAML.
- *
- * What remains reviewer-invisible and therefore guarded here is the workflow
- * *wiring*: the permissions and env the extracted gate needs to run, and that
- * the workflow delegates to the `piot-ci` bin rather than reintroducing inline
- * logic. Dropping `actions: read` or `GH_TOKEN` would silently degrade the
- * `gh api` run lookups (unauthenticated / unauthorized) at runtime.
+ * Contract for the evidence-check workflow (#309, #354). The decision logic moved
+ * to `packages/ci/src/evidence-check/` (#445, epic #442) and is pinned by the
+ * colocated tests there. What stays reviewer-invisible is the wiring: dropping
+ * `actions: read` or `GH_TOKEN` silently degrades the `gh api` run lookups.
  */
 
 import { existsSync, readFileSync } from 'node:fs';

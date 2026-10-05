@@ -1,24 +1,8 @@
 /**
- * `piot reconcile` — backfill missing tags for published-but-untagged
- * packages (integration). The on-demand companion to the publish-path
- * auto-heal (#407): where auto-heal only fires for a package that is
- * already in a publish run, `reconcile` heals an already-stuck package
- * without a release.
- *
- * reconcile is a thin reader over the same engine `status` (#403 slice 1)
- * uses to *detect* the drift and the same `ensureTag` primitive the
- * publish path (#407 slice 2) uses to *write* the tag — so what it heals
- * can never disagree with what `status` reports or what a release would
- * cut. Only the registry HTTP boundary is mocked (msw); config, tags,
- * handler dispatch, and the git tag writes are real.
- *
- * The commit a backfilled tag points at matters: piot reads "changed
- * since last release" from the tag's commit. reconcile prefers a sibling
- * package already tagged at the same version (the real release commit),
- * falling back to HEAD only when no sibling tag exists. This is the
- * e2e twin of `tests/e2e/reconcile.e2e.test.ts`.
- *
- * Issue #410, #403 slice 3.
+ * `reconcile` backfills missing tags for published-but-untagged packages
+ * (#410, #403 slice 3) — the on-demand companion to the publish-path
+ * auto-heal (#407). The commit matters: it prefers a sibling package already
+ * tagged at the same version, falling back to HEAD only when none exists.
  */
 
 import { execFileSync } from 'node:child_process';

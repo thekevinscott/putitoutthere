@@ -1,48 +1,8 @@
 /**
- * `piot reconcile` against the real CLI + real registries — the e2e twin
- * of `tests/integration/reconcile.integration.test.ts`.
- *
- * Where the integration test imports the engine in-process and mocks the
- * registry HTTP (msw), this one **shells out to the built CLI**
- * (`node dist/cli-bin.js reconcile …`) pointed at piot's own live fixture
- * packages, whose current versions are published with no local git tag.
- * reconcile reads the real latest version and backfills the tag.
- *
- * No publish, no auth, no build: reconcile only reads the registry and
- * writes a git tag. The throwaway repo has no `origin`, so the tag push
- * is warned-not-fatal (same as the publish-path auto-heal e2e) — the
- * local tag is the observable contract. With a single package there is
- * no sibling tag to borrow, so the tag lands at HEAD.
- *
- * The second scenario is #623's: a package whose registry version is
- * AHEAD of its newest tag. A delegated PyPI upload runs in the caller's
- * `pypi-publish` job, so the tag for the version it uploads has to be
- * backfilled after the fact — and in steady state the package already
- * carries the previous release's tag, so "no tags at all" never
- * describes it.
- *
- * ## Why these assertions are shaped this way (#665)
- *
- * Both tests used to read the registry's *latest-version pointer*
- * themselves and assert reconcile had landed on the same answer. Nothing
- * makes two independent reads of a mutable pointer agree: `e2e-fixture.yml`
- * publishes these fixtures on every PR, and PyPI serves that pointer with
- * `cache-control: max-age=900`, so for up to 15 minutes after an upload
- * one read can see the new version and the other the old one. That fired
- * on a docs-only PR (#663).
- *
- * So we assert what reconcile is actually contracted to do — *tag a
- * version that is really live* — using the version reconcile itself
- * reports (`--json`), then confirm that version against the registry's
- * **per-version** endpoint. A per-version resource is immutable once
- * published, so that read cannot skew. What the latest-version pointer
- * happened to say at any instant was never the contract.
- *
- * Red before the command exists: `reconcile` is an unknown subcommand.
- * Red before #623: the registry-ahead scenario heals nothing.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issues #403, #410,
- * #623, #665.
+ * `reconcile` against the real CLI + real registries. Issues #403, #410,
+ * #623, #665. Assertions deliberately avoid the registry's latest-version
+ * *pointer* — pypi.org serves it `cache-control: max-age=900`, so two reads
+ * can disagree for 15 min (#663) — and read the immutable per-version one.
  */
 
 import { execFileSync } from 'node:child_process';

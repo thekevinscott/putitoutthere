@@ -1,15 +1,8 @@
 /**
- * npm integration test. Runs the npm handler's isPublished + publish
- * against a simulated registry implemented by mocking the Node built-in
- * `execFile` underneath the real process seam (`execCapture`).
- *
- * The npm handler shells out to the `npm` CLI (instead of hitting
- * REST endpoints directly), so msw can't intercept. A verdaccio
- * in-process process would be the purist form of this test, but the
- * seam mock covers the same handler contract at a tenth of the startup
- * cost.
- *
- * Issue #27. Plan: §23.3.
+ * npm handler isPublished + publish against a simulated registry: the npm
+ * handler shells out to the `npm` CLI, so msw cannot intercept. Only the Node
+ * built-in `execFile` underneath the real `execCapture` seam is mocked.
+ * Issue #27.
  */
 
 import { EventEmitter } from 'node:events';

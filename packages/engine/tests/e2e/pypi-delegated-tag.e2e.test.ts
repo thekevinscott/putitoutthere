@@ -1,25 +1,8 @@
 /**
- * Delegated PyPI publishes must not be tagged by the publish job (#623)
- * — against the real CLI and the real registry. The e2e twin of
- * `tests/integration/pypi-delegated-tag.integration.test.ts`.
- *
- * Where the integration test mocks PyPI's HTTP read, this shells out to
- * the built CLI (`node dist/cli-bin.js publish`) and lets it hit
- * pypi.org for real, pointed at the live, piot-owned fixture project
- * `piot-fixture-zzz-python-sdist` at a version that will never exist.
- * The real 404 is what makes the run take the delegation path, and no
- * upload happens on that path by construction — the whole point of #623
- * is that the engine hands the upload to a caller-side job — so this
- * publishes nothing anywhere.
- *
- * The contract: the run succeeds, says the upload was delegated, and
- * leaves NO git tag behind. The tag is the record of what shipped, and
- * nothing has shipped until the caller-side `pypi-publish` job uploads.
- *
- * Red before the fix: the delegation path reports `published` and the
- * tag is cut here.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #623.
+ * Delegated PyPI publishes must not be tagged by the publish job (#623),
+ * against real pypi.org. The live fixture project at a version that will
+ * never exist 404s, which is what makes the run take the delegation path —
+ * and that path uploads nothing by construction.
  */
 
 import { execFileSync } from 'node:child_process';

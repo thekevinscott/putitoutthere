@@ -1,29 +1,8 @@
 /**
- * `publish` report → per-platform publish summary (#625).
- *
- * Drives the real CLI `run(['publish', '--json', ...])` against a real
- * git repo, the default `handlerFor` (the actual npm handler
- * dispatches), and a fake npm registry implemented by mocking the Node
- * built-in `execFile` underneath the first-party process seam. Every
- * piece of putitoutthere's own code runs verbatim: config loader, plan,
- * preflight, completeness, `publishPlatforms`, the main-package publish,
- * tag formatting, and the JSON report the CLI prints.
- *
- * The contract under test: a `napi` / `bundled-cli` release publishes a
- * platform package per target *plus* the umbrella package, and the run
- * report has to name all of them. `publishPlatforms` already returns
- * `{ published, skipped }`; before #625 the npm handler discarded it, so
- * a six-package release reported exactly one line and an operator
- * reading the log could not tell a complete multi-package publish from a
- * partial one that shipped the umbrella and stopped.
- *
- * The `skipped` half is asserted with equal weight: on a re-run after a
- * partial failure, "these two were already on the registry, so I skipped
- * them" is the reassurance the operator needs, and it was invisible too.
- *
- * The e2e twin — the same two scenarios driven through the built CLI as a
- * real subprocess with the real `npm` CLI publishing to a real (local)
- * registry over HTTP — is `tests/e2e/publish-platform-report.e2e.test.ts`.
+ * `publish` report → per-platform publish summary (#625): before the fix the
+ * npm handler discarded `publishPlatforms`' `{ published, skipped }`, so a
+ * six-package release reported one line. Both halves are asserted. Only the
+ * Node built-in `execFile` underneath the first-party seam is mocked.
  */
 
 import { EventEmitter } from 'node:events';

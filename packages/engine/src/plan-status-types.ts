@@ -1,10 +1,7 @@
 /**
- * `plan` publish/skip + skew shared types. The verdict view layered over
- * the build matrix: per package, would a release from this ref PUBLISH,
- * SKIP (already on the registry), or is the registry UNKNOWN (unreachable
- * — reported, never fatal); plus the dependency-skew pairs.
- *
- * Issue #412, #403 slice 4.
+ * `plan` publish/skip + skew shared types (#412, #403 slice 4): per package,
+ * would a release from this ref PUBLISH, SKIP (already on the registry), or is
+ * the registry UNKNOWN (unreachable — reported, never fatal); plus skew pairs.
  */
 
 import type { MatrixRow } from './plan.js';

@@ -1,12 +1,8 @@
 /**
- * `release_packages` manual-release spec parser tests.
- *
- * The spec is the value of the reusable workflow's `release_packages`
- * input: a comma-separated list of package entries, each a name
- * optionally suffixed with `@<patch|minor|major>` or an explicit
- * `@<X.Y.Z>` semver. A bare name defaults to a patch bump. It lets a
- * consumer re-release named packages without any new code (e.g. after
- * a putitoutthere bug fix).
+ * `release_packages` manual-release spec parser tests. The spec is the value
+ * of the reusable workflow's `release_packages` input: comma-separated package
+ * entries, each a name optionally suffixed with `@<patch|minor|major>` or an
+ * explicit `@<X.Y.Z>` semver; a bare name defaults to a patch bump.
  */
 
 import { describe, expect, it } from 'vitest';

@@ -1,12 +1,6 @@
 /**
- * CLI wiring for the `verify` command family (#442/#443): the
- * `npm-tarball` subcommand dispatch, its flags, and the posture
- * fall-through. Isolated per the unit-suite convention: the engine
- * (`./verify/npm-tarball/index.js`) and the posture check
- * (`./verify/posture.js`) are bare-automocked so the doubles can't drift
- * from the source, and the dispatcher under test (`./cli.js`) is loaded via
- * dynamic import so the mocks are in place first. This asserts routing, not
- * their behavior (covered in their own suites and the e2e-cli tier).
+ * CLI wiring for the `verify` command family (#442/#443): the `npm-tarball`
+ * subcommand dispatch, its flags, and the posture fall-through.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

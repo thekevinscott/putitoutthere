@@ -54,22 +54,10 @@ describe('execCapture', () => {
   });
 
   describe('capture ceiling (#664)', () => {
-    // The seam hands `maxBuffer` straight to `execFile`, whose overflow
-    // policy is not truncation: Node raises
-    // `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` and SIGTERMs the child. A
-    // `cargo publish --verbose` that was going to succeed dies partway
-    // through, and the engine reports a failure the tool never produced —
-    // on a possibly half-completed registry upload, which is the
-    // partial-publish state the all-or-nothing commitment exists to
-    // prevent.
-    //
-    // The ceiling itself is worth having; killing for hitting it is not.
-    // These pin the replacement policy: bound what we keep, keep the ends
-    // that carry diagnosis, say so out loud, and let the child finish.
-    //
-    // `writeSync` rather than `process.stdout.write`: writes to a pipe are
-    // async, so a chatty child that exits promptly can lose its own tail
-    // and the assertions would pass for the wrong reason.
+    // `maxBuffer` overflow is not truncation — Node raises
+    // `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` and SIGTERMs the child mid-publish.
+    // `writeSync`, not `process.stdout.write`: pipe writes are async, so a
+    // child that exits promptly can lose its own tail and pass these wrongly.
     const MIB = 1024 * 1024;
     const CEILING = 64 * 1024;
     const HEAD = 'PIOT-664-HEAD';

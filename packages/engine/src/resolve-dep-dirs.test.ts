@@ -1,18 +1,8 @@
 /**
- * Unit tests for `resolveDepDirs` (#621).
- *
- * Two indirections decide whether a crate is found at all: an entry may
- * defer to `[workspace.dependencies]` (putting both the path and the
- * requirement in the workspace root, a different file), and `path` is
- * relative to the manifest that DECLARED it -- the root for an inherited
- * entry, not the member. Getting either wrong silently drops a crate from
- * the version rewrite, which is the original bug wearing a new hat.
- *
- * Fixtures are plain objects rather than parsed TOML, and directories are
- * asserted by suffix rather than by equality: the unit suite also runs on
- * windows-latest, where resolving "/repo/packages/host" yields a
- * drive-lettered, backslash-separated path. Comparing the tail keeps the
- * assertion honest on both without importing a path collaborator.
+ * Unit tests for `resolveDepDirs` (#621). Two indirections decide whether a
+ * crate is found at all: an entry may defer to `[workspace.dependencies]`, and
+ * `path` is relative to the manifest that DECLARED it — the root for an
+ * inherited entry, not the member. Dirs are asserted by suffix for windows.
  */
 
 import { describe, expect, it } from 'vitest';

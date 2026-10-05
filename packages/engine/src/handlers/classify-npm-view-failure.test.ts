@@ -1,11 +1,8 @@
 /**
- * `classifyNpmViewFailure` unit tests (#650).
- *
- * The classifier is what stops `isPublished` from reading "we could not
- * reach npm" as "the version is not published", and what stops piot from
- * paying npm's error-blind retry ladder for a name that will never resolve.
- * Each case below pins one of the three readings, plus the boundaries
- * between them.
+ * `classifyNpmViewFailure` unit tests (#650). The classifier is what stops
+ * `isPublished` from reading "we could not reach npm" as "the version is not
+ * published", and what stops piot from paying npm's error-blind retry ladder
+ * for a name that will never resolve.
  */
 
 import { describe, expect, it } from 'vitest';

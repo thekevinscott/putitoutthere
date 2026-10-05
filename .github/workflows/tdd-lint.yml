@@ -1,16 +1,9 @@
 name: TDD Lint
 
-# Enforces the red/green TDD discipline from plan.md §23.7: PRs that
-# modify src/ must also touch at least one *.test.ts file. CI rejects
-# non-test-bearing PRs.
-#
-# Escape hatch: a commit in the PR range with a `Skip-Gates: <reason>`
-# trailer bypasses this check. The trailer is visible in the PR commit
-# list, so reviewers can push back if it's abused. See notes/gates.md.
-#
-# The gate logic lives in tested TypeScript (`packages/ci/src/tdd-lint/`,
-# the `piot-ci tdd-lint` command), not inline bash — see AGENTS.md >
-# "Repo-internal CI gates" (#452, epic #442).
+# Enforces red/green TDD: a PR modifying src/ must also touch at least one
+# *.test.ts. Escape hatch: a commit with a `Skip-Gates: <reason>` trailer,
+# visible in the PR commit list so reviewers can push back. Gate logic is
+# tested TypeScript in packages/ci/src/tdd-lint/ (#452, epic #442).
 
 # The gate's `git diff` is pathspec-scoped to `packages/engine/src/` (run.ts),
 # so a diff touching nothing there has no claim to make and passes. Keep

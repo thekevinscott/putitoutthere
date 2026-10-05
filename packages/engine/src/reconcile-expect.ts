@@ -1,24 +1,8 @@
 /**
- * `reconcile --expect`: confirm caller-asserted `package@version` pairs
- * against each registry's IMMUTABLE per-version endpoint
- * (`handler.isPublished`) and tag them — bypassing the mutable
- * latest-version pointer (`handler.latestVersion` / `computeStatus`)
- * entirely.
- *
- * `pypi-tag.yml` runs bare `reconcile` seconds after a delegated PyPI
- * upload. Discovery reads pypi.org's `GET /pypi/{name}/json` ->
- * `info.version`, a CDN-cached pointer (`cache-control: max-age=900`)
- * that can still name the previous release for up to 15 minutes — which
- * already has its tag, so reconcile finds nothing to do and exits 0
- * having cut no tag at all (#666). The per-version endpoint a caller
- * names explicitly cannot be stale in the same way: it either confirms
- * the exact version or it doesn't.
- *
- * Thin reader, no parallel logic (design-commitments #7): reuses the same
- * `isPublished`, `resolveTagCommit`, and `ensureTag` primitives the
- * publish and discovery paths already share.
- *
- * Issue #666.
+ * `reconcile --expect`: confirm caller-asserted `package@version` pairs against
+ * each registry's IMMUTABLE per-version endpoint, not the mutable latest
+ * pointer — pypi.org's `/pypi/{name}/json` is CDN-cached (`max-age=900`), so
+ * bare `reconcile` after a delegated upload can cut no tag at all (#666).
  */
 
 import type { Config, Package } from './config.js';

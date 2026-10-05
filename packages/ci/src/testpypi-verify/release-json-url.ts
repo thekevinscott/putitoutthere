@@ -1,13 +1,8 @@
 /**
  * The URL of TestPyPI's version-pinned release-metadata document,
  * `<origin>/pypi/{package}/{version}/json`, derived from the configured simple
- * index URL so both point at the same instance. `null` when the index URL is
- * not parseable. Pure.
- *
- * Version-pinned is the load-bearing part (#668): fixture versions are
- * timestamps, so this URL has never been requested before the publish under
- * test and cannot be served from a stale edge cache object — unlike
- * `/simple/{package}/`, which every prior run has already warmed.
+ * index URL so both point at the same instance. Version-pinned is load-bearing
+ * (#668): versions are timestamps, so it can never be served stale. Pure.
  */
 
 export function releaseJsonUrl(indexUrl: string, pkg: string, version: string): string | null {

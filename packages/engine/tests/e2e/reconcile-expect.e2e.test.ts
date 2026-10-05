@@ -1,30 +1,8 @@
 /**
- * `piot reconcile --expect` against the real CLI + real pypi.org — the
- * e2e twin of `tests/integration/reconcile-expect.integration.test.ts`.
- *
- * Where the integration test imports the engine in-process and mocks the
- * registry HTTP (msw), this one **shells out to the built CLI**
- * (`node dist/cli-bin.js reconcile --expect …`) and reads PyPI for real.
- * That is the point: the bug in #666 is a property of pypi.org's actual
- * cache behaviour, and only an unmocked read can show that the endpoint
- * the fix depends on behaves as assumed.
- *
- * Both scenarios pin themselves to `0.0.1` of the live fixture project —
- * a permanently published version that is NOT the project's latest. So
- * the mutable, CDN-cached `info.version` pointer never names it, and a
- * `fixture-py-v0.0.1` tag can only have come from the expectation path.
- * Nothing here reads the latest pointer, so nothing here moves when the
- * fixture publishes again mid-run.
- *
- * No publish, no auth, no build: reconcile only reads the registry and
- * writes a git tag. The throwaway repo has no `origin`, so the tag push
- * is warned-not-fatal — the local tag is the observable contract.
- *
- * Red before #666: `--expect` is an unrecognised flag, so reconcile
- * discovers from the latest pointer, never tags 0.0.1, and reports
- * success for a version it was told to confirm and did not.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #666.
+ * `reconcile --expect` against real pypi.org (#666) — the bug is a property
+ * of pypi.org's actual cache behaviour, so only an unmocked read shows it.
+ * Both scenarios pin `0.0.1`, a permanently published version that is NOT
+ * latest, so the CDN-cached `info.version` pointer can never name it.
  */
 
 import { execFileSync } from 'node:child_process';

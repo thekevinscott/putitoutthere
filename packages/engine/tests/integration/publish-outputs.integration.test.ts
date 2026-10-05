@@ -1,19 +1,8 @@
 /**
- * `publish` → `$GITHUB_OUTPUT` integration test (#461).
- *
- * Drives the real CLI `run(['publish', ...])` against a real git repo,
- * the default `handlerFor` (the actual npm handler dispatches), and a
- * fake npm registry implemented by mocking `execFileSync` — the same
- * seam `publish.integration.test.ts` stubs. Every piece of
- * putitoutthere's own code runs verbatim: config loader, plan,
- * preflight, completeness, handler dispatch, tag formatting, and the
- * `$GITHUB_OUTPUT` write.
- *
- * The contract under test: when a release actually ships ≥ 1 package,
- * the publish command appends `released` / `released_packages` to
- * `$GITHUB_OUTPUT` so the reusable workflow can surface them as outputs
- * a consumer gates a post-release job on (issue #461). This asserts the
- * real file the runner would read, not a mock of it.
+ * `publish` → `$GITHUB_OUTPUT` (#461): when a release ships >= 1 package the
+ * command appends `released` / `released_packages` so the reusable workflow
+ * can surface them. Asserts the real file the runner would read; only the
+ * npm CLI subprocess is mocked.
  */
 
 import { EventEmitter } from 'node:events';

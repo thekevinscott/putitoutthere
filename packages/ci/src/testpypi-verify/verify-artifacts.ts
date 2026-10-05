@@ -1,12 +1,8 @@
 /**
  * Composition root for the metadata-verification phase of `testpypi-verify
- * metadata`. Reproduces the bash heredoc that, per requirement, opened the
- * downloaded wheel and sdist, read the single `METADATA` / `PKG-INFO` member,
- * and asserted its `Version:` matched the requirement — printing `ok: …` on
- * success and failing with the exact stderr line on the first mismatch. The
- * archive member listing/extraction runs through `unzip`/`tar` (the same
- * subprocess boundary the harness uses); the selection and version-match
- * decisions are the pure cores'. Returns the exit code (0 = all verified).
+ * metadata`. Per requirement, opens the downloaded wheel and sdist, reads the
+ * single `METADATA` / `PKG-INFO` member via `unzip`/`tar`, and asserts its
+ * `Version:` matches. Returns the exit code (0 = all verified).
  */
 
 import { readdir } from 'node:fs/promises';

@@ -1,18 +1,8 @@
 /**
- * Crate-size pre-merge check (#362).
- *
- * crates.io rejects any `.crate` upload over 10 MiB with `413 Payload
- * Too Large`, but `cargo publish` surfaces that only mid-release, after
- * the verification build has compiled the crate and every transitive
- * dep — the release surprise the no-surprises design commitment exists
- * to eliminate. `checkCratesPackageSize` reproduces the tarball with
- * `cargo package` at PR time, so a tracked symlink dragging a build
- * tree into the crate, or a missing `[package].exclude`, is caught on
- * the PR that introduces it.
- *
- * Wired into `runChecks` (`check.ts`). The end-to-end path through the
- * config loader is covered by
- * `tests/integration/check-crate-size.integration.test.ts`.
+ * Crate-size pre-merge check (#362). crates.io rejects any `.crate` upload
+ * over 10 MiB with `413 Payload Too Large`, and `cargo publish` surfaces that
+ * only mid-release, after the verification build has compiled every dep. This
+ * reproduces the tarball with `cargo package` at PR time instead.
  */
 
 import { join } from 'node:path';

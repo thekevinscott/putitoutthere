@@ -1,24 +1,8 @@
 /**
- * `piot plan`'s `unpublished_kinds` $GITHUB_OUTPUT key against the real CLI
- * and the real crates.io — the e2e twin of
- * `tests/integration/crates-auth-gate.integration.test.ts` (#622).
- *
- * The reusable workflow gates its crates.io OIDC exchange on this key, so a
- * wrong answer here is a failed release: too narrow and a crates publish
- * arrives with no credential; too wide and a re-run with nothing left to ship
- * still demands a working trusted publisher and dies before npm and PyPI get
- * their turn (the #622 repro).
- *
- * Shells out to the built CLI (`node dist/cli-bin.js plan …`) pointed at
- * piot's own live fixture crate, with `$GITHUB_OUTPUT` aimed at a temp file.
- * `--release-packages` pins the planned version so the verdict is
- * deterministic: the crate's current live version is already published (a real
- * `isPublished` 200 → nothing to authenticate for), while an implausible
- * version is not (a real 404 → the credential is genuinely needed). This is
- * the tier that fails if the real registry read diverges from the mocked one.
- * No publish, no auth — plan only reads.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issue #622.
+ * `plan`'s `unpublished_kinds` output against the real CLI and real
+ * crates.io; the reusable workflow gates its crates.io OIDC exchange on it.
+ * `--release-packages` pins the planned version so the live reads are
+ * deterministic: current version → 200, implausible version → 404. #622.
  */
 
 import { execFileSync } from 'node:child_process';

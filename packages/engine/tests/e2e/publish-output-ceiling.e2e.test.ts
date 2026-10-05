@@ -1,21 +1,8 @@
 /**
- * A publish must not be killed by its own subprocess output, and what it
- * keeps of that output must be bounded and legible (#664) — the e2e twin
- * of `tests/integration/publish-output-ceiling.integration.test.ts`.
- *
- * Where the integration test drives `publish()` in-process, this shells
- * out to the built CLI (`node dist/cli-bin.js publish`) and lets the
- * idempotency probe hit crates.io for real: `99.99.99` of piot's live
- * fixture crate is a genuine 404, so the run proceeds to the publish step.
- *
- * `cargo` is a stub on `PATH` that writes 10 MiB of chatter down a **real
- * pipe** through the **real** `execCapture` seam. Nothing is published:
- * the stub is the only thing the CLI ever executes as cargo.
- *
- * Red before the fix: `execCapture` has no ceiling of its own, so nothing
- * announces a bound and nothing enforces one.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * A publish must not be killed by its own subprocess output (#664). `99.99.99`
+ * of piot's live fixture crate is a genuine crates.io 404, so the run reaches
+ * the publish step; `cargo` is then a stub on `PATH` writing 10 MiB down a
+ * real pipe through the real `execCapture` seam. Nothing is published.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,12 +1,8 @@
 /**
- * Dependency-skew detection over a plan's per-package verdicts. A skew is
- * the dangerous shape from the motivating incident (#403): a package
- * would PUBLISH while a `depends_on` dependency it relies on SKIPs (is
- * already published / stuck), so the dependent ships ahead of its
- * dependency. Pure over {verdicts, packages} — the registry reads happen
- * in `computePlanStatus`.
- *
- * Issue #412, #403 slice 4.
+ * Dependency-skew detection over a plan's per-package verdicts (#412, #403):
+ * a package would PUBLISH while a `depends_on` dependency SKIPs (already
+ * published / stuck), so the dependent ships ahead of its dependency. Pure
+ * over {verdicts, packages} — the registry reads happen in `computePlanStatus`.
  */
 
 import type { Package } from './config.js';

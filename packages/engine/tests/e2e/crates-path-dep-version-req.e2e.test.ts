@@ -1,42 +1,8 @@
 /**
- * A crates release rewrites the in-repo requirements pointing at it — e2e.
- *
- * Issue #640. The e2e twin of
- * `tests/integration/crates-path-dep-version-req.integration.test.ts`: same
- * scenario, two fidelities. Where the integration test drives `publish()`
- * in-process with `cargo` mocked and inspects manifest text, this one
- * **shells out to the built CLI** (`node dist/cli-bin.js publish`) and then
- * makes **real cargo actually resolve the workspace**.
- *
- * That is the whole point of this tier here. The bug is not a wrong string
- * in a file — it is a tree cargo refuses to build. Every manifest assertion
- * can read green on a workspace that cannot resolve at all, so the only
- * check that cannot be self-consistently wrong is handing the result to
- * cargo and asking.
- *
- * `cargo metadata --offline` (with resolution, i.e. *without* `--no-deps`)
- * reproduces the issue's failure verbatim:
- *
- *     error: failed to select a version for the requirement `…-core = "^0.2"`
- *     candidate versions found which didn't match: 0.4.2
- *     location searched: …/packages/core
- *
- * `location searched` naming the local path — not an index — also settles the
- * caveat the issue flagged: for a `path` + `version` dependency cargo checks
- * the requirement against the path crate's on-disk manifest, so registry
- * state cannot change the outcome. The repro holds online for the same
- * reason it holds offline.
- *
- * **No registry is contacted by the publish attempt.** `CARGO_NET_OFFLINE`
- * makes the real `cargo publish` fail immediately, before it can reach any
- * index, so this test can drive the genuine publish path — the only route to
- * the crates handler's `writeVersion` — without ever publishing anything.
- * The engine has already written the manifests by then, and those writes are
- * the subject. The one real network call is `isPublished` GETting crates.io
- * for crate names that have never existed (404s), which is the read-mostly
- * shape this tier is for.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * A crates release rewrites the in-repo requirements pointing at it (#640).
+ * Real cargo resolution is the only reader that can fail on it: error: failed
+ * to select a version for the requirement `…-core = "^0.2"`. CARGO_NET_OFFLINE
+ * makes `cargo publish` fail before an index, so nothing is ever published.
  */
 
 import { execFileSync } from 'node:child_process';

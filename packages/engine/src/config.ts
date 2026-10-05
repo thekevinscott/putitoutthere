@@ -1,16 +1,8 @@
 /**
- * `putitoutthere.toml` loader and validator.
- *
- * Shape per plan.md §6. Handler-specific fields per §6.4. `targets`
- * cross-validation per §12.2: only meaningful for `maturin` / `napi` /
- * `bundled-cli` builds.
- *
- * Two entry points:
- *  - `parseConfig(toml)`  pure function over a TOML string; used in tests.
- *  - `loadConfig(path)`   reads the file and calls parseConfig.
- *
- * Unknown fields are a hard error (no silent drops). Zod's `.strict()`
- * enforces this at every level.
+ * `putitoutthere.toml` loader and validator. Shape per plan.md §6,
+ * handler-specific fields §6.4, `targets` cross-validation §12.2 (only
+ * meaningful for `maturin` / `napi` / `bundled-cli` builds). Unknown fields
+ * are a hard error at every level via Zod `.strict()` — no silent drops.
  */
 
 import { readFile } from 'node:fs/promises';

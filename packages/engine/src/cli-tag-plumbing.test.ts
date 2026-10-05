@@ -1,11 +1,7 @@
 /**
- * CLI wiring for the tag-plumbing commands (#446): dispatch routes each to
- * its engine function with the parsed `--cwd` / `--subject`, and the exit
- * code is passed through. Isolated per the unit-suite convention: each
- * engine is bare-automocked so the double can't drift from the source, and
- * the dispatcher under test (`./cli.js`) is loaded via dynamic import so
- * the mocks are in place first. This asserts routing, not behavior
- * (covered in the colocated engine tests and the e2e-cli tier).
+ * CLI wiring for the tag-plumbing commands (#446): dispatch routes each to its
+ * engine function with the parsed `--cwd` / `--subject`, and the exit code is
+ * passed through.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

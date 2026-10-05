@@ -1,26 +1,8 @@
 /**
- * `runChecks` pre-merge validation — integration test.
- *
- * Per the "No release surprises" goal in `notes/design-commitments.md`
- * (after #316) and issue #319: every check knowable from the consumer's
- * repo state alone runs at PR time, before a release run could fail
- * mid-publish on a precondition checkable in milliseconds.
- *
- * Lives in `tests/integration/` because the bug class this exists to
- * prevent — a misconfigured `putitoutthere.toml` shipping a real
- * release — is only observable when the real config loader, the real
- * cascade graph, the real `git ls-files` walk, and the real per-kind
- * manifest readers all run together. Unit tests with mock handlers
- * cannot observe that integration.
- *
- * Each test seeds a clean git repo with exactly the misconfiguration
- * under test plus the well-formed pieces it needs to reach that check,
- * then asserts the corresponding finding lands in `runChecks(...)`'s
- * output. The closing "well-formed config passes" test pins the other
- * half of the contract so an always-fails regression can't satisfy
- * the red set.
- *
- * Issue #319.
+ * `runChecks` pre-merge validation (#319). Each test seeds a clean git repo
+ * with exactly the misconfiguration under test; the closing "well-formed
+ * config passes" case pins the other half, so an always-fails regression
+ * cannot satisfy the red set.
  */
 
 import { execFileSync } from 'node:child_process';

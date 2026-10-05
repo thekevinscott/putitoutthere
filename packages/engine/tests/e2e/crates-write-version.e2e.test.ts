@@ -1,36 +1,8 @@
 /**
- * The crates publish path bumps the crate's OWN version — e2e.
- *
- * Issue #639. The e2e twin of
- * `tests/integration/crates-write-version.integration.test.ts`: same
- * scenario, two fidelities. Where the integration test drives `publish()`
- * in-process with `cargo` mocked and inspects manifest text, this one
- * **shells out to the built CLI** (`node dist/cli-bin.js publish`) and then
- * asks **real cargo** what it makes of the tree the engine left behind.
- *
- * That last step is why this tier is not optional here. The whole bug is a
- * regex reaching past the table it was aimed at, and a manifest-text
- * assertion is written by the same person who was wrong about where the
- * table ended. `cargo metadata` is the authority on what
- * `version.workspace = true` resolves to and on what requirement a
- * dependency actually carries — it is the reader whose disagreement is the
- * failure.
- *
- * **No registry is contacted by the publish attempt.** `CARGO_NET_OFFLINE`
- * makes the real `cargo publish` fail immediately, before it can reach any
- * index, so this test can drive the genuine publish path — the only route to
- * the crates handler's `writeVersion` — without ever publishing anything.
- * The non-zero exit is expected and asserted; the engine has already written
- * the manifests by the time cargo refuses, and those writes are the subject.
- * The one real network call is the handler's `isPublished` GET against
- * crates.io for a crate name that has never existed (a 404), which is the
- * read-mostly shape this tier is for.
- *
- * `cargo metadata --no-deps` resolves workspace inheritance without touching
- * the dependency graph, so the assertions stay offline and fast even though
- * the fixture declares a registry dependency.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first).
+ * The crates publish path bumps the crate's OWN version (#639); `cargo
+ * metadata --no-deps` is the authority on what `version.workspace = true`
+ * resolves to. `CARGO_NET_OFFLINE` makes the real `cargo publish` fail before
+ * it reaches an index, so the publish path runs without publishing anything.
  */
 
 import { execFileSync } from 'node:child_process';

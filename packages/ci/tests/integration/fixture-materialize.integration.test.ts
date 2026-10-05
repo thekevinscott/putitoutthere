@@ -1,13 +1,8 @@
 /**
  * Integration test for the fixture-materialize harness (#447, epic #442).
- *
- * Drives the real `piot-ci fixture-materialize <mode>` dispatch in-process —
- * `run()` from `cli.ts` → `runFixtureMaterialize` → `decideFixtureMaterialize`
- * + `applySubstitutions` — with only the OS boundary (`node:fs/promises`, the
- * exec seam) mocked. Unlike `src/fixture-materialize/run.test.ts` (which also
- * mocks `decide`), this exercises the real per-phase decision, so the
- * substitution set, git-init, and FIXTURE_VERSION export are asserted through
- * the actual command.
+ * Drives the real `piot-ci fixture-materialize <mode>` dispatch in-process with
+ * only the OS boundary mocked, so the real per-phase decision — substitution
+ * set, git-init, FIXTURE_VERSION export — is asserted through the command.
  */
 
 import { EventEmitter } from 'node:events';

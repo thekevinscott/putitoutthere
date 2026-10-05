@@ -1,30 +1,8 @@
 /**
- * Workflow-YAML contract: the npm `build = "napi"` path must rewrite the
- * napi crate's version to `matrix.version` BEFORE `npm run build` (which
- * runs the consumer's `napi build`) compiles the `.node`. #429.
- *
- * Why this exists: `napi build` bakes `CARGO_PKG_VERSION` into the `.node`
- * at compile time from whatever literal sits in the crate's Cargo.toml,
- * with no env override — the same problem the maturin `write-version`
- * step (#276) and the npm/pypi bundled-cli `write-crate-version` step
- * (#366) already solve for their build paths. The napi path had no
- * equivalent, so the synthesized per-platform npm package carried the
- * planned version in its package.json while the compiled `.node` inside
- * it reported the stale on-disk crate literal — a library that re-exposes
- * the Rust core's `version()` through napi would report a version
- * diverging from the published npm package.
- *
- * Unlike bundled-cli — whose CLI crate can live at a separate
- * `bundle_cli.crate_path` — the napi crate IS the package's own crate
- * (napi-rs convention: `Cargo.toml` beside `package.json`), so the bump
- * targets `matrix.path`. `write-crate-version` resolves
- * `version.workspace = true` to the workspace root (#428), so a polyglot
- * cargo-workspace napi crate is handled too. The `main` (noarch) row
- * compiles no `.node` and is excluded.
- *
- * Both the consumer-facing reusable workflow (`_matrix.yml`) and its e2e
- * mirror (`e2e-fixture-job.yml`) must carry the step, so the `js-napi`
- * fixture exercises the same path a real consumer's release runs.
+ * Workflow-YAML contract (#429): the npm `build = "napi"` path must rewrite the
+ * napi crate's version to `matrix.version` BEFORE `npm run build`. `napi build`
+ * bakes `CARGO_PKG_VERSION` at compile time with no env override, so the `.node`
+ * would otherwise report a stale literal while package.json carries the plan.
  */
 
 import { readFileSync } from 'node:fs';

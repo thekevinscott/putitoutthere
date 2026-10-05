@@ -1,12 +1,8 @@
 /**
- * Composition root for the tdd-lint gate (#452): reads BASE_SHA / HEAD_SHA,
- * runs the `git log` / `git diff` invocations, feeds them to `decideTddLint`,
- * writes the lines, returns the exit code. Both collaborators are mocked
- * (the `node:child_process` boundary and `decide`) so this isolates the
- * wiring. It asserts the *exact* git commands run (including the
- * `packages/engine/src/` pathspec), that git output is parsed into the right
- * decide() input, and that decide()'s lines + exit code are surfaced
- * unchanged. The decisions themselves are covered in `decide.test.ts`.
+ * Composition-root wiring for the tdd-lint gate (#452). `execCapture` and
+ * `decide` are mocked, so this pins the exact git commands run (including the
+ * `packages/engine/src/` pathspec) and that decide's lines + exit code surface
+ * unchanged. Decisions live in `decide.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

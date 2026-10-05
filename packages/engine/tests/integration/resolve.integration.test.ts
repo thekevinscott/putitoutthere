@@ -1,28 +1,8 @@
 /**
- * `putitoutthere resolve` — willfire's callback map for the e2e plan job
- * (#683, thekevinscott/willfire#152).
- *
- * putitoutthere's own PR CI fans `e2e-fixture.yml` over
- * `e2e-fixture-job.yml`, whose `plan` job needs installed dependencies —
- * the one job willfire's sandbox cannot execute. `resolve` answers it
- * ahead of predict time: one JSON map on stdout, keyed
- * `<owner>/<repo>/<workflow-path>:<job-id>` (format frozen on
- * thekevinscott/willfire#153), one entry per fixture enumerable from the
- * checkout, `outputs` carrying the exact strings the live job's
- * `$GITHUB_OUTPUT` would — matched per invocation by inputs subset.
- *
- * Mocks nothing. The map's entire claim is agreement with what the live
- * plan job computes from the same fixture sources; a mocked plan would
- * only prove self-consistency. Everything is local and deterministic:
- * fixture sources on disk, throwaway git repos in tmp, no network.
- *
- * The js-vanilla `matrix` expectation is pinned byte-exact against
- * `JSON.stringify` of the real `plan()` matrix over the materialized
- * fixture (`__VERSION__` → 0.0.0) — the same bytes `emitPlanOutputs`
- * writes after `matrix=` into `$GITHUB_OUTPUT`. The one deliberate
- * divergence from a live run is the version: the live plan job stamps a
- * run-scoped `0.0.{unix_seconds}` no static resolver can reproduce, and
- * `resolve` pins 0.0.0 so its output is deterministic.
+ * `resolve` — willfire's callback map for the e2e plan job (#683,
+ * thekevinscott/willfire#152). One JSON map keyed
+ * `<owner>/<repo>/<workflow-path>:<job-id>` (format frozen on willfire#153).
+ * Mocks nothing. The live job stamps `0.0.{unix_seconds}`; resolve pins 0.0.0.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,12 +1,8 @@
 /**
- * Whether a GitHub Release already exists for `tag` (#444).
- *
- * Wraps `gh release view`, which exits non-zero when the Release is absent.
- * That non-zero is the idempotency guard: a re-run of `release-github`
- * finds the Release present and skips creation instead of erroring. stdout
- * and stderr are discarded (the bash step redirected them to `/dev/null`),
- * and any error — including a genuinely missing Release — resolves to
- * `false`, matching the bash `gh release view … >/dev/null 2>&1` condition.
+ * Whether a GitHub Release already exists for `tag` (#444). Wraps `gh release
+ * view`, whose non-zero exit on an absent Release is the idempotency guard: a
+ * re-run skips creation instead of erroring. Any error — including a genuinely
+ * missing Release — resolves to `false`.
  */
 
 import { execCapture } from '../utils/exec-capture.js';

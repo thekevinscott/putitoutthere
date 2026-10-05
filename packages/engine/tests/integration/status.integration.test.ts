@@ -1,27 +1,8 @@
 /**
- * `piot status` — registry-vs-tag drift detection (integration).
- *
- * The registry is the source of truth; git tags are a cache. `status`
- * reconciles each package's latest git tag (the same `lastTag` resolver
- * the planner and the publish path use) against the registry's latest
- * published version, and flags any drift between the two.
- *
- * Motivating incident (#403): a crate published to crates.io whose
- * release run died before the tagging step. piot derives "last released
- * version" from git tags, so its state silently diverged from the
- * registry — `isPublished` saw the version live, the run "skipped
- * cleanly", and the missing tag never healed. The package got stuck:
- * with no baseline tag it fell back to `first_version`, already
- * published, so it skipped forever and could never bump.
- *
- * This lives in the integration tier, not unit, because the bug is only
- * observable when the real config loader, the real `lastTag` resolver,
- * and the real per-kind registry dispatch run together against a real
- * git tag state. A unit test with a mock handler can't observe "the tag
- * the planner would read is absent while the registry says published" —
- * the mock handler is the very thing that would have to notice the gap,
- * and it doesn't. Only the registry HTTP boundary is mocked (msw);
- * config, tags, and handler dispatch are real.
+ * `piot status` — registry-vs-tag drift detection. The registry is the source
+ * of truth; git tags are a cache. #403: a crate published whose release run
+ * died before tagging gets stuck — with no baseline tag it falls back to
+ * `first_version`, which is already published, so it skips forever.
  */
 
 import { execFileSync } from 'node:child_process';

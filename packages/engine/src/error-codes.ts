@@ -1,19 +1,8 @@
 /**
- * Stable error-code vocabulary.
- *
- * User-facing errors and GitHub Actions `::error::` annotations carry
- * one of these codes so external observers — humans grepping the run
- * log, foreign LLM agents debugging a failed publish, the docs site
- * deep-linking from a code to a recipe — can fingerprint the failure
- * mode without parsing free-form prose.
- *
- * Codes are deliberately verbose. The string is the diagnostic; brevity
- * here just creates ambiguity at a distance.
- *
- * Adding a new code: add it to BOTH `ErrorCodes` and `ALL_ERROR_CODES`;
- * the test in `error-codes.test.ts` enforces parity. Once a code ships
- * in a public-surfaced error message it becomes a stable identifier —
- * rename only with a migration entry.
+ * Stable error-code vocabulary. User-facing errors and `::error::`
+ * annotations carry a code so observers can fingerprint a failure mode
+ * without parsing free-form prose. Add new codes to BOTH `ErrorCodes` and
+ * `ALL_ERROR_CODES` (parity is tested); a shipped code is a stable id.
  */
 
 export const ErrorCodes = {
@@ -96,18 +85,10 @@ export const ErrorCodes = {
    *  vcs`. Either way the build backend has no way to compute a version
    *  at pack time. The fix is to wire up the plugin. #301, #696. */
   PYPI_DYNAMIC_VERSION_NO_BACKEND: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
-  /** A pypi package declares `dynamic = ["version"]` and backs it with a
-   *  `[tool.hatch.version]` block whose source is a **file in the tree**
-   *  — a bare `path` (hatchling's default `regex` source) or
-   *  `source = "code"`. Both read the version off disk without
-   *  consulting `SETUPTOOLS_SCM_PRETEND_VERSION`, and no release step
-   *  rewrites the file (`write-version` is maturin-only), so the wheel
-   *  ships the committed literal rather than the planned version — and
-   *  nothing fails. `agent-transcript-viewer` published `0.0.0` to PyPI
-   *  this way while the plan said `0.1.0`. The fix is to switch the
-   *  source to `"vcs"` (with `hatch-vcs` in `[build-system].requires`),
-   *  which is why this is a separate code from
-   *  `PYPI_DYNAMIC_VERSION_NO_BACKEND`. #696. */
+  /** A pypi package backs `dynamic = ["version"]` with a
+   *  `[tool.hatch.version]` source reading a file in the tree (bare `path`
+   *  or `source = "code"`): it ignores `SETUPTOOLS_SCM_PRETEND_VERSION`, so
+   *  the wheel ships the committed literal. Fix: `source = "vcs"`. #696. */
   PYPI_HATCH_VERSION_PATH: 'PIOT_PYPI_HATCH_VERSION_PATH',
   /** A maturin pypi package declares `[package.bundle_cli]` but
    *  `[tool.maturin].include` does not cover the configured

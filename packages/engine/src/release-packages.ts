@@ -1,20 +1,8 @@
 /**
- * `release_packages` manual-release spec parser.
- *
- * The spec is the value of the reusable workflow's `release_packages`
- * input. It lets a consumer trigger a release of explicitly named
- * packages without any new code — the motivating case being a
- * re-release after a putitoutthere bug fix, where the consumer's repo
- * has no new commits but the packages still need to ship again.
- *
- * Grammar:
- *   spec       = entry *( "," entry )
- *   entry      = package-name [ "@" version-spec ]
- *   version-spec = "patch" | "minor" | "major" | semver
- *
- * A bare package name defaults to a `patch` bump. `semver` is strict
- * `X.Y.Z` (see `version.ts`). Whitespace around entries and the comma
- * separator is tolerated.
+ * `release_packages` manual-release spec parser — the reusable workflow's
+ * `release_packages` input, which re-releases explicitly named packages when
+ * the consumer's repo has no new commits. Grammar: comma-separated
+ * `name[@patch|minor|major|X.Y.Z]`; a bare name defaults to a `patch` bump.
  */
 
 import { parseSemver } from './version.js';

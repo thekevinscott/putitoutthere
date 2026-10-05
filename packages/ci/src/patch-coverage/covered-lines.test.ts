@@ -1,13 +1,8 @@
 /**
  * Pins how the patch-coverage gate (#468) turns one file's istanbul-format
- * coverage record (the v8 reporter's `{ s, statementMap }`) into the sets of
- * covered / uncovered line numbers. Reproduces the `.mjs`'s `coveredLines`:
- *   - a statement spans start.line..end.line inclusive;
- *   - hits > 0 marks every spanned line covered, otherwise uncovered;
- *   - a line touched by both a covered and an uncovered statement is covered
- *     (the covered set wins — `uncovered.delete(l)`);
- *   - a missing file record yields null.
- * Pure; exact assertions on the sorted membership.
+ * coverage record (the v8 reporter's `{ s, statementMap }`) into covered /
+ * uncovered line sets, reproducing the `.mjs`'s `coveredLines`. A line touched
+ * by both a covered and an uncovered statement is covered — the covered set wins.
  */
 
 import { describe, expect, it } from 'vitest';

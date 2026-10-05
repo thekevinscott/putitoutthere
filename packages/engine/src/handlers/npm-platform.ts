@@ -1,26 +1,8 @@
 /**
  * npm platform-package orchestration for `build = "napi"` and
- * `build = "bundled-cli"`.
- *
- * Flow per plan §13.7:
- *   1. For each (build entry, target), synthesize a per-platform package
- *      with narrowed os/cpu fields and the platform binary.
- *   2. Publish each per-platform package (skip already-published).
- *   3. Rewrite the main package's `package.json` to add
- *      `optionalDependencies` pointing at the just-published versions
- *      across every build entry's family.
- *   4. Caller (npm.ts:publishImpl) publishes the main package last.
- *
- * Ordering is enforced: a failed platform publish short-circuits
- * before step 3, so the main package isn't published in an
- * inconsistent state.
- *
- * Multi-mode (#dirsql): when `build` is an array with more than one
- * entry, each entry contributes its own platform-package family. The
- * artifact directory for each (mode, triple) carries a mode infix to
- * keep `napi` and `bundled-cli` artifacts distinct on the build side.
- *
- * Issue #19. Plan: §13.7, §12.2.
+ * `build = "bundled-cli"` (#19; plan §13.7, §12.2). Ordering is enforced: a
+ * failed platform publish short-circuits before the main `package.json` gains
+ * its `optionalDependencies`, so the main package never ships inconsistent.
  */
 
 import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -554,17 +536,10 @@ const NAPI_TO_RUST: Record<string, string> = {
 const RUST_TRIPLES: ReadonlySet<string> = new Set(Object.values(NAPI_TO_RUST));
 
 /**
- * Resolve a target triple to its Rust (rustup/cargo) form.
- *
- * - napi-rs short form (`linux-x64-gnu`) → its Rust triple
- *   (`x86_64-unknown-linux-gnu`).
- * - a Rust triple → itself (identity), so rust-flavor `targets` pass
- *   through untouched.
- * - anything else throws, matching `targetToOsCpu`'s posture: an
- *   unmappable triple fails loud at plan time rather than reaching
- *   `rustup target add` with a triple it rejects (#387).
- *
- * Lookup is case-insensitive, mirroring `targetToOsCpu`.
+ * Resolve a target triple to its Rust (rustup/cargo) form: a napi-rs short
+ * form (`linux-x64-gnu`) maps to its Rust triple, a Rust triple is identity,
+ * and anything else throws so an unmappable triple fails at plan time rather
+ * than reaching `rustup target add` (#387). Case-insensitive.
  */
 export function toRustTriple(target: string): string {
   const key = target.toLowerCase();
@@ -582,20 +557,10 @@ export function toRustTriple(target: string): string {
 }
 
 /**
- * The package-relative path `package.json#main` should name, given the
- * entries of a staged platform artifact (`dir`, its `files` listing) and
- * the build mode that produced it.
- *
- * `bundled-cli` resolves through directories to an actual file: consumers
- * stage the cross-compiled binary either flat (`<artifact>/<bin>`) or
- * nested (`<artifact>/bin/<bin>`), and both layouts clear the completeness
- * check, which lists files recursively. Taking `readdir`'s first
- * non-`package.json` entry as-is named the `bin` **directory** on the
- * nested layout — so the manifest pointed `main` at a directory and the
- * #365 executable-bit restore chmodded that directory instead of the
- * binary, publishing it at 0644 (#626).
- *
- * `napi` is unaffected: it looks up the `.node` payload by extension.
+ * The package-relative path `package.json#main` should name for a staged
+ * platform artifact. `bundled-cli` resolves through directories to a real
+ * file: on the nested `<artifact>/bin/<bin>` layout `readdir`'s first entry is
+ * the `bin` **directory**, which #365's chmod then restored at 0644 (#626).
  */
 export async function pickMainFile(
   dir: string,

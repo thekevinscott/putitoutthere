@@ -1,10 +1,6 @@
 /**
- * `emitReleaseOutputs` unit coverage (#461, #623). Isolated per the
- * unit-suite convention: the only collaborator is `node:fs/promises`'s
- * `appendFile`, which is mocked, so each case asserts exactly the bytes
- * the runner would read back out of `$GITHUB_OUTPUT`. The real file write
- * is exercised at the integration tier
- * (`tests/integration/pypi-delegated-tag.integration.test.ts`).
+ * `emitReleaseOutputs` unit coverage (#461, #623): the exact bytes the runner
+ * would read back out of `$GITHUB_OUTPUT`.
  */
 
 import { appendFile } from 'node:fs/promises';

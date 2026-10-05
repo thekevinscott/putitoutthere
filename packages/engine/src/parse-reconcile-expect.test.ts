@@ -1,15 +1,8 @@
 /**
- * `parseReconcileExpect` unit coverage. Pure grammar, no collaborators to
- * mock: the two accepted forms are a single `<name>@<version>` and the
- * release job's `delegated_packages` JSON array, forwarded verbatim.
- *
- * The scoped-npm case is the one that decides the split rule — `@scope/p`
- * carries an `@` of its own, so the version separator is the LAST `@`, not
- * the first. The rejection cases pin that a malformed expectation fails
- * loudly rather than resolving to a half-parsed pair, because the caller's
- * next move is to cut a tag from whatever comes back.
- *
- * Issue #666.
+ * `parseReconcileExpect` unit coverage (#666). The scoped-npm case decides the
+ * split rule: `@scope/p` carries an `@` of its own, so the version separator
+ * is the LAST `@`, not the first. A malformed expectation must fail loudly —
+ * the caller's next move is to cut a tag from whatever comes back.
  */
 
 import { describe, expect, it } from 'vitest';

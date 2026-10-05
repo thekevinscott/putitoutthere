@@ -1,10 +1,5 @@
 /**
  * Dirty-tree scan tests (#135).
- *
- * Unit-suite isolation: the git subprocess (the process seam —
- * `execCapture`) is mocked, so each case drives the scan through canned
- * porcelain rather than a real repo. Real git behavior is covered by the
- * crates integration tier (tests/integration/crates.integration.test.ts).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

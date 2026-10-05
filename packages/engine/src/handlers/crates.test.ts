@@ -1,15 +1,5 @@
 /**
- * crates.io handler tests.
- *
- * Issue #16. Plan: §7.4, §13.1, §14.5, §16.1.
- *
- * Unit-suite isolation: the subprocess boundary (the process seam —
- * `execCapture`, driving cargo + git) and the filesystem
- * (`node:fs/promises`) are mocked so each case isolates the unit under
- * test. Cargo.toml contents are driven through `readFile` resolutions;
- * the dirty-tree scan is driven through mocked `git` output rather than a
- * real repo. Real end-to-end file + git behavior is covered by the crates
- * integration tier (tests/integration/crates.integration.test.ts).
+ * crates.io handler tests (#16).
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -862,18 +852,11 @@ describe('crates.publish', () => {
     });
 
     /**
-     * #651. `--verbose` plus `CARGO_TERM_VERBOSE=true` makes a cold verify
-     * build's stderr run to hundreds of KB. The rendered message is logged
-     * on one line and GitHub cuts a log line at 64KB from the *front*, so
-     * an unelided render throws away cargo's error and keeps the healthy
-     * build chatter.
-     *
-     * Assertions here are booleans rather than `toContain` on purpose: a
-     * failed matcher against a ~480KB string prints the whole string into
-     * the test report, which is the same disease under a different roof.
+     * #651. GitHub cuts a log line at 64KB from the *front*, so an unelided
+     * render of a cold verify build's stderr throws away cargo's error and
+     * keeps the healthy build chatter. Assertions here are booleans rather
+     * than `toContain`: a failed matcher would print the whole ~480KB string.
      */
-    // No leading indent on the head marker: the handler trims the stream
-    // before rendering, so cargo's leading spaces are gone by then.
     const HUGE_HEAD = 'Updating crates.io index';
     const HUGE_TAIL = 'error: could not compile `demo-crate` (lib)';
     const hugeStderr = (tail: string = HUGE_TAIL): string =>

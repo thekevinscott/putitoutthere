@@ -1,21 +1,8 @@
 /**
- * Write a publish run's release facts to `$GITHUB_OUTPUT` (#461, #623).
- *
- * Four keys, in two pairs:
- *
- *  - `released` / `released_packages` (#461) — what this run actually put
- *    on a registry. A post-release job (changelog assembly, docs stamping,
- *    announcements) gates on these.
- *  - `delegated` / `delegated_packages` (#623) — PyPI packages whose
- *    upload the engine handed to a caller-side job. They have NOT shipped
- *    and are deliberately absent from the `released` pair: no tag has been
- *    cut for them, and the upload has not happened. The caller's
- *    `pypi-publish` job gates on `delegated`, which is why this is written
- *    on the failure path too — "PyPI's own path succeeded" has to be
- *    answerable after an unrelated registry failed the run.
- *
- * A no-op when `$GITHUB_OUTPUT` is unset (local runs), so callers don't
- * have to branch on being inside Actions.
+ * Write a publish run's release facts to `$GITHUB_OUTPUT` (#461, #623):
+ * `released`/`released_packages` for what shipped, plus
+ * `delegated`/`delegated_packages` for PyPI uploads handed to a caller-side
+ * job — deliberately not `released`, and written on the failure path too.
  */
 
 import { appendFile } from 'node:fs/promises';

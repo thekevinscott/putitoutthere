@@ -1,27 +1,9 @@
 /**
- * Rewrite the `version = "…"` requirement on a **path** dependency,
- * preserving the rest of the manifest byte-for-byte. #621.
- *
- * Bumping an embedded crate without moving the requirements that point at
- * it is worse than leaving it stale: cargo stops resolving entirely.
- *
- *     error: failed to select a version for the requirement `demo-core = "^0.2"`
- *     candidate versions found which didn't match: 0.4.2
- *
- * That is a hard failure (exit 101) before anything compiles, and a
- * `version` key alongside `path` is *mandatory* for any crate that also
- * publishes to crates.io — so the shape that needs this is exactly the
- * shape polyglot repos have.
- *
- * String surgery rather than a TOML round-trip, matching
- * `replaceCargoVersion` and `replaceWorkspacePackageVersion`: re-emitting
- * parsed TOML discards comments and formatting from a file the consumer
- * owns.
- *
- * Only entries that also carry a `path` key are touched. A registry
- * dependency that happens to share the key name keeps its requirement —
- * rewriting pyo3's `0.22` to the release version would pin a version that
- * does not exist.
+ * Rewrite the `version = "…"` requirement on a **path** dependency, preserving
+ * the rest of the manifest byte-for-byte (#621). A stale requirement stops cargo
+ * dead at exit 101 — "failed to select a version for the requirement
+ * demo-core = ^0.2". Only path-carrying entries are touched: rewriting pyo3's
+ * `0.22` would pin a version that does not exist.
  */
 
 /** Escape a dependency key for literal use inside a RegExp. */
@@ -31,15 +13,9 @@ function escapeRe(s: string): string {
 
 /**
  * Rewrite every `version` requirement declared for `depKey` **that also
- * declares a `path`**, in either dependency-entry syntax:
- *
- *   - inline table — `demo-core = { path = "../core", version = "0.2" }`
- *   - section table — `[dependencies.demo-core]` / `path` / `version`
- *
- * Both forms are scanned across the whole manifest, so a dependency
- * declared in several tables (normal plus dev, plus a `cfg`-gated one)
- * has every occurrence rewritten. Returns the source unchanged when the
- * key declares no path-plus-version entry.
+ * declares a `path`**, in either syntax — inline table
+ * (`demo-core = { path = "../core", version = "0.2" }`) or section table
+ * (`[dependencies.demo-core]`) — across every table in the manifest.
  */
 export function replaceDepVersionReq(source: string, depKey: string, version: string): string {
   const key = escapeRe(depKey);

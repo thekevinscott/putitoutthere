@@ -1,11 +1,7 @@
 /**
- * Error-code module tests.
- *
- * Phase 1 / Idea 4. The codes are a stable vocabulary that user-facing
- * error messages and `::error::` annotations will tag. Foreign agents
- * debugging a failed publish from the outside can fingerprint on the
- * code instead of free-form prose; the docs site can deep-link
- * `auth.html?code=PIOT_…` to a code-specific recipe.
+ * Error-code module tests. The codes are a stable vocabulary that user-facing
+ * error messages and `::error::` annotations tag, so a foreign agent debugging
+ * a failed publish can fingerprint on the code instead of free-form prose.
  */
 
 import { describe, expect, it } from 'vitest';

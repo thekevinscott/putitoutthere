@@ -1,10 +1,8 @@
 /**
  * Decision core for the evidence-check gate (#445). I/O-free: given the
  * newly-added `## Unreleased` bullets, the base/head SHAs, and a
- * `passedEvidence` predicate (which the composition root binds to the live
- * GitHub Actions run state), decide pass/fail and the lines to emit. Extracted
- * from the inline bash in `.github/workflows/evidence-check.yml`; the decisions
- * and `::error::`/success text match it exactly (pinned in `decide.test.ts`).
+ * `passedEvidence` predicate, decide pass/fail and the lines to emit. Extracted
+ * from the inline bash in `.github/workflows/evidence-check.yml`.
  */
 import { ALLOWED_BUCKETS } from './buckets.js';
 import { bucketOf } from './bucket-of.js';

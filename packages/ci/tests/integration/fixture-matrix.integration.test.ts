@@ -1,27 +1,8 @@
 /**
- * Integration test for the fixture-matrix gate (#670).
- *
- * Drives the real `piot-ci fixture-matrix <fixture>` dispatch in-process
- * (`run()` from `cli.ts`) and mocks nothing. That is deliberate: the gate's
- * entire claim is that it reproduces the matrix `e2e-fixture-job.yml`'s
- * `plan` job computes, and a mocked filesystem or a mocked git would only
- * prove the gate agrees with the shape this test assumed — the
- * self-consistency trap. Everything it touches is local and deterministic
- * (fixture sources on disk, a throwaway git repo in a temp dir, no network),
- * so running it for real is both stronger and affordable.
- *
- * Scope note: the gate emits matrix rows, not `build` job *names*. On `main`
- * the build job carries no `name:`, so GitHub derives one from the whole
- * matrix row — including a `0.0.{unix_seconds}` version and, on
- * `*-first-publish` fixtures, a package name embedding `github.run_id` —
- * neither of which is reproducible outside the run. #660 (issue #655) gives
- * the job a deterministic `name:`; formatting a row into a check name is that
- * shape's concern, and belongs with whoever consumes these rows, not here.
- *
- * The expected rows below are pinned against reality: the `plan` output for
- * `polyglot-everything-first-publish` was diffed against the 18 `build` jobs
- * of completed run 33435391488 — one row per dispatched job, matching on
- * kind / build / target.
+ * Integration test for the fixture-matrix gate (#670). Mocks nothing, and that
+ * is deliberate: the gate's claim is that it reproduces the matrix
+ * `e2e-fixture-job.yml`'s `plan` job computes, and a mocked filesystem or git
+ * would only prove it agrees with this test's assumption. Rows, not job names.
  */
 
 import { readdir } from 'node:fs/promises';

@@ -1,33 +1,8 @@
 /**
- * `putitoutthere release-github` — cut a GitHub Release for each new tag on
- * HEAD (#444, epic #442).
- *
- * Extraction of the inline "Create GitHub Release(s) for new tag(s)" bash
- * step in `.github/workflows/release.yml`. The engine creates annotated
- * git tags and publishes to PyPI / npm / crates.io but does NOT cut GitHub
- * Releases; this backfills them so the project's /releases page tracks the
- * tag history.
- *
- * The contract — previously pinned only by a YAML-text test (#437), now
- * ordinary tested code:
- *
- * - **no-fetch** — never `git fetch`. Local tag state is already complete:
- *   checkout (`fetch-depth: 0`) fetched every remote tag, and the tags
- *   iterated here were created locally by the engine in this same job. A
- *   blanket `git fetch --tags` would reject any tag that moved since
- *   checkout — a consumer's floating major tag, force-moved mid-run by
- *   their promotion automation — failing the job after a fully successful
- *   publish (#436).
- * - **ref-scoped-push** — `git push origin refs/tags/<tag>` per tag,
- *   idempotent and invisible to every other tag, completing the engine's
- *   warn-only tag push (#407) in the same run so `gh release create`
- *   always sees its tag on the remote.
- * - **idempotent-create** — the `gh release view` guard skips a Release
- *   that already exists instead of erroring on a re-run.
- *
- * Returns the process exit code (always 0 on the happy path; a git/gh
- * failure throws out of the loop and the CLI's top-level catch surfaces it
- * as exit 1, matching the bash `set -euo pipefail`).
+ * `putitoutthere release-github` — cut a GitHub Release for each new tag on HEAD
+ * (#444, #437). Never `git fetch`: a blanket `git fetch --tags` would reject a
+ * tag moved since checkout and fail the job after a fully successful publish
+ * (#436). Pushes are ref-scoped per tag (#407); creation is idempotent.
  */
 
 import { pushTagRef, tagsPointingAtHead } from '../git.js';

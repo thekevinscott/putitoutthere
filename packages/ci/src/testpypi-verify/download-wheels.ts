@@ -1,13 +1,8 @@
 /**
  * Composition root for the wheel-download phase of `testpypi-verify metadata`.
- * Fetches every wheel the resolved release lists, straight from its immutable
- * artifact URL, and fails with the exact `::error::failed to download wheel …`
- * line on the first that will not come down. Returns the exit code (0 = all
- * wheels downloaded).
- *
- * Replaces the `pip download --index-url …/simple/` loop this phase used to
- * run (#668): pip resolves through the simple index, so it inherited that
- * page's edge-cache staleness no matter how long the loop waited.
+ * Fetches every wheel the resolved release lists from its immutable artifact
+ * URL. Replaces the `pip download --index-url …/simple/` loop (#668): pip
+ * resolves through the edge-cached simple index, inheriting its staleness.
  */
 
 import { downloadArtifact } from './download-artifact.js';

@@ -1,22 +1,8 @@
 /**
- * The failure dump carries the failing subprocess, not a paraphrase of it.
- *
- * Second half of #617. When a handler throws, `publish()` builds a
- * `FailureContext` for `dumpFailure` — the job-summary markdown a consumer
- * reads to find out what went wrong. It was populated from `error.message`
- * with `command: []` and `exitCode: -1`, so the dump described the engine's
- * own rendered sentence rather than the tool's output: on the run that
- * produced #617 the summary carried an empty command, an empty stderr and
- * exit code -1, and npm's raw 403 — the one line naming *why* the publish
- * was refused — never reached the operator at all.
- *
- * The seam is `ExecError`: it already holds the real stdout, stderr and
- * exit status, and the handler wraps it as the `cause` of whatever it
- * throws. This pins that the dump reads through to it.
- *
- * Same harness as `publish.integration.test.ts`: a real git repo, real
- * config load / plan / preflight / handler dispatch, with only the npm CLI
- * subprocess stubbed. Issue #617.
+ * The failure dump carries the failing subprocess, not a paraphrase (#617):
+ * `FailureContext` was built from `error.message` with `command: []` and
+ * `exitCode: -1`, so npm's raw 403 never reached the operator. The seam is
+ * `ExecError`, which the handler wraps as the `cause` of what it throws.
  */
 
 import { EventEmitter } from 'node:events';

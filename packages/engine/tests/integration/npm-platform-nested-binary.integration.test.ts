@@ -1,36 +1,8 @@
 /**
- * Nested bundled-cli artifacts through the real `publish()` pipeline —
- * the deterministic twin of `npm-platform-nested-binary.e2e.test.ts`
- * (#626).
- *
- * A consumer's build step may stage the cross-compiled binary either flat
- * (`artifacts/<pkg>-<triple>/<bin>`) or nested under a subdirectory
- * (`artifacts/<pkg>-<triple>/bin/<bin>`). Both clear the completeness
- * check — it lists files recursively — so both reach
- * `synthesizePlatformPackage`, which picks the package's `main` by taking
- * the first non-`package.json` entry `readdir` returns. On the nested
- * layout that entry is the **directory** `bin`, so:
- *
- *   1. the synthesized manifest declares `"main": "bin"`, pointing at a
- *      directory (live casualty:
- *      `@agent-transcripts/x86_64-unknown-linux-gnu@0.0.1`), and
- *   2. the #365 executable-bit restore chmods that directory instead of
- *      the binary, so the tarball ships the binary at 0644 — exactly the
- *      condition #365 exists to prevent. Masked for consumers using a
- *      launcher that re-chmods at spawn time; an EACCES for anyone who
- *      execs the binary directly.
- *
- * Everything but the npm CLI runs for real: the config loader, `plan()`,
- * the pre-flights, handler dispatch, the npm handler body, and the
- * staging-directory synthesis on a real filesystem. Only `execFile` — the
- * Node built-in under the process seam — is mocked, so the assertions read
- * the staging directory npm *would* have packed, at the moment `npm
- * publish <folder>` is invoked (the engine deletes it right after).
- *
- * The e2e twin asserts the same two facts one fidelity up, on the bytes a
- * real `npm publish` PUT to a registry.
- *
- * Issue #626.
+ * Nested bundled-cli artifacts (#626): `synthesizePlatformPackage` takes `main`
+ * from the first non-`package.json` `readdir` entry — the directory `bin` on
+ * the nested layout — so #365's chmod lands there and the tarball ships the
+ * binary 0644. Assertions read the staging dir before the engine deletes it.
  */
 
 import { EventEmitter } from 'node:events';

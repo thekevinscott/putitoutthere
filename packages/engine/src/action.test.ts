@@ -1,10 +1,7 @@
 /**
- * `action` unit tests. `main()` is the ~50-line GHA adapter: it reads the
- * `INPUT_*` env, shapes the CLI argv, dispatches, and surfaces the exit code
- * (honouring `fail_on_error`). The dispatcher itself (`./cli.js`'s `run`) is
- * mocked so this isolates the adapter's env-parsing / argv-shaping / exit-code
- * logic; the real plan / write-* behaviour is covered at the integration + e2e
- * tiers.
+ * `action` unit tests. `main()` is the GHA adapter: reads the `INPUT_*` env,
+ * shapes the CLI argv, dispatches, and surfaces the exit code (honouring
+ * `fail_on_error`).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

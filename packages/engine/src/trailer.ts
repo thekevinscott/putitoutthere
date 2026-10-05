@@ -1,21 +1,8 @@
 /**
- * Release trailer parser.
- *
- * Grammar (plan.md §10.3):
- *   trailer      = "release:" WS value [ WS packages ]
- *   value        = "patch" | "minor" | "major" | "skip"
- *   packages     = "[" package-list "]"
- *   package-list = package-name *( "," WS package-name )
- *
- * Semantics (§10.6): case-insensitive key match; only the LAST `release:`
- * line wins.
- *
- * Pure TypeScript implementation. A `git interpret-trailers`-backed
- * variant may be added later for edge cases the RFC 822 trailer spec
- * handles (folded continuations, etc.), but the pure parser covers
- * every message shape putitoutthere actually sees.
- *
- * Issue #6.
+ * Release trailer parser (#6; grammar plan.md §10.3, semantics §10.6):
+ * `release: patch|minor|major|skip [ "[" name, name "]" ]`. The key match is
+ * case-insensitive and only the LAST `release:` line wins. Pure TypeScript —
+ * no `git interpret-trailers`, no folded-continuation support.
  */
 
 import type { Bump } from './types.js';

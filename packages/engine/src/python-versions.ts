@@ -1,17 +1,8 @@
 /**
- * Python-version resolution for `kind = "pypi"` packages.
- *
- * `kind = "pypi"` builds a wheel for every CPython version a package
- * supports, not just one. The version set is resolved per package:
- *
- *  1. An explicit `python_versions` array in `putitoutthere.toml`.
- *  2. Otherwise, inferred from `[project].requires-python` in the
- *     consumer's `pyproject.toml`.
- *  3. Otherwise, a single default version.
- *
- * The planner fans the pypi build matrix across the resolved set so
- * consumers whose `requires-python` spans multiple versions ship
- * complete wheel coverage with zero configuration. Issue #369.
+ * Python-version resolution for `kind = "pypi"` packages (#369): explicit
+ * `python_versions` in `putitoutthere.toml`, else inferred from
+ * `[project].requires-python`, else a single default. The planner fans the pypi
+ * build matrix across the set so wheel coverage needs no configuration.
  */
 
 import { readFile } from 'node:fs/promises';

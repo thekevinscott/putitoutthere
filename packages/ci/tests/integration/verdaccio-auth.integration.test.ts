@@ -1,11 +1,8 @@
 /**
- * Integration test for the Verdaccio-auth harness (#453, epic #442).
- *
- * Drives the real `piot-ci verdaccio-auth` dispatch in-process — `run()` →
- * `runVerdaccioAuth` → `decideVerdaccioAuth` + `parseNpmPaths` — with only the
- * OS boundary (the exec seam, `node:fs/promises`) mocked. Exercises the real
- * decision, so the token-validity gate, the per-package `.npmrc` contents, and
- * the `::add-mask::` / `Wrote` lines are asserted through the actual command.
+ * Integration test for the Verdaccio-auth harness (#453, epic #442). Drives the
+ * real `piot-ci verdaccio-auth` dispatch in-process with only the OS boundary
+ * mocked, so the real decision — token-validity gate, per-package `.npmrc`
+ * contents, the `::add-mask::` / `Wrote` lines — is asserted through it.
  */
 
 import type * as ChildProcess from 'node:child_process';

@@ -1,18 +1,8 @@
 /**
- * Decision core for the actionlint id-token gate (#452). I/O-free: given the
- * contents of the PR-time-path workflow files, decide whether any declares
- * `id-token: write` and produce the exact output the inline bash did.
- * Extracted from the `Assert PR-time path has no id-token permission` step in
- * `.github/workflows/actionlint.yml`; the decisions and every emitted line
- * (the `grep -n` `<lineNumber>:<line>` echoes and the `::error file=…::`
- * message) match it exactly (pinned in `decide.test.ts`).
- *
- * The original grep pattern was `^[[:space:]]+id-token[[:space:]]*:[[:space:]]*write`:
- * a line that, after at least one leading whitespace, is an `id-token: write`
- * YAML key (lenient about the spacing around the colon, unanchored after
- * `write`). The matcher below reproduces that with fixed-string `startsWith`
- * and `trimStart` steps rather than a single regex — the regex's `[[:space:]]+`
- * / `[[:space:]]*` quantifiers would otherwise breed equivalent mutants.
+ * Decision core for the actionlint id-token gate (#452). I/O-free: decides
+ * whether a PR-time-path workflow declares `id-token: write`, emitting exactly
+ * what the inline bash in `.github/workflows/actionlint.yml` did. Matched with
+ * `startsWith`/`trimStart`, not a regex: `[[:space:]]+` breeds equivalent mutants.
  */
 
 export interface WorkflowFile {

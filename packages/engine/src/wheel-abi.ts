@@ -1,32 +1,9 @@
 /**
- * Detects Python-version-independent maturin wheels so the planner can
- * collapse the per-CPython-version build fan to a single wheel. #401.
- *
- * `kind = "pypi"` `build = "maturin"` normally fans the wheel build
- * across every CPython version `requires-python` allows (see
- * `python-versions.ts`). But two maturin shapes produce ONE wheel per
- * platform that is byte-identical regardless of the interpreter that
- * built it:
- *
- *  - `[tool.maturin].bindings = "bin"` in `pyproject.toml` — the wheel
- *    wraps a Rust *binary*, tagged `py3-none-<platform>`; it carries no
- *    Python ABI at all.
- *  - a pyo3 (or pyo3-ffi) `abi3` / `abi3-pyXY` feature — a single
- *    stable-ABI extension tagged `cp3x-abi3-<platform>` that loads on
- *    every CPython >= X.Y.
- *
- * Fanning either shape across N versions yields N identical wheels:
- * wasted build time, and — because each fanned row uploads under its own
- * artifact — N copies of the same wheel filename that race-corrupt at the
- * consumer's `merge-multiple: true` download (`twine` → `BadZipFile`).
- *
- * Detection is best-effort and conservative. A missing or unparseable
- * manifest, or an abi3 setup we don't recognize (a workspace-inherited
- * `pyo3` dependency, a target-specific `[target.'cfg(...)'.dependencies]`
- * table), falls through to `false` and the planner keeps fanning — the
- * pre-#401 behavior, never worse.
- *
- * Engine convention: async `readFile` throughout (AGENTS.md, #469).
+ * Detect Python-version-independent maturin wheels so the planner collapses the
+ * per-CPython build fan to one wheel (#401): `[tool.maturin].bindings = "bin"` or
+ * a pyo3 `abi3` feature. Fanning either yields N identical wheel filenames that
+ * race-corrupt under `merge-multiple: true` (`twine` → `BadZipFile`); anything
+ * unrecognised falls through to `false` and keeps fanning.
  */
 
 import { readFile } from 'node:fs/promises';

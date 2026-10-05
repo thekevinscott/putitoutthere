@@ -1,18 +1,8 @@
 /**
- * `reconcile` unit coverage. The subject backfills the missing git tag
- * for every package whose live registry version has no tag — the
- * `published, untagged` drift, and (since #623) the registry-ahead-of-
- * the-newest-tag drift a caller-side PyPI upload leaves behind.
- *
- * Its collaborators are isolated: `loadConfig`, `computeStatus`,
- * `resolveTagCommit`, `tagList`, and `ensureTag` are automocked and
- * driven per scenario, so each case exercises the reconcile loop — which
- * rows it heals, the sibling-vs-HEAD commit it tags, and the dry-run gate
- * — without a real repo or registry. The pure `formatTag` math runs for
- * real. End-to-end behaviour (real git tag writes + CLI rendering) is
- * pinned at the integration + e2e tiers.
- *
- * Issue #410, #403 slice 3, #623, #666.
+ * `reconcile` unit coverage (#410, #403 slice 3, #623, #666). Backfills the
+ * missing git tag for every package whose live registry version has no tag —
+ * the `published, untagged` drift, and (since #623) the registry-ahead-of-the-
+ * newest-tag drift a caller-side PyPI upload leaves behind.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

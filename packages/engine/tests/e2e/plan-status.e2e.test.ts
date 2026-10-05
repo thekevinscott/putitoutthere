@@ -1,20 +1,8 @@
 /**
- * `piot plan` publish/skip verdict against the real CLI + real crates.io
- * — the e2e twin of `tests/integration/plan-status.integration.test.ts`.
- *
- * Shells out to the built CLI (`node dist/cli-bin.js plan … --json`)
- * pointed at piot's own live fixture crate `piot-fixture-zzz-poly-rust`.
- * `--release-packages` pins the planned version, so the verdict is
- * deterministic: the crate's current live version is already published
- * (→ SKIP, a real isPublished 200 against crates.io), while an
- * implausible version is not (→ PUBLISH, a real 404). This is the tier
- * that fails if the real isPublished endpoint shape diverges from the
- * mocked one. No publish, no auth — plan only reads.
- *
- * Red before the feature: `plan --json` emits the bare matrix array with
- * no verdicts.
- *
- * Run via `pnpm test:e2e` (which builds `dist/` first). Issues #403, #412.
+ * `plan` publish/skip verdict against the real CLI + real crates.io.
+ * `--release-packages` pins the planned version so the live reads are
+ * deterministic: the crate's current version is published (200 → SKIP), an
+ * implausible one is not (404 → PUBLISH). Issues #403, #412.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,36 +1,8 @@
 /**
- * `piot plan` against an unreachable network — #650.
- *
- * A hermetic (`--network none`) `plan` run measured 70s against a 13-row
- * consumer matrix versus 0.95s with network, for a `matrix` output that is
- * byte-identical either way. Every second of that is the npm publish-verdict
- * probe: `isPublished` shells out to `npm view`, and the npm CLI's own
- * error-blind retry budget (`fetch-retries=2`, 10s then 60s) re-attempts a
- * DNS failure that cannot succeed. A name that does not resolve is
- * deterministic within a run — retrying it buys nothing.
- *
- * Two claims, one scenario:
- *
- * 1. **One bounded probe.** `npm view` is invoked exactly once, with npm's
- *    internal retry budget disabled, so an offline probe fails at DNS speed
- *    instead of paying a 70s backoff ladder. Asserted on the calls the
- *    engine makes rather than on elapsed time, which would be flaky in CI.
- * 2. **`unknown`, not `publish`.** Today every non-zero `npm view` exit —
- *    including "the network is gone" — is read as "the version is not on
- *    the registry", so an offline plan asserts a package WOULD PUBLISH when
- *    it could not reach npm to find out. That is exactly the release
- *    surprise `plan` exists to prevent. An unreachable registry must render
- *    UNKNOWN, the same posture crates.io and PyPI already take, and the
- *    matrix must still be emitted (the diagnostic degrades, never aborts).
- *
- * `unknown` keeps the release path intact: `unpublishedKinds` counts
- * unknown as unpublished (#622), so npm auth is still acquired for a run
- * whose verdict could not be resolved.
- *
- * Only the subprocess boundary is mocked — `execFile` underneath the real
- * process seam, and only for `npm`; git runs for real. Config, plan,
- * version, and handler dispatch are the real ones. This is the in-process
- * twin of `tests/e2e/plan-offline.e2e.test.ts`.
+ * `plan` against an unreachable network (#650): `npm view`'s own
+ * `fetch-retries=2` ladder (10s then 60s) retries a DNS failure that cannot
+ * succeed, and a non-zero exit is read as "not published". Asserted on the
+ * calls the engine makes, not elapsed time, which would be flaky in CI.
  */
 
 import type * as ChildProcess from 'node:child_process';

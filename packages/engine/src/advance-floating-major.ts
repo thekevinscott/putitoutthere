@@ -1,20 +1,8 @@
 /**
  * `putitoutthere advance-floating-major` — move the floating `v<major>` tag
- * to the newest release in its major line (#446, epic #442).
- *
- * Extraction of `release-npm.yml`'s inline "Move floating major tag" bash.
- * Scaffolded consumer workflows reference
- * `thekevinscott/putitoutthere@v<major>` (the community `actions/checkout@v4`
- * convention); the canonical per-release tag is
- * `putitoutthere-v<x.y.z>`, so this keeps a floating `v<major>` pointing at
- * the latest release in the major line. Idempotent: a re-run is a no-op
- * when the floating tag already matches the latest release.
- *
- * Reuses the release path's own resolvers rather than re-globbing/sorting
- * in parallel: `lastTag` finds the highest release tag for the (single)
- * package the config declares and hands back its already-parsed version,
- * and the shared `forceMoveTag` performs the move — so the floating tag
- * can never track a release the publish path wouldn't recognize.
+ * to the newest release in its major line (#446, epic #442). Scaffolded
+ * consumers reference `thekevinscott/putitoutthere@v<major>` while the
+ * canonical per-release tag is `putitoutthere-v<x.y.z>`. Idempotent.
  */
 
 import { join } from 'node:path';

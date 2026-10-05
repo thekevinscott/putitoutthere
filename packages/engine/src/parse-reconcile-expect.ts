@@ -1,11 +1,8 @@
 /**
  * Grammar for `reconcile --expect`: a single `<name>@<version>`, or a JSON
  * array of `{name, version, ...}` matching the release job's
- * `delegated_packages` output verbatim (extra keys, e.g. `tag`, are
- * ignored) — so `pypi-tag.yml` can forward that output without reshaping
- * it in YAML.
- *
- * Issue #666.
+ * `delegated_packages` output verbatim (extra keys like `tag` are ignored), so
+ * `pypi-tag.yml` can forward that output without reshaping it. Issue #666.
  */
 
 import { toError } from './to-error.js';

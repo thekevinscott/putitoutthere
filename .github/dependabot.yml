@@ -22,21 +22,10 @@ updates:
       - dependency-name: "@vitest/*"
         update-types: ["version-update:semver-major"]
     groups:
-      # `vitest` and `@vitest/*` must move as ONE PR, majors included.
-      # @vitest/coverage-v8 is version-locked to the vitest runtime it
-      # instruments, so a split bump mismatches them and vitest aborts:
-      #   Loaded  vitest@5.0.1  and  @vitest/coverage-v8@4.1.11 .
-      #   Running mixed versions is not supported and may lead into bugs
-      #   Update your dependencies and make sure the versions match.
-      # which cascaded into 139 unhandled `TypeError: Expected string coverage
-      # payload, received object` and left both halves of the 4 -> 5 upgrade
-      # structurally un-greenable (#705 bumped vitest alone, #706 bumped
-      # coverage-v8 alone; neither could pass the coverage gates by itself).
-      # `dev-dependencies` below cannot carry this: it is scoped to
-      # minor+patch, and a *major* matches no group at all, so Dependabot
-      # falls back to one PR per package. Listed first because a dependency
-      # joins the first group whose rules it matches, and it names every
-      # update-type so this family can never split again.
+      # `vitest` and `@vitest/*` must move as ONE PR, majors included:
+      # @vitest/coverage-v8 is version-locked to the runtime it instruments
+      # and vitest aborts on a mismatch (#705, #706). Listed FIRST -- a
+      # dependency joins the first group whose rules it matches.
       vitest:
         patterns:
           - vitest

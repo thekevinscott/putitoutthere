@@ -1,11 +1,7 @@
 /**
- * `readPythonSource` — read + normalize `[tool.maturin].python-source`
- * from `pyproject.toml`, honoring the legacy `python_source` spelling and
- * the missing-file / missing-table / missing-key → `""` paths (#451).
- *
- * Unit-isolated: `node:fs/promises` is mocked so the branches are driven by
- * the pyproject presence + body the mock returns, not by a temp dir on disk.
- * Real-IO coverage lives in the verify integration/e2e tiers.
+ * `readPythonSource` — read + normalize `[tool.maturin].python-source` from
+ * `pyproject.toml`, honoring the legacy `python_source` spelling and the
+ * missing-file / missing-table / missing-key → `""` paths (#451).
  */
 
 import { readFile, stat } from 'node:fs/promises';

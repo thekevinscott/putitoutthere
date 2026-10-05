@@ -1,17 +1,8 @@
 /**
- * Artifact completeness check.
- *
- * Before any publish side effect, verify every matrix row's artifact
- * is present and has the expected shape. A missing artifact aborts
- * that package's release (per plan.md §13.2); other packages
- * continue. No --allow-incomplete flag in v0: silent partial ships
- * are exactly the class of bug this exists to prevent.
- *
- * This is putitoutthere's own guardrail -- it runs regardless of what
- * the user's workflow YAML did with `needs:` chains or
- * `fail-fast: false`.
- *
- * Issue #13. Plan: §13.2.
+ * Artifact completeness check (#13, plan.md §13.2). Before any publish side
+ * effect, verify every matrix row's artifact is present and shaped as
+ * expected; a missing artifact aborts that package's release while other
+ * packages continue. No `--allow-incomplete` flag: partial ships are the bug.
  */
 
 import { readdir, stat } from 'node:fs/promises';

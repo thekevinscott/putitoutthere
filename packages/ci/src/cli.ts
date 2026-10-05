@@ -1,15 +1,8 @@
 /**
- * `piot-ci` — dispatcher for putitoutthere's repo-internal CI gates.
- *
- * The gates that today live as inline bash in `.github/workflows/**` (the
- * evidence-check, changelog, and patch-coverage gates, fixture-harness
- * setup) are being extracted into tested TypeScript under
- * `packages/ci/src/<gate>/` and invoked through this bin — never as
- * authored code in `.github/`, never by a `dist/` path. See AGENTS.md >
- * "Repo-internal CI gates". This is the dispatcher skeleton; each gate
- * registers as a subcommand in its own PR.
- *
- * Returns the process exit code.
+ * `piot-ci` — dispatcher for putitoutthere's repo-internal CI gates. Gates are
+ * tested TypeScript under `packages/ci/src/<gate>/`, invoked through this bin —
+ * never as authored code in `.github/`, never by a `dist/` path. See AGENTS.md
+ * > "Repo-internal CI gates". Returns the process exit code.
  */
 
 import { runActionlintIdToken } from './actionlint-idtoken/run.js';

@@ -1,16 +1,9 @@
 /**
  * Resolve a published package's tarball URL via `npm view … dist.tarball`,
- * absorbing packument lag with a bounded retry schedule (#443).
- *
- * `npm view`'s packument index propagates across the registry CDN
- * asynchronously, so an immediate read after publish can return empty
- * before the metadata lands. `sleeps` (seconds) drives the backoff: N
- * sleeps means N+1 attempts, no sleep after the last. Returns the tarball
- * URL, or `null` when every attempt came back empty — the caller emits the
- * mode-specific `::error::`.
- *
- * `npm view` is the sole subprocess; `--registry` (when set) is appended
- * after the positional args so it stays out of the `name@version` slot.
+ * absorbing packument lag with a bounded retry (#443): the packument index
+ * propagates across the registry CDN asynchronously, so an immediate read after
+ * publish can come back empty. N `sleeps` means N+1 attempts; `null` if all
+ * empty. `--registry` goes after the positional args, clear of `name@version`.
  */
 
 import { execCapture } from '../../utils/exec-capture.js';

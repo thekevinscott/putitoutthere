@@ -1,38 +1,9 @@
 /**
  * Move the in-repo version requirements that point at a crate whose version
- * just changed. #640.
- *
- * #621 taught the *build*-time writers this, for the crates an artifact
- * embeds. The *publish* path never learned it: the crates handler bumps
- * exactly one manifest, the crate's own. For two crates.io packages in one
- * repo where A path-deps B, releasing B moves it past A's requirement and
- * nothing updates A:
- *
- *     error: failed to select a version for the requirement `expcore = "^0.2"`
- *     candidate versions found which didn't match: 0.4.2
- *     location searched: …/packages/core
- *
- * A hard failure (exit 101) before anything compiles or packages, and an
- * intermittent one — a repo on a patch cadence stays green until the first
- * bump that leaves the declared range. `location searched` naming the local
- * path is also why registry state cannot rescue it: for a `path` + `version`
- * dependency cargo checks the requirement against the path crate's on-disk
- * manifest.
- *
- * A `version` key alongside `path` is *mandatory* for any crate that also
- * publishes to crates.io, so the shape that breaks is the shape such a repo
- * is required to have.
- *
- * This is the inverse walk of `write-embedded-crate-versions.ts`: that one
- * walks *out* from a crate to what it embeds, this one looks *in* at what
- * points back. It rewrites requirements only; no crate's version is bumped
- * here, because at publish time each package owns its own planned version
- * and stamping a neighbour's would publish a version nobody planned.
- *
- * Like #621's rewrites these are ephemeral — the publish job runs off a
- * fresh checkout and nothing is committed — but unlike #621's they happen in
- * the same job as `cargo publish`, so the pre-publish dirty-tree check has
- * to be told which manifests they touched.
+ * just changed (#640). Releasing B past A's `path` + `version` requirement
+ * fails cargo at exit 101 — "failed to select a version for the requirement
+ * expcore = ^0.2 … location searched: …/packages/core" — and that local path is
+ * why registry state cannot rescue it. Rewrites requirements, never a version.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -46,16 +17,10 @@ import { replaceDepVersionReq } from './replace-dep-version-req.js';
 import { resolveDepDirs } from './resolve-dep-dirs.js';
 
 /**
- * Rewrite every in-repo `version = "…"` requirement that points at the crate
- * at `crateDir` to `version`. Returns the absolute paths modified.
- *
- * `siblingDirs` are the other declared packages' directories — they may sit
- * outside any shared cargo workspace, so they are scanned in addition to the
- * workspace's own members rather than instead of them.
- *
- * Only entries that resolve to `crateDir` move. A registry dependency, or a
- * path dependency pointing anywhere else, keeps its requirement: pinning
- * pyo3 to this release's version would name a pyo3 that does not exist.
+ * Rewrite every in-repo `version = "…"` requirement that points at the crate at
+ * `crateDir` to `version`; returns the absolute paths modified. `siblingDirs`
+ * are other declared packages' dirs, which may sit outside any shared workspace,
+ * so they are scanned as well as its members. Only entries resolving to `crateDir` move.
  */
 export async function writeDependentVersionReqs(
   crateDir: string,

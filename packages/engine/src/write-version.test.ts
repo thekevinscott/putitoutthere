@@ -1,11 +1,8 @@
 /**
- * Unit tests for `writeVersionForBuild` (#276, #428).
- *
- * `node:fs` and the workspace-root walk (`findWorkspaceRoot`, itself an fs
- * collaborator) are mocked so each case isolates the pyproject-gate + cargo
- * routing; the pure `replaceCargoVersion` / `replaceWorkspacePackageVersion`
- * string rewriters (via `writeResolvedCargoVersion`) run for real. Real
- * on-disk manifest round-trips are covered by the integration + e2e tiers.
+ * Unit tests for `writeVersionForBuild` (#276, #428). Isolates the
+ * pyproject-gate plus cargo routing; the pure `replaceCargoVersion` /
+ * `replaceWorkspacePackageVersion` rewriters (via
+ * `writeResolvedCargoVersion`) run for real.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';

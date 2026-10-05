@@ -1,10 +1,8 @@
 /**
  * Mode dispatcher for the TestPyPI verify/assert harness (#455, epic #442).
- * Routes the two steps of `e2e-fixture.yml`'s `testpypi-publish` job —
- * `assert` (the pre-publish artifact guard) and `metadata` (the post-publish
- * download + version verification) — to their composition roots, and rejects
- * an unknown/missing mode. Both are invoked as
- * `pnpm exec piot-ci testpypi-verify <mode>`.
+ * Routes `e2e-fixture.yml`'s `testpypi-publish` steps — `assert` (the
+ * pre-publish artifact guard) and `metadata` (post-publish download + version
+ * verify) — to their composition roots, and rejects an unknown/missing mode.
  */
 
 import { runTestpypiAssert } from './run-assert.js';

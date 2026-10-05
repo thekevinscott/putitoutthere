@@ -1,13 +1,8 @@
 /**
  * Decision core for TestPyPI's release-metadata document: split its `urls`
- * array into the wheels and sdists the release publishes. `null` when the body
- * is not JSON, or carries no `urls` array — a shape this gate cannot act on.
- * Pure.
- *
- * Files are classified by filename suffix rather than by the `packagetype`
- * field, so this agrees by construction with the downstream selectors
- * (`selectDownloadedWheel` / `selectDownloadedSdist`), which match on the same
- * suffixes.
+ * array into wheels and sdists. `null` when the body is not JSON or carries no
+ * `urls` array. Classified by filename suffix rather than the `packagetype`
+ * field, so this agrees by construction with the downstream selectors. Pure.
  */
 
 import { asReleaseFile } from './as-release-file.js';

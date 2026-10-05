@@ -1,10 +1,8 @@
 /**
- * #610: map a config `manylinux` baseline to the platform-tag substrings
- * a compliant wheel filename may carry. maturin emits PEP 600 tags
- * (`manylinux_2_28`) and, for the legacy aliases, sometimes both the
- * alias and its PEP 600 equivalent — accept either. `auto` (or no
- * baseline) returns no patterns: the tag is whatever the build
- * environment produced, so there is nothing to assert.
+ * #610: map a config `manylinux` baseline to the platform-tag substrings a
+ * compliant wheel filename may carry. maturin emits PEP 600 tags
+ * (`manylinux_2_28`) and sometimes both a legacy alias and its PEP 600
+ * equivalent — accept either. `auto` (or unset) asserts nothing.
  */
 export function manylinuxTagPatterns(manylinux: string | undefined): string[] {
   if (manylinux === undefined || manylinux === '' || manylinux === 'auto') {

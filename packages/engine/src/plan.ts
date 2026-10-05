@@ -1,12 +1,8 @@
 /**
- * `putitoutthere plan` — the planner.
- *
- * Composes config, trailer, cascade, version, git into the matrix-row
- * array consumed by the GHA `build` job. Per plan.md §12.4. Pure
- * function over (config + git state) → matrix; deterministic for the
- * same inputs so CI golden-file checks have something to compare.
- *
- * Issue #21.
+ * `putitoutthere plan` — the planner (#21, plan.md §12.4). Composes config,
+ * trailer, cascade, version and git into the matrix-row array the GHA `build`
+ * job consumes. Deterministic for the same inputs, so golden-file CI checks
+ * have something stable to compare.
  */
 
 import { join } from 'node:path';
@@ -39,18 +35,10 @@ export interface MatrixRow {
   artifact_path: string;
   path: string;          // package working dir
   build?: string;        // handler-specific build mode
-  // #217 (pypi) / #298 (npm): per-target bundle-a-Rust-CLI recipe.
-  // Set on maturin per-target wheel rows AND on npm per-target
-  // bundled-cli rows when `[package.bundle_cli]` is declared on the
-  // package. NOT set on the sdist row (pypi, source-only), the main
-  // row (npm, top-level launcher only), or napi rows in a multi-mode
-  // npm package. The scaffolded build job branches on this to emit
-  // the cargo build + stage step before the build tool runs.
-  //
-  // `stage_to` is pypi-only — npm staging target is fully determined
-  // by `artifact_path` and so is left unset on npm rows. The optional
-  // field carries the union of both shapes; pypi rows always supply
-  // it, npm rows always omit it.
+  // #217 (pypi) / #298 (npm): per-target bundle-a-Rust-CLI recipe. Set on
+  // maturin per-target wheel rows and npm per-target bundled-cli rows, never on
+  // the sdist row, the npm main row, or napi rows. `stage_to` is pypi-only —
+  // npm staging is fully determined by `artifact_path`, so it stays unset.
   bundle_cli?: {
     bin: string;
     stage_to?: string;
@@ -259,20 +247,10 @@ async function nextVersion(
 }
 
 async function rowsForPackage(pkg: Package, version: string, cwd: string): Promise<MatrixRow[]> {
-  // #230: actions/upload-artifact@v4 forbids `/` in artifact names, so
-  // any package name containing a slash (the polyglot-monorepo
-  // grouping shape, e.g. `py/foo`, `js/bar`) needs to be encoded
-  // before being used as an artifact-name component. Encoding here +
-  // a config-load rule rejecting the encoding sequence in `pkg.name`
-  // makes the round-trip unambiguous. Read sites under publish/
-  // doctor/preflight/completeness consume `artifact_name` verbatim
-  // and need no changes.
-  //
-  // #244: actions/upload-artifact@v4 also rejects paths starting with
-  // `./` or equal to `.`, which is what `${pkg.path}/dist` produces
-  // when pkg.path is `.` (single-package-at-root shape). Normalize
-  // paths through `joinPath` so consumers with `path = "."` aren't
-  // tripped by the upload step.
+  // actions/upload-artifact@v4 forbids `/` in artifact names (#230) and rejects
+  // paths starting `./` or equal to `.` (#244, what `${pkg.path}/dist` yields
+  // when `path = "."`). So slashed names are encoded here — config load rejects
+  // the encoding sequence, keeping the round-trip unambiguous — and `joinPath`.
   const safe = sanitizeArtifactName(pkg.name);
   const at = (subdir: string): string => joinPath(pkg.path, subdir);
   switch (pkg.kind) {

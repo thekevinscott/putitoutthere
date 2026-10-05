@@ -1,10 +1,5 @@
 /**
- * Unit tests for the version-independent-wheel detector. #401.
- *
- * `node:fs/promises` is mocked and the `pyproject.toml` / `Cargo.toml`
- * bytes are driven directly, so each case isolates the manifest-parsing
- * logic with no real temp dir. The real on-disk round trip is covered by
- * the integration and e2e tiers.
+ * Unit tests for the version-independent-wheel detector (#401).
  */
 
 import { readFile } from 'node:fs/promises';

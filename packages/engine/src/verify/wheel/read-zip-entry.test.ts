@@ -1,15 +1,8 @@
 /**
- * `readZipEntry` (#450): the minimal pure-Node zip reader. Exercises both
- * stored (method 0) and deflate (method 8) entries, the not-a-zip and no-match
- * null paths, entry selection among several, and the case where a local
- * header's extra field differs from the central directory's (so the data
- * offset must be read from the local header).
- *
- * Unit-isolated: `node:zlib` is mocked so no real deflate stream is built —
- * fixtures store their bytes raw and the method-8 branch is exercised through
- * the mocked `inflateRawSync` (driven as an identity decode). Real deflate
- * round-tripping is covered in `tests/integration/verify-wheel.integration.test.ts`
- * and `tests/e2e/verify-wheel.e2e.test.ts`.
+ * `readZipEntry` (#450): the minimal pure-Node zip reader. The load-bearing
+ * case is a local header whose extra field differs from the central
+ * directory's — the data offset must then be read from the local header.
+ * `node:zlib` is mocked as an identity decode, so fixtures store bytes raw.
  */
 
 import { inflateRawSync } from 'node:zlib';

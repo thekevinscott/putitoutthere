@@ -1,11 +1,8 @@
 /**
  * Pins the strict-100% escape-hatch detector for the patch-coverage gate
- * (#468). Reproduces the `.mjs`'s
- * `HATCH_RE = /\/\*\s*(?:v8|c8|istanbul)\s+ignore/i` — a `/*`, optional
- * whitespace, one of v8|c8|istanbul, at least one whitespace, then `ignore`,
- * case-insensitive, matched anywhere in the added line's text. Pure; exact
- * boolean assertions, with inputs chosen to pin the `\s*` (zero-or-more,
- * before the tool name) vs `\s+` (one-or-more, before `ignore`) boundary.
+ * (#468), reproducing the `.mjs`'s
+ * `HATCH_RE = /\/\*\s*(?:v8|c8|istanbul)\s+ignore/i`. Inputs pin the `\s*`
+ * (before the tool name) vs `\s+` (before `ignore`) boundary.
  */
 
 import { describe, expect, it } from 'vitest';
