@@ -102,8 +102,25 @@ jobs:
   build:
     needs: plan
     # Required: the default name interpolates run-scoped matrix fields
-    # (`version`, and `name` on first-publish fixtures), so no predictor
-    # can match it. These three are stable and unique per row.
+    # (`version`, and `name` on first-publish fixtures), so no predictor can
+    # match it. Three constraints bind every slot below, and all three are
+    # pinned by packages/ci/tests/integration/e2e-job-names (#655):
+    #
+    #   1. Run-stable. `artifact_path` derives from [[package]].path;
+    #      `artifact_name` is one character away and derives from the
+    #      per-run-stamped name.
+    #   2. A bare `matrix.<path>`. willfire evaluates no expressions, so a
+    #      `format()`/`&&` slot is unresolvable however well GitHub renders it.
+    #   3. Present on *every* row. An optional field renders empty on GitHub
+    #      but is a miss for willfire, which then drops the whole name from the
+    #      predicted set. Adding `matrix.python_version` cost 53 of 84 build
+    #      predictions, silently, because it is absent on npm and crates rows.
+    #
+    # Constraint 3 is why a maturin wheel build fanned across interpreters is
+    # not separated here: `python_version` is the only field that differs, and
+    # it is exactly the field that cannot go in the name. No declared fixture
+    # fans, and the per-fixture injectivity test goes red at PR time on the one
+    # that would.
     name: build (${{ matrix.kind }}, ${{ matrix.target }}, ${{ matrix.artifact_path }})
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
     strategy:
@@ -517,6 +534,10 @@ jobs:
 
   publish:
     needs: [plan, build]
+    # Deliberately unnamed: not a matrix job, so GitHub's job-id-derived name
+    # is already stable, and `name: publish (${{ inputs.fixture }})` turned
+    # all 15 of these from resolvable into unresolvable — willfire does not
+    # propagate a caller's matrix into a called workflow's `inputs` (#660).
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
     runs-on: ubuntu-latest
     environment: e2e
