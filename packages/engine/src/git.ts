@@ -115,8 +115,9 @@ export async function pushTag(name: string, opts: GitOptions = {}): Promise<void
  * nothing, which is exactly the state a failed push leaves behind (#717).
  */
 export async function remoteTagExists(name: string, opts: GitOptions = {}): Promise<boolean> {
+  // `run` already trimEnds; no further trimming needed to tell empty from non-empty.
   const out = await run(['ls-remote', '--tags', 'origin', `refs/tags/${name}`], opts);
-  return out.trim().length > 0;
+  return out.length > 0;
 }
 
 /**

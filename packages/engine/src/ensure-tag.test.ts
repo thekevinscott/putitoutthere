@@ -37,6 +37,7 @@ describe('ensureTag', () => {
       message: 'Release lib-v1.0.0',
     });
     expect(pushTagMock).toHaveBeenCalledWith('lib-v1.0.0', { cwd: 'repo' });
+    expect(log.info).toHaveBeenCalledWith('publish: pushing tag lib-v1.0.0');
   });
 
   it('is a no-op when origin already has the tag', async () => {
@@ -71,9 +72,20 @@ describe('ensureTag', () => {
     pushTagMock.mockRejectedValue(new Error('No configured push destination'));
     const log = makeLog();
 
-    await expect(
-      ensureTag('{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log),
-    ).rejects.toThrow(/PIOT_TAG_PUSH_FAILED.*lib@1\.0\.0.*No configured push destination/s);
+    const err: unknown = await ensureTag(
+      '{name}-v{version}', 'lib', '1.0.0', 'headsha', { cwd: 'repo' }, log,
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toMatch(/PIOT_TAG_PUSH_FAILED.*lib@1\.0\.0.*No configured push destination/s);
+    // The rest of the message, not just the error code + cause: it must
+    // name the write as already done, warn against re-running `publish`,
+    // and point at `reconcile` as the actual fix.
+    expect(message).toContain('is on the registry, but pushing tag lib-v1.0.0 failed');
+    expect(message).toContain('write already happened — do not re-run publish for this version');
+    expect(message).toContain('(origin, auth, a diverged remote tag) and rerun `putitoutthere reconcile`, which');
+    expect(message).toContain('backfills the tag without re-publishing.');
     expect(log.warn).not.toHaveBeenCalled();
   });
 
