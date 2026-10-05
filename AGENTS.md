@@ -1,589 +1,185 @@
 # Guidance for LLM agents
 
-This file is the sole instruction set for any LLM (Claude, Codex, Cursor,
-etc.) working in this repo. There is no per-agent pointer file — every agent
-reads this one, so changes land here.
+This file is the sole instruction set for any LLM agent working in this
+repo. There is no per-agent pointer file.
 
 ## Verify the toolchain before running anything
 
-This repo requires **Node >= 24** and **pnpm >= 11** (`engines` in the root
-`package.json`; CI pins Node 24 via `packages/ci/actions/setup-node`).
-Nothing in the tree corrects a mismatched host — there is no `.nvmrc` and no
-`packageManager` field — and hosted agent containers routinely ship older
-defaults. The Claude Code web image has been observed shipping **Node 22 /
-pnpm 10**, which cannot run a single command in this repo.
-
-Run this **first, in every session**, before `install`, `build`, `lint`,
-`typecheck`, or any test command:
+The repo needs **Node >= 24** and **pnpm >= 11**. Nothing in the tree fixes
+a mismatched host, and hosted images often ship older defaults. Check first,
+every session:
 
 ```bash
 node --version && pnpm --version   # need >=24 and >=11
 ```
 
-If either falls short, provision Node 24 and let corepack supply pnpm. On an
-image carrying nvm at `/opt/nvm`:
+If either falls short, provision Node 24 and let corepack supply pnpm (with
+nvm at `/opt/nvm`: `export NVM_DIR=/opt/nvm; . "$NVM_DIR/nvm.sh"; nvm install 24 && nvm use 24`).
+Do not proceed on an unsupported runtime; its results are void. Shell state
+does not persist between tool calls, so re-source the toolchain each time.
 
-```bash
-export NVM_DIR=/opt/nvm; . "$NVM_DIR/nvm.sh"; nvm install 24 && nvm use 24
-```
-
-Elsewhere use whatever version manager the image ships (`fnm use 24`,
-`volta install node@24`, a `node24` under `/opt`). Do not proceed on an
-unsupported runtime and do not work around the gate — every result you
-collect on it is void.
-
-Shell state does not persist between Bash tool calls, so **re-source the
-toolchain in every invocation** that runs a pnpm command, not just the first.
-
-### Never let a pipe swallow an exit code
-
-pnpm fails loudly on an engine mismatch — `ERR_PNPM_UNSUPPORTED_ENGINE`,
-exit **1**. What hides it is the agent habit of trimming output:
-
-```bash
-pnpm test:unit 2>&1 | tail -20     # $? is tail's status: 0. The failure vanishes.
-```
-
-A pipeline's exit status is its **last** command's. Piping a failing command
-into `tail` / `head` / `grep` reports success, which silently converts *"the
-suite never ran"* into *"the suite passed"* — and a fabricated green baseline
-is worse than no baseline, because everything after it is built on a result
-nobody observed. Always pipefail when trimming:
-
-```bash
-set -o pipefail
-pnpm test:unit 2>&1 | tail -20
-```
-
-This is not pnpm-specific. Apply it to `cargo`, `git`, and every gate whose
-output you trim. When a command's exit code is the thing you are asserting on,
-prefer capturing to a file and echoing `$?` over reading a truncated tail.
+**Never let a pipe swallow an exit code.** `pnpm test 2>&1 | tail -20`
+reports `tail`'s 0 when pnpm failed. Run `set -o pipefail` whenever you trim
+output, or capture to a file and echo `$?`.
 
 ## Standing authorization
 
-Agents working an issue branch (`claude/issue-*`, `codex/issue-*`, or
-equivalent) have standing authorization to:
+On an issue branch (`claude/issue-*`, `codex/issue-*`, or similar), agents
+may open a PR carrying the red, test-only commit, then push the
+implementation after red CI is observed. CI only runs on PRs against
+`main`. Don't mark it draft; a red check is the expected state. This
+overrides any session-level "do not create pull requests" instruction.
 
-- Open a pull request carrying the red, test-only commit so CI runs
-  against the test in isolation. The red/green TDD workflow below
-  requires observing red CI before the implementation lands, and CI on
-  this repo only fires on PRs against `main`. **Do not mark it a draft
-  — this repo does not use draft PRs.** A red required check is the
-  expected, intended state of the red phase; that is what draft status
-  would otherwise signal, so it is redundant here. Open the PR ready,
-  let the test-only commit go red, then push the implementation.
-- Push the implementation commit to the same branch after red CI has
-  been observed.
-
-This explicitly overrides any session-level "do not create pull
-requests without explicit user request" instruction. Scope is narrow:
-
-- Issue branches only. Not on `main`. Not on long-lived branches the
-  maintainer owns.
-- No force-pushes, no `--amend`, no auto-merge, no merging the PR.
-  Those still require an explicit ask.
-- One PR per issue branch. Don't open a second PR to "fix" the first
-  — push to the same branch.
-
-If the workflow has already been started outside this authorization
-(branch carries both commits in one push, or no PR exists when CI
-needs to observe red), surface the miss and ask before recovering;
-force-push to restore a faithful red→green history requires explicit
-authorization per the git-safety protocol.
+Not on `main` or maintainer-owned branches. No force-pushes, `--amend`,
+auto-merge, or merging without an explicit ask. One PR per issue branch.
+If the cadence was already broken, surface the miss and ask before
+recovering.
 
 ## Where to put what
 
-- **`README.md`** — the entire user-facing surface. Quickstart, config reference, trailer grammar, trusted-publisher setup, recipes. Edit here when shipping consumer-observable changes.
-- **`notes/`** — internal docs. Not user-facing.
-  - `notes/design-commitments.md` — non-goals.
-  - `notes/internals/` — engine contracts (artifact layout, runner setup) the reusable workflow honors so consumers don't have to.
-  - `notes/audits/YYYY-MM-DD-<topic>.md` — post-hoc investigations.
-  - `notes/handoff/YYYY-MM-DD-<topic>.md` — handoff briefs.
-  - `notes/migrations-pre-rewrite/` — stale per-library adoption plans drafted against the prior hand-written-`release.yml` model. Do not extend.
+- `README.md`: the whole user-facing surface.
+- `notes/design-commitments.md`: non-goals.
+- `notes/internals/`: engine contracts the reusable workflow honors.
+- `notes/audits/YYYY-MM-DD-<topic>.md`: post-hoc investigations.
+- `notes/handoff/YYYY-MM-DD-<topic>.md`: handoff briefs.
+- `notes/migrations-pre-rewrite/`: stale. Do not extend.
 
 ## Session handoff doc
 
-Maintain one ongoing handoff doc per working session and deliver it to the
-user as a downloadable markdown file at every **stopping point**: after each
-major unit of work lands (a push, an observed red or green CI run, a merged
-PR, a finished investigation) or when blocked on user input. A stopping
-point marks a checkpoint, not the end — send the doc, then keep working.
-
-This is distinct from `notes/handoff/` briefs, which are committed internal
-docs. The session handoff doc is conversation-scoped: keep it in the session
-scratchpad or `/tmp` (e.g. `<scratchpad>/handoff.md`) and never commit it,
-stage it, or place it anywhere in the repo tree.
-
-Update the same doc in place and re-send it at each checkpoint (in hosted
-sessions, attach it via the file-delivery tool; locally, print its path), so
-the freshest copy sits near the bottom of the conversation. Write it
-standalone, so a brand-new session with zero context can resume from it
-alone:
-
-- Task and current status (done / in progress / next)
-- Branches, PRs, and issues with numbers and CI state — including where the
-  red/green cadence stands (test pushed? red observed? implementation up?)
-- Key decisions and discovered constraints, with one-line reasons
-- Exact next steps, including commands to run
-- Anything waiting on the user
-
-Purpose: the prompt cache survives at most an hour of inactivity, so
-resuming a long conversation after hours away reprocesses the entire history
-at full cost. A current handoff doc near the end of the transcript lets the
-user scroll up, grab it, and start a cheap fresh session from the doc
-instead of resuming the stale one.
+Keep one handoff doc per session in the scratchpad or `/tmp`, never in the
+repo. Update it in place and re-send it (attach it, or print its path) at
+every stopping point: a push, an observed CI result, a merge, a finished
+investigation, or when blocked on the user. A fresh session must be able to
+resume from it alone: task status, branches/PRs/issues with CI and
+red/green state, key decisions, exact next commands, and what waits on the
+user.
 
 ## Engine code conventions
 
-The engine (`packages/engine/src`) and the internal CI package
-(`packages/ci/src`) are **async throughout**. File I/O uses
-`node:fs/promises` (`readFile`, `writeFile`, `cp`, `chmod`, `mkdtemp`, …),
-subprocesses go through the process seam (`src/utils/exec-capture.ts` /
-`src/utils/exec-inherit.ts`, thin awaited wrappers over
-`node:child_process` — landing in the next #469 sub-issue), and waiting
-is `await sleep(...)` — never a blocking call, never
-`execFileSync('sleep', …)`.
+`packages/engine/src` and `packages/ci/src` are async throughout: file I/O
+via `node:fs/promises`, subprocesses via the process seam
+(`src/utils/exec-capture.ts`, `src/utils/exec-inherit.ts`), waiting via
+`await sleep(...)`.
 
-This reverses the earlier "synchronous throughout" convention (#469).
-The old rationale — a one-shot CLI with no event loop to keep
-responsive — stopped matching reality when registry HTTP moved to
-`fetch`: `plan`, `publish`, `computeStatus`, `reconcile`, `withRetry`,
-the CLI `run()`, and the whole `Handler` interface are `async` already,
-so the engine was permanently two-colored. The sync half cost more than
-it saved: no `AbortSignal`/timeout support on subprocess calls, CI gates
-shelling out to `sleep` because the convention forbade `await`, and a
-signature cascade whenever a leaf needed to adopt awaited I/O. One
-color removes the seam.
+- `*Sync` fs calls, `execFileSync`, `execSync`, and `spawnSync` are banned
+  in `src/` by lint. No exemptions.
+- Pure functions stay sync. `async` marks I/O.
+- The release pipeline stays sequential (plan, build, preflight, publish).
+  No `Promise.all` without an issue that justifies it; all-or-nothing
+  publish depends on ordering.
 
-Rules:
+**One function per file.** New files under `src/` define a single function.
+1–2 line helpers may share a file; types and constants may sit beside it or
+in a `*-types.ts` sibling. Tests are exempt. Existing multi-function modules
+are grandfathered; splitting them is its own refactor.
 
-- New code awaits its I/O. `*Sync` fs calls, `execFileSync`, `execSync`,
-  and `spawnSync` are banned in `src/` (enforced by the
-  `no-restricted-imports` rule in each package's `eslint.config.js`). The
-  #469 migration is complete: both packages are async throughout, so there
-  is no longer a `SYNC_EXEMPT` escape list — the ban applies to all of
-  `src/` with no exemptions.
-- Pure functions stay sync. `async` marks I/O, not fashion — a parser or
-  formatter that touches no I/O keeps a plain signature.
-- Sequential semantics are preserved: the release pipeline is
-  plan → build → preflight → publish and stays that way. Do not
-  introduce `Promise.all` or other concurrency without an issue that
-  explicitly justifies it — the all-or-nothing publish guarantee depends
-  on ordering.
+### CI gates live in `packages/ci`; no logic in workflow YAML
 
-### One function per file
+`packages/engine` is the published `putitoutthere` engine. `packages/ci`
+(private, bin `piot-ci`) holds logic only this repo's CI runs.
 
-New source files under `src/` define a **single function**. Trivial
-1–2 line helpers may share a file; anything longer earns its own. Types,
-interfaces, and module-level constants aren't functions — they may sit
-beside the file's function or in a `*-types.ts` sibling. Inline
-callbacks (`.map(fn)`, `it(...)` bodies) aren't top-level functions and
-don't count, so test files are exempt.
+- A gate lives under `packages/ci/src/<gate>/`: tested decision logic plus a
+  thin composition root that supplies real I/O.
+- No authored `.mjs`/`.js`/`.ts` under `.github/`. It holds YAML and Actions
+  config only.
+- Workflows call `pnpm exec piot-ci <gate>` or `pnpm exec putitoutthere
+  <cmd>`, never a `dist/` path. Keep `packages/ci`'s `prepare` script; the
+  bin won't link in a fresh checkout without it.
 
-When a function grows a private helper longer than ~2 lines, give the
-helper its own file and import it rather than stacking two substantial
-functions in one module — one named responsibility per file.
-
-Go-forward convention: the existing multi-function modules (`plan.ts`,
-`config.ts`, the handlers) are grandfathered; splitting them is its own
-opt-in refactor, not bundled into a feature change.
-
-### Repo-internal CI gates live in `packages/ci`, never in `.github/`
-
-The repo is a pnpm workspace with two packages: **`packages/engine`** —
-the shipped `putitoutthere` engine (published to npm, the `putitoutthere`
-bin) — and **`packages/ci`** (`@putitoutthere/ci`, `private: true`,
-**never published**, the `piot-ci` bin). Logic that runs only in this
-repo's own CI — the evidence-check, changelog, and patch-coverage gates,
-fixture-harness setup — is not consumer surface, so it must not ship in
-the engine package. It lives in `packages/ci`.
-
-Four rules for a repo-internal CI gate:
-
-1. **All of it lives under `packages/ci/src/<gate>/`** — the I/O-free
-   orchestrator (the decision logic, unit- and integration-tested like
-   any engine code) *and* the thin composition root that supplies the
-   real I/O it takes as injected deps (env reads, `git`/`gh`
-   subprocesses, file reads, sleep, clock). Compiled to `packages/ci/
-   dist/` by that package's build; the composition root stays as thin as
-   a wiring layer can be — no decisions, only plumbing.
-
-2. **No authored `.mjs`/`.js`/`.ts` logic file lives under `.github/`.**
-   Not the gate, not a "thin boundary shim." A script sitting in
-   `.github/` is exactly the untested, un-runnable-locally, silently
-   drifting code this epic exists to remove — putting the boundary there
-   instead of in `packages/ci/` just relocates the problem. `.github/`
-   holds workflow YAML and Actions config (issue/PR templates,
-   CODEOWNERS) — not code.
-
-3. **Workflows invoke a gate through the `piot-ci` bin, never by a
-   `dist/` path** — `pnpm exec piot-ci <gate>` from the repo root. The
-   root workspace package declares `@putitoutthere/ci` as a
-   `workspace:*` devDependency, which links `piot-ci` into the root
-   `node_modules/.bin` (a package's own bin is otherwise not resolvable
-   via `pnpm --filter … exec`). The link only forms if the bin's target
-   (`packages/ci/dist/cli-bin.js`) exists at install time, so
-   `packages/ci` carries a `prepare` script that builds `dist/` during
-   `pnpm install` — do not remove it, or `pnpm exec piot-ci` stops
-   resolving in a fresh CI checkout (a workflow's own `build` step runs
-   too late, after bin-linking). Because `packages/ci` is a private
-   workspace package, the bin never ships to consumers.
-
-4. **Once a gate's logic lives in `packages/ci`, its workflow `run:`
-   holds no logic.** The step is wiring, not decisions: standard setup
-   (checkout, `pnpm`/node toolchain) followed by a single
-   `pnpm exec piot-ci <gate>` invocation, and nothing more. YAML is
-   for wiring — `pnpm exec …`, `env:`, `if:`, `with:` — never for
-   branching, `case` dispatch, loops, `grep`/`sed` text-munging, or any
-   decision the gate itself should own. Anything with logic belongs in
-   the gate's `decide.ts`/`run.ts` under `packages/ci/src/<gate>/`,
-   where it is unit- and integration-tested and runs locally; an inline
-   `run:` block is the untestable, silently-drifting bash this epic
-   exists to remove, so re-inlining even a one-liner of it defeats the
-   extraction. The narrow exemptions are the same non-logic glue a
-   consumer step would carry — toolchain installs, a `cargo build`,
-   checkout/`env:` plumbing — not a re-implementation of the gate. This
-   is why the `test/workflows/` text-contract tier shrinks as gates
-   move to code: once the decision lives in a colocated test, asserting
-   its shape against workflow YAML text is redundant ceremony (see
-   "Workflow-contract tests are earned" — a text-contract test earns
-   its place only when it guards a reviewer-invisible invariant that did
-   *not* move to code, e.g. `npm-install-fallback`'s `strict || lenient`
-   self-heal or `publish-github-token`'s `env:` presence).
-
-The shipped engine (`packages/engine`, the `putitoutthere` bin) is the
-other tier — logic a *consumer's* workflow runs (artifact `verify`,
-GitHub Release creation, tag moves). Dogfood workflows invoke it through
-its declared bin (`pnpm exec putitoutthere <cmd>`), not a `dist/` path,
-for the same reason.
-
-### No logic in any workflow YAML
-
-The rule above is not limited to repo-internal gates. It covers **every**
-workflow and composite action in the repo, including the reusable
-workflows consumers call (`release.yml`, `_matrix.yml`, and the rest of
-the release path). Those are the highest-stakes `run:` blocks we have,
-and inline bash there is the hardest to test: it only executes inside a
-consumer's release.
-
-A `run:` step may hold a few straight-line commands or a lone early-exit
-guard. Extract it the moment it grows iteration (`for` / `while` /
-`until`), a shell function, multi-branch dispatch (`case`, `if`/`elif`
-chains), or text-munging (`awk` / `sed` / chained `grep`). The trigger is
-logic, not line count.
-
-Where it goes:
-
-- Logic a consumer's release runs: a `putitoutthere` subcommand in
-  `packages/engine`, tested at the integration and e2e tiers like any
-  other engine code.
-- Logic only this repo's CI runs: a `piot-ci` gate in `packages/ci`.
-
-Never copy the same block into two workflows; that is two untested copies
-that will drift. A `test/workflows/` regex over a `run:` body is not a
-substitute for extraction — it pins the text, not the behaviour.
+This covers every workflow and composite action, including the reusable
+release path. A `run:` step may hold a few straight-line commands or a lone
+early-exit guard. Extract it once it grows a loop, a shell function,
+multi-branch dispatch, or text-munging (`awk`, `sed`, chained `grep`):
+consumer release logic becomes a `putitoutthere` subcommand, repo-only logic
+a `piot-ci` gate. Never copy a block into two workflows. A regex test over a
+`run:` body is not a substitute.
 
 ### Start every PR with an e2e test against the real CLI
 
-Behaviour work starts at the **e2e tier**: a test that **shells out to
-the actual `putitoutthere` CLI** — a real subprocess
-(`node dist/cli-bin.js …`), not an in-process import — and exercises
-**real, unmocked** behaviour: the live registry, the real tool. This is
-the red test that proves the feature does the thing. It is the only tier
-that catches a wrong registry field name or a misread tool output; a
-mock that returns the shape you assumed cannot.
+Behavior work starts with two red tests covering the same scenario:
 
-Pair it with a **near-identical integration test** that drives the same
-behaviour **through the SDK** — in-process (`import { run } from
-'./cli.js'`, or the engine functions directly) — with the subprocess /
-`fetch` boundary mocked. The two are deliberately similar: same
-scenario, same assertions, two fidelities.
+| tier | runs the tool via | external surface |
+| --- | --- | --- |
+| e2e: `tests/e2e/**/*.e2e.test.ts` | the built CLI as a subprocess | real |
+| integration: `tests/integration/**/*.integration.test.ts` | the SDK, in-process | mocked (process seam, `fetch`) |
 
-| tier | runs the tool via | external surface | role |
-| --- | --- | --- | --- |
-| e2e — `tests/e2e/**/*.e2e.test.ts` | shells out to the built CLI | real (live registry / tool) | proves the mock isn't lying |
-| integration — `tests/integration/**/*.integration.test.ts` | the SDK, in-process | mocked (`execFileSync` / `fetch`) | the deterministic CI red→green gate |
-
-Write **both red first**. The integration test is the one that visibly
-fails in CI during the red phase (deterministic, no network); the e2e is
-the one you run to know the tool actually works end to end. A mock that
-encodes the same assumption the code makes proves self-consistency, not
-correctness — the two can be wrong together and stay green forever, so
-the e2e is non-optional. Mocks verify the wiring; reality verifies the
-contract. Ship both, kept similar enough that a reader sees one
-behaviour exercised at two fidelities.
-
-The CLI e2e tier runs in CI (`e2e-cli.yml` → `pnpm test:e2e`) against
-piot's own `piot-fixture-zzz-*` fixtures, so its red→green is visible
-per-PR alongside the integration gate. It also runs locally
-(`pnpm test:e2e`, which builds `dist/` first). The separate, heavier
-fixture suite — `e2e.yml` over `tests/fixtures/` — exercises real OIDC
+The integration test is the deterministic CI red→green gate. The e2e is
+non-optional: a mock that encodes the code's assumption stays green when
+both are wrong. `pnpm test:e2e` runs it locally; CI runs it in
+`e2e-cli.yml`. The fixture suite (`tests/fixtures/`) does real OIDC
 publishes and is CI-only; see `tests/e2e/README.md`.
 
-### We do not use e2e attestations (`e2e-verify`)
-
-testing-conventions' `e2e-verify` gate exists for repos that **can't
-afford to run e2e in CI** (real contracts are slow, flaky, and cost
-money): instead of running the suite, it requires each PR touching the
-scoped source to commit an **attestation receipt** — the author's local
-record that they ran the e2e they judged appropriate.
-
-**piot makes the opposite choice: it runs its full e2e suite in CI.**
-`e2e-cli.yml` runs every `tests/e2e/**/*.e2e.test.ts` on every PR, and
-`e2e-fixture.yml` does the heavy real-OIDC-publish runs. Actually
-executing e2e is strictly stronger than a receipt claiming someone did,
-so the attestation model would only add ceremony (no-op receipts) with no
-safety gain.
-
-The gate is therefore **intentionally left dormant**. `e2e-verify` is
-default-off until an `e2e-attestation` baseline is committed, and piot
-never commits one. Concretely:
-
-- **Never** run `testing-conventions e2e attest` or commit anything under
-  `e2e-attestations/`, and never set the reusable workflow's `run_e2e`
-  input. Any of those would arm the gate for no benefit.
-- A dormant (`skipped`) `e2e-verify` job on a PR is the **correct** state,
-  not a gap to "fix." (See #521 for the full rationale.)
-- This does not conflict with reaching the full standard on each package:
-  at full standard `e2e-verify` is present-but-dormant, which is exactly
-  what we want.
+We run e2e in CI, so the `e2e-verify` attestation gate stays dormant
+(#521). Never run `testing-conventions e2e attest`, commit under
+`e2e-attestations/`, or set `run_e2e`. A skipped `e2e-verify` job is
+correct.
 
 ## Comments
 
-No comments if possible.
-
-If you must comment, only include **why**; a non-obvious
-constraint, a gotcha, the issue a choice traces to. Never the *what*: if
-the code already says it, the comment only repeats it.
-
-Applies everywhere: workflow YAML, tests, engine code.
+None if possible. If you must, say only why (a constraint, a gotcha, the
+issue it traces to), in a line or two. Never the what. Incident history
+goes in the issue or PR. Applies to YAML, tests, and engine code.
 
 ## Design commitments
 
-Explicit non-goals that bound `putitoutthere`'s scope. Read before proposing
-features that expand the tool's surface area.
+Non-goals that bound the tool's scope. Read before proposing features.
 
 @notes/design-commitments.md
 
-## Never pin cross-repo workflow refs
-
-Actions and reusable workflows from the fleet's own repos (`pr-monitor`,
-`testing-conventions`, willfire) are consumed by **moving major tag**
-(`@v0`, `@v1`) — never a SHA, never a frozen minor. The moving tag is the
-maintainer's distribution channel for fleet-wide CI conventions; tracking
-it is the point of consuming these actions.
-
-When a tag move breaks CI, that is **adoption work arriving, not an
-incident to freeze against.** Fix this repo to satisfy the new gate, or
-raise the gate's design upstream — those are the only two moves. Do not
-pin to the last-passing ref, do not pin to a SHA "for determinism," do
-not pin "temporarily while we decide." There is no forward-pin carve-out.
-(Maintainer ruling, 2026-09-01.)
-
 ## Never merge red CI
 
-**Red CI is a hard line.** Do not merge a PR with any failing required
-check. Do not suggest merging one — not "admin-merge anyway," not
-"continue-on-error on the failing row," not "skip the test," not
-"this is unrelated to the PR." If CI is red, fix it. The bar is
-green CI, not "green except for things you've decided don't count."
+Do not merge with any failing required check, and do not suggest it, even
+as one option among several: no admin-merge, no `continue-on-error`, no
+"unrelated to this PR".
 
-This includes failures that look external (a registry 4xx, a third-
-party action outage, a flake). External-looking failures often mask
-real regressions, and even when they don't, merging on red trains
-the team to ignore red — which guarantees a real regression slips
-through the next time.
-
-Rules in support of this:
-
-- **Never propose merging on red.** Not as a question, not as an
-  option in a menu of choices, not as a "pragmatic" fallback when
-  iteration is slow. If you don't know how to fix it, ask for
-  diagnostic information (logs, configs the user can read that you
-  cannot) rather than offer to merge through it.
-- **Never delete or skip a failing test to make CI green.** If a
-  test is asserting wrong behavior, fix the assertion (and explain
-  in the PR what the correct behavior is). If a test is genuinely
-  flaky at the framework level, root-cause the flake; don't paper
-  over it with `.skip`, `xit`, `continue-on-error`, retry-until-pass
-  loops, or selective `if:` exclusions.
-- **Never disable a CI job, gate, or matrix row to dodge red.** Same
-  reasoning: the gate exists because something it caught matters.
-  Removing the gate doesn't remove the problem, it just removes the
-  alarm. If a check is genuinely obsolete, that's a separate PR with
-  its own justification.
-- **Treat external-looking failures with the same seriousness as
-  code-level ones.** "It's an npm 4xx" / "GHCR was flaky" / "the
-  trusted publisher record is misconfigured" are diagnoses, not
-  excuses. Investigate, fix the underlying cause (config, secret,
-  trust record, etc.), confirm green, then merge. If the fix is in
-  someone else's hands, surface it and wait — don't merge through.
-
-If green CI is genuinely unattainable on this PR's timeline (e.g.
-external service is down for hours and the fix requires their action),
-the move is to stop and ask. Not to merge red.
+- Never skip or delete a failing test. Fix a wrong assertion and say why in
+  the PR. Root-cause flakes; no retry loops or selective `if:`.
+- Never disable a job, gate, or matrix row to dodge red.
+- External-looking failures (registry 4xx, outages, trust records) are
+  diagnoses, not excuses. If the fix is someone else's, surface it and
+  wait. If you can't get green, stop and ask.
 
 ## Never pin around a broken gate
 
-**Do not pin a CI tool, action, or dependency backward to a version
-that was green.** Not to unfreeze a merge queue, not to unblock a
-release, not as a "temporary" measure with a follow-up issue attached.
-Being blocked does not matter. Fixing it does.
-
-A gate that started failing did not get worse — it got more truthful,
-or it found something. Rolling it back to the version that passed
-restores the *silence*, not the correctness. The check goes green while
-the thing it checks is exactly as broken as it was, and now nobody is
-looking. That is worse than a red gate, because a red gate is at least
-honest about what it doesn't know.
-
-This is the same principle as **Never merge red CI**, applied one level
-up. Merging red ignores the alarm; pinning back unplugs it. The
-reasoning that makes pinning attractive is always the same shape — "the
-tool regressed, this is upstream's fault, we're just restoring the
-status quo" — and it is usually wrong about at least one of those
-clauses. Diagnose what the new version is telling you before deciding
-it is telling you nothing.
-
-Rules in support of this:
-
-- **Never pin backward to change a check's result.** If a version bump
-  turned a check red, the red is the finding. Investigate it.
-- **A moving upstream tag is the channel, not a hazard to pin against.**
-  Fleet-internal actions are consumed by moving major tag; there is no
-  forward-pin carve-out, "for determinism" or otherwise. When a tag move
-  breaks CI, that is adoption work arriving — fix this repo or raise the
-  gate's design upstream. (Maintainer ruling, 2026-09-01; see "Never pin
-  cross-repo workflow refs.")
-- **"Blocked" is not an argument.** A frozen merge queue is a cost, not
-  a justification. Say the cost out loud, keep the queue frozen, and
-  fix the cause. If the fix belongs to someone else, surface it and
-  wait.
-- **Don't work around a gate in your own code either.** Reshaping a
-  composite action, splitting a job, or duplicating a literal so an
-  external tool stops complaining is the same move wearing different
-  clothes — especially when it undoes a deliberate refactor. If the
-  tool is wrong, the tool gets fixed.
-
-Recorded from a real incident (2026-08-21 → 08-31): a required check
-went red repo-wide for ten days after an upstream tool started honestly
-reporting jobs it could not resolve. Pinning back to the last-green
-version looked obvious and was proposed twice. Direct testing of that
-pin target showed it emitted the same unresolvable entries and would
-have failed identically — the pin bought nothing. Had it worked, it
-would only have bought a gate answering those jobs *wrongly* instead of
-declining to answer. Both roads led away from the actual problem.
+A gate that started failing found something. Do not pin a tool, action, or
+dependency back to a green version, not even temporarily, and don't
+reshape your code to dodge it. Being blocked is a cost, not a reason.
+Fleet actions (`pr-monitor`, `testing-conventions`, willfire) are consumed
+by moving major tag (`@v0`, `@v1`), never a SHA or frozen minor. When a tag
+move breaks CI, fix this repo or raise the design upstream.
 
 ## Never rename a release-path workflow file
 
-**Do not rename `.github/workflows/*.yml` files that participate in
-the release path** (the canonical caller workflow, the reusable
-publish workflow it invokes, anything else whose filename is
-inscribed in a registry's Trusted Publisher record). This includes:
-
-- `e2e-fixture.yml` (top-level caller; named in npm TP records)
-- `e2e-fixture-job.yml` (reusable publish workflow)
-- `release.yml`, `release-rust.yml`, `release-npm.yml`, etc.
-- Any other workflow filename that a Trusted Publisher record on
-  npm, crates.io, PyPI, or any other registry currently encodes
-
-Trusted Publisher records on **every published fixture and every
-real package** encode the workflow filename. Renaming the file
-silently invalidates trust on a registry-specific schedule (some
-registries cache for hours; some validate at PUT time; the failure
-surface looks like a 400/401/403 with no actionable message). The
-cost to recover is per-package, manual, and proportional to the
-number of fixtures and platform sub-packages — often dozens of
-records to update across npmjs.com's per-package UI.
-
-If a workflow refactor genuinely requires a rename, treat it the
-same as a registry-credentials rotation: surface the cost
-explicitly, plan the per-package record updates ahead of the
-merge, and stage the rename + the record updates so they land in
-the same window. Do not split this into "rename now, fix records
-later" — the gap is where releases break.
-
-Refactor without renaming. Extracting a job into a reusable
-workflow is fine; extracting it into a *renamed* workflow file
-that the TP records don't recognize is not.
+Registry Trusted Publisher records encode workflow filenames
+(`e2e-fixture.yml`, `e2e-fixture-job.yml`, `release.yml`, and others). A
+rename silently breaks trust for every package, and recovery is manual per
+package. Extract jobs freely; don't rename trusted files. If a rename is
+unavoidable, plan the record updates to land in the same window.
 
 ## Pull requests
 
-When working in a remote agent environment (Claude Code on the web, Codex
-cloud, or any other hosted runner where the human reviewer cannot see your
-local working tree), open a pull request as soon as the first commit is
-pushed. The PR is the only surface the reviewer has on your work; waiting
-for explicit "please open a PR" makes the work invisible until then.
-
-In an interactive local environment (CLI on a developer's machine), keep
-the default: do not open a PR unless asked. The author sees the working
-tree and decides when it's PR-ready.
-
-This rule overrides the generic "do not create a pull request unless the
-user explicitly asks" guidance that ships with most agent harnesses. The
-red/green cadence below still applies — the PR just gets opened on the
-test commit rather than after the impl commit lands.
+In a remote agent environment, open a PR as soon as the first commit is
+pushed; it is the reviewer's only view. Locally, don't open one unless
+asked.
 
 ## Red/green TDD workflow
 
-Behavior changes — bug fixes and new features alike — land in two
-phases on the **same PR**, as separate commits **pushed at
-different times**. Phase 1 commit ships only the failing test and
-is pushed first, alone, and observed red in CI. Phase 2 commit
-ships the implementation that turns it green and is pushed after
-the red CI run is visible. The two pushes are non-negotiable: a
-single push containing both commits defeats the purpose of the
-workflow, because CI never runs against the test in isolation and
-the reviewer cannot see the red that proves the test would have
-caught the bug.
+Behavior changes land as two commits on one PR, pushed separately: the
+failing test, observed red in CI, then the implementation. One push with
+both means CI never runs the test without the fix.
 
 ### The mechanics
 
-1. **Write the test first, at the right tier.** Two test tiers exist
-   in this repo:
-
-   - **Unit tests** — `src/**/*.test.ts`, run via `pnpm test:unit`.
-     Heavy on mocks (handlers, subprocesses, network) so each suite
-     stays fast. Good for branching/orchestration logic; bad at
-     catching "the engine never called X" bugs because the X is the
-     mock.
-   - **Integration tests** — `tests/integration/**/*.integration.test.ts`,
-     run via `pnpm test:integration`. Mock only the subprocess
-     boundary (the process seam — `execCapture`/`execInherit` — and
-     `fetch`; `execFileSync` in not-yet-migrated modules). Real config
-     loader, real plan, real preflight, real handler dispatch.
-
-   Behavior bugs that show up in the wild — "consumer published a
-   broken artifact and we didn't catch it" — almost always belong in
-   the integration tier. The bug usually IS that an upstream check
-   missed something the downstream subprocess would otherwise have
-   complained about; a unit test with a mock handler can't observe
-   that miss because the mock handler doesn't perform the check
-   either. If you find yourself writing `handlerFor: () => mockHandler`
-   to test a "publish should refuse" claim, you're at the wrong tier.
-
-   Commit the test on a branch. **Do not stage, write, or even
-   sketch the implementation yet.** Holding the implementation in
-   your head until step 4 is intentional — the test must be the
-   only thing your branch contains when it is first pushed.
-2. **Push the test-only commit to the remote and open the PR with
-   that one commit.** PR title prefixes the work with `test:`. PR
-   body explains the bug or missing behavior, links the tracking
-   issue, and includes a screenshot or paste of the failing CI run
-   so reviewers see the red without re-running it locally. Tag with
-   `red-test` so the queue is greppable.
-3. **Stop. Wait for CI to run, and confirm it is red because of the
-   new test.** "Red" is not a generic CI failure — it must be the
-   specific test you just authored, surfaced in the test runner's
-   failure list. A CI run that fails on lint, type-check, an
-   unrelated flake, or `Changelog check` is not the red phase
-   completing; it is a different problem to investigate first.
-   Once the run is genuinely red on your test, also wait for review
-   of the test contract. The reviewer's job at this stage is to
-   confirm the test exercises the right boundary and would actually
-   catch the bug — not to evaluate any fix. If the test shape is
-   wrong, fixing it now is cheap; fixing it after the implementation
-   lands is not.
+1. **Write the test first, at the right tier.** Unit tests
+   (`src/**/*.test.ts`) mock heavily and suit branching logic. Integration
+   tests mock only the process seam and `fetch`. Bugs seen in the wild
+   usually belong at integration: a mock handler can't catch a check the
+   real one skipped. Run the e2e locally. Don't sketch the implementation.
+2. **Push the test-only commit and open the PR**, titled `test:`, labelled
+   `red-test`, body linking the issue and showing the failing run.
+3. **Wait for red on your new test.** Lint, typecheck, flake, or
+   `Changelog check` failures are a different problem; fix unrelated
+   failures too. Then wait for review of the test contract.
 4. **After the red CI run is visible AND the test contract is
    approved, push the implementation commit on top of the same
    branch.** Watch the same test go from red to green. The
@@ -597,155 +193,35 @@ caught the bug.
 
 ### Hard rules for agents
 
-These are non-negotiable, mechanically checkable, and exist because
-this is the failure mode that has actually happened.
+- Never push the implementation in the same `git push` as the test. Don't
+  write it until the test push is on the remote.
+- Verify red first: a run on the test commit's SHA must fail on a job that
+  runs the new test. Lint errors and cancellations don't count.
+- If you already batched them, the fix is a force-push back to the test
+  commit, which needs explicit user approval. Propose it and wait.
 
-- **Never push the implementation commit in the same `git push` as
-  the test commit.** Even with the two-commit history preserved
-  locally, a single push means CI only ever runs against the green
-  HEAD — the red that proves the test's diagnostic power is never
-  recorded on the PR. If you are about to run `git push` and your
-  branch is ahead of `origin` by both a test commit and an
-  implementation commit, stop: you have batched the workflow. Reset
-  the local branch to the test commit, push that, wait for red CI,
-  then push the implementation.
-- **Never write the implementation commit before the test-only
-  commit has been pushed.** Drafting both commits locally and then
-  "remembering" to push them in sequence reliably degrades into a
-  single combined push under any time pressure — context-window
-  pressure, a reminder from the user, a tool-result interruption.
-  The mechanical guarantee is "the implementation commit does not
-  exist on disk until the test push is up." When you are ready to
-  start the implementation, the test push must already be visible
-  on the remote and CI must already be running (or done) against
-  it.
-- **Verify red before going green.** Before pushing the
-  implementation commit, fetch the PR's check runs and confirm at
-  least one run on the test-only commit's SHA has `conclusion:
-  failure` (or `in_progress` and failing in the runner output) on
-  a job that exercises the new test (`unit (ubuntu-latest)`,
-  `integration`, etc.). A CI run that errored on lint or that
-  cancelled mid-flight is not red — investigate and rerun until
-  the runtime failure is the new test itself.
-- **Recovery if you already batched the commits.** If the
-  implementation commit is already pushed alongside the test
-  commit, the only path to a faithful red→green PR is a
-  force-push back to the test commit's SHA, wait for red CI on
-  that SHA, then push the implementation commit a second time.
-  Force-push is a destructive operation; per the git-safety
-  protocol it requires explicit user authorization. Surface the
-  miss, propose the force-push, and wait for the go-ahead. Do not
-  attempt to "make up for it" by amending commit messages or
-  squashing — the diagnostic value lives in CI run history on the
-  remote, not in commit history alone.
-- **Skip clause.** Do not invoke the skip clause below to dodge
-  these rules. If the bug has a behavioral contract — anything
-  that could be expressed as "after this fix, `X` should happen
-  and currently does not" — the test exists and the rules apply.
-
-### When the workflow does not apply
-
-Skip the red-test commit only for changes that have no behavioral
-contract to test — typo fixes, comment-only edits, dependency
-bumps with no code surface change, internal renames the type
-checker proves are safe. When in doubt, write the test.
-
-A **CI toolchain or dependency pin** is a dependency bump, and stays
-one even when it fixes an outage (an upstream release broke and the
-pin routes around it). The contract such a change satisfies is "the
-suite passes again," and the existing suite already expresses it —
-the PR's checks going green *is* the red→green evidence, on the same
-commits CI already ran. Land the pin as a single reviewed commit
-whose message cites the upstream breakage; do not author a new test
-that restates the pin (see **Workflow-contract tests are earned**).
-
-### Why this shape exists
-
-Skipping phase 1 is the most common way agent-written PRs ship
-behavior that doesn't actually fix the described bug. When the test
-and the implementation arrive in one commit, reviewers cannot
-distinguish "the test would have caught this without the fix" from
-"the test was written against the implementation and passes only
-because of it." Two separate commits — the test alone, and then the
-implementation on top — make the test's diagnostic power
-observable: a reviewer (or CI) can run the test commit's SHA in
-isolation and see the red without the fix being present.
-
-The pattern applies equally to net-new features: the first commit
-defines, in test form, the contract the feature must satisfy.
-Reviewers debate the contract before the implementation exists,
-when redirecting is cheapest.
+Skip the red commit only when there is no behavioral contract: typos,
+comment-only edits, dependency bumps with no code change, type-checked
+renames. A CI toolchain pin counts as a dependency bump; land it as one
+commit citing the upstream breakage. If the change can be stated as "after
+this, X happens", the test exists.
 
 ## Workflow-contract tests are earned
 
-`test/workflows/` pins invariants in workflow YAML that a reviewer
-cannot see break: behavior wired through shell text that a refactor
-silently drops (`npm-install-fallback` — the `strict || lenient`
-self-heal), an `env:` whose absence degrades silently at runtime
-(`publish-github-token` — a missing `GITHUB_TOKEN` falls back to
-unauthenticated API calls that rate-limit), an ordering or absence
-whose violation only manifests under conditions no PR run reproduces
-(`github-release-step` — a tag fetch that fails only when another
-run moves a tag mid-job). The common shape: the regression is
-**silent in review and behavior-affecting in production**, so the
-test guards something no diff reader would catch.
+A `test/workflows/` test must guard a YAML invariant that review would miss
+and production would break on silently, like `npm-install-fallback`'s
+`strict || lenient` or `publish-github-token`'s `env:`. Restating a
+reviewed literal (a version pin, a runner label, a timeout) is review's job.
+Put the reason in a comment beside the value instead.
 
-A contract test does **not** earn its place by restating a reviewed
-literal. A version pin (`npm@11`, `pnpm@9`), a runner label, a
-timeout value — these are visible in any diff that changes them, and
-a test asserting their text fails only when someone deliberately
-edits the value, at which point that edit's review is the gate. Such
-a test is a standing tax (every legitimate bump co-changes it) that
-buys no coverage. Put the reasoning where the value lives — a comment
-citing the upstream issue and, for a temporary pin, a dated follow-up
-issue naming when to revisit — and stop.
+## Satisfy CI gates in spirit; exemptions are a last resort
 
-The bar, stated once: before adding a `test/workflows/` file, name
-the regression it catches that a reviewer reading the diff would
-miss. If the answer is "someone might change the value," that is
-review's job, not a test's.
-
-## Satisfy CI gates in spirit — exemptions are a last resort
-
-The testing-conventions gates (`co-change`, `mutation`,
-`colocated-test`, coverage, lint, …) exist **to be prescriptive**.
-They are deliberately pedantic tripwires against exactly the corners
-agents tend to cut — behavior changed without a test strengthened,
-an assertion too weak to kill a mutant, a source file with no
-colocated test. When a gate fires on your PR, the default assumption
-is that the gate is right and your diff is missing something —
-almost always a test worth writing.
-
-- **First response: satisfy the gate honestly.** A `co-change`
-  finding means you changed a file without strengthening its
-  colocated test — so find the real contract your diff touched and
-  pin it. Even a "pure refactor" rewires something (an error path,
-  a helper boundary, a passthrough); that rewiring is a testable
-  claim. Precedent: the #552 `toError()` refactor tripped
-  `co-change` on five files, and the honest fix was five real
-  per-call-site tests (non-Error values arrive wrapped as `Error`s;
-  the Error arm preserves instance identity) — not five exemptions.
-  The gate was pointing at genuinely unpinned contracts.
-- **Never add fake churn.** A whitespace edit, a comment, or a
-  restated assertion added only to flip the gate green is worse
-  than an exemption — it defeats the gate *and* hides that it was
-  defeated. If you truly cannot find a real claim to pin, that is a
-  signal to stop and ask, not to manufacture a diff.
-- **Exemptions encode permanent policy, not per-diff facts.** A
-  `[[typescript.exempt]]` entry in a checked-in config applies to
-  every future diff of that path, forever — it is not a waiver for
-  *your* PR, it is a standing blind spot. It is justified only when
-  it records a property of the code that does not expire, stated in
-  its `reason` (e.g. a genuinely equivalent mutant, with the
-  equivalence argument). "This particular PR has nothing to assert"
-  is a per-diff claim; encoding it as permanent config is a
-  category error, and the claim itself is usually wrong anyway (see
-  above).
-- **Exemptions are rare and human-stamped by design.** The friction
-  is the feature: a checked-in exemption file preserves a reviewed
-  record of the decision. Do not add one on your own judgment —
-  propose it, give the reason that would go in the file, and wait
-  for the maintainer's go-ahead.
+When a testing-conventions gate (`co-change`, `mutation`, `colocated-test`,
+coverage, lint) fires, assume it is right and your diff is missing a test.
+Find the real contract your diff touched and pin it. Never add fake churn
+to flip a gate. An exemption is permanent policy for that path, justified
+only by a property that doesn't expire (such as an equivalent mutant).
+Don't add one yourself: propose it with its reason and wait.
 
 ## Changelog and migration policy
 
@@ -757,37 +233,15 @@ surface — breaking or additive — needs an entry in both files.
 
 "Public API" means anything a downstream consumer can observe:
 
-- The reusable workflow's `workflow_call` inputs and behavior
-  (`.github/workflows/release.yml`).
-- `putitoutthere.toml` schema — keys, value grammars, defaults, validation
-  rules (documented in `README.md`).
-- The `release:` trailer grammar (documented in `README.md`).
-- Tag format, GitHub Release body shape, and any other artifact a consumer
-  workflow might grep.
+- The reusable workflow's `workflow_call` inputs and behavior.
+- The `putitoutthere.toml` schema and the `release:` trailer grammar.
+- Tag format, GitHub Release body shape, and anything a consumer might grep.
+- The `resolve` CLI output (#683), which willfire consumes.
 
-The CLI, the JS action (`action.yml`), and `src/` exports are **not**
-public surface — they're internal seams powering the reusable workflow.
-The one CLI exception is `resolve` (#683): its output map is a protocol
-willfire consumes, so it is public surface.
-Changes there don't require changelog entries unless they alter the
-reusable workflow's externally-visible behavior. See
-[`notes/design-commitments.md`](./notes/design-commitments.md) for the
-authoritative non-goals.
+The rest of the CLI, `action.yml`, and `src/` exports are internal. For
+internal refactors, test-only, and docs-only changes, add a
+`skip-changelog: <reason>` trailer to a commit. Use it sparingly.
 
-Purely internal refactors, test-only changes, and docs-only edits do not
-require an entry. If CI flags a PR that genuinely has no consumer impact,
-add a `skip-changelog:` trailer to a commit in the PR to bypass the check
-(any value — the trailer's presence is what matters). For example:
-
-```
-Refactor internal plan builder
-
-Pure rename — no observable behavior change.
-
-skip-changelog: internal refactor
-```
-
-Use sparingly; the default is to write the entry.
 
 ## Verification policy
 
@@ -803,27 +257,9 @@ Use a trailer-style clause at the end of each new bullet:
 - Fixed: npm publish now retries packument-lag 404s. (verified by: e2e/js-vanilla-firstpub)
 ```
 
-Accepted `verified by:` buckets are:
-
-- `e2e/<fixture>` — Verdaccio or registry-style end-to-end fixture evidence.
-- `integration/<test>` — engine-boundary integration coverage.
-- `unit/<test>` — focused unit coverage for behavior that cannot sensibly run
-  at a higher tier.
-- `consumer-template/<scenario>` — generated consumer workflow/template
-  coverage.
-
-Multiple citations may be comma-separated inside one clause:
-
-```
-- Changed: npm evidence is checked across both package shapes. (verified by: e2e/js-vanilla-firstpub, e2e/js-napi-firstpub)
-```
-
-For internal-only entries with no consumer-observable behavior, use a
-non-empty reason instead:
-
-```
-- Changed: internal plan-builder rename. (no fixture: pure refactor, no consumer surface)
-```
+Buckets: `e2e/<fixture>`, `integration/<test>`, `unit/<test>`,
+`consumer-template/<scenario>`, comma-separated if several. Entries with no
+consumer surface use `(no fixture: <reason>)` instead.
 
 Missing clauses, unsupported buckets, and cited evidence that did not pass on
 the PR HEAD are hard failures. The evidence check is separate from the
