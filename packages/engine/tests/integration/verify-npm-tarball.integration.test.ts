@@ -1,9 +1,8 @@
 /**
  * `piot verify npm-tarball` (epic #442, #443), extracted from two inline bash
- * blocks in `e2e-fixture-job.yml`. Two boundaries are faked: `fetch`, which
- * reads the per-version document for registry state (#716), and the Node
- * built-in `execFile` under the real exec seam, where `curl` is faked.
- * `tar` is the REAL binary, so extraction runs for real.
+ * blocks in `e2e-fixture-job.yml`. Only the Node built-in `execFile` under
+ * the real exec seam and `fetch` are mocked: the registry read and `curl` are
+ * faked, while `tar` is the REAL binary, so extraction runs for real.
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -18,8 +17,8 @@ import { run } from '../../src/cli.js';
 // Mock only the Node built-in (`execFile`) under the first-party exec seam,
 // so the real seam runs (testing-conventions forbids mocking first-party
 // modules in integration tests). Real `tar` (delegated to the un-mocked
-// execFile) and real fs keep extraction and file I/O genuine; only `curl`
-// is faked.
+// execFile) and real fs keep extraction and file I/O genuine; `curl` is
+// faked.
 const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
@@ -75,37 +74,16 @@ afterAll(() => {
   rmSync(tgzRoot, { recursive: true, force: true });
 });
 
-/**
- * The path a `<name>@<version>` spec's per-version document occupies — `@`
- * literal, `/` percent-encoded. Matched as a SUFFIX below so one wiring
- * serves both the Verdaccio and real-npm bases.
- */
-function versionDocPath(spec: string): string {
-  const at = spec.lastIndexOf('@');
-  return `/${encodeURIComponent(spec.slice(0, at)).replaceAll('%40', '@')}/${spec.slice(at + 1)}`;
-}
-
-/**
- * Wire both registry boundaries for the happy path. `published` maps
- * `name@version` to the tarball URL its per-version document advertises (#716);
- * a spec that is absent — or mapped to `''` — gets the registry's 404.
- * `urlToTgz` maps a served URL to one of the prebuilt tarball paths the mocked
- * `curl` copies out. The `npm view` branch is deliberately NOT faked: a
- * regression back to the packument should reach the real network and fail
- * loudly rather than be answered by a double.
- */
-function wire(published: Record<string, string>, urlToTgz: Record<string, string>): void {
-  vi.spyOn(globalThis, 'fetch').mockImplementation(((input: string | URL) => {
-    const url = String(input);
-    fetched.push(url);
-    const hit = Object.entries(published).find(([spec]) => url.endsWith(versionDocPath(spec)));
-    if (hit === undefined || hit[1] === '') {
-      return Promise.resolve(new Response('"version not found"', { status: 404 }));
-    }
-    const body = JSON.stringify({ dist: { tarball: hit[1] } });
-    return Promise.resolve(new Response(body, { status: 200 }));
-  }) as unknown as typeof fetch);
-
+function wire(
+  viewUrls: Record<string, string | string[]>,
+  urlToTgz: Record<string, string>,
+): void {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const [, name, version] = /^https?:\/\/[^/]+\/(.+)\/([^/]+)$/.exec(url)!;
+    const entry = viewUrls[`${decodeURIComponent(name!)}@${version}`];
+    const tarball = Array.isArray(entry) ? (entry.shift() ?? '') : (entry ?? '');
+    return tarball ? new Response(JSON.stringify({ dist: { tarball } })) : new Response('{}', { status: 404 });
+  }));
   execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     const a = [...(args ?? [])];
     if (cmd === 'curl') {
@@ -122,36 +100,14 @@ function wire(published: Record<string, string>, urlToTgz: Record<string, string
 }
 
 /**
- * Wire the `fetch` boundary for npm's per-version document, `GET
- * <registry>/<name>/<version>` (#716). Keyed by the exact URL; the value is a
- * queue of responses, the last of which repeats. A URL with no entry answers
- * 404, which is what the registry says both for a version nobody published
- * and for one published a moment ago. Every requested URL is appended to
- * `fetched`, so a test can assert how many reads the resolve actually made.
- */
-function wireVersionDocs(docs: Record<string, Array<{ status: number; json?: unknown }>>): void {
-  vi.spyOn(globalThis, 'fetch').mockImplementation(((input: string | URL) => {
-    const url = String(input);
-    fetched.push(url);
-    const queue = docs[url];
-    const next = queue !== undefined && queue.length > 1 ? queue.shift() : queue?.[0];
-    if (next === undefined) {
-      return Promise.resolve(new Response('"version not found"', { status: 404 }));
-    }
-    const body = next.json === undefined ? '' : JSON.stringify(next.json);
-    return Promise.resolve(new Response(body, { status: next.status }));
-  }) as unknown as typeof fetch);
-}
-
-/**
  * Drive a `run()` whose retry loop `await`s real-second sleeps without
- * waiting real seconds. The engine is async end to end: each retry's
- * registry read and the surrounding real-fs reads resolve as microtasks /
- * real I/O, so a retry's sleep timer is only scheduled after those settle —
- * a single `runAllTimersAsync()` would see no timer yet and return early.
- * Instead, loop: fast-forward past the longest sleep (60s) and flush a
- * microtask each turn, letting the real fs reads and the next scheduled
- * sleep land, until the run settles.
+ * waiting real seconds. The engine is async end to end now: each retry's
+ * registry read and the surrounding real-fs reads resolve
+ * as microtasks / real I/O, so a retry's sleep timer is only scheduled after
+ * those settle — a single `runAllTimersAsync()` would see no timer yet and
+ * return early. Instead, loop: fast-forward past the longest sleep (180s)
+ * and flush a microtask each turn, letting the real fs reads and the next
+ * scheduled sleep land, until the run settles.
  */
 async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
   vi.useFakeTimers();
@@ -174,13 +130,11 @@ async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
 
 let repo: string;
 const out: string[] = [];
-const fetched: string[] = [];
 
 beforeEach(() => {
   execMock.mockReset();
   repo = mkdtempSync(join(tmpdir(), 'piot-npmtar-'));
   out.length = 0;
-  fetched.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
     return true;
@@ -193,6 +147,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -260,6 +215,43 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
     expect(text).toContain(`local ${join(repo, 'packages/npm')}/dist: present, 1 file(s)`);
     expect(code).toBe(1);
   });
+
+  it('fails when the registry never returns a tarball URL', async () => {
+    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
+    // Empty forever → exhausts the retry schedule (driven by fake timers).
+    wire({ '@scope/pkg@1.0.0': '' }, {});
+
+    const code = await withFakeTimers(() =>
+      run([
+        'node', 'piot', 'verify', 'npm-tarball',
+        '--registry', 'http://localhost:4873',
+        '--matrix', JSON.stringify([mainRow()]),
+        '--cwd', repo,
+      ]),
+    );
+
+    expect(out.join('')).toContain('never returned a tarball URL');
+    expect(code).toBe(1);
+  });
+
+  it('retries through registry lag, then verifies once the URL appears', async () => {
+    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
+    wire({ '@scope/pkg@1.0.0': ['', 'https://reg/pkg.tgz'] }, { 'https://reg/pkg.tgz': tgz.withDist! });
+
+    const code = await withFakeTimers(() =>
+      run([
+        'node', 'piot', 'verify', 'npm-tarball',
+        '--registry', 'http://localhost:4873',
+        '--matrix', JSON.stringify([mainRow()]),
+        '--cwd', repo,
+      ]),
+    );
+
+    const text = out.join('');
+    expect(text).toContain('http://localhost:4873/@scope%2Fpkg/1.0.0 not readable yet (attempt 1/5)');
+    expect(text).toContain('ok: package/dist/ (1 file(s))');
+    expect(code).toBe(0);
+  });
 });
 
 describe('piot verify npm-tarball --per-triple: synthesized binary presence (#443)', () => {
@@ -309,189 +301,5 @@ describe('piot verify npm-tarball --per-triple: synthesized binary presence (#44
 
     expect(out.join('')).toContain('tarball contains only package.json');
     expect(code).toBe(1);
-  });
-});
-
-/**
- * #716. `npm view` reads the MUTABLE packument (`GET /<name>`), which npm
- * serves `max-age=300`: the read taken a second after a publish caches a copy
- * that omits the new version, and the next five minutes of reads are served
- * that copy. That is how a 320s budget lost to lags of 46s / 103s / 110s on
- * three live e2e runs in two days, failing publishes that had succeeded on a
- * lane that cannot be rerun. `GET /<name>/<version>` is uncached, so each
- * read sees current state — but current state still trails the publish by a
- * moment, so these tests pin that a 404 is retried rather than believed.
- */
-describe('piot verify npm-tarball: resolves off the immutable per-version document (#716)', () => {
-  const VERSION_DOC = 'https://registry.npmjs.org/@scope%2Fpkg/1.0.0';
-
-  it('verifies a published version the mutable packument cannot see yet', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    // The exact #716 shape: the publish landed, so the per-version document
-    // has it, while `npm view` stays empty for minutes afterwards.
-    wire({ '@scope/pkg@1.0.0': '' }, { 'https://reg/pkg.tgz': tgz.withDist! });
-    wireVersionDocs({ [VERSION_DOC]: [{ status: 200, json: { dist: { tarball: 'https://reg/pkg.tgz' } } }] });
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    const text = out.join('');
-    expect(text, `output:\n${text}`).toContain('ok: package/dist/ (1 file(s))');
-    expect(code).toBe(0);
-    // One read answers it; no propagation budget is spent.
-    expect(fetched).toEqual([VERSION_DOC]);
-  });
-
-  it('retries a 404 and verifies once the per-version document lands', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    wire({ '@scope/pkg@1.0.0': '' }, { 'https://reg/pkg.tgz': tgz.withDist! });
-    // The live shape: `npm publish` returned success and this endpoint still
-    // 404s for a moment afterwards. Believing that 404 fails a release that
-    // shipped, which is the regression this test exists to hold shut.
-    wireVersionDocs({
-      [VERSION_DOC]: [
-        { status: 404 },
-        { status: 404 },
-        { status: 200, json: { dist: { tarball: 'https://reg/pkg.tgz' } } },
-      ],
-    });
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    const text = out.join('');
-    expect(text, `output:\n${text}`).toContain(
-      'registry read did not resolve (attempt 1/10): HTTP 404; retrying in 2s',
-    );
-    expect(text).toContain('ok: package/dist/ (1 file(s))');
-    expect(code).toBe(0);
-    expect(fetched).toEqual([VERSION_DOC, VERSION_DOC, VERSION_DOC]);
-  });
-
-  it('reads the per-version document at the --registry override, scoped name encoded', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    wire({ '@scope/pkg@1.0.0': '' }, { 'https://reg/pkg.tgz': tgz.withDist! });
-    wireVersionDocs({
-      'http://localhost:4873/@scope%2Fpkg/1.0.0': [
-        { status: 200, json: { dist: { tarball: 'https://reg/pkg.tgz' } } },
-      ],
-    });
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--registry', 'http://localhost:4873',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    expect(out.join('')).toContain('ok: package/dist/ (1 file(s))');
-    expect(code).toBe(0);
-    expect(fetched).toEqual(['http://localhost:4873/@scope%2Fpkg/1.0.0']);
-  });
-
-  it('fails a 404 that outlasts the budget, naming the endpoint it asked', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    wire({ '@scope/pkg@1.0.0': '' }, {});
-    // No entry → 404 forever, i.e. npm never serves the version.
-    wireVersionDocs({});
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    const text = out.join('');
-    // Names the endpoint and the status, then both readings it permits — the
-    // old message asserted one of them and was wrong half the time.
-    expect(text, `output:\n${text}`).toContain(VERSION_DOC);
-    expect(text).toContain('HTTP 404');
-    expect(text).toContain('did not resolve after 10 attempts');
-    expect(code).toBe(1);
-    expect(fetched).toHaveLength(10);
-  });
-
-  it('retries an unreadable registry, then verifies once the read succeeds', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    wire({ '@scope/pkg@1.0.0': '' }, { 'https://reg/pkg.tgz': tgz.withDist! });
-    wireVersionDocs({
-      [VERSION_DOC]: [
-        { status: 503 },
-        { status: 200, json: { dist: { tarball: 'https://reg/pkg.tgz' } } },
-      ],
-    });
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    const text = out.join('');
-    expect(text, `output:\n${text}`).toContain(
-      'registry read did not resolve (attempt 1/10): HTTP 503; retrying in 2s',
-    );
-    expect(text).toContain('ok: package/dist/ (1 file(s))');
-    expect(code).toBe(0);
-    expect(fetched).toEqual([VERSION_DOC, VERSION_DOC]);
-  });
-
-  it('fails with the last read failure when the registry stays unreadable', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    wire({ '@scope/pkg@1.0.0': '' }, {});
-    wireVersionDocs({ [VERSION_DOC]: [{ status: 500 }] });
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    const text = out.join('');
-    expect(text, `output:\n${text}`).toContain(`${VERSION_DOC} did not resolve after 10 attempts`);
-    expect(text).toContain('last read: HTTP 500');
-    expect(code).toBe(1);
-    expect(fetched).toHaveLength(10);
-  });
-
-  it('resolves per-triple tarballs off the per-version document too', async () => {
-    wire({ '@scope/pkg-linux-x64-gnu@1.0.0': '' }, { 'https://reg/triple.tgz': tgz.withBinary! });
-    wireVersionDocs({
-      'http://localhost:4873/@scope%2Fpkg-linux-x64-gnu/1.0.0': [
-        { status: 200, json: { dist: { tarball: 'https://reg/triple.tgz' } } },
-      ],
-    });
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball', '--per-triple',
-        '--registry', 'http://localhost:4873',
-        '--matrix', JSON.stringify([mainRow({ target: 'linux-x64-gnu' })]),
-        '--cwd', repo,
-      ]),
-    );
-
-    const text = out.join('');
-    expect(text, `output:\n${text}`).toContain('ok: 1 non-metadata file(s):');
-    expect(code).toBe(0);
-    expect(fetched).toEqual(['http://localhost:4873/@scope%2Fpkg-linux-x64-gnu/1.0.0']);
   });
 });

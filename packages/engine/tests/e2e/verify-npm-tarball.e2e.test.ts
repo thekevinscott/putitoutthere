@@ -61,11 +61,6 @@ afterEach(() => {
 });
 
 describe('piot verify npm-tarball against the live npm registry (#443)', () => {
-  // #716 lives in this test: the resolve reads `GET /<name>/<version>` off
-  // live npm, scoped-name path encoding included. `latestVersion()` uses
-  // `npm view` only to pick a target — the command under test no longer
-  // shells out to it at all, so a regression back to the packument fails
-  // here against the real registry rather than against a double.
   it('confirms the published tarball honors package.json files[]', () => {
     const version = latestVersion();
     const matrix = JSON.stringify([

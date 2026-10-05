@@ -23,70 +23,15 @@ Each section covers five things, in order:
 
 ### npm tarball verification reads the per-version document (#716)
 
-**Summary.** `verify npm-tarball` downloads each published npm tarball back
-and asserts it honors the shape its `package.json` declared. To find the
-tarball it ran `npm view <pkg>@<version> dist.tarball`, which reads npm's
-**packument** (`GET /<name>`) — the discovery view npm serves
-`cache-control: public, max-age=300`. The first read after a publish caches
-a copy that omits the brand-new version, and the next five minutes of reads
-are served that same copy, so the 5+15+30+90+180s ladder spent its 320s
-budget re-asking one stale snapshot. Three successful publishes in two days
-lagged it by 46s, 103s and 110s, failing releases that had shipped with
-`npm view … never returned a tarball URL after 6 attempts`.
+**Summary.** `verify npm-tarball` found the published tarball through `npm view`, which reads npm's packument. npm caches that for five minutes, so the step could fail a publish that succeeded. It now reads `GET /<name>/<version>`, which is uncached, and retries for up to about 12 minutes against public npm.
 
-Resolution now reads the **per-version document**, `GET /<name>/<version>`,
-which npm serves uncached (`cf-cache-status: DYNAMIC`) — so each attempt
-sees current registry state rather than one cached snapshot, and the
-five-minute floor under the old failure is gone. Current state is still not
-instant: four live publishes answered 404 on that endpoint within a second
-of `npm publish` reporting success. So a 404 is retried too. That is sound
-here only because the caller is the run that just published this exact
-`name@version`; for a *discovery* read the same 404 is also the correct
-permanent answer for a version nobody ever published, which is the
-ambiguity #694 had to route around on the PyPI side.
-
-**Required changes.** None. Nothing in `putitoutthere.toml`, the reusable
-workflow's inputs, or your release job changes. If a release previously
-failed at `Verify published npm tarballs honor package.json files` (or its
-`--per-triple` sibling) on a version you could see on npmjs.com, that
-failure was spurious; re-run it.
+**Required changes.** None.
 
 **Deprecations removed.** None.
 
-**Behavior changes without code changes.** Four, all inside the two
-npm-tarball verify steps:
+**Behavior changes without code changes.** The step no longer runs `npm view`. On public npm the retry budget grows from 320s to 710s. Log lines changed: retries print `<url> not readable yet (attempt N/M); retrying in Ns`, and the failure reads `<registry> never returned a tarball URL after N attempts`.
 
-1. The steps no longer invoke `npm view`, and so no longer need an npm CLI
-   login or an `.npmrc` to read a private registry — the read is a plain
-   unauthenticated `GET` carrying only a `user-agent`, bounded by a 15s
-   timeout per attempt. A registry that requires authentication for *reads*
-   was never supported by this step and still is not.
-2. The retry ladder is now 2+5+10+20+30+60+60+60+60s (10 attempts, 307s of
-   waiting, against 320s before) and covers both a 404 and a read that did
-   not *complete* — a 429, a 5xx, a transport error, or a 200 whose body is
-   not JSON. The budget is no larger than the one it replaces; what changed
-   is that it is spent on uncached reads, each of which can return a
-   different answer.
-3. A 200 whose document carries no `dist.tarball` now fails on the first
-   read rather than being retried. The registry has answered; there is
-   nothing left for it to converge on.
-4. The log lines changed. The retry notice
-   `  packument lag: npm view returned empty (attempt N/6); retrying in Ns`
-   is replaced by
-   `  registry read did not resolve (attempt N/10): HTTP 404; retrying in Ns`,
-   and the failure names the exact URL and the last thing it returned:
-   `<url> did not resolve after 10 attempts; last read: HTTP 404. Either the
-   publish did not reach the registry, or propagation exceeded the budget.`
-   The `--per-triple` step still appends its synthesized-name hint after
-   that sentence. Anyone grepping these steps for `packument lag` or
-   `never returned a tarball URL` should match the new text.
-
-**Verification.** On a fresh npm publish the step reports
-`ok: package/<dir>/ (N file(s))` within seconds of the publish returning —
-possibly after one or two `registry read did not resolve … HTTP 404` lines,
-which are the propagation window being waited out rather than a failure. A
-version that genuinely never published spends the full 307s and then fails
-naming the URL it read.
+**Verification.** After an npm publish, the step prints `ok: package/<dir>/ (N file(s))`.
 
 ---
 

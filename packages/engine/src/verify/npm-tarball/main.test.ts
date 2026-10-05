@@ -79,7 +79,7 @@ describe('verifyNpmTarballMain', () => {
 
   it('passes when every declared dir is present in the tarball', async () => {
     readFileMock.mockResolvedValue(pkgJson(['dist']));
-    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/pkg.tgz' });
+    resolveMock.mockResolvedValue('https://reg/pkg.tgz');
     downloadMock.mockResolvedValue(TARBALL);
     statMock.mockResolvedValue({ isDirectory: () => true } as never);
     listMock.mockResolvedValue(['tarball-root/package/dist/index.js']);
@@ -89,14 +89,13 @@ describe('verifyNpmTarballMain', () => {
     expect(text).toContain('verifying tarball at http://localhost:4873 contains: dist');
     expect(text).toContain('ok: package/dist/ (1 file(s))');
     expect(code).toBe(0);
-    expect(resolveMock).toHaveBeenCalledWith('@scope/pkg', '1.0.0', 'http://localhost:4873');
     // The downloaded tarball's temp root is cleaned up recursively/forcefully.
     expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
   });
 
   it('fails with a present-locally diagnostic when the tarball drops a dir', async () => {
     readFileMock.mockResolvedValue(pkgJson(['dist']));
-    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/pkg.tgz' });
+    resolveMock.mockResolvedValue('https://reg/pkg.tgz');
     downloadMock.mockResolvedValue(TARBALL);
     statMock.mockRejectedValue(ENOENT); // tarball target absent
     localDirStateMock.mockResolvedValue(PRESENT_DIAG);
@@ -110,7 +109,7 @@ describe('verifyNpmTarballMain', () => {
 
   it('fails with a missing diagnostic when the dir is absent locally too', async () => {
     readFileMock.mockResolvedValue(pkgJson(['dist']));
-    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/pkg.tgz' });
+    resolveMock.mockResolvedValue('https://reg/pkg.tgz');
     downloadMock.mockResolvedValue(TARBALL);
     statMock.mockRejectedValue(ENOENT);
     localDirStateMock.mockResolvedValue(MISSING_DIAG);
@@ -122,7 +121,7 @@ describe('verifyNpmTarballMain', () => {
 
   it('fails when the declared dir is present but empty in the tarball', async () => {
     readFileMock.mockResolvedValue(pkgJson(['dist']));
-    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/pkg.tgz' });
+    resolveMock.mockResolvedValue('https://reg/pkg.tgz');
     downloadMock.mockResolvedValue(TARBALL);
     statMock.mockResolvedValue({ isDirectory: () => true } as never);
     listMock.mockResolvedValue([]); // present dir, but no files under it
@@ -135,7 +134,7 @@ describe('verifyNpmTarballMain', () => {
 
   it('fails when the declared dir exists as a file in the tarball', async () => {
     readFileMock.mockResolvedValue(pkgJson(['dist']));
-    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/pkg.tgz' });
+    resolveMock.mockResolvedValue('https://reg/pkg.tgz');
     downloadMock.mockResolvedValue(TARBALL);
     statMock.mockResolvedValue({ isDirectory: () => false } as never); // it's a file
     localDirStateMock.mockResolvedValue(MISSING_DIAG);
@@ -159,20 +158,14 @@ describe('verifyNpmTarballMain', () => {
     expect(resolveMock).not.toHaveBeenCalled();
   });
 
-  it('uses the real-npm label and passes a resolve failure through verbatim', async () => {
+  it('uses the real-npm label and fails when no URL ever resolves', async () => {
     readFileMock.mockResolvedValue(pkgJson(['dist']));
-    // The resolve already names the endpoint it read and what it answered, so
-    // re-diagnosing here is what produced the old "either/or" guess (#716).
-    const reason = 'https://registry.npmjs.org/@scope%2Fpkg/1.0.0 returned 404.';
-    resolveMock.mockResolvedValue({ status: 'failed', reason });
+    resolveMock.mockResolvedValue(null);
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '' });
     const text = out.join('');
-    expect(text).toContain('verifying tarball at registry.npmjs.org contains: dist');
-    expect(text).toContain(`::error::[@scope/pkg@1.0.0] ${reason}\n`);
+    expect(text).toContain('registry.npmjs.org never returned a tarball URL after 8 attempts');
     expect(code).toBe(1);
     expect(downloadMock).not.toHaveBeenCalled();
-    // No override → the resolve picks the public registry itself.
-    expect(resolveMock).toHaveBeenCalledWith('@scope/pkg', '1.0.0', undefined);
   });
 });

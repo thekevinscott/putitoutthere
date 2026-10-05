@@ -31,18 +31,16 @@ export async function verifyNpmTarballTriple(
     const version = row.version;
     process.stdout.write(`[${platformName}@${version}] verifying tarball at ${registry}\n`);
 
-    const resolved = await resolveNpmTarballUrl(platformName, version, registry);
-    if (resolved.status === 'failed') {
-      // The resolve says what the registry answered; only this caller knows
-      // the name it asked about is synthesized and could be wrong.
+    const url = await resolveNpmTarballUrl(platformName, version, { registry, sleeps: [2, 2, 2, 2] });
+    if (url === null) {
       process.stdout.write(
-        `::error::[${platformName}@${version}] ${resolved.reason} Either the platform publish didn't actually publish, or the synthesized name diverged from the default {name}-{triple} template.\n`,
+        `::error::[${platformName}@${version}] ${registry} never returned a tarball URL. Either the platform publish didn't actually publish, or the synthesized name diverged from the default {name}-{triple} template.\n`,
       );
       fail = 1;
       continue;
     }
 
-    const { root, packageDir } = await downloadNpmTarball(resolved.url, 2);
+    const { root, packageDir } = await downloadNpmTarball(url, 2);
     // Only the tarball's own root `package.json` is metadata — a nested one
     // is payload like any other file, and excluding it by basename would
     // make "contains only package.json" a false statement about a tarball
