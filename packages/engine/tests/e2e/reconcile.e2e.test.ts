@@ -20,6 +20,7 @@ const PYPI_PROJECT = 'piot-fixture-zzz-python-sdist';
 const UA = 'piot-e2e-reconcile';
 
 let repo: string;
+let remote: string;
 
 function git(args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -83,6 +84,11 @@ beforeEach(() => {
   git(['config', 'user.name', 'Test']);
   git(['config', 'commit.gpgsign', 'false']);
   git(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-reconcile-e2e-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  git(['remote', 'add', 'origin', remote]);
 
   // reconcile reads only config + tags + the registry — no manifest, no
   // preflight — so a bare config that names the live crate is enough.
@@ -106,6 +112,7 @@ globs = ["packages/rust/**"]
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
 });
 
 describe('piot reconcile against crates.io (#410)', () => {

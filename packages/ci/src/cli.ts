@@ -12,6 +12,7 @@ import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
 import { runFixtureMatrix } from './fixture-matrix/run.js';
 import { runPatchCoverage } from './patch-coverage/run.js';
+import { runPypiTagVerify } from './pypi-tag-verify/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
@@ -56,6 +57,9 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
   if (cmd === 'testpypi-verify') {
     return runTestpypiVerify(argv);
+  }
+  if (cmd === 'pypi-tag-verify') {
+    return runPypiTagVerify(argv);
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();

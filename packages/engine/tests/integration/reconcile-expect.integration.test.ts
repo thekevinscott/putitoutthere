@@ -60,6 +60,7 @@ afterAll(() => server.close());
 /* ------------------------------- git repo ------------------------------- */
 
 let repo: string;
+let remote: string;
 const stdoutChunks: string[] = [];
 const stderrChunks: string[] = [];
 
@@ -117,6 +118,11 @@ beforeEach(() => {
   gitInRepo(['config', 'user.name', 'Test']);
   gitInRepo(['config', 'commit.gpgsign', 'false']);
   gitInRepo(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-reconcile-expect-int-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  gitInRepo(['remote', 'add', 'origin', remote]);
 
   stdoutChunks.length = 0;
   stderrChunks.length = 0;
@@ -137,6 +143,7 @@ afterEach(() => {
   published.clear();
   pointerStatus = null;
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
 });
 
 describe('piot reconcile --expect: a stale latest pointer cannot skip the tag (#666)', () => {

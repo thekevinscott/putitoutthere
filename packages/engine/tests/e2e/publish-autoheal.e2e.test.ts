@@ -16,6 +16,7 @@ const CLI = join(fileURLToPath(import.meta.url), '..', '..', '..', 'dist', 'cli-
 const CRATE = 'piot-fixture-zzz-poly-rust';
 
 let repo: string;
+let remote: string;
 
 function git(args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -68,6 +69,11 @@ beforeEach(() => {
   git(['config', 'user.name', 'Test']);
   git(['config', 'commit.gpgsign', 'false']);
   git(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-autoheal-e2e-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  git(['remote', 'add', 'origin', remote]);
 
   writeRepoFile(
     'putitoutthere.toml',
@@ -102,6 +108,7 @@ license = "MIT"
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
 });
 
 describe('publish-path auto-heal against crates.io (#407)', () => {

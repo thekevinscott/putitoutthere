@@ -36,6 +36,7 @@ function fakeChild(code: number): ChildProcess.ChildProcess {
 }
 
 let repo: string;
+let remote: string;
 let ghOutput: string;
 
 function gitInRepo(args: string[]): void {
@@ -84,6 +85,11 @@ beforeEach(() => {
   gitInRepo(['config', 'user.name', 'Test']);
   gitInRepo(['config', 'commit.gpgsign', 'false']);
   gitInRepo(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-publish-outputs-int-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  gitInRepo(['remote', 'add', 'origin', remote]);
 
   writeRepoFile('putitoutthere.toml', TOML);
   writeRepoFile('packages/ts/index.ts', 'x');
@@ -104,6 +110,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
   delete process.env.NODE_AUTH_TOKEN;
   delete process.env.GITHUB_OUTPUT;
   execMock.mockReset();

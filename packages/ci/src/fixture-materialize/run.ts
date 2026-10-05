@@ -94,7 +94,20 @@ export async function runFixtureMaterialize(argv: readonly string[]): Promise<nu
   }
 
   if (plan.gitInit) {
-    for (const args of GIT_STEPS) {
+    // Function-scoped (not a module constant, unlike MANIFEST_NAMES above):
+    // the mutation gate's static-mutant detection never re-evaluates a
+    // module-level initializer per mutant and false-survives it (mirrors
+    // fixture-matrix's materialize-fixture.ts).
+    //
+    // A throwaway bare repo wired up as fixture-tree's `origin`. ensureTag's
+    // remote-aware check (#717) runs `git ls-remote --tags origin`
+    // unconditionally and throws without one, where a failed push used to
+    // be silently warned.
+    const fixtureOrigin = 'fixture-tree-origin.git';
+    await rm(fixtureOrigin, { recursive: true, force: true });
+    await execInherit('git', ['init', '--bare', '-q', fixtureOrigin]);
+    const steps = [...GIT_STEPS, ['remote', 'add', 'origin', `../${fixtureOrigin}`]];
+    for (const args of steps) {
       await execInherit('git', [...args], { cwd: FIXTURE_TREE });
     }
   }

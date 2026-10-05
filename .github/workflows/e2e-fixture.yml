@@ -97,6 +97,12 @@ jobs:
     environment: e2e
     permissions:
       id-token: write
+    outputs:
+      # #718: the `pypi-tag` job below has to key off whether this job
+      # actually uploaded anything. An undeclared job output expands to the
+      # empty string rather than erroring, so without this line `pypi-tag`
+      # would silently never fire — the same shape of silent miss #694 was.
+      have_pypi: ${{ steps.have-pypi.outputs.have_pypi }}
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -145,6 +151,104 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  # #718: the hop AFTER the upload. `pypi-publish` ended at
+  # pypa/gh-action-pypi-publish, so the half of the PyPI release path that
+  # consumers actually run — `reconcile --expect` cutting the tag for what
+  # was just uploaded — had no coverage anywhere in the repo. That is why
+  # #694 (reconcile reading PyPI's mutable project pointer and tagging
+  # nothing) shipped invisibly: every gate it would have tripped was a unit
+  # test against a mocked registry.
+  #
+  # This job MIRRORS pypi-tag.yml's documented consumer shape rather than
+  # calling it, for three independent reasons:
+  #
+  #   1. pypi-tag.yml pins `uses: thekevinscott/putitoutthere@v0`, so
+  #      calling it would exercise the RELEASED action, not the PR's — the
+  #      opposite of what an e2e lane is for. `./` cannot be substituted
+  #      inside it either: for a cross-repo reusable workflow `./` resolves
+  #      against the CONSUMER's checkout, and workflow-yaml-invariants
+  #      pins the inner refs at `@v0` on purpose.
+  #   2. pypi-tag.yml reads the calling repo's own putitoutthere.toml, whose
+  #      package set does not contain the fixture projects — `reconcile
+  #      --expect` would throw `"…" is not a package name`.
+  #   3. It pushes tags. Run here that would put fixture tags
+  #      (`piot-fixture-zzz-python-hatch-v0.0.…`) on this repo's remote on
+  #      every e2e wave.
+  #
+  # So reconcile runs for real, against real PyPI, over the real artifacts
+  # the upload just shipped — but in a throwaway git tree under
+  # RUNNER_TEMP with NO remote. `ensureTag` creates the tag locally and its
+  # push is already warn-only (#717), so the tag is observable without the
+  # repo's tag namespace ever being touched. `--dry-run` was not an option:
+  # action.yml exposes no `dry_run` input, and a dry run would not exercise
+  # `ensureTag` at all, which is the half that silently did nothing.
+  pypi-tag:
+    name: PyPI tag reconcile + verify
+    needs: pypi-publish
+    # Mirrors the consumer template's gate (see pypi-tag.yml's usage block)
+    # plus the `have_pypi` arm: `pypi-publish` skips its upload when
+    # `dist/` came back empty (#294 drops every first-publish artifact,
+    # and `simulate_no_dist` can empty it outright), and there is nothing
+    # to reconcile against a registry that received nothing.
+    if: ${{ !cancelled() && needs.pypi-publish.result == 'success' && needs.pypi-publish.outputs.have_pypi == 'true' }}
+    runs-on: ubuntu-latest
+    # Read-only: the tags this job cuts are local to $TAG_TREE by design.
+    # If a refactor ever points reconcile at the checkout instead, the push
+    # fails on permissions rather than landing a fixture tag on main.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      # Outside the checkout deliberately. A tree that somehow lacked `.git`
+      # would let git walk UP to the repo and tag that; RUNNER_TEMP has no
+      # repository above it. Exported here rather than in a job-level `env:`
+      # because the `runner` context is not available at job level — see the
+      # `${RUNNER_TEMP}` precedent in e2e-fixture-job.yml. Via GITHUB_ENV so
+      # both the `run:` steps and the action's `with:` can read it.
+      - name: Site the throwaway tag tree outside the checkout
+        run: echo "TAG_TREE=${RUNNER_TEMP}/piot-pypi-tag" >> "$GITHUB_ENV"
+      - uses: ./packages/ci/actions/setup-node
+      - uses: ./packages/ci/actions/setup-pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build engine + action bundle
+        run: |
+          pnpm run build
+          pnpm run build:action
+      # Same two patterns `pypi-publish` downloaded, so the expectation is
+      # derived from the same bytes that were uploaded.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '*-sdist'
+          path: dist/
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '*-wheel-*'
+          path: dist/
+          merge-multiple: true
+      # Reads `dist/` back into `[{name, version, tag}]` — the same shape
+      # release.yml's `delegated_packages` output carries, which is what the
+      # consumer template feeds `expect`. The fixture matrix cannot hand it
+      # over directly: e2e-fixture-job.yml declares no workflow_call
+      # outputs, and a matrix job's outputs overwrite each other anyway.
+      # Applies #294's placeholder filter so the expectation names exactly
+      # the projects the upload was given.
+      - id: expect
+        name: Derive what the PyPI upload shipped
+        run: pnpm exec piot-ci pypi-tag-verify prepare
+      - name: Tag every published version that has no tag
+        uses: ./
+        with:
+          command: reconcile
+          working_directory: ${{ env.TAG_TREE }}
+          expect: ${{ steps.expect.outputs.expect }}
+      # The assertion #694 needed and nothing had: every version that is on
+      # PyPI carries a tag. reconcile exits 0 having done nothing when it
+      # asks the wrong question, so its exit code is not the signal.
+      - name: Assert a tag was cut for every uploaded version
+        run: pnpm exec piot-ci pypi-tag-verify assert
 
   # #295: PyPI is the only registry with a public test instance whose
   # upload semantics match production closely enough to catch warehouse-

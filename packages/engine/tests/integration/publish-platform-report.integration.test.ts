@@ -39,6 +39,7 @@ const TARGETS = ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin'] as const;
 const PLATFORM_NAMES = TARGETS.map((t) => `demo-cli-${t}`);
 
 let repo: string;
+let remote: string;
 
 function gitInRepo(args: string[]): void {
   execFileSync('git', args, { cwd: repo });
@@ -140,6 +141,11 @@ beforeEach(() => {
   gitInRepo(['config', 'user.name', 'Test']);
   gitInRepo(['config', 'commit.gpgsign', 'false']);
   gitInRepo(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-platform-report-int-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  gitInRepo(['remote', 'add', 'origin', remote]);
 
   writeRepoFile('putitoutthere.toml', TOML);
   writeRepoFile('packages/js/index.js', 'module.exports = {};\n');
@@ -173,6 +179,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
   delete process.env.NODE_AUTH_TOKEN;
   execMock.mockReset();
 });

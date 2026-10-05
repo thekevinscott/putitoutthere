@@ -8,6 +8,7 @@ import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
 import { runFixtureMatrix } from './fixture-matrix/run.js';
 import { runPatchCoverage } from './patch-coverage/run.js';
+import { runPypiTagVerify } from './pypi-tag-verify/run.js';
 import { runTddLint } from './tdd-lint/run.js';
 import { runTestpypiVerify } from './testpypi-verify/run.js';
 import { runVerdaccioAuth } from './verdaccio-auth/run.js';
@@ -19,6 +20,7 @@ vi.mock('./evidence-check/run.js');
 vi.mock('./fixture-materialize/run.js');
 vi.mock('./fixture-matrix/run.js');
 vi.mock('./patch-coverage/run.js');
+vi.mock('./pypi-tag-verify/run.js');
 vi.mock('./tdd-lint/run.js');
 vi.mock('./testpypi-verify/run.js');
 vi.mock('./verdaccio-auth/run.js');
@@ -143,6 +145,14 @@ describe('piot-ci dispatcher', () => {
     const code = await run(argv('testpypi-verify', 'assert'));
     expect(code).toBe(1);
     expect(runTestpypiVerify).toHaveBeenCalledWith(['node', 'piot-ci', 'testpypi-verify', 'assert']);
+    expect(err.join('')).toBe('');
+  });
+
+  it('dispatches pypi-tag-verify to its gate, forwarding argv, and returns its exit code', async () => {
+    vi.mocked(runPypiTagVerify).mockResolvedValue(1);
+    const code = await run(argv('pypi-tag-verify', 'prepare'));
+    expect(code).toBe(1);
+    expect(runPypiTagVerify).toHaveBeenCalledWith(['node', 'piot-ci', 'pypi-tag-verify', 'prepare']);
     expect(err.join('')).toBe('');
   });
 });

@@ -46,6 +46,7 @@ interface StagedPublish {
 }
 
 let repo: string;
+let remote: string;
 let staged: StagedPublish[];
 
 /** A minimal execFile-child stand-in that emits `close` with `code`. */
@@ -125,6 +126,11 @@ beforeEach(() => {
   gitInRepo(['config', 'user.name', 'Test']);
   gitInRepo(['config', 'commit.gpgsign', 'false']);
   gitInRepo(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-nested-cli-int-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  gitInRepo(['remote', 'add', 'origin', remote]);
 
   writeRepoFile('putitoutthere.toml', TOML);
   writeRepoFile(
@@ -155,6 +161,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
   delete process.env.NODE_AUTH_TOKEN;
   execMock.mockReset();
 });
