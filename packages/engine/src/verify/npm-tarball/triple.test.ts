@@ -51,7 +51,7 @@ describe('verifyNpmTarballTriple', () => {
   });
 
   it('passes when the platform tarball ships a non-metadata file', async () => {
-    resolveMock.mockResolvedValue('https://reg/triple.tgz');
+    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/triple.tgz' });
     downloadMock.mockResolvedValue(TARBALL);
     listMock.mockResolvedValue([
       'tarball-root/package/package.json',
@@ -76,7 +76,7 @@ describe('verifyNpmTarballTriple', () => {
     // `bin/` DIRECTORY. Counting only top-level files reads that as
     // metadata-only and fails a tarball whose binary is right there at
     // `package/bin/` — the recursive listing is the one that sees it.
-    resolveMock.mockResolvedValue('https://reg/triple.tgz');
+    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/triple.tgz' });
     downloadMock.mockResolvedValue(TARBALL);
     // Two payload files under different directories: pins the recursive
     // count and the space separator the listing joins on.
@@ -95,7 +95,7 @@ describe('verifyNpmTarballTriple', () => {
   });
 
   it('fails when the tarball carries only package.json', async () => {
-    resolveMock.mockResolvedValue('https://reg/triple.tgz');
+    resolveMock.mockResolvedValue({ status: 'found', url: 'https://reg/triple.tgz' });
     downloadMock.mockResolvedValue(TARBALL);
     // Genuinely metadata-only: an empty `bin/` contributes no files, so the
     // recursive walk finds the `package.json` and nothing else.
@@ -114,11 +114,19 @@ describe('verifyNpmTarballTriple', () => {
     expect(code).toBe(1);
   });
 
-  it('fails when no URL ever resolves', async () => {
-    resolveMock.mockResolvedValue(null);
+  it('appends the name-divergence hint to whatever the resolve reported', async () => {
+    // Only this caller knows the name it asked about was SYNTHESIZED, so the
+    // resolve's verdict is passed through and annotated, not restated (#716).
+    const reason = 'http://localhost:4873/@scope%2Fpkg-linux-x64-gnu/1.0.0 returned 404.';
+    resolveMock.mockResolvedValue({ status: 'failed', reason });
+
     const code = await verifyNpmTarballTriple([row], opts);
-    expect(out.join('')).toContain('npm view at http://localhost:4873 never returned a tarball URL');
+
+    expect(out.join('')).toContain(
+      `::error::[@scope/pkg-linux-x64-gnu@1.0.0] ${reason} Either the platform publish didn't actually publish, or the synthesized name diverged from the default {name}-{triple} template.\n`,
+    );
     expect(code).toBe(1);
     expect(downloadMock).not.toHaveBeenCalled();
+    expect(resolveMock).toHaveBeenCalledWith('@scope/pkg-linux-x64-gnu', '1.0.0', 'http://localhost:4873');
   });
 });

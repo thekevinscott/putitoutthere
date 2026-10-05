@@ -25,10 +25,7 @@ export async function verifyNpmTarballMain(
     return 0;
   }
 
-  // Verdaccio (a same-host service container) is immediately consistent
-  // once `npm publish` returns; real npm's CDN needs generous backoff.
   const registry = opts.registry;
-  const sleeps = registry ? [1, 2, 5, 10] : [5, 15, 30, 90, 180];
   const registryLabel = registry ? registry : 'registry.npmjs.org';
 
   let fail = 0;
@@ -49,16 +46,14 @@ export async function verifyNpmTarballMain(
       `[${pkgName}@${version}] verifying tarball at ${registryLabel} contains: ${dirs.join(' ')}\n`,
     );
 
-    const url = await resolveNpmTarballUrl(pkgName, version, { registry, sleeps });
-    if (url === null) {
-      process.stdout.write(
-        `::error::[${pkgName}@${version}] npm view at ${registryLabel} never returned a tarball URL after ${sleeps.length + 1} attempts. Either the publish didn't actually publish, or packument propagation is much slower than expected.\n`,
-      );
+    const resolved = await resolveNpmTarballUrl(pkgName, version, registry);
+    if (resolved.status === 'failed') {
+      process.stdout.write(`::error::[${pkgName}@${version}] ${resolved.reason}\n`);
       fail = 1;
       continue;
     }
 
-    const { root, packageDir } = await downloadNpmTarball(url, 5);
+    const { root, packageDir } = await downloadNpmTarball(resolved.url, 5);
     for (const d of dirs) {
       const target = join(packageDir, d);
       // `-d` before counting: `listFilesRecursive` reads the dir, so it

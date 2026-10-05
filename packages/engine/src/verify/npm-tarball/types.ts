@@ -12,9 +12,8 @@ export interface VerifyNpmTarballOptions {
   /** The plan matrix, as the JSON string the workflow already carries. */
   matrix: string;
   /**
-   * Registry to read from. Present → tight packument-lag backoff and an
-   * explicit `--registry` on `npm view` (the Verdaccio / first-publish
-   * path). Absent → real npm with the generous CDN-propagation backoff.
+   * Registry to read the per-version document from (the Verdaccio /
+   * first-publish path sets it). Absent → `registry.npmjs.org`.
    */
   registry?: string | undefined;
   /**
@@ -23,6 +22,26 @@ export interface VerifyNpmTarballOptions {
    */
   perTriple?: boolean | undefined;
 }
+
+/**
+ * Outcome of one read of the immutable per-version document (#716).
+ * `missing` is its 404 — a verdict rather than lag; `untarballed` is a 200
+ * whose document carries no `dist.tarball`; `unreadable` is a read that never
+ * completed, and the only one of the three worth retrying.
+ */
+export type NpmVersionDocRead =
+  | { status: 'found'; tarball: string }
+  | { status: 'missing' }
+  | { status: 'untarballed' }
+  | { status: 'unreadable'; detail: string };
+
+/**
+ * Where a tarball resolve landed. The failure already carries its own
+ * explanation, so each caller annotates rather than re-diagnoses (#716).
+ */
+export type NpmTarballResolution =
+  | { status: 'found'; url: string }
+  | { status: 'failed'; reason: string };
 
 /** The matrix fields this command reads. Superset-compatible with `MatrixRow`. */
 export interface TarballRow {

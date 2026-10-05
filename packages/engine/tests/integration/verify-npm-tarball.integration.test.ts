@@ -1,8 +1,9 @@
 /**
  * `piot verify npm-tarball` (epic #442, #443), extracted from two inline bash
- * blocks in `e2e-fixture-job.yml`. Only the Node built-in `execFile` under
- * the real exec seam is mocked: `npm view` and `curl` are faked for registry
- * state, while `tar` is the REAL binary, so extraction runs for real.
+ * blocks in `e2e-fixture-job.yml`. Two boundaries are faked: `fetch`, which
+ * reads the per-version document for registry state (#716), and the Node
+ * built-in `execFile` under the real exec seam, where `curl` is faked.
+ * `tar` is the REAL binary, so extraction runs for real.
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -17,8 +18,8 @@ import { run } from '../../src/cli.js';
 // Mock only the Node built-in (`execFile`) under the first-party exec seam,
 // so the real seam runs (testing-conventions forbids mocking first-party
 // modules in integration tests). Real `tar` (delegated to the un-mocked
-// execFile) and real fs keep extraction and file I/O genuine; `npm view` +
-// `curl` are faked.
+// execFile) and real fs keep extraction and file I/O genuine; only `curl`
+// is faked.
 const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
@@ -75,27 +76,38 @@ afterAll(() => {
 });
 
 /**
- * Wire the subprocess boundary. `viewUrls` maps `name@version` (the exact
- * `npm view` first-arg) to the tarball URL it returns; an entry may be an
- * array to model packument lag — successive `npm view` calls shift off the
- * front, `''` meaning "not yet propagated". `urlToTgz` maps a served URL to
- * one of the prebuilt tarball paths the mocked `curl` copies out.
+ * The path a `<name>@<version>` spec's per-version document occupies — `@`
+ * literal, `/` percent-encoded. Matched as a SUFFIX below so one wiring
+ * serves both the Verdaccio and real-npm bases.
  */
-function wire(
-  viewUrls: Record<string, string | string[]>,
-  urlToTgz: Record<string, string>,
-): void {
+function versionDocPath(spec: string): string {
+  const at = spec.lastIndexOf('@');
+  return `/${encodeURIComponent(spec.slice(0, at)).replaceAll('%40', '@')}/${spec.slice(at + 1)}`;
+}
+
+/**
+ * Wire both registry boundaries for the happy path. `published` maps
+ * `name@version` to the tarball URL its per-version document advertises (#716);
+ * a spec that is absent — or mapped to `''` — gets the registry's 404.
+ * `urlToTgz` maps a served URL to one of the prebuilt tarball paths the mocked
+ * `curl` copies out. The `npm view` branch is deliberately NOT faked: a
+ * regression back to the packument should reach the real network and fail
+ * loudly rather than be answered by a double.
+ */
+function wire(published: Record<string, string>, urlToTgz: Record<string, string>): void {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(((input: string | URL) => {
+    const url = String(input);
+    fetched.push(url);
+    const hit = Object.entries(published).find(([spec]) => url.endsWith(versionDocPath(spec)));
+    if (hit === undefined || hit[1] === '') {
+      return Promise.resolve(new Response('"version not found"', { status: 404 }));
+    }
+    const body = JSON.stringify({ dist: { tarball: hit[1] } });
+    return Promise.resolve(new Response(body, { status: 200 }));
+  }) as unknown as typeof fetch);
+
   execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     const a = [...(args ?? [])];
-    if (a[0] === 'view') {
-      // `npm view <spec> dist.tarball [--registry …]` — the spec sits
-      // right before `dist.tarball`. The seam captures stdout as a string.
-      const key = a[a.indexOf('dist.tarball') - 1]!;
-      const entry = viewUrls[key];
-      const url = Array.isArray(entry) ? (entry.shift() ?? '') : (entry ?? '');
-      cb(null, `${url}\n`, '');
-      return undefined as unknown as ChildProcess.ChildProcess;
-    }
     if (cmd === 'curl') {
       const url = a[a.length - 1]!;
       const outIdx = a.indexOf('-o');
@@ -133,13 +145,13 @@ function wireVersionDocs(docs: Record<string, Array<{ status: number; json?: unk
 
 /**
  * Drive a `run()` whose retry loop `await`s real-second sleeps without
- * waiting real seconds. The engine is async end to end now: each retry's
- * `npm view` (awaited seam call) and the surrounding real-fs reads resolve
- * as microtasks / real I/O, so a retry's sleep timer is only scheduled after
- * those settle — a single `runAllTimersAsync()` would see no timer yet and
- * return early. Instead, loop: fast-forward past the longest sleep (180s)
- * and flush a microtask each turn, letting the real fs reads and the next
- * scheduled sleep land, until the run settles.
+ * waiting real seconds. The engine is async end to end: each retry's
+ * registry read and the surrounding real-fs reads resolve as microtasks /
+ * real I/O, so a retry's sleep timer is only scheduled after those settle —
+ * a single `runAllTimersAsync()` would see no timer yet and return early.
+ * Instead, loop: fast-forward past the longest sleep (30s) and flush a
+ * microtask each turn, letting the real fs reads and the next scheduled
+ * sleep land, until the run settles.
  */
 async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
   vi.useFakeTimers();
@@ -247,44 +259,6 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
     expect(text).toContain("tarball missing 'dist'");
     expect(text).toContain(`local ${join(repo, 'packages/npm')}/dist: present, 1 file(s)`);
     expect(code).toBe(1);
-  });
-
-  it('fails when npm view never returns a tarball URL', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    // Empty forever → exhausts the retry schedule (driven by fake timers).
-    wire({ '@scope/pkg@1.0.0': '' }, {});
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--registry', 'http://localhost:4873',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    expect(out.join('')).toContain('never returned a tarball URL');
-    expect(code).toBe(1);
-  });
-
-  it('retries through packument lag, then verifies once the URL appears', async () => {
-    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    // Empty on the first view, URL on the second → one retry sleep.
-    wire({ '@scope/pkg@1.0.0': ['', 'https://reg/pkg.tgz'] }, { 'https://reg/pkg.tgz': tgz.withDist! });
-
-    const code = await withFakeTimers(() =>
-      run([
-        'node', 'piot', 'verify', 'npm-tarball',
-        '--registry', 'http://localhost:4873',
-        '--matrix', JSON.stringify([mainRow()]),
-        '--cwd', repo,
-      ]),
-    );
-
-    const text = out.join('');
-    expect(text).toContain('packument lag: npm view returned empty (attempt 1/5)');
-    expect(text).toContain('ok: package/dist/ (1 file(s))');
-    expect(code).toBe(0);
   });
 });
 
