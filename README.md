@@ -1584,8 +1584,10 @@ a [manual release](#manual-release) for it (`release_packages`).
 
 ## Project layout
 
-- [`CHANGELOG.md`](./CHANGELOG.md) — per-release changes.
-- [`MIGRATIONS.md`](./MIGRATIONS.md) — per-version upgrade guide.
+- [`changelog.d/`](./changelog.d/) — changes, one file per PR.
+- [`migrations.d/`](./migrations.d/) — upgrade notes, one file per PR.
+- [`CHANGELOG.md`](./CHANGELOG.md) / [`MIGRATIONS.md`](./MIGRATIONS.md) —
+  the same, for releases before the fragment folders.
 - [`notes/design-commitments.md`](./notes/design-commitments.md) — non-goals.
 - [`notes/internals/`](./notes/internals/) — internal contracts (artifact
   layout, runner setup) that the reusable workflow honors so consumers don't
