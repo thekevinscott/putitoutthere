@@ -15,9 +15,14 @@ import { decideFixtureMaterialize, type FixtureMaterializeMode } from './decide.
 // these files carry the `__VERSION__` / `-placeholder` tokens.
 const MANIFEST_NAMES = ['putitoutthere.toml', 'package.json', 'Cargo.toml', 'pyproject.toml'];
 const FIXTURE_TREE = 'fixture-tree';
+// A throwaway bare repo wired up as fixture-tree's `origin` — ensureTag's
+// remote-aware check (#717) runs `git ls-remote --tags origin` unconditionally
+// and throws without one, where a failed push used to be silently warned.
+const FIXTURE_ORIGIN = 'fixture-tree-origin.git';
 const FIXTURES_ROOT = 'packages/engine/tests/fixtures';
 
-// The throwaway-repo git commands, in order, matching the bash exactly.
+// The throwaway-repo git commands, in order, matching the bash exactly, plus
+// the `origin` remote (#717) the bash never needed.
 const GIT_STEPS: readonly (readonly string[])[] = [
   ['init', '-q', '-b', 'main'],
   ['config', 'user.email', 'e2e@putitoutthere.dev'],
@@ -26,6 +31,7 @@ const GIT_STEPS: readonly (readonly string[])[] = [
   ['config', 'tag.gpgsign', 'false'],
   ['add', '.'],
   ['commit', '-q', '-m', 'e2e: initial fixture'],
+  ['remote', 'add', 'origin', `../${FIXTURE_ORIGIN}`],
 ];
 
 function isMode(value: string | undefined): value is FixtureMaterializeMode {
@@ -94,6 +100,8 @@ export async function runFixtureMaterialize(argv: readonly string[]): Promise<nu
   }
 
   if (plan.gitInit) {
+    await rm(FIXTURE_ORIGIN, { recursive: true, force: true });
+    await execInherit('git', ['init', '--bare', '-q', FIXTURE_ORIGIN]);
     for (const args of GIT_STEPS) {
       await execInherit('git', [...args], { cwd: FIXTURE_TREE });
     }

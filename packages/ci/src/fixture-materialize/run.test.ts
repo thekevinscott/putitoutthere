@@ -222,15 +222,19 @@ describe('runFixtureMaterialize: git init', () => {
     ['config', 'tag.gpgsign', 'false'],
     ['add', '.'],
     ['commit', '-q', '-m', 'e2e: initial fixture'],
+    ['remote', 'add', 'origin', '../fixture-tree-origin.git'],
   ];
 
-  it('runs the exact git command sequence in fixture-tree when gitInit is true', async () => {
+  it('materializes a bare origin repo, then runs the exact git command sequence in fixture-tree when gitInit is true (#717)', async () => {
     decide.mockReturnValue({ substitutions: [], gitInit: true, writeFixtureVersion: false });
     process.env.FIXTURE_VERSION = '0.0.5';
     await expect(runFixtureMaterialize(argv('publish'))).resolves.toBe(0);
-    expect(exec).toHaveBeenCalledTimes(GIT_SEQUENCE.length);
+
+    expect(rm).toHaveBeenCalledWith('fixture-tree-origin.git', { recursive: true, force: true });
+    expect(exec).toHaveBeenNthCalledWith(1, 'git', ['init', '--bare', '-q', 'fixture-tree-origin.git']);
+    expect(exec).toHaveBeenCalledTimes(GIT_SEQUENCE.length + 1);
     GIT_SEQUENCE.forEach((args, i) => {
-      expect(exec).toHaveBeenNthCalledWith(i + 1, 'git', args, { cwd: 'fixture-tree' });
+      expect(exec).toHaveBeenNthCalledWith(i + 2, 'git', args, { cwd: 'fixture-tree' });
     });
   });
 
