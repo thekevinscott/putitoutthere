@@ -35,6 +35,7 @@ const HEAD_MARKER = 'PIOT-664-HEAD-first-line-of-cargo-chatter';
 const TAIL_MARKER = 'PIOT-664-TAIL-where-cargo-prints-the-error';
 
 let repo: string;
+let remote: string;
 let stubDir: string;
 let originalPath: string | undefined;
 
@@ -117,6 +118,11 @@ beforeEach(() => {
   gitInRepo(['config', 'user.name', 'Test']);
   gitInRepo(['config', 'commit.gpgsign', 'false']);
   gitInRepo(['config', 'tag.gpgsign', 'false']);
+  // ensureTag (#717) now requires a real push to succeed before it
+  // considers a release tagged; give it a real, local `origin` to push to.
+  remote = mkdtempSync(join(tmpdir(), 'piot-output-ceiling-int-remote-'));
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: remote });
+  gitInRepo(['remote', 'add', 'origin', remote]);
 
   writeRepoFile('putitoutthere.toml', TOML);
   writeRepoFile('packages/rust/src/lib.rs', '');
@@ -129,6 +135,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
+  rmSync(remote, { recursive: true, force: true });
   rmSync(stubDir, { recursive: true, force: true });
   if (originalPath === undefined) {
     delete process.env.PATH;
