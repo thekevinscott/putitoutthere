@@ -1,9 +1,3 @@
-/**
- * `putitoutthere npm-build` (#721) against real npm and a real pnpm@11, in
- * real temp trees. The engine's `npm install -g pnpm@11` lands in a throwaway
- * prefix put first on PATH, so the host's global install is never touched.
- */
-
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

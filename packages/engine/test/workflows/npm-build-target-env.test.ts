@@ -1,9 +1,3 @@
-/**
- * Workflow-YAML contract (#287, #627): the e2e harness's inline npm build step
- * must hand the consumer build script `VERSION`, as `npm-build` does for the
- * reusable workflow (#721, covered by its integration and e2e tests).
- */
-
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -1,6 +1,5 @@
 import { execInherit, type ExecInheritOptions } from '../utils/exec-inherit.js';
 
-// npm and pnpm are `.cmd` shims on Windows, which spawn refuses without a shell.
 export function toolArgv(tool: string, args: readonly string[], platform: NodeJS.Platform): [string, string[]] {
   return platform === 'win32' ? ['cmd.exe', ['/d', '/s', '/c', tool, ...args]] : [tool, [...args]];
 }

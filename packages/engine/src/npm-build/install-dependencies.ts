@@ -1,8 +1,6 @@
 import { runTool } from './run-tool.js';
 import type { Installer } from './types.js';
 
-// First publish of a napi/bundled-cli family: its platform optionalDependencies
-// 404, the lockfile drops them, and the strict install refuses (#256).
 const DRIFT = 'likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family';
 
 const STRICT = {
@@ -26,7 +24,6 @@ export async function installDependencies(dir: string, installer: Installer): Pr
     return;
   }
   if (installer === 'pnpm') {
-    // The consumer's pnpm, not this repo's toolchain.
     await runTool('npm', ['install', '-g', 'pnpm@11'], { cwd: dir });
   }
   const plan = STRICT[installer];

@@ -1,10 +1,3 @@
-/**
- * `putitoutthere npm-build` (#721): picks the installer for an npm package by
- * walking from the package dir up to `--cwd` for a lockfile or pnpm workspace
- * file, self-heals a strict install, then runs the build. Real temp dirs; only
- * the `node:child_process` boundary under the exec seam is mocked.
- */
-
 import { EventEmitter } from 'node:events';
 import type * as ChildProcess from 'node:child_process';
 import { spawn } from 'node:child_process';
