@@ -1,22 +1,19 @@
 name: Evidence check
 
-# Enforces AGENTS.md's "Verification policy": new CHANGELOG.md bullets under
-# ## Unreleased must cite machine-checked evidence, or explain why no fixture
-# applies.
+# Enforces AGENTS.md's "Verification policy": each bullet in a changelog.d/
+# fragment the PR adds must cite machine-checked evidence, or explain why no
+# fixture applies (#730).
 #
 # The gate logic lives in tested TypeScript (`packages/ci/src/evidence-check/`,
 # the `piot-ci evidence-check` command), not inline bash — see AGENTS.md >
 # "Repo-internal CI gates" (#445, epic #442).
 
-# The gate diffs CHANGELOG.md against the PR base and validates only the
-# bullets that diff newly added (run.ts: one `git diff -- CHANGELOG.md`, one
-# `readFile('CHANGELOG.md')`, then `gh api` for each citation). With
-# CHANGELOG.md untouched there are no new bullets and the verdict is a
-# foregone pass, so the file is the trigger.
+# The gate validates only fragments the PR added under changelog.d/. With
+# none added the verdict is a foregone pass, so the folder is the trigger.
 on:
   pull_request:
     paths:
-      - 'CHANGELOG.md'
+      - 'changelog.d/**'
       - 'packages/ci/src/evidence-check/**'
       - 'packages/ci/actions/**'
       - '.github/workflows/evidence-check.yml'
@@ -43,7 +40,7 @@ jobs:
         # `piot-ci` is linked into node_modules/.bin and resolvable below.
         run: pnpm install --frozen-lockfile
 
-      - name: Enforce CHANGELOG evidence citations
+      - name: Enforce changelog fragment evidence citations
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
