@@ -24,10 +24,10 @@ export interface VerifyNpmTarballOptions {
 }
 
 /**
- * Outcome of one read of the immutable per-version document (#716).
- * `missing` is its 404 — a verdict rather than lag; `untarballed` is a 200
- * whose document carries no `dist.tarball`; `unreadable` is a read that never
- * completed, and the only one of the three worth retrying.
+ * Outcome of one read of the per-version document (#716). `missing` is its
+ * 404, `untarballed` a 200 whose document carries no `dist.tarball`, and
+ * `unreadable` a read that never completed. `untarballed` is the only
+ * failure a further read cannot change.
  */
 export type NpmVersionDocRead =
   | { status: 'found'; tarball: string }

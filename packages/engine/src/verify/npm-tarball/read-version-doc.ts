@@ -1,8 +1,10 @@
 /**
- * One read of npm's per-version document (#716). A 404 here is the registry's
- * verdict, not a cache miss: the document exists from the moment the publish
- * is accepted. So only a read that did not COMPLETE is `unreadable`, and that
- * is the single outcome a retry can change.
+ * One read of npm's per-version document (#716). Four outcomes, because the
+ * caller's next move differs for each: `found` is done, `untarballed` is the
+ * registry answering completely and wrongly, `missing` is its 404 — which
+ * right after a publish means not-yet-consistent rather than not-published —
+ * and `unreadable` is a read that never completed. The last two are the ones
+ * another read can change.
  */
 
 import type { NpmVersionDocRead } from './types.js';

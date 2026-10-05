@@ -51,17 +51,32 @@ describe('resolveNpmTarballUrl', () => {
     expect(readMock).toHaveBeenCalledWith('http://localhost:4873/@scope%2Fpkg/1.0.0');
   });
 
-  it('fails a 404 on the first read, because an immutable 404 is never lag', async () => {
+  it('retries a 404, because the caller just published this version', async () => {
+    readMock
+      .mockResolvedValueOnce({ status: 'missing' })
+      .mockResolvedValue({ status: 'found', tarball: 'https://reg/pkg.tgz' });
+
+    expect(await resolveNpmTarballUrl('@scope/pkg', '1.0.0')).toEqual({
+      status: 'found',
+      url: 'https://reg/pkg.tgz',
+    });
+    // Live npm answered 404 here within a second of four successful
+    // publishes, so a first-read 404 is lag; the log says 404 rather than
+    // inventing a cause for it.
+    expect(out.join('')).toBe(
+      '  registry read did not resolve (attempt 1/10): HTTP 404; retrying in 2s\n',
+    );
+    expect(sleepMock.mock.calls).toEqual([[2000]]);
+  });
+
+  it('gives up on a 404 that never clears, naming both possible causes', async () => {
     readMock.mockResolvedValue({ status: 'missing' });
 
     expect(await resolveNpmTarballUrl('@scope/pkg', '1.0.0')).toEqual({
       status: 'failed',
-      reason: `${DOC} returned 404. That document is immutable and written at publish time, so this version was never published — waiting does not change the answer.`,
+      reason: `${DOC} did not resolve after 10 attempts; last read: HTTP 404. Either the publish did not reach the registry, or propagation exceeded the budget.`,
     });
-    // The whole point of #716: no budget is spent on a question already
-    // answered, and no answer is given that the reader has to second-guess.
-    expect(readMock).toHaveBeenCalledTimes(1);
-    expect(sleepMock).not.toHaveBeenCalled();
+    expect(readMock).toHaveBeenCalledTimes(10);
   });
 
   it('fails a document carrying no dist.tarball, also without retrying', async () => {
@@ -71,6 +86,7 @@ describe('resolveNpmTarballUrl', () => {
       status: 'failed',
       reason: `${DOC} carries no dist.tarball, so there is nothing to download.`,
     });
+    // The one failure a further read cannot change, so it costs no wait.
     expect(readMock).toHaveBeenCalledTimes(1);
     expect(sleepMock).not.toHaveBeenCalled();
   });
@@ -86,22 +102,24 @@ describe('resolveNpmTarballUrl', () => {
       url: 'https://reg/pkg.tgz',
     });
     expect(out.join('')).toBe(
-      '  registry read failed (attempt 1/6): HTTP 503; retrying in 2s\n' +
-        '  registry read failed (attempt 2/6): ECONNRESET; retrying in 5s\n',
+      '  registry read did not resolve (attempt 1/10): HTTP 503; retrying in 2s\n' +
+        '  registry read did not resolve (attempt 2/10): ECONNRESET; retrying in 5s\n',
     );
     expect(sleepMock.mock.calls).toEqual([[2000], [5000]]);
   });
 
-  it('gives up after six reads, naming the last failure', async () => {
+  it('gives up after ten reads, naming the last failure', async () => {
     readMock.mockResolvedValue({ status: 'unreadable', detail: 'HTTP 500' });
 
     expect(await resolveNpmTarballUrl('@scope/pkg', '1.0.0')).toEqual({
       status: 'failed',
-      reason: `could not read ${DOC} after 6 attempts; last failure: HTTP 500.`,
+      reason: `${DOC} did not resolve after 10 attempts; last read: HTTP 500. Either the publish did not reach the registry, or propagation exceeded the budget.`,
     });
-    expect(readMock).toHaveBeenCalledTimes(6);
-    // 67s in total, and every second of it is a registry that would not
-    // answer — not a publish being waited out.
-    expect(sleepMock.mock.calls).toEqual([[2000], [5000], [10_000], [20_000], [30_000]]);
+    expect(readMock).toHaveBeenCalledTimes(10);
+    // 307s of waiting, no larger than the 320s budget this replaces — the
+    // change is that it is spent on uncached reads, which can change answer.
+    expect(sleepMock.mock.calls).toEqual([
+      [2000], [5000], [10_000], [20_000], [30_000], [60_000], [60_000], [60_000], [60_000],
+    ]);
   });
 });

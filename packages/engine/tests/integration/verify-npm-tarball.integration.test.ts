@@ -125,9 +125,9 @@ function wire(published: Record<string, string>, urlToTgz: Record<string, string
  * Wire the `fetch` boundary for npm's per-version document, `GET
  * <registry>/<name>/<version>` (#716). Keyed by the exact URL; the value is a
  * queue of responses, the last of which repeats. A URL with no entry answers
- * 404, which is what the registry says for a version that was never
- * published. Every requested URL is appended to `fetched`, so a test can
- * assert how many reads the resolve actually made.
+ * 404, which is what the registry says both for a version nobody published
+ * and for one published a moment ago. Every requested URL is appended to
+ * `fetched`, so a test can assert how many reads the resolve actually made.
  */
 function wireVersionDocs(docs: Record<string, Array<{ status: number; json?: unknown }>>): void {
   vi.spyOn(globalThis, 'fetch').mockImplementation(((input: string | URL) => {
@@ -149,7 +149,7 @@ function wireVersionDocs(docs: Record<string, Array<{ status: number; json?: unk
  * registry read and the surrounding real-fs reads resolve as microtasks /
  * real I/O, so a retry's sleep timer is only scheduled after those settle —
  * a single `runAllTimersAsync()` would see no timer yet and return early.
- * Instead, loop: fast-forward past the longest sleep (30s) and flush a
+ * Instead, loop: fast-forward past the longest sleep (60s) and flush a
  * microtask each turn, letting the real fs reads and the next scheduled
  * sleep land, until the run settles.
  */
@@ -313,13 +313,14 @@ describe('piot verify npm-tarball --per-triple: synthesized binary presence (#44
 });
 
 /**
- * #716. `npm view` reads the MUTABLE packument (`GET /<name>`), a
- * cache-fronted discovery view that lagged a completed publish by 46s / 103s
- * / 110s past a 320s budget on three live e2e runs in two days — so the gate
- * failed publishes that had succeeded, on a lane that cannot be rerun. The
- * per-version document (`GET /<name>/<version>`) is written at publish time
- * and is never stale-but-present, so it answers the question the gate is
- * actually asking and a 404 from it is a verdict rather than lag.
+ * #716. `npm view` reads the MUTABLE packument (`GET /<name>`), which npm
+ * serves `max-age=300`: the read taken a second after a publish caches a copy
+ * that omits the new version, and the next five minutes of reads are served
+ * that copy. That is how a 320s budget lost to lags of 46s / 103s / 110s on
+ * three live e2e runs in two days, failing publishes that had succeeded on a
+ * lane that cannot be rerun. `GET /<name>/<version>` is uncached, so each
+ * read sees current state — but current state still trails the publish by a
+ * moment, so these tests pin that a 404 is retried rather than believed.
  */
 describe('piot verify npm-tarball: resolves off the immutable per-version document (#716)', () => {
   const VERSION_DOC = 'https://registry.npmjs.org/@scope%2Fpkg/1.0.0';
@@ -346,6 +347,37 @@ describe('piot verify npm-tarball: resolves off the immutable per-version docume
     expect(fetched).toEqual([VERSION_DOC]);
   });
 
+  it('retries a 404 and verifies once the per-version document lands', async () => {
+    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
+    wire({ '@scope/pkg@1.0.0': '' }, { 'https://reg/pkg.tgz': tgz.withDist! });
+    // The live shape: `npm publish` returned success and this endpoint still
+    // 404s for a moment afterwards. Believing that 404 fails a release that
+    // shipped, which is the regression this test exists to hold shut.
+    wireVersionDocs({
+      [VERSION_DOC]: [
+        { status: 404 },
+        { status: 404 },
+        { status: 200, json: { dist: { tarball: 'https://reg/pkg.tgz' } } },
+      ],
+    });
+
+    const code = await withFakeTimers(() =>
+      run([
+        'node', 'piot', 'verify', 'npm-tarball',
+        '--matrix', JSON.stringify([mainRow()]),
+        '--cwd', repo,
+      ]),
+    );
+
+    const text = out.join('');
+    expect(text, `output:\n${text}`).toContain(
+      'registry read did not resolve (attempt 1/10): HTTP 404; retrying in 2s',
+    );
+    expect(text).toContain('ok: package/dist/ (1 file(s))');
+    expect(code).toBe(0);
+    expect(fetched).toEqual([VERSION_DOC, VERSION_DOC, VERSION_DOC]);
+  });
+
   it('reads the per-version document at the --registry override, scoped name encoded', async () => {
     writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
     wire({ '@scope/pkg@1.0.0': '' }, { 'https://reg/pkg.tgz': tgz.withDist! });
@@ -369,10 +401,10 @@ describe('piot verify npm-tarball: resolves off the immutable per-version docume
     expect(fetched).toEqual(['http://localhost:4873/@scope%2Fpkg/1.0.0']);
   });
 
-  it('calls a 404 from the per-version document a failed publish, on the first read', async () => {
+  it('fails a 404 that outlasts the budget, naming the endpoint it asked', async () => {
     writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
     wire({ '@scope/pkg@1.0.0': '' }, {});
-    // No entry → 404, i.e. npm has no record of the version at all.
+    // No entry → 404 forever, i.e. npm never serves the version.
     wireVersionDocs({});
 
     const code = await withFakeTimers(() =>
@@ -384,16 +416,13 @@ describe('piot verify npm-tarball: resolves off the immutable per-version docume
     );
 
     const text = out.join('');
-    // Self-diagnosing: names the endpoint, the status, and the one reading
-    // they imply — the old message asked the reader to choose between "didn't
-    // publish" and "propagation is slow" and gave them nothing to choose with.
+    // Names the endpoint and the status, then both readings it permits — the
+    // old message asserted one of them and was wrong half the time.
     expect(text, `output:\n${text}`).toContain(VERSION_DOC);
-    expect(text).toContain('404');
-    expect(text).toContain('immutable');
+    expect(text).toContain('HTTP 404');
+    expect(text).toContain('did not resolve after 10 attempts');
     expect(code).toBe(1);
-    // The decisive point: ONE read, not a retry budget. A 404 here cannot be
-    // propagation lag, so waiting it out only delays the same answer.
-    expect(fetched).toEqual([VERSION_DOC]);
+    expect(fetched).toHaveLength(10);
   });
 
   it('retries an unreadable registry, then verifies once the read succeeds', async () => {
@@ -415,7 +444,9 @@ describe('piot verify npm-tarball: resolves off the immutable per-version docume
     );
 
     const text = out.join('');
-    expect(text, `output:\n${text}`).toContain('registry read failed (attempt 1/6): HTTP 503; retrying in 2s');
+    expect(text, `output:\n${text}`).toContain(
+      'registry read did not resolve (attempt 1/10): HTTP 503; retrying in 2s',
+    );
     expect(text).toContain('ok: package/dist/ (1 file(s))');
     expect(code).toBe(0);
     expect(fetched).toEqual([VERSION_DOC, VERSION_DOC]);
@@ -435,10 +466,10 @@ describe('piot verify npm-tarball: resolves off the immutable per-version docume
     );
 
     const text = out.join('');
-    expect(text, `output:\n${text}`).toContain(`could not read ${VERSION_DOC} after 6 attempts`);
-    expect(text).toContain('last failure: HTTP 500');
+    expect(text, `output:\n${text}`).toContain(`${VERSION_DOC} did not resolve after 10 attempts`);
+    expect(text).toContain('last read: HTTP 500');
     expect(code).toBe(1);
-    expect(fetched).toHaveLength(6);
+    expect(fetched).toHaveLength(10);
   });
 
   it('resolves per-triple tarballs off the per-version document too', async () => {
