@@ -20,6 +20,7 @@ import {
   pushTag,
   pushTagRef,
   pushTagRefForce,
+  remoteTagExists,
   tagCommit,
   tagList,
   tagsPointingAtHead,
@@ -242,6 +243,26 @@ describe('pushTag', () => {
   it('pushes to origin by bare name', async () => {
     await pushTag('v0.1.0', OPTS);
     expectArgv(['push', 'origin', 'v0.1.0']);
+  });
+});
+
+describe('remoteTagExists', () => {
+  it('is true when ls-remote reports a matching ref', async () => {
+    stdout('a1b2c3d\trefs/tags/lib-v1.0.0\n');
+    expect(await remoteTagExists('lib-v1.0.0', OPTS)).toBe(true);
+    expectArgv(['ls-remote', '--tags', 'origin', 'refs/tags/lib-v1.0.0']);
+  });
+
+  it('is false when ls-remote reports no matching ref', async () => {
+    stdout('');
+    expect(await remoteTagExists('lib-v1.0.0', OPTS)).toBe(false);
+  });
+
+  it('throws when the remote cannot be reached at all (e.g. no origin configured)', async () => {
+    execMock.mockRejectedValue(
+      gitError("fatal: 'origin' does not appear to be a git repository"),
+    );
+    await expect(remoteTagExists('lib-v1.0.0', OPTS)).rejects.toThrow();
   });
 });
 
