@@ -87,7 +87,7 @@ function printUsage(): void {
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
-      '  npm-build      Install an npm package\'s dependencies and run its build (#721)',
+      '  npm-build      Install an npm package\'s dependencies and run its build',
       '  version        Print CLI version',
       '',
       'Options:',
@@ -515,15 +515,13 @@ export async function run(argv: readonly string[]): Promise<number> {
           await npmBuildMatrix(flags.matrix, boundary);
           return 0;
         }
-        if (!flags.path) {throw new Error('npm-build: --path <pkg-dir> or --matrix <json> is required');}
-        if (!flags.target) {throw new Error('npm-build: --target <t> is required');}
-        if (!flags.version) {throw new Error('npm-build: --version <v> is required');}
-        await npmBuildPackage({
-          dir: resolve(boundary, flags.path),
-          boundary,
-          target: flags.target,
-          build: flags.build ?? '',
-          version: flags.version,
+        if (!flags.path || !flags.target || !flags.version) {
+          throw new Error('npm-build: --matrix <json>, or --path, --target and --version, is required');
+        }
+        await npmBuildPackage(resolve(boundary, flags.path), boundary, {
+          TARGET: flags.target,
+          BUILD: flags.build ?? '',
+          VERSION: flags.version,
         });
         return 0;
       }

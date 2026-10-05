@@ -14,8 +14,7 @@ inputs:
       the package directory whose pyproject.toml / Cargo.toml gets
       bumped. For `verify-bundle-cli` (#595), also forwarded as
       `--path` — the package directory whose built wheel lives under
-      `<path>/dist`. For `npm-build` (#721), forwarded as `--path` — the
-      npm package directory to install and build. Defaults to the runner working directory. Internal use;
+      `<path>/dist`. For `npm-build`, the package to build. Defaults to the runner working directory. Internal use;
       the reusable workflow supplies this when invoked against a
       non-root tree (e.g. e2e fixtures materialized into a subdir,
       or a per-package `matrix.path`).
@@ -24,8 +23,7 @@ inputs:
   version:
     description: >-
       Planned version string. Required when `command: write-version`
-      (#276), and for a single-package `npm-build`, where the build
-      script sees it as `VERSION` (#721); ignored otherwise. The reusable workflow forwards the
+      (#276) and single-package `npm-build`; ignored otherwise. The reusable workflow forwards the
       build matrix's `version` row from the planner.
     required: false
     default: ''
@@ -61,8 +59,7 @@ inputs:
       The build matrix row's target triple, forwarded to
       `verify-bundle-cli` as `--target` (#595). A triple containing
       `windows` selects the `.exe` binary suffix. Required when
-      `command: verify-bundle-cli`, and for a single-package `npm-build`,
-      where the build script sees it as `TARGET` (#721); ignored otherwise.
+      `command: verify-bundle-cli` and single-package `npm-build`; ignored otherwise.
     required: false
     default: ''
   expect:
@@ -79,17 +76,11 @@ inputs:
     required: false
     default: ''
   build:
-    description: >-
-      The build matrix row's `build` mode, forwarded to `npm-build` as
-      `--build` and exposed to the consumer's build script as `BUILD`
-      (#721). Ignored otherwise.
+    description: The build matrix row's `build` mode, for `npm-build`.
     required: false
     default: ''
   matrix:
-    description: >-
-      The plan matrix JSON, forwarded to `npm-build` as `--matrix` (#721):
-      install and build every npm package in it once, as `TARGET=main`.
-      Ignored otherwise.
+    description: The plan matrix JSON; `npm-build` builds every npm package in it.
     required: false
     default: ''
   fail_on_error:

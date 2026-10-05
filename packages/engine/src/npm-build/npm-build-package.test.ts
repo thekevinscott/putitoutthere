@@ -1,58 +1,58 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join, resolve } from 'node:path';
 
-import { findInstaller } from './find-installer.js';
-import { installDependencies } from './install-dependencies.js';
+import { beforeEach, expect, it, vi } from 'vitest';
+
+import { execInherit } from '../utils/exec-inherit.js';
+import { pathExists } from '../utils/path-exists.js';
 import { npmBuildPackage } from './npm-build-package.js';
-import { runTool } from './run-tool.js';
 
-vi.mock('./find-installer.js');
-vi.mock('./install-dependencies.js');
-vi.mock('./run-tool.js');
+vi.mock('../utils/exec-inherit.js');
+vi.mock('../utils/path-exists.js');
 
-const find = vi.mocked(findInstaller);
-const install = vi.mocked(installDependencies);
-const tool = vi.mocked(runTool);
-let out: string[];
+const root = resolve('/repo');
+const pkg = join(root, 'pkg');
+let out: string;
 
-const OPTS = { dir: '/repo/pkg', boundary: '/repo', target: 'linux-x64-gnu', build: 'napi', version: '1.2.3' };
+function setup(files: string[], failing: string[] = []): string[] {
+  vi.mocked(pathExists).mockImplementation((p) => Promise.resolve(files.map((f) => join(root, f)).includes(p)));
+  const calls: string[] = [];
+  vi.mocked(execInherit).mockImplementation((cmd, args) => {
+    const line = [cmd, ...args].join(' ');
+    calls.push(line);
+    return failing.includes(line) ? Promise.reject(new Error(line)) : Promise.resolve();
+  });
+  return calls;
+}
 
 beforeEach(() => {
-  find.mockReset().mockResolvedValue('pnpm');
-  install.mockReset().mockResolvedValue(undefined);
-  tool.mockReset().mockResolvedValue(undefined);
-  out = [];
-  vi.spyOn(process.stdout, 'write').mockImplementation((s: string | Uint8Array) => {
-    out.push(String(s));
-    return true;
-  });
+  out = '';
+  vi.spyOn(process.stdout, 'write').mockImplementation((s) => ((out += String(s)), true));
 });
 
-afterEach(() => {
-  vi.restoreAllMocks();
+const BUILD = 'npm run build --if-present';
+const PNPM = ['npm install -g pnpm@11', 'pnpm install --frozen-lockfile', BUILD];
+const DRIFT = 'drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to';
+
+it.each([
+  [['pkg/package-lock.json', 'pkg/pnpm-lock.yaml'], [], ['npm ci', BUILD]],
+  [['pnpm-lock.yaml'], [], PNPM],
+  [['pkg/pnpm-workspace.yaml', 'package-lock.json'], [], PNPM],
+  [['../package-lock.json'], [], ['npm install', BUILD]],
+  [[], [], ['npm install', BUILD]],
+  [['pkg/package-lock.json'], ['npm ci'], ['npm ci', 'npm install', BUILD], `::warning::package-lock.json ${DRIFT} npm install\n`],
+  [['pnpm-workspace.yaml'], ['pnpm install --frozen-lockfile'], [...PNPM.slice(0, 2), 'pnpm install --no-frozen-lockfile', BUILD], `::warning::pnpm-lock.yaml ${DRIFT} pnpm install --no-frozen-lockfile\n`],
+])('%j failing %j runs %j', async (files, failing, expected, warning = '') => {
+  const calls = setup(files, failing);
+  await npmBuildPackage(pkg, root, { TARGET: 't' });
+  expect(calls).toEqual(expected);
+  expect(out).toBe(warning);
+  expect(vi.mocked(execInherit)).toHaveBeenLastCalledWith('npm', ['run', 'build', '--if-present'], { cwd: pkg, env: expect.objectContaining({ TARGET: 't', PATH: process.env.PATH }) as unknown });
 });
 
-describe('npmBuildPackage', () => {
-  it('installs with the installer found between dir and boundary, then builds', async () => {
-    await npmBuildPackage(OPTS);
-    expect(find).toHaveBeenCalledWith('/repo/pkg', '/repo');
-    expect(install).toHaveBeenCalledWith('/repo/pkg', 'pnpm');
-    expect(out.join('')).toBe('npm-build: /repo/pkg: installer pnpm\n');
-    expect(tool).toHaveBeenCalledWith('npm', ['run', 'build', '--if-present'], {
-      cwd: '/repo/pkg',
-      env: expect.objectContaining({ TARGET: 'linux-x64-gnu', BUILD: 'napi', VERSION: '1.2.3' }) as unknown,
-    });
-  });
-
-  it('keeps the rest of the environment for the build', async () => {
-    vi.stubEnv('PIOT_SENTINEL', 'kept');
-    await npmBuildPackage(OPTS);
-    expect(tool.mock.calls[0]![2].env).toMatchObject({ PIOT_SENTINEL: 'kept' });
-    vi.unstubAllEnvs();
-  });
-
-  it('does not build when the install fails', async () => {
-    install.mockRejectedValue(new Error('Command failed: npm install'));
-    await expect(npmBuildPackage(OPTS)).rejects.toThrow('npm install');
-    expect(tool).not.toHaveBeenCalled();
-  });
+it('stops when the lenient install fails, and spawns through cmd.exe on Windows', async () => {
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+  const calls = setup(['pkg/package-lock.json'], ['cmd.exe /d /s /c npm ci', 'cmd.exe /d /s /c npm install']);
+  await expect(npmBuildPackage(pkg, root, {})).rejects.toThrow('npm install');
+  expect(calls).toEqual(['cmd.exe /d /s /c npm ci', 'cmd.exe /d /s /c npm install']);
+  expect(vi.mocked(execInherit)).toHaveBeenCalledWith('cmd.exe', ['/d', '/s', '/c', 'npm', 'ci'], { cwd: pkg });
 });

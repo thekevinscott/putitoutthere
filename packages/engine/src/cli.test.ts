@@ -250,11 +250,6 @@ describe('cli: top-level dispatch', () => {
 });
 
 describe('parseFlags', () => {
-  it('reads --build (#721)', () => {
-    expect(parseFlags(['--build', 'napi']).build).toBe('napi');
-    expect(parseFlags([]).build).toBeUndefined();
-  });
-
   it('resolves a relative --cwd to an absolute path (#244)', () => {
     // Downstream handlers run subprocesses with `cwd: ctx.cwd` and pass
     // file paths derived from `join(cwd, 'artifacts', ...)`. If the parsed
@@ -630,52 +625,25 @@ describe('cli: write-launcher dispatch', () => {
 });
 
 describe('cli: npm-build dispatch', () => {
-  it('builds one package from --path, bounded by --cwd, with the row env (#721)', async () => {
-    const code = await run(argv(
-      'npm-build', '--cwd', '/tree', '--path', 'packages/a',
-      '--target', 'linux-x64-gnu', '--build', 'napi', '--version', '1.2.3',
-    ));
-    expect(code).toBe(0);
-    expect(npmBuildPackageMock).toHaveBeenCalledWith({
-      dir: resolve('/tree', 'packages/a'),
-      boundary: resolve('/tree'),
-      target: 'linux-x64-gnu',
-      build: 'napi',
-      version: '1.2.3',
-    });
-    expect(npmBuildMatrixMock).not.toHaveBeenCalled();
+  it('builds one package bounded by --cwd, or the whole matrix', async () => {
+    expect(await run(argv('npm-build', '--cwd', '/t', '--path', 'a', '--target', 'x', '--build', 'napi', '--version', '1'))).toBe(0);
+    expect(await run(argv('npm-build', '--cwd', '/t', '--path', 'a', '--target', 'x', '--version', '1'))).toBe(0);
+    expect(await run(argv('npm-build', '--cwd', '/t', '--matrix', '[]', '--path', 'a'))).toBe(0);
+    expect(npmBuildPackageMock.mock.calls).toEqual([
+      [resolve('/t', 'a'), resolve('/t'), { TARGET: 'x', BUILD: 'napi', VERSION: '1' }],
+      [resolve('/t', 'a'), resolve('/t'), { TARGET: 'x', BUILD: '', VERSION: '1' }],
+    ]);
+    expect(npmBuildMatrixMock).toHaveBeenCalledWith('[]', resolve('/t'));
   });
 
-  it('defaults BUILD to empty when --build is absent (#721)', async () => {
-    const code = await run(argv('npm-build', '--cwd', '/tree', '--path', 'p', '--target', 'main', '--version', '1.0.0'));
-    expect(code).toBe(0);
-    expect(npmBuildPackageMock).toHaveBeenCalledWith(expect.objectContaining({ build: '' }));
-  });
-
-  it('hands --matrix to the matrix rebuild instead (#721)', async () => {
-    const code = await run(argv('npm-build', '--cwd', '/tree', '--matrix', '[]', '--path', 'ignored'));
-    expect(code).toBe(0);
-    expect(npmBuildMatrixMock).toHaveBeenCalledWith('[]', resolve('/tree'));
-    expect(npmBuildPackageMock).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [['--target', 'main', '--version', '1.0.0'], /--path/],
-    [['--path', 'p', '--version', '1.0.0'], /--target/],
-    [['--path', 'p', '--target', 'main'], /--version/],
-  ])('errors naming the missing flag (%j)', async (flags, message) => {
-    const code = await run(argv('npm-build', '--cwd', '/tree', ...flags));
-    expect(code).toBe(1);
-    expect(stderr.join('')).toMatch(message);
-    expect(npmBuildPackageMock).not.toHaveBeenCalled();
-  });
-
-  it('fails when the build fails (#721)', async () => {
-    npmBuildPackageMock.mockRejectedValue(new Error('Command failed: npm run build --if-present'));
-    const code = await run(argv('npm-build', '--cwd', '/tree', '--path', 'p', '--target', 'main', '--version', '1.0.0'));
-    expect(code).toBe(1);
-    expect(stderr.join('')).toMatch(/npm run build/);
-  });
+  it.each([['--target', 'x', '--version', '1'], ['--path', 'a', '--version', '1'], ['--path', 'a', '--target', 'x']])(
+    'fails without one of --path, --target, --version (%j)',
+    async (...flags) => {
+      expect(await run(argv('npm-build', '--cwd', '/t', ...flags))).toBe(1);
+      expect(stderr.join('')).toContain('--path, --target and --version');
+      expect(npmBuildPackageMock).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('cli: publish dispatch', () => {

@@ -202,27 +202,13 @@ describe('action', () => {
     ]);
   });
 
-  it('npm-build: forwards the row as --path / --target / --build / --version (#721)', async () => {
-    process.env.INPUT_COMMAND = 'npm-build';
-    process.env.INPUT_WORKING_DIRECTORY = 'packages/ts';
-    process.env.INPUT_TARGET = 'linux-x64-gnu';
-    process.env.INPUT_BUILD = 'napi';
-    process.env.INPUT_VERSION = '1.2.3';
+  it('npm-build: forwards the row inputs, or the matrix alone', async () => {
+    Object.assign(process.env, { INPUT_COMMAND: 'npm-build', INPUT_WORKING_DIRECTORY: 'p', INPUT_TARGET: 't', INPUT_BUILD: 'b', INPUT_VERSION: '1' });
     await expect(main()).rejects.toThrow(/exit:0/);
-    expect(runMock).toHaveBeenCalledWith([
-      'node', 'putitoutthere', 'npm-build',
-      '--path', 'packages/ts',
-      '--target', 'linux-x64-gnu',
-      '--build', 'napi',
-      '--version', '1.2.3',
-    ]);
-  });
-
-  it('npm-build: forwards matrix as --matrix and omits unset inputs (#721)', async () => {
-    process.env.INPUT_COMMAND = 'npm-build';
-    process.env.INPUT_MATRIX = '[{"kind":"npm"}]';
+    expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', 'npm-build', '--path', 'p', '--target', 't', '--build', 'b', '--version', '1']);
+    Object.assign(process.env, { INPUT_WORKING_DIRECTORY: '', INPUT_TARGET: '', INPUT_BUILD: '', INPUT_VERSION: '', INPUT_MATRIX: '[]' });
     await expect(main()).rejects.toThrow(/exit:0/);
-    expect(runMock).toHaveBeenCalledWith(['node', 'putitoutthere', 'npm-build', '--matrix', '[{"kind":"npm"}]']);
+    expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', 'npm-build', '--matrix', '[]']);
   });
 
   it('verify-bundle-cli: splits the command and forwards the four flags (#595)', async () => {

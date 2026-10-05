@@ -21,59 +21,22 @@ Each section covers five things, in order:
 
 ## Unreleased
 
-### npm install step now walks up for a workspace-root lockfile (#721)
+### npm install step finds a workspace-root lockfile (#721)
 
-**Summary.** Two reusable-workflow steps choose an installer for an
-npm-kind package by checking for `package-lock.json` or `pnpm-lock.yaml`
-in that package's own directory: `_matrix.yml`'s `build` job (before
-`npm run build --if-present`) and `release.yml`'s `publish` job (the
-`Build npm packages` step, run against an npm-kind row immediately before
-upload). A package that is a member of a pnpm (or npm) workspace keeps no
-lockfile of its own — only the workspace root does — so the local-only
-check fell through to the unconditional `else` branch: a bare
-`npm install`.
+**Summary.** The npm build steps in `_matrix.yml` and `release.yml` now look for
+`package-lock.json`, `pnpm-lock.yaml` or `pnpm-workspace.yaml` in the package
+directory and its ancestors up to the checkout root. Before, a workspace member
+with no lockfile of its own got a bare `npm install`.
 
-In the publish job that bare `npm install` is especially destructive. If
-an earlier row in the same job had already installed a different npm
-package with pnpm, `npm install` walked the pnpm-populated, symlinked
-`node_modules` left behind and tried to run dependency lifecycle scripts
-it doesn't know how to satisfy, dying with `sh: 1: wireit: not found`
-(exit 127) before the step could emit the PyPI hand-off output the rest
-of the job depends on — blocking every registry in the release, not just
-npm. Observed on a real consumer (`thekevinscott/telelux`, release run
-37050020677, job `release / publish`).
-
-Both steps now run a new engine subcommand, `putitoutthere npm-build`,
-in place of their inline bash. It checks for a `package-lock.json`,
-`pnpm-lock.yaml`, or `pnpm-workspace.yaml` in the package directory **or
-any ancestor up to the checkout root** (`$GITHUB_WORKSPACE`) before
-falling back to a bare `npm install`. The nearest directory with any of
-the three wins; within one directory `package-lock.json` is checked first. Finding the marker only changes which branch runs — pnpm
-itself already resolves the workspace root once invoked from a member
-directory, so the fix is choosing the right installer, not teaching it to
-find the workspace root a second time.
-
-**Required changes.** None. No workflow input, config key, or trailer
-changes. A standalone npm package — no ancestor lockfile at all — runs
-the exact same bare `npm install` it always did.
+**Required changes.** None.
 
 **Deprecations removed.** None.
 
-**Behavior changes without code changes.** One. A pnpm (or npm) workspace
-member that previously fell through to a bare `npm install` now runs
-`pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile` (or
-the npm-strict `npm ci || npm install` branch, if an ancestor
-`package-lock.json` is what's found) instead. A package with no ancestor
-workspace marker at all is unaffected.
+**Behavior changes without code changes.** A workspace member now installs with
+pnpm (or `npm ci`) instead of a bare `npm install`.
 
-**Verification.** In a release run, the npm step's log names the
-installer it picked (`npm-build: <dir>: installer pnpm`) for a workspace
-member, and the publish job no longer dies with `wireit: not found`.
-`packages/engine/tests/integration/npm-build.integration.test.ts` covers
-installer selection, the boundary, the self-heal, the build env, and the
-`--matrix` rebuild through the SDK; `packages/engine/tests/e2e/npm-build.e2e.test.ts`
-runs the same cases against real npm and pnpm@11, including a real
-`ERR_PNPM_OUTDATED_LOCKFILE` falling back to `--no-frozen-lockfile`.
+**Verification.** The publish job no longer fails with `wireit: not found` on a
+pnpm workspace member.
 
 ### A failed tag push during `publish`/`reconcile` now fails the job (#717)
 
