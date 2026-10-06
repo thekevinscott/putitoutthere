@@ -48,7 +48,7 @@ beforeEach(() => {
   ] as unknown as Awaited<ReturnType<typeof readdir>>);
   derive.mockReturnValue({ expectations: EXPECTATIONS });
   decide.mockReturnValue({ lines: ['  tagged: pkg-v0.0.1'], exitCode: 0 });
-  stubCapture('pkg-v0.0.1\n');
+  stubCapture('abc123\trefs/tags/pkg-v0.0.1\n');
   process.env.TAG_TREE = TREE;
 });
 
@@ -58,19 +58,19 @@ afterEach(() => {
 });
 
 describe('runPypiTagAssert', () => {
-  it('re-derives from dist/, reads the throwaway tree tags, and returns the exit code', async () => {
+  it('re-derives from dist/, reads the tags on the tree\'s origin, and returns the exit code', async () => {
     await expect(runPypiTagAssert()).resolves.toBe(0);
     expect(readdirMock).toHaveBeenCalledWith('dist', { withFileTypes: true });
     expect(derive).toHaveBeenCalledWith(['pkg-0.0.1.tar.gz']);
-    expect(capture).toHaveBeenCalledWith('git', ['tag', '-l'], { cwd: TREE });
+    expect(capture).toHaveBeenCalledWith('git', ['ls-remote', '--tags', '--refs', 'origin'], { cwd: TREE });
     expect(decide).toHaveBeenCalledWith(EXPECTATIONS, ['pkg-v0.0.1']);
     expect(out.join('')).toBe('  tagged: pkg-v0.0.1\n');
   });
 
-  it('splits the tag list into trimmed, non-empty names', async () => {
-    // `git tag -l` on an empty repo prints nothing, and its output always
-    // ends in a newline — a blank entry would look like a real tag name.
-    stubCapture('  pkg-v0.0.1  \nother\n\n');
+  it('splits the ref list into trimmed, non-empty tag names', async () => {
+    // An origin with no tags prints nothing, and the output always ends in a
+    // newline — a blank entry would look like a real tag name.
+    stubCapture('  abc123\trefs/tags/pkg-v0.0.1  \ndef456\trefs/tags/other\n\n');
     await expect(runPypiTagAssert()).resolves.toBe(0);
     expect(decide).toHaveBeenCalledWith(EXPECTATIONS, ['pkg-v0.0.1', 'other']);
   });

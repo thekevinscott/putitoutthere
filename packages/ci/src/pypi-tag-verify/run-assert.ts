@@ -1,6 +1,7 @@
 /**
  * Composition root for `pypi-tag-verify assert` — the step that reads the e2e
- * tag job's tags back out of the throwaway tree. The only I/O lives here; the
+ * tag job's tags back out of the throwaway tree's `origin`, so a tag that was
+ * cut but never pushed (#717) fails it. The only I/O lives here; the
  * decision is `assert-expected-tags.ts`'s.
  *
  * Re-derives the expectation from `dist/` rather than taking a value passed
@@ -30,11 +31,12 @@ export async function runPypiTagAssert(): Promise<number> {
     return 1;
   }
 
-  const { stdout } = await execCapture('git', ['tag', '-l'], { cwd: tree });
+  const { stdout } = await execCapture('git', ['ls-remote', '--tags', '--refs', 'origin'], { cwd: tree });
   const tags = stdout
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line !== '');
+    .filter((line) => line !== '')
+    .map((line) => line.slice(line.indexOf('refs/tags/') + 'refs/tags/'.length));
   const decision = decideAssertExpectedTags(decided.expectations, tags);
   for (const line of decision.lines) {
     process.stdout.write(`${line}\n`);
