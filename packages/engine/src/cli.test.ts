@@ -38,6 +38,7 @@ import type { PlanStatus } from './plan-status-types.js';
 import type { StatusRow } from './status-types.js';
 
 vi.mock('node:fs/promises');
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('./advance-floating-major.js');
 vi.mock('./advance-v0.js');
 vi.mock('./check.js');
@@ -634,6 +635,11 @@ describe('cli: npm-build dispatch', () => {
       [resolve('/t', 'a'), resolve('/t'), { TARGET: 'x', BUILD: '', VERSION: '1' }],
     ]);
     expect(npmBuildMatrixMock).toHaveBeenCalledWith('[]', resolve('/t'));
+  });
+
+  it('is listed in --help', async () => {
+    await run(argv('--help'));
+    expect(stderr.join('')).toMatch(/npm-build\s+Install an npm package's dependencies and run its build/);
   });
 
   it.each([['--target', 'x', '--version', '1'], ['--path', 'a', '--version', '1'], ['--path', 'a', '--target', 'x']])(

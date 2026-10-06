@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { npmBuildMatrix } from './npm-build-matrix.js';
 import { npmBuildPackage } from './npm-build-package.js';
 
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('./npm-build-package.js');
 
 it('builds each npm path once, as TARGET=main with the first row\'s version', async () => {

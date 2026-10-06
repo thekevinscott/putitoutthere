@@ -206,7 +206,8 @@ describe('action', () => {
     Object.assign(process.env, { INPUT_COMMAND: 'npm-build', INPUT_WORKING_DIRECTORY: 'p', INPUT_TARGET: 't', INPUT_BUILD: 'b', INPUT_VERSION: '1' });
     await expect(main()).rejects.toThrow(/exit:0/);
     expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', 'npm-build', '--path', 'p', '--target', 't', '--build', 'b', '--version', '1']);
-    Object.assign(process.env, { INPUT_WORKING_DIRECTORY: '', INPUT_TARGET: '', INPUT_BUILD: '', INPUT_VERSION: '', INPUT_MATRIX: '[]' });
+    delete process.env.INPUT_BUILD;
+    Object.assign(process.env, { INPUT_WORKING_DIRECTORY: '', INPUT_TARGET: '', INPUT_VERSION: '', INPUT_MATRIX: '[]' });
     await expect(main()).rejects.toThrow(/exit:0/);
     expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', 'npm-build', '--matrix', '[]']);
   });

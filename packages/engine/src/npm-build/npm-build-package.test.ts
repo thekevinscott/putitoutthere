@@ -6,6 +6,7 @@ import { execInherit } from '../utils/exec-inherit.js';
 import { pathExists } from '../utils/path-exists.js';
 import { npmBuildPackage } from './npm-build-package.js';
 
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('../utils/exec-inherit.js');
 vi.mock('../utils/path-exists.js');
 
@@ -48,6 +49,12 @@ it.each([
   expect(calls).toEqual(expected);
   expect(out).toBe(warning);
   expect(vi.mocked(execInherit)).toHaveBeenLastCalledWith('npm', ['run', 'build', '--if-present'], { cwd: pkg, env: expect.objectContaining({ TARGET: 't', PATH: process.env.PATH }) as unknown });
+});
+
+it('stops at the filesystem root when the boundary is not an ancestor', async () => {
+  const calls = setup([]);
+  await npmBuildPackage(pkg, resolve('/elsewhere'), {});
+  expect(calls).toEqual(['npm install', BUILD]);
 });
 
 it('stops when the lenient install fails, and spawns through cmd.exe on Windows', async () => {
