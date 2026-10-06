@@ -1,21 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveNpmTarballUrl } from './resolve-url.js';
-import { execCapture } from '../../utils/exec-capture.js';
-import { ExecError } from '../../utils/exec-error.js';
 
-vi.mock('../../utils/exec-error.js', async () => await vi.importActual<typeof import('../../utils/exec-error.js')>('../../utils/exec-error.js'));
-
-// Bare automock (no factory): the double is derived from the real seam
-// module, so it can't drift and needs no hand-written factory. Real `npm view`
-// behaviour is covered by the integration and e2e tiers.
-vi.mock('../../utils/exec-capture.js');
-
-const execMock = vi.mocked(execCapture);
+const fetchMock = vi.fn<typeof fetch>();
 const out: string[] = [];
 
+function respond(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status });
+}
+
+const DOC = { dist: { tarball: 'https://reg/pkg.tgz' } };
+
 beforeEach(() => {
-  execMock.mockReset();
+  fetchMock.mockReset();
+  vi.stubGlobal('fetch', fetchMock);
   out.length = 0;
   vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
     out.push(typeof c === 'string' ? c : c.toString());
@@ -24,46 +22,42 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
+async function settle<T>(p: Promise<T>): Promise<T> {
+  await vi.runAllTimersAsync();
+  return p;
+}
+
 describe('resolveNpmTarballUrl', () => {
-  it('returns the trimmed URL on the first successful view, no sleep', async () => {
-    execMock.mockResolvedValue({ stdout: 'https://reg/pkg.tgz\n', stderr: '' });
-    const url = await resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [1] });
-    expect(url).toBe('https://reg/pkg.tgz');
-    // Flags appended after positionals so the spec stays out of the flag slot.
-    expect(execMock).toHaveBeenCalledWith(
-      'npm',
-      ['view', 'pkg@1.0.0', 'dist.tarball'],
-    );
+  it('reads the per-version document for a scoped name on public npm', async () => {
+    fetchMock.mockResolvedValue(respond(200, DOC));
+    expect(await resolveNpmTarballUrl('@scope/pkg', '1.0.0', { sleeps: [1] })).toBe('https://reg/pkg.tgz');
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://registry.npmjs.org/@scope%2Fpkg/1.0.0');
+    expect(fetchMock.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
     expect(out.join('')).toBe('');
   });
 
-  it('passes --registry through when set', async () => {
-    execMock.mockResolvedValue({ stdout: 'https://reg/pkg.tgz\n', stderr: '' });
-    await resolveNpmTarballUrl('pkg', '1.0.0', { registry: 'http://localhost:4873', sleeps: [] });
-    expect(execMock).toHaveBeenCalledWith(
-      'npm',
-      ['view', 'pkg@1.0.0', 'dist.tarball', '--registry', 'http://localhost:4873'],
-    );
+  it('reads from an override registry, trailing slash and all', async () => {
+    fetchMock.mockResolvedValue(respond(200, DOC));
+    await resolveNpmTarballUrl('pkg', '1.0.0', { registry: 'http://localhost:4873/', sleeps: [] });
+    expect(fetchMock.mock.calls[0]![0]).toBe('http://localhost:4873/pkg/1.0.0');
   });
 
-  it('retries through empty packument reads, then gives up with null', async () => {
-    execMock.mockResolvedValue({ stdout: '', stderr: '' });
+  it('retries a 404 until the version appears', async () => {
     vi.useFakeTimers();
-    try {
-      const p = resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [1] });
-      await vi.runAllTimersAsync();
-      expect(await p).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-    expect(out.join('')).toContain('packument lag: npm view returned empty (attempt 1/2); retrying in 1s');
+    fetchMock.mockResolvedValueOnce(respond(404, DOC)).mockResolvedValue(respond(200, DOC));
+    expect(await settle(resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [3] }))).toBe('https://reg/pkg.tgz');
+    expect(out.join('')).toBe('  https://registry.npmjs.org/pkg/1.0.0 not readable yet (attempt 1/2); retrying in 3s\n');
   });
 
-  it('treats a non-zero npm view exit as empty', async () => {
-    execMock.mockRejectedValue(new ExecError('E404', '', '', 1));
-    expect(await resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [] })).toBeNull();
+  it('gives up with null once every attempt fails', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockRejectedValueOnce(new Error('timeout')).mockResolvedValue(respond(200, {}));
+    expect(await settle(resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [1, 1] }))).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

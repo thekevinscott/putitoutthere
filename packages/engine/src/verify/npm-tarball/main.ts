@@ -25,10 +25,8 @@ export async function verifyNpmTarballMain(
     return 0;
   }
 
-  // Verdaccio (a same-host service container) is immediately consistent
-  // once `npm publish` returns; real npm's CDN needs generous backoff.
   const registry = opts.registry;
-  const sleeps = registry ? [1, 2, 5, 10] : [5, 15, 30, 90, 180];
+  const sleeps = registry ? [1, 2, 5, 10] : [5, 15, 30, 60, 120, 180, 300];
   const registryLabel = registry ? registry : 'registry.npmjs.org';
 
   let fail = 0;
@@ -52,7 +50,7 @@ export async function verifyNpmTarballMain(
     const url = await resolveNpmTarballUrl(pkgName, version, { registry, sleeps });
     if (url === null) {
       process.stdout.write(
-        `::error::[${pkgName}@${version}] npm view at ${registryLabel} never returned a tarball URL after ${sleeps.length + 1} attempts. Either the publish didn't actually publish, or packument propagation is much slower than expected.\n`,
+        `::error::[${pkgName}@${version}] ${registryLabel} never returned a tarball URL after ${sleeps.length + 1} attempts. Either the publish didn't actually publish, or npm took longer than the budget to record it.\n`,
       );
       fail = 1;
       continue;
