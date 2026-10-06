@@ -22,7 +22,7 @@ import { run } from '../../src/cli.js';
 
 // Integration tests run first-party code (the exec seam) for real and mock
 // only the platform boundaries underneath: `execFile` (what `execCapture`
-// uses, for `git tag -l`) and `spawn` (what `execInherit` uses, for the
+// uses, for `git ls-remote`) and `spawn` (what `execInherit` uses, for the
 // throwaway repo's git steps). Mocking the seam modules themselves would
 // trip the testing-conventions `no-first-party-mock` gate.
 vi.mock('node:fs/promises');
@@ -142,6 +142,7 @@ describe('piot-ci pypi-tag-verify (integration)', () => {
     // Under RUNNER_TEMP, outside the checkout: a tree with no `.git` would
     // otherwise let git walk up and tag the real repository.
     expect(rm).toHaveBeenCalledWith(TREE, { recursive: true, force: true });
+    expect(rm).toHaveBeenCalledWith(`${TREE}-origin`, { recursive: true, force: true });
     expect(mkdir).toHaveBeenCalledWith(TREE, { recursive: true });
 
     const [path, contents] = vi.mocked(writeFile).mock.calls[0] ?? [];
@@ -150,12 +151,13 @@ describe('piot-ci pypi-tag-verify (integration)', () => {
     expect(String(contents)).toContain('name = "piot-fixture-zzz-python-maturin"');
     expect(String(contents)).not.toContain('placeholder');
 
-    // `ensureTag` tags a commit, so the tree needs a HEAD; and no remote is
-    // added, so a tag push cannot escape the runner.
+    // `ensureTag` tags a commit, so the tree needs a HEAD. Its origin is a
+    // local bare repo beside the tree, so a tag push cannot escape the runner.
     const git = gitCalls();
     expect(git[0]).toEqual(['init', '-q', '-b', 'main']);
-    expect(git.at(-1)?.[0]).toBe('commit');
-    expect(git.flat()).not.toContain('remote');
+    expect(git).toContainEqual(['commit', '-q', '-m', 'e2e: pypi-tag fixture']);
+    expect(git.at(-2)).toEqual(['init', '-q', '--bare', `${TREE}-origin`]);
+    expect(git.at(-1)).toEqual(['remote', 'add', 'origin', `${TREE}-origin`]);
   });
 
   it('prepare refuses a dist/ whose artifacts disagree on a version', async () => {
@@ -180,18 +182,18 @@ describe('piot-ci pypi-tag-verify (integration)', () => {
     expect(appendFile).not.toHaveBeenCalled();
   });
 
-  it('assert passes when every uploaded version got a tag', async () => {
-    stubCapture(`${EXPECTED[0]?.tag}\n${EXPECTED[1]?.tag}\n`);
+  it('assert passes when every uploaded version got a tag on origin', async () => {
+    stubCapture(`aaa\trefs/tags/${EXPECTED[0]?.tag}\nbbb\trefs/tags/${EXPECTED[1]?.tag}\n`);
 
     await expect(verify('assert')).resolves.toBe(0);
     expect(execFileMock.mock.calls[0]?.[0]).toBe('git');
-    expect(execFileMock.mock.calls[0]?.[1]).toEqual(['tag', '-l']);
+    expect(execFileMock.mock.calls[0]?.[1]).toEqual(['ls-remote', '--tags', '--refs', 'origin']);
   });
 
   it('assert fails, naming the version, when reconcile cut no tag', async () => {
     // #694 verbatim: reconcile exits 0 reporting nothing to do, the version
     // is on PyPI, and no tag exists. Without this read-back the lane is green.
-    stubCapture(`${EXPECTED[0]?.tag}\n`);
+    stubCapture(`aaa\trefs/tags/${EXPECTED[0]?.tag}\n`);
 
     await expect(verify('assert')).resolves.toBe(1);
     const printed = out.join('');

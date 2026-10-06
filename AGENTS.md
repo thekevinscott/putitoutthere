@@ -46,13 +46,7 @@ recovering.
 
 ## Session handoff doc
 
-Keep one handoff doc per session in the scratchpad or `/tmp`, never in the
-repo. Update it in place and re-send it (attach it, or print its path) at
-every stopping point: a push, an observed CI result, a merge, a finished
-investigation, or when blocked on the user. A fresh session must be able to
-resume from it alone: task status, branches/PRs/issues with CI and
-red/green state, key decisions, exact next commands, and what waits on the
-user.
+@notes/session-handoff.md
 
 ## Engine code conventions
 
