@@ -5,9 +5,9 @@
  *
  * The throwaway tree lives at `$TAG_TREE`, which the workflow points outside
  * the checkout (`${{ runner.temp }}/…`): a tree with no `.git` would let git
- * walk up and tag the real repository instead. No remote is added either, so
- * `ensureTag`'s push fails and is warned rather than reaching origin — the
- * repo's own tag namespace stays untouched (#718).
+ * walk up and tag the real repository instead. Its `origin` is a local bare
+ * repo beside it, so `ensureTag`'s remote check and push (#717) have a real
+ * remote while the repo's own tag namespace stays untouched (#718, #732).
  */
 
 import { appendFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
@@ -22,6 +22,12 @@ export async function runPypiTagPrepare(): Promise<number> {
   // key. Function-scope rather than module-scope on purpose: Stryker
   // evaluates a module-scope initialiser once, before the test activates its
   // mutant, so every mutant in this table would survive unkillably there.
+  const tree = process.env.TAG_TREE;
+  if (tree === undefined || tree === '') {
+    process.stdout.write('::error::pypi-tag-verify: TAG_TREE must be set.\n');
+    return 1;
+  }
+  const origin = `${tree}-origin`;
   const gitSteps: readonly (readonly string[])[] = [
     ['init', '-q', '-b', 'main'],
     ['config', 'user.email', 'e2e@putitoutthere.dev'],
@@ -30,12 +36,9 @@ export async function runPypiTagPrepare(): Promise<number> {
     ['config', 'tag.gpgsign', 'false'],
     ['add', '.'],
     ['commit', '-q', '-m', 'e2e: pypi-tag fixture'],
+    ['init', '-q', '--bare', origin],
+    ['remote', 'add', 'origin', origin],
   ];
-  const tree = process.env.TAG_TREE;
-  if (tree === undefined || tree === '') {
-    process.stdout.write('::error::pypi-tag-verify: TAG_TREE must be set.\n');
-    return 1;
-  }
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput === undefined || githubOutput === '') {
     process.stdout.write('::error::pypi-tag-verify: GITHUB_OUTPUT must be set.\n');
@@ -52,6 +55,7 @@ export async function runPypiTagPrepare(): Promise<number> {
   }
 
   await rm(tree, { recursive: true, force: true });
+  await rm(origin, { recursive: true, force: true });
   await mkdir(tree, { recursive: true });
   await writeFile(`${tree}/putitoutthere.toml`, fixtureConfigToml(decided.expectations));
   for (const args of gitSteps) {
