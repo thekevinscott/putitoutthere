@@ -28,8 +28,6 @@ vi.mock('node:child_process', async (orig) => {
 
 const execMock = vi.mocked(execFile);
 
-vi.mock('../../src/utils/sleep.js', () => ({ sleep: vi.fn(() => Promise.resolve()) }));
-
 const events: string[] = [];
 const notVisibleFor = new Map<string, number>();
 const fetchMock = vi.fn<typeof fetch>((input) => {
@@ -116,6 +114,25 @@ function wireNpm(alreadyPublished: readonly string[]): void {
     }
     return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
   }) as unknown as typeof execFile);
+}
+
+async function withFakeTimers<T>(fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  try {
+    const p = fn();
+    let done = false;
+    void p.then(
+      () => { done = true; },
+      () => { done = true; },
+    );
+    while (!done) {
+      await vi.advanceTimersByTimeAsync(300_000);
+      await new Promise((r) => setImmediate(r));
+    }
+    return await p;
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 async function runPublish(): Promise<{ code: number; out: string }> {
@@ -290,7 +307,7 @@ describe('publish waits for platform packages to be visible (#733)', () => {
     wireNpm([]);
     notVisibleFor.set(PLATFORM_NAMES[1]!, 2);
 
-    const report = await publishJson();
+    const report = await withFakeTimers(publishJson);
 
     expect(report.published[0]!.result.status).toBe('published');
     expect(events).toEqual([
@@ -308,7 +325,7 @@ describe('publish waits for platform packages to be visible (#733)', () => {
     wireNpm([]);
     notVisibleFor.set(PLATFORM_NAMES[1]!, Infinity);
 
-    const { code, out } = await runPublish();
+    const { code, out } = await withFakeTimers(runPublish);
 
     expect(code).not.toBe(0);
     expect(events).not.toContain('publish demo-cli');
