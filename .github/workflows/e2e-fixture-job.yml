@@ -539,6 +539,12 @@ jobs:
     # all 15 of these from resolvable into unresolvable — willfire does not
     # propagate a caller's matrix into a called workflow's `inputs` (#660).
     if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    # #735: not ref-scoped. Concurrent publishes to one fixture package from
+    # different refs stretch npm's recording lag past the verify budget.
+    concurrency:
+      group: e2e-publish-${{ inputs.fixture }}
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-latest
     environment: e2e
     permissions:
