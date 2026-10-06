@@ -89,6 +89,7 @@ describe('verifyNpmTarballMain', () => {
     expect(text).toContain('verifying tarball at http://localhost:4873 contains: dist');
     expect(text).toContain('ok: package/dist/ (1 file(s))');
     expect(code).toBe(0);
+    expect(resolveMock).toHaveBeenCalledWith('@scope/pkg', '1.0.0', { registry: 'http://localhost:4873', sleeps: [1, 2, 5, 10] });
     // The downloaded tarball's temp root is cleaned up recursively/forcefully.
     expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
   });
