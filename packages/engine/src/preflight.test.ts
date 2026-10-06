@@ -2628,35 +2628,6 @@ describe('preflight edge branches (full coverage)', () => {
     expect(findings.filter((f) => f.code === 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH')).toEqual([]);
   });
 
-  it('checkRepoUrlMatch skips a crates manifest with no [package] table', async () => {
-    // readDeclaredRepoUrl (crates): `(parsed.package ?? {})` fallback.
-    const p = j(dir, 'repo-crates-nopkg');
-    writeCargoToml(p, '[workspace]\nmembers = ["a"]\n');
-    expect(
-      (await checkRepoUrlMatch([pkg('crates', { name: 'a', path: p })], { githubRepository: 'acme/widget' })),
-    ).toEqual([]);
-  });
-
-  it('checkRepoUrlMatch skips a pypi manifest with no [project] table', async () => {
-    // readDeclaredRepoUrl (pypi): `(parsed.project ?? {})` fallback.
-    const p = j(dir, 'repo-pypi-noproject');
-    writePyproject(p, '[build-system]\nbuild-backend = "setuptools.build_meta"\n');
-    expect(
-      (await checkRepoUrlMatch([pkg('pypi', { name: 'a', path: p })], { githubRepository: 'acme/widget' })),
-    ).toEqual([]);
-  });
-
-  it('checkRepoUrlMatch skips an npm manifest whose object repository has no usable url', async () => {
-    // readDeclaredRepoUrl (npm): the object-form branch where `url` is not a
-    // non-empty string, so the else path returns null and the package is
-    // skipped.
-    const p = j(dir, 'repo-npm-noobjurl');
-    setFile(j(p, 'package.json'), JSON.stringify({ name: 'a', repository: { type: 'git' } }));
-    expect(
-      (await checkRepoUrlMatch([pkg('npm', { name: 'a', path: p })], { githubRepository: 'acme/widget' })),
-    ).toEqual([]);
-  });
-
   it('checkPyprojectShape: a non-string maturin include entry does not cover stage_to', async () => {
     // extractIncludePath: an include entry that is neither a string nor an
     // object (a bare number) yields no path, so it cannot cover stage_to and

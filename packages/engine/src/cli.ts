@@ -14,6 +14,7 @@ import { foldActionBundle } from './fold-action-bundle.js';
 import { emitPlanOutputs } from './emit-plan-outputs.js';
 import { emitReleaseOutputs } from './emit-release-outputs.js';
 import { computePlanStatus } from './plan-status.js';
+import { printUsage } from './print-usage.js';
 import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
 import { reconcile } from './reconcile.js';
@@ -58,58 +59,6 @@ type Command = (typeof COMMANDS)[number];
 
 function isCommand(value: string): value is Command {
   return (COMMANDS as readonly string[]).includes(value);
-}
-
-function printUsage(): void {
-  process.stderr.write(
-    [
-      'Usage: putitoutthere <command> [options]',
-      '',
-      'Commands:',
-      '  plan           Compute and emit the release plan',
-      '  publish        Execute the plan',
-      '  check          Pre-merge configuration validation (#319)',
-      '  status         Report registry-vs-tag drift (read-only; #403)',
-      '  reconcile      Backfill missing tags for published-but-untagged packages (#403)',
-      '  resolve        Emit willfire\'s callback map for the e2e plan job (#683)',
-      '  verify         Report publish/trust posture — OIDC vs token, per registry (#403)',
-      '  verify npm-tarball  Assert a published npm tarball honors package.json files[] (#443)',
-      '  verify crate   Assert a published .crate ships its source tree (#449)',
-      '  verify wheel   Assert a built wheel/sdist carries the planned version (#450)',
-      '  verify bundle-cli  Assert a maturin wheel contains its staged bundle_cli binary (#451)',
-      '  release-github Cut a GitHub Release for each new tag on HEAD (#444)',
-      '  advance-v0     Force-move the floating v0 tag to HEAD (#446)',
-      '  advance-floating-major  Move the floating v<major> tag to the latest release (#446)',
-      '  fold-bundle    Commit the built dist-action/ bundle on top of HEAD (#446)',
-      '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
-      '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
-      '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
-      '  version        Print CLI version',
-      '',
-      'Options:',
-      '  --cwd <path>      working directory',
-      '  --config <path>   path to putitoutthere.toml',
-      '  --subject <s>     bundle-commit subject line (fold-bundle)',
-      '  --path <dir>      package or crate directory (write-version / write-crate-version)',
-      '  --version <v>     planned version (write-version / write-crate-version)',
-      '  --release-packages <spec>  manual-release spec (plan / publish)',
-      '  --matrix <json>   plan matrix (verify npm-tarball)',
-      '  --registry <url>  registry to read from (verify npm-tarball); default real npm',
-      '  --registry-root <dir>  cargo-http-registry disk root to read .crate files from (verify crate)',
-      '  --target <t>      matrix target: `sdist` or a wheel triple (verify wheel / bundle-cli)',
-      '  --manylinux <m>   manylinux baseline the wheel filename must carry (verify wheel; #610)',
-      '  --stage-to <dir>  wheel-relative dir the bundle_cli binary is staged into (verify bundle-cli)',
-      '  --bin <name>      bundle_cli binary name (verify bundle-cli)',
-      '  --per-triple      verify synthesized per-triple tarballs (verify npm-tarball)',
-      '  --check           exit non-zero when status finds drift',
-      '  --dry-run         report what reconcile would do without writing tags',
-      '  --expect <spec>   reconcile: confirm & tag exactly <name>@<version> (or a JSON [{name,version}] array), skipping latest-version discovery (#666)',
-      '  --json            emit machine-readable output',
-      '',
-      'See https://github.com/thekevinscott/putitoutthere for docs.',
-      '',
-    ].join('\n'),
-  );
 }
 
 interface ParsedFlags {
