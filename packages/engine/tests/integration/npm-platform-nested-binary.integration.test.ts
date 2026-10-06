@@ -90,6 +90,7 @@ targets = ["${TRIPLE}"]
 `;
 
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ dist: { tarball: 'https://reg/x.tgz' } })))));
   repo = mkdtempSync(join(tmpdir(), 'piot-nested-cli-int-'));
   staged = [];
 
@@ -164,6 +165,7 @@ afterEach(() => {
   rmSync(remote, { recursive: true, force: true });
   delete process.env.NODE_AUTH_TOKEN;
   execMock.mockReset();
+  vi.unstubAllGlobals();
 });
 
 describe('bundled-cli platform synthesis with a nested binary (#626)', () => {
