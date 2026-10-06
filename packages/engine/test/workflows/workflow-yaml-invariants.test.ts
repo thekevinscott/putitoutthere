@@ -660,7 +660,7 @@ describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => 
     if (typeof step.if !== 'string') return false;
     if (!step.if.includes("matrix.kind == 'npm'")) return false;
     const run = step.run ?? '';
-    return run.includes('npm run build');
+    return step.with?.command === 'npm-build' || run.includes('npm run build');
   }
 
   function gatesOnNpmBundleCli(condition: string | undefined): boolean {

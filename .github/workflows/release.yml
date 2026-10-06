@@ -234,63 +234,12 @@ jobs:
         if: contains(needs.build.outputs.matrix, '"kind":"npm"') && env.CALLER_NPM_TOKEN != ''
         run: echo "NODE_AUTH_TOKEN=$CALLER_NPM_TOKEN" >> "$GITHUB_ENV"
 
-      # Build npm packages from source before `npm publish` runs.
-      # The build job's `dist/` is not carried through as an artifact
-      # for vanilla npm rows (artifact_path is `package.json`); the
-      # publish job is a fresh checkout, so any package whose
-      # package.json declares `"files": ["dist", ...]` would ship a
-      # tarball missing the compiled output. Rebuild here to mirror
-      # what a developer running `npm publish` locally would do.
-      # napi / bundled-cli platform packages stage from artifacts/
-      # via the engine's npm-platform handler and are unaffected.
       - name: Build npm packages
         if: contains(needs.build.outputs.matrix, '"kind":"npm"')
-        shell: bash
-        env:
-          MATRIX: ${{ needs.build.outputs.matrix }}
-        run: |
-          set -euo pipefail
-          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          # Strict installs (`npm ci`, `pnpm install --frozen-lockfile`) self-
-          # heal to their non-strict form on failure. Why: bundled-cli / napi
-          # consumers declare `optionalDependencies` for `<name>-<triple>@<version>`
-          # platform packages that this pipeline produces. On the first publish,
-          # those entries 404 on the registry; pnpm 10 silently drops 404'd
-          # optionals from the lockfile when it is regenerated locally, then
-          # `--frozen-lockfile` refuses on the next CI run because the lockfile
-          # and package.json disagree. The `::warning::` makes the fallback
-          # visible in the run log. Same shape used by `_matrix.yml`'s build
-          # step. See README → Recipes → Bundled-CLI npm family.
-          for path in $paths; do
-            echo "::group::npm install + build at ${path}"
-            pushd "${path}" > /dev/null
-            if [ -f package-lock.json ]; then
-              npm ci || {
-                echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
-                npm install
-              }
-            elif [ -f pnpm-lock.yaml ]; then
-              # pnpm for the *consumer's* checkout, not ours. Deliberately a
-              # literal and not ./packages/ci/actions/setup-pnpm: that action installs
-              # our build toolchain, this installs theirs, and a `uses:` step
-              # cannot appear inside a run: script anyway.
-              npm install -g pnpm@11
-              pnpm install --frozen-lockfile || {
-                echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-                pnpm install --no-frozen-lockfile
-              }
-            else
-              npm install
-            fi
-            # #287: export TARGET / BUILD so consumer build scripts that
-            # dispatch on them see defined values. Only the main row
-            # rebuilds here, so TARGET=main and BUILD is empty (a multi-mode
-            # package has no single build). #627: VERSION is a real value.
-            version=$(printf '%s' "$MATRIX" | jq -r --arg p "$path" 'first(.[] | select(.kind == "npm" and .path == $p) | .version)')
-            TARGET=main BUILD='' VERSION="$version" npm run build --if-present
-            popd > /dev/null
-            echo "::endgroup::"
-          done
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: npm-build
+          matrix: ${{ needs.build.outputs.matrix }}
 
       - id: publish
         uses: thekevinscott/putitoutthere@v0
