@@ -3,7 +3,6 @@ import { dirname, join } from 'node:path';
 import { execInherit, type ExecInheritOptions } from '../utils/exec-inherit.js';
 import { pathExists } from '../utils/path-exists.js';
 
-const DRIFT = 'likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family';
 const MARKERS = [['package-lock.json', 'npm'], ['pnpm-lock.yaml', 'pnpm'], ['pnpm-workspace.yaml', 'pnpm']] as const;
 
 export async function npmBuildPackage(dir: string, boundary: string, env: Record<string, string>): Promise<void> {
@@ -25,7 +24,7 @@ export async function npmBuildPackage(dir: string, boundary: string, env: Record
       ? [['ci'], ['install'], 'package-lock.json']
       : [['install', '--frozen-lockfile'], ['install', '--no-frozen-lockfile'], 'pnpm-lock.yaml'];
     await tool(name, strict).catch(async () => {
-      process.stdout.write(`::warning::${lockfile} drift (${DRIFT}); falling back to ${name} ${lenient.join(' ')}\n`);
+      process.stdout.write(`::warning::${lockfile} drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to ${name} ${lenient.join(' ')}\n`);
       await tool(name, lenient);
     });
   }
