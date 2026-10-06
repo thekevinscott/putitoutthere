@@ -89,6 +89,7 @@ describe('verifyNpmTarballMain', () => {
     expect(text).toContain('verifying tarball at http://localhost:4873 contains: dist');
     expect(text).toContain('ok: package/dist/ (1 file(s))');
     expect(code).toBe(0);
+    expect(resolveMock).toHaveBeenCalledWith('@scope/pkg', '1.0.0', { registry: 'http://localhost:4873', sleeps: [1, 2, 5, 10] });
     // The downloaded tarball's temp root is cleaned up recursively/forcefully.
     expect(vi.mocked(rm)).toHaveBeenCalledWith(expect.anything(), { recursive: true, force: true });
   });
@@ -162,10 +163,9 @@ describe('verifyNpmTarballMain', () => {
     readFileMock.mockResolvedValue(pkgJson(['dist']));
     resolveMock.mockResolvedValue(null);
 
-    // No `registry` → real npm; label is registry.npmjs.org, 6 attempts.
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '' });
     const text = out.join('');
-    expect(text).toContain('npm view at registry.npmjs.org never returned a tarball URL after 6 attempts');
+    expect(text).toContain('registry.npmjs.org never returned a tarball URL after 8 attempts');
     expect(code).toBe(1);
     expect(downloadMock).not.toHaveBeenCalled();
   });

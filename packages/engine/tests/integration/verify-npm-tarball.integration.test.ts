@@ -1,8 +1,8 @@
 /**
  * `piot verify npm-tarball` (epic #442, #443), extracted from two inline bash
  * blocks in `e2e-fixture-job.yml`. Only the Node built-in `execFile` under
- * the real exec seam is mocked: `npm view` and `curl` are faked for registry
- * state, while `tar` is the REAL binary, so extraction runs for real.
+ * the real exec seam and `fetch` are mocked: the registry read and `curl` are
+ * faked, while `tar` is the REAL binary, so extraction runs for real.
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -17,8 +17,8 @@ import { run } from '../../src/cli.js';
 // Mock only the Node built-in (`execFile`) under the first-party exec seam,
 // so the real seam runs (testing-conventions forbids mocking first-party
 // modules in integration tests). Real `tar` (delegated to the un-mocked
-// execFile) and real fs keep extraction and file I/O genuine; `npm view` +
-// `curl` are faked.
+// execFile) and real fs keep extraction and file I/O genuine; `curl` is
+// faked.
 const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
@@ -74,28 +74,18 @@ afterAll(() => {
   rmSync(tgzRoot, { recursive: true, force: true });
 });
 
-/**
- * Wire the subprocess boundary. `viewUrls` maps `name@version` (the exact
- * `npm view` first-arg) to the tarball URL it returns; an entry may be an
- * array to model packument lag — successive `npm view` calls shift off the
- * front, `''` meaning "not yet propagated". `urlToTgz` maps a served URL to
- * one of the prebuilt tarball paths the mocked `curl` copies out.
- */
 function wire(
   viewUrls: Record<string, string | string[]>,
   urlToTgz: Record<string, string>,
 ): void {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const [, name, version] = /^https?:\/\/[^/]+\/(.+)\/([^/]+)$/.exec(url)!;
+    const entry = viewUrls[`${decodeURIComponent(name!)}@${version}`];
+    const tarball = Array.isArray(entry) ? (entry.shift() ?? '') : (entry ?? '');
+    return tarball ? new Response(JSON.stringify({ dist: { tarball } })) : new Response('{}', { status: 404 });
+  }));
   execMock.mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     const a = [...(args ?? [])];
-    if (a[0] === 'view') {
-      // `npm view <spec> dist.tarball [--registry …]` — the spec sits
-      // right before `dist.tarball`. The seam captures stdout as a string.
-      const key = a[a.indexOf('dist.tarball') - 1]!;
-      const entry = viewUrls[key];
-      const url = Array.isArray(entry) ? (entry.shift() ?? '') : (entry ?? '');
-      cb(null, `${url}\n`, '');
-      return undefined as unknown as ChildProcess.ChildProcess;
-    }
     if (cmd === 'curl') {
       const url = a[a.length - 1]!;
       const outIdx = a.indexOf('-o');
@@ -112,7 +102,7 @@ function wire(
 /**
  * Drive a `run()` whose retry loop `await`s real-second sleeps without
  * waiting real seconds. The engine is async end to end now: each retry's
- * `npm view` (awaited seam call) and the surrounding real-fs reads resolve
+ * registry read and the surrounding real-fs reads resolve
  * as microtasks / real I/O, so a retry's sleep timer is only scheduled after
  * those settle — a single `runAllTimersAsync()` would see no timer yet and
  * return early. Instead, loop: fast-forward past the longest sleep (180s)
@@ -157,6 +147,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -225,7 +216,7 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
     expect(code).toBe(1);
   });
 
-  it('fails when npm view never returns a tarball URL', async () => {
+  it('fails when the registry never returns a tarball URL', async () => {
     writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
     // Empty forever → exhausts the retry schedule (driven by fake timers).
     wire({ '@scope/pkg@1.0.0': '' }, {});
@@ -243,9 +234,8 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
     expect(code).toBe(1);
   });
 
-  it('retries through packument lag, then verifies once the URL appears', async () => {
+  it('retries through registry lag, then verifies once the URL appears', async () => {
     writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
-    // Empty on the first view, URL on the second → one retry sleep.
     wire({ '@scope/pkg@1.0.0': ['', 'https://reg/pkg.tgz'] }, { 'https://reg/pkg.tgz': tgz.withDist! });
 
     const code = await withFakeTimers(() =>
@@ -258,7 +248,7 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
     );
 
     const text = out.join('');
-    expect(text).toContain('packument lag: npm view returned empty (attempt 1/5)');
+    expect(text).toContain('http://localhost:4873/@scope%2Fpkg/1.0.0 not readable yet (attempt 1/5)');
     expect(text).toContain('ok: package/dist/ (1 file(s))');
     expect(code).toBe(0);
   });

@@ -34,7 +34,7 @@ export async function verifyNpmTarballTriple(
     const url = await resolveNpmTarballUrl(platformName, version, { registry, sleeps: [2, 2, 2, 2] });
     if (url === null) {
       process.stdout.write(
-        `::error::[${platformName}@${version}] npm view at ${registry} never returned a tarball URL. Either the platform publish didn't actually publish, or the synthesized name diverged from the default {name}-{triple} template.\n`,
+        `::error::[${platformName}@${version}] ${registry} never returned a tarball URL. Either the platform publish didn't actually publish, or the synthesized name diverged from the default {name}-{triple} template.\n`,
       );
       fail = 1;
       continue;
