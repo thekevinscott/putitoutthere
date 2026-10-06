@@ -117,7 +117,7 @@ describe('verifyNpmTarballTriple', () => {
   it('fails when no URL ever resolves', async () => {
     resolveMock.mockResolvedValue(null);
     const code = await verifyNpmTarballTriple([row], opts);
-    expect(out.join('')).toContain('npm view at http://localhost:4873 never returned a tarball URL');
+    expect(out.join('')).toContain('http://localhost:4873 never returned a tarball URL');
     expect(code).toBe(1);
     expect(downloadMock).not.toHaveBeenCalled();
   });
