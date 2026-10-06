@@ -17,6 +17,7 @@ import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
 import { matchTlogDuplicate } from './match-tlog-duplicate.js';
+import { awaitPlatformsVisible } from './await-platforms-visible.js';
 
 export type NpmBuildMode = 'napi' | 'bundled-cli';
 
@@ -135,6 +136,9 @@ export async function publishPlatforms(
       }
     }
   }
+
+  const registryOverride = nonEmpty(ctx.env.PIOT_NPM_REGISTRY) ?? nonEmpty(process.env.PIOT_NPM_REGISTRY);
+  await awaitPlatformsVisible(published, version, registryOverride);
 
   await rewriteOptionalDependencies(pkg, version, [...published, ...skipped]);
 

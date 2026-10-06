@@ -25,8 +25,10 @@ import {
   type PlatformPkg,
 } from './npm-platform.js';
 import type { Ctx } from '../types.js';
+import { awaitPlatformsVisible } from './await-platforms-visible.js';
 
 vi.mock('../utils/exec-capture.js');
+vi.mock('./await-platforms-visible.js');
 vi.mock('node:fs/promises');
 
 const execMock = vi.mocked(execCapture);
@@ -555,6 +557,23 @@ describe('publishPlatforms (napi)', () => {
       expect.any(String),
       'utf8',
     ]);
+  });
+
+  it('waits for the platforms it published, at the override registry, before touching package.json', async () => {
+    vi.stubEnv('PIOT_NPM_REGISTRY', 'http://127.0.0.1:4873/');
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view' && String(a[1]).includes('linux-x64-gnu')) {return Promise.resolve(ok('0.2.0\n'));}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
+    });
+    vi.mocked(awaitPlatformsVisible).mockRejectedValueOnce(new Error('not visible'));
+
+    await expect(publishPlatforms(basePkg(), '0.2.0', makeCtx())).rejects.toThrow('not visible');
+
+    expect(awaitPlatformsVisible).toHaveBeenCalledWith(['demo-cli-darwin-arm64'], '0.2.0', 'http://127.0.0.1:4873/');
+    expect(readFileSync(`${repo}/pkg/package.json`, 'utf8')).not.toContain('optionalDependencies');
+    vi.unstubAllEnvs();
   });
 
   it('preserves a trailing newline when rewriting the main package.json', async () => {

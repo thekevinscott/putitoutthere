@@ -3,6 +3,7 @@ import { sleep } from '../../utils/sleep.js';
 interface ResolveOptions {
   registry?: string | undefined;
   sleeps: number[];
+  log?: (line: string) => void;
 }
 
 export async function resolveNpmTarballUrl(
@@ -20,7 +21,7 @@ export async function resolveNpmTarballUrl(
     if (tarball) {return tarball;}
     if (attempt < attempts) {
       const secs = opts.sleeps[attempt - 1]!;
-      process.stdout.write(`  ${url} not readable yet (attempt ${attempt}/${attempts}); retrying in ${secs}s\n`);
+      (opts.log ?? ((l: string) => process.stdout.write(l)))(`  ${url} not readable yet (attempt ${attempt}/${attempts}); retrying in ${secs}s\n`);
       await sleep(secs * 1000);
     }
   }
