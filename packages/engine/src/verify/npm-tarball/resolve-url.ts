@@ -15,7 +15,7 @@ export async function resolveNpmTarballUrl(
   const attempts = opts.sleeps.length + 1;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const tarball = await fetch(url, { signal: AbortSignal.timeout(15_000) })
-      .then(async (res) => (res.ok ? ((await res.json()) as { dist?: { tarball?: string } }).dist?.tarball : undefined))
+      .then(async (res) => (res.ok ? ((await res.json()) as { dist: { tarball?: string } }).dist.tarball : undefined))
       .catch(() => undefined);
     if (tarball) {return tarball;}
     if (attempt < attempts) {
