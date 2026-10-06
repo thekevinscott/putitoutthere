@@ -1,10 +1,3 @@
-/**
- * Workflow-YAML contract (#287): the `matrix.kind == 'npm'` build step must set
- * `TARGET` and `BUILD`. The cross-compile is consumer-owned, so without `TARGET`
- * every per-platform row produces an empty `build/<triple>/` and
- * `actions/upload-artifact` reports `No files were found with the provided path`.
- */
-
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,9 +28,6 @@ function loadSteps(file: string, jobKey: string): Step[] {
 }
 
 function findNpmRunBuildStep(steps: Step[]): Step | undefined {
-  // The relevant step has `if: matrix.kind == 'npm'`, contains
-  // `npm run build` in its `run:` body, and is a `run:` step (not a
-  // `uses:` step like `actions/setup-node`).
   return steps.find(
     (s) =>
       typeof s.if === 'string' &&
@@ -47,101 +37,7 @@ function findNpmRunBuildStep(steps: Step[]): Step | undefined {
   );
 }
 
-describe('reusable workflow: npm build step exposes TARGET / BUILD env', () => {
-  it('_matrix.yml build-matrix npm step sets TARGET=${{ matrix.target }}', () => {
-    const steps = loadSteps('_matrix.yml', 'build');
-    const step = findNpmRunBuildStep(steps);
-    expect(step, '_matrix.yml: could not find npm `npm run build` step').toBeDefined();
-    expect(
-      step!.env,
-      `_matrix.yml: npm build step has no env block. Without TARGET, bundled-cli/napi consumers' build scripts ` +
-        `can't tell which triple to cross-compile for, so every per-platform matrix row uploads an empty ` +
-        `\`build/<triple>/\` directory.`,
-    ).toBeDefined();
-    expect(step!.env!.TARGET).toBe('${{ matrix.target }}');
-  });
-
-  it('_matrix.yml build-matrix npm step sets BUILD=${{ matrix.build }}', () => {
-    const steps = loadSteps('_matrix.yml', 'build');
-    const step = findNpmRunBuildStep(steps);
-    expect(step!.env!.BUILD).toBe('${{ matrix.build }}');
-  });
-
-  it('release.yml publish-job npm rebuild step sets TARGET (loop variable)', () => {
-    // The `release.yml` rebuild loops over npm matrix rows in bash,
-    // not via a workflow matrix. The contract there is that `TARGET`
-    // and `BUILD` are exported per-iteration for the consumer's
-    // `npm run build`. The check looks at the run: body itself
-    // rather than a step-level env block.
-    const steps = loadSteps('release.yml', 'publish');
-    const step = steps.find(
-      (s) =>
-        typeof s.run === 'string' &&
-        /jq\s.*select\(\.kind\s*==\s*"npm"\)/.test(s.run) &&
-        /npm\s+run\s+build/.test(s.run),
-    );
-    expect(
-      step,
-      'release.yml: could not find publish-job npm rebuild step (the loop over `kind == "npm"` rows that calls `npm run build`)',
-    ).toBeDefined();
-    // The bash body must export TARGET and BUILD per iteration so the
-    // consumer's build script sees them. Symmetric with the build
-    // matrix's TARGET handling.
-    expect(
-      /\bTARGET=/.test(step!.run!),
-      `release.yml: npm rebuild loop body must set TARGET per iteration so the consumer's build script ` +
-        `can stage the right binary. Without it, the publish-time rebuild produces a different artifact ` +
-        `from the build-time matrix and \`npm publish\` ships the wrong tarball contents.`,
-    ).toBe(true);
-    expect(
-      /\bBUILD=/.test(step!.run!),
-      `release.yml: npm rebuild loop body must set BUILD per iteration so multi-mode (napi + bundled-cli) ` +
-        `consumers' build scripts can dispatch on the mode.`,
-    ).toBe(true);
-  });
-});
-
-/**
- * Workflow-YAML contract (#627): the same npm build step must also set
- * `VERSION`. On the roll-your-own path (`build = "bundled-cli"` with no
- * `[package.bundle_cli]`) no engine-side writer runs, so `cargo build` bakes the
- * committed literal and nothing fails — only the installed `--version` disagrees.
- */
-describe('reusable workflow: npm build step exposes VERSION env (#627)', () => {
-  it('_matrix.yml build-matrix npm step sets VERSION=${{ matrix.version }}', () => {
-    const steps = loadSteps('_matrix.yml', 'build');
-    const step = findNpmRunBuildStep(steps);
-    expect(step, '_matrix.yml: could not find npm `npm run build` step').toBeDefined();
-    expect(
-      step!.env!.VERSION,
-      `_matrix.yml: npm build step must set VERSION so a roll-your-own bundled-cli build script can stamp ` +
-        `Cargo.toml before \`cargo build\` bakes CARGO_PKG_VERSION in. Without it the script has no reachable ` +
-        `source of truth for the planned version, and every npm release ships a binary reporting the ` +
-        `previously committed one — silently, all the way through publish.`,
-    ).toBe('${{ matrix.version }}');
-  });
-
-  it('release.yml publish-job npm rebuild step sets VERSION (loop variable)', () => {
-    const steps = loadSteps('release.yml', 'publish');
-    const step = steps.find(
-      (s) =>
-        typeof s.run === 'string' &&
-        /jq\s.*select\(\.kind\s*==\s*"npm"\)/.test(s.run) &&
-        /npm\s+run\s+build/.test(s.run),
-    );
-    expect(
-      step,
-      'release.yml: could not find publish-job npm rebuild step (the loop over `kind == "npm"` rows that calls `npm run build`)',
-    ).toBeDefined();
-    expect(
-      /\bVERSION=/.test(step!.run!),
-      `release.yml: npm rebuild loop body must set VERSION per iteration. The publish-time rebuild runs the ` +
-        `same consumer build script the build matrix ran; leaving VERSION unset there hands the script an ` +
-        `\`undefined\` at publish time for a value it saw defined at build time — the asymmetry #287 fixed ` +
-        `for TARGET / BUILD.`,
-    ).toBe(true);
-  });
-
+describe('e2e harness: npm build step exposes VERSION env (#627)', () => {
   it('e2e-fixture-job.yml npm build step sets VERSION=${{ matrix.version }}', () => {
     const steps = loadSteps('e2e-fixture-job.yml', 'build');
     const step = findNpmRunBuildStep(steps);

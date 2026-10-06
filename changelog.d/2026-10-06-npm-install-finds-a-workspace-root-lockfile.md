@@ -1,0 +1,1 @@
+- Fixed: the npm install step finds a workspace-root lockfile, so a pnpm or npm workspace member no longer falls through to a bare `npm install` that can break the publish job. #721. (verified by: integration, e2e/CLI)
