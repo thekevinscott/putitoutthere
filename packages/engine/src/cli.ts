@@ -13,6 +13,8 @@ import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
 import { emitPlanOutputs } from './emit-plan-outputs.js';
 import { emitReleaseOutputs } from './emit-release-outputs.js';
+import { npmBuildMatrix } from './npm-build/npm-build-matrix.js';
+import { npmBuildPackage } from './npm-build/npm-build-package.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
@@ -53,6 +55,7 @@ const COMMANDS = [
   'write-version',
   'write-crate-version',
   'write-launcher',
+  'npm-build',
 ] as const;
 type Command = (typeof COMMANDS)[number];
 
@@ -84,6 +87,7 @@ function printUsage(): void {
       '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
       '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
       '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
+      '  npm-build      Install an npm package\'s dependencies and run its build',
       '  version        Print CLI version',
       '',
       'Options:',
@@ -152,6 +156,7 @@ interface ParsedFlags {
   // name; the wheel must contain the binary at `<stage_to>/<bin>`.
   stageTo?: string | undefined;
   bin?: string | undefined;
+  build?: string | undefined;
   perTriple: boolean;
   // `fold-bundle` (#446): the bundle commit's subject line
   // (`chore(release): bundle action` vs `chore(v0): bundle action`).
@@ -190,6 +195,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--subject') {out.subject = argv[++i];}
     else if (a === '--stage-to') {out.stageTo = argv[++i];}
     else if (a === '--bin') {out.bin = argv[++i];}
+    else if (a === '--build') {out.build = argv[++i];}
     else if (a === '--per-triple') {out.perTriple = true;}
     else if (a === '--dry-run') {out.dryRun = true;}
     else if (a === '--expect') {out.expect = argv[++i];}
@@ -500,6 +506,22 @@ export async function run(argv: readonly string[]): Promise<number> {
             `write-launcher: ${flags.path}: wrote ${written.join(', ')}\n`,
           );
         }
+        return 0;
+      }
+      case 'npm-build': {
+        const boundary = resolve(flags.cwd);
+        if (flags.matrix !== undefined) {
+          await npmBuildMatrix(flags.matrix, boundary);
+          return 0;
+        }
+        if (!flags.path || !flags.target || !flags.version) {
+          throw new Error('npm-build: --matrix <json>, or --path, --target and --version, is required');
+        }
+        await npmBuildPackage(resolve(boundary, flags.path), boundary, {
+          TARGET: flags.target,
+          BUILD: flags.build ?? '',
+          VERSION: flags.version,
+        });
         return 0;
       }
       case 'write-version': {
