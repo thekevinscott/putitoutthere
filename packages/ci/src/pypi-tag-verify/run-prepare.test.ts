@@ -64,12 +64,13 @@ describe('runPypiTagPrepare', () => {
   it('writes a fresh throwaway tree holding the generated config', async () => {
     await expect(runPypiTagPrepare()).resolves.toBe(0);
     expect(rm).toHaveBeenCalledWith(TREE, { recursive: true, force: true });
+    expect(rm).toHaveBeenCalledWith(`${TREE}-origin`, { recursive: true, force: true });
     expect(mkdir).toHaveBeenCalledWith(TREE, { recursive: true });
     expect(toToml).toHaveBeenCalledWith(EXPECTATIONS);
     expect(writeFile).toHaveBeenCalledWith(`${TREE}/putitoutthere.toml`, '[putitoutthere]\n');
   });
 
-  it('inits and commits the tree, adding no remote', async () => {
+  it('inits and commits the tree, with a local bare repo as origin', async () => {
     await expect(runPypiTagPrepare()).resolves.toBe(0);
     const calls = exec.mock.calls.map((call) => [call[0], call[1]]);
     expect(calls).toEqual([
@@ -80,10 +81,12 @@ describe('runPypiTagPrepare', () => {
       ['git', ['config', 'tag.gpgsign', 'false']],
       ['git', ['add', '.']],
       ['git', ['commit', '-q', '-m', 'e2e: pypi-tag fixture']],
+      ['git', ['init', '-q', '--bare', `${TREE}-origin`]],
+      ['git', ['remote', 'add', 'origin', `${TREE}-origin`]],
     ]);
     // Every step runs inside the throwaway tree, never the checkout.
     expect(exec.mock.calls.map((call) => call[2]?.cwd)).toEqual(
-      Array.from({ length: 7 }, () => TREE),
+      Array.from({ length: 9 }, () => TREE),
     );
   });
 
