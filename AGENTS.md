@@ -217,6 +217,10 @@ to flip a gate. An exemption is permanent policy for that path, justified
 only by a property that doesn't expire (such as an equivalent mutant).
 Don't add one yourself: propose it with its reason and wait.
 
+Never run the mutation gate (Stryker) locally. It runs only in CI. Push,
+then read the surviving mutants from the failed job's log. To check a
+single mutant, apply it by hand and run the unit tests.
+
 ## Changelog and migration policy
 
 Every PR that changes public API **must** update both `CHANGELOG.md` and
