@@ -28,6 +28,20 @@ vi.mock('node:child_process', async (orig) => {
 
 const execMock = vi.mocked(execFile);
 
+const events: string[] = [];
+const notVisibleFor = new Map<string, number>();
+const fetchMock = vi.fn<typeof fetch>((input) => {
+  const [name, version] = String(input).replace('https://registry.npmjs.org/', '').split('/');
+  const left = notVisibleFor.get(name!) ?? 0;
+  if (version === undefined || left > 0) {
+    notVisibleFor.set(name!, left - 1);
+    events.push(`404 ${name}`);
+    return Promise.resolve(new Response('{}', { status: 404 }));
+  }
+  events.push(`200 ${name}`);
+  return Promise.resolve(new Response(JSON.stringify({ dist: { tarball: 'https://reg/x.tgz' } })));
+});
+
 /** A minimal execFile-child stand-in that emits `close` with `code`. */
 function fakeChild(code: number): ChildProcess.ChildProcess {
   const child = new EventEmitter() as ChildProcess.ChildProcess;
@@ -93,12 +107,48 @@ function wireNpm(alreadyPublished: readonly string[]): void {
         return fakeChild(1);
       }
       if (a[0] === 'publish') {
+        events.push(`publish ${a.some((x) => x.includes('putitoutthere-plat-')) ? 'platform' : 'demo-cli'}`);
         cb(null, '', '');
         return fakeChild(0);
       }
     }
     return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
   }) as unknown as typeof execFile);
+}
+
+async function withFakeTimers<T>(fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  try {
+    const p = fn();
+    let done = false;
+    void p.then(
+      () => { done = true; },
+      () => { done = true; },
+    );
+    while (!done) {
+      await vi.advanceTimersByTimeAsync(300_000);
+      await new Promise((r) => setImmediate(r));
+    }
+    return await p;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+async function runPublish(): Promise<{ code: number; out: string }> {
+  const chunks: string[] = [];
+  const capture = ((c: string | Uint8Array) => {
+    chunks.push(typeof c === 'string' ? c : Buffer.from(c).toString('utf8'));
+    return true;
+  }) as typeof process.stdout.write;
+  vi.spyOn(process.stdout, 'write').mockImplementation(capture);
+  vi.spyOn(process.stderr, 'write').mockImplementation(capture);
+  try {
+    const code = await run(['node', 'putitoutthere', 'publish', '--json', '--cwd', repo]);
+    return { code, out: chunks.join('') };
+  } finally {
+    vi.restoreAllMocks();
+  }
 }
 
 /** Run the CLI and parse the `--json` report it writes to stdout. */
@@ -175,6 +225,9 @@ beforeEach(() => {
   gitInRepo(['commit', '-m', 'feat: initial\n\nrelease: patch']);
 
   process.env.NODE_AUTH_TOKEN = 'tok';
+  events.length = 0;
+  notVisibleFor.clear();
+  vi.stubGlobal('fetch', fetchMock);
 });
 
 afterEach(() => {
@@ -182,6 +235,7 @@ afterEach(() => {
   rmSync(remote, { recursive: true, force: true });
   delete process.env.NODE_AUTH_TOKEN;
   execMock.mockReset();
+  vi.unstubAllGlobals();
 });
 
 describe('publish report: per-platform publish summary (#625)', () => {
@@ -245,5 +299,36 @@ globs = ["packages/js/**"]
 
     expect(report.published[0]!.result.status).toBe('published');
     expect(report.published[0]!.result.platforms).toBeUndefined();
+  });
+});
+
+describe('publish waits for platform packages to be visible (#733)', () => {
+  it('publishes the main package only after every platform per-version document resolves', async () => {
+    wireNpm([]);
+    notVisibleFor.set(PLATFORM_NAMES[1]!, 2);
+
+    const report = await withFakeTimers(publishJson);
+
+    expect(report.published[0]!.result.status).toBe('published');
+    expect(events).toEqual([
+      'publish platform',
+      'publish platform',
+      `200 ${PLATFORM_NAMES[0]}`,
+      `404 ${PLATFORM_NAMES[1]}`,
+      `404 ${PLATFORM_NAMES[1]}`,
+      `200 ${PLATFORM_NAMES[1]}`,
+      'publish demo-cli',
+    ]);
+  });
+
+  it('does not publish the main package when a platform package never becomes visible', async () => {
+    wireNpm([]);
+    notVisibleFor.set(PLATFORM_NAMES[1]!, Infinity);
+
+    const { code, out } = await withFakeTimers(runPublish);
+
+    expect(code).not.toBe(0);
+    expect(events).not.toContain('publish demo-cli');
+    expect(out).toMatch(new RegExp(`${PLATFORM_NAMES[1]}@\\S+ .*not publishing the main package`));
   });
 });
