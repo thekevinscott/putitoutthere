@@ -10,7 +10,7 @@ const files: Record<string, string> = {
 };
 
 const deps = {
-  readFile: async (path: string) => files[path],
+  readFile: (path: string) => Promise.resolve(files[path]),
   extractRefs: (_path: string, content: string) =>
     content.split('\n').filter((l) => l.startsWith('@')).map((l) => l.slice(1)),
 };
