@@ -14,6 +14,8 @@ import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { expandDirGlob } from './glob.js';
 import { classifyPypiVersionSource } from './pypi-version-source.js';
+import { readDeclaredRepoUrl } from './read-declared-repo-url.js';
+import { readToml } from './read-toml.js';
 import type { Kind } from './types.js';
 
 // Per-kind accepted env var names, primary first. `checkAuth` scans left
@@ -792,20 +794,6 @@ async function collectBundleCliCrateFindings(
   }
 }
 
-async function readToml(path: string): Promise<Record<string, unknown> | null> {
-  let raw: string;
-  try {
-    raw = await readFile(path, 'utf8');
-  } catch {
-    return null;
-  }
-  try {
-    return parseToml(raw);
-  } catch {
-    return null;
-  }
-}
-
 function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
   const features = (cargoToml.features ?? {}) as Record<string, unknown>;
   return new Set(Object.keys(features));
@@ -1003,90 +991,6 @@ export async function requireRepoUrlMatch(
     `See ${REPO_URL_DOC_POINTER}.`,
   );
   throw new Error(lines.join('\n'));
-}
-
-interface DeclaredRepoUrl {
-  url: string;
-  manifestPath: string;
-}
-
-async function readDeclaredRepoUrl(p: Package): Promise<DeclaredRepoUrl | null> {
-  switch (p.kind) {
-    case 'npm': {
-      const manifestPath = join(p.path, 'package.json');
-      const parsed = await readJson(manifestPath);
-      if (parsed === null) {return null;}
-      const repository = (parsed as { repository?: unknown }).repository;
-      if (typeof repository === 'string' && repository.trim().length > 0) {
-        return { url: repository.trim(), manifestPath };
-      }
-      if (repository !== null && typeof repository === 'object') {
-        const url = (repository as { url?: unknown }).url;
-        if (typeof url === 'string' && url.trim().length > 0) {
-          return { url: url.trim(), manifestPath };
-        }
-      }
-      return null;
-    }
-    case 'crates': {
-      const manifestPath = join(p.path, 'Cargo.toml');
-      const parsed = await readTomlDoc(manifestPath);
-      if (parsed === null) {return null;}
-      const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
-      const repo = pkgTable.repository;
-      if (typeof repo === 'string' && repo.trim().length > 0) {
-        return { url: repo.trim(), manifestPath };
-      }
-      return null;
-    }
-    case 'pypi': {
-      const manifestPath = join(p.path, 'pyproject.toml');
-      const parsed = await readTomlDoc(manifestPath);
-      if (parsed === null) {return null;}
-      const project = (parsed.project ?? {}) as Record<string, unknown>;
-      const urls = (project.urls ?? {}) as Record<string, unknown>;
-      // PEP 621 leaves the key casing to the project, and PyPI normalises
-      // common labels case-insensitively. Accept the canonical "Repository"
-      // first and fall back to common synonyms (source-code repos vs.
-      // homepage links) so a project picking any reasonable label still
-      // gets the check.
-      for (const key of ['Repository', 'repository', 'Source', 'source', 'Homepage', 'homepage']) {
-        const candidate = urls[key];
-        if (typeof candidate === 'string' && candidate.trim().length > 0) {
-          return { url: candidate.trim(), manifestPath };
-        }
-      }
-      return null;
-    }
-  }
-}
-
-async function readJson(path: string): Promise<unknown> {
-  let raw: string;
-  try {
-    raw = await readFile(path, 'utf8');
-  } catch {
-    return null;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-async function readTomlDoc(path: string): Promise<Record<string, unknown> | null> {
-  let raw: string;
-  try {
-    raw = await readFile(path, 'utf8');
-  } catch {
-    return null;
-  }
-  try {
-    return parseToml(raw);
-  } catch {
-    return null;
-  }
 }
 
 function normalizeOwnerRepo(value: string | undefined): string | null {

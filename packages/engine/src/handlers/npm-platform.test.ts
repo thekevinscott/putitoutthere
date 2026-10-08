@@ -24,9 +24,11 @@ import {
   toRustTriple,
   type PlatformPkg,
 } from './npm-platform.js';
+import { looksLikePublishOverRace as looksLikePublishOverRaceImpl } from './looks-like-publish-over-race.js';
 import type { Ctx } from '../types.js';
 import { awaitPlatformsVisible } from './await-platforms-visible.js';
 
+vi.mock('./looks-like-publish-over-race.js', async () => await vi.importActual<typeof import('./looks-like-publish-over-race.js')>('./looks-like-publish-over-race.js'));
 vi.mock('../utils/exec-capture.js');
 vi.mock('./await-platforms-visible.js');
 vi.mock('node:fs/promises');
@@ -1204,23 +1206,9 @@ describe('publishPlatforms: staging cleanup is best-effort (#581)', () => {
   });
 });
 
-describe('looksLikePublishOverRace', () => {
-  it('matches npm\'s E403 over-publish stderr', () => {
-    expect(
-      looksLikePublishOverRace(
-        'npm error code E403\nnpm error 403 You cannot publish over the previously published versions: 0.0.1.',
-      ),
-    ).toBe(true);
-  });
-
-  it('returns false on unrelated 403 stderr', () => {
-    expect(looksLikePublishOverRace('npm error 403 Forbidden - PUT')).toBe(false);
-    expect(looksLikePublishOverRace('npm ERR! 403 ENEEDAUTH')).toBe(false);
-  });
-
-  it('returns false on undefined / empty', () => {
-    expect(looksLikePublishOverRace(undefined)).toBe(false);
-    expect(looksLikePublishOverRace('')).toBe(false);
+describe('looksLikePublishOverRace re-export', () => {
+  it('is the same function npm.ts reaches through npm-platform', () => {
+    expect(looksLikePublishOverRace).toBe(looksLikePublishOverRaceImpl);
   });
 });
 

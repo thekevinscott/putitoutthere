@@ -13,11 +13,12 @@ import { sanitizeArtifactName } from '../config.js';
 import { detectIndent } from './detect-indent.js';
 import { firstFileUnder } from './first-file-under.js';
 import type { Ctx } from '../types.js';
-import { buildSubprocessEnv, nonEmpty } from '../env.js';
-import { execCapture } from '../utils/exec-capture.js';
-import { ExecError } from '../utils/exec-error.js';
-import { matchTlogDuplicate } from './match-tlog-duplicate.js';
+import { nonEmpty } from '../env.js';
 import { awaitPlatformsVisible } from './await-platforms-visible.js';
+import { isPlatformPublished } from './is-platform-published.js';
+import { publishPlatformPackage } from './publish-platform-package.js';
+
+export { looksLikePublishOverRace } from './looks-like-publish-over-race.js';
 
 export type NpmBuildMode = 'napi' | 'bundled-cli';
 
@@ -113,7 +114,7 @@ export async function publishPlatforms(
         isMulti,
       );
       try {
-        await npmPublish(stagingDir, pkg, ctx);
+        await publishPlatformPackage(stagingDir, pkg, ctx);
         published.push(platformName);
       } finally {
         // Cleanup is best-effort. The publish already happened, and the
@@ -196,21 +197,6 @@ export function platformArtifactName(
 
 /* --------------------------- internals --------------------------- */
 
-async function isPlatformPublished(
-  platformName: string,
-  version: string,
-  ctx: Ctx,
-): Promise<boolean> {
-  try {
-    await execCapture('npm', ['view', `${platformName}@${version}`, 'version'], {
-      cwd: ctx.cwd,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function synthesizePlatformPackage(
   pkg: PlatformPkg,
   entry: NpmBuildEntry,
@@ -282,121 +268,6 @@ async function synthesizePlatformPackage(
   );
 
   return staging;
-}
-
-async function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): Promise<void> {
-  // See src/handlers/npm.ts for the PIOT_NPM_REGISTRY rationale (#304):
-  // internal e2e seam, suppresses provenance + assumes `.npmrc`-supplied
-  // auth at the override registry.
-  const registryOverride = nonEmpty(ctx.env.PIOT_NPM_REGISTRY) ?? nonEmpty(process.env.PIOT_NPM_REGISTRY);
-  const hasOidc =
-    !registryOverride &&
-    Boolean(
-      nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
-        nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
-    );
-  const access = pkg.access ?? 'public';
-  const args: string[] = ['publish', `--access=${access}`];
-  if (pkg.tag) {args.push(`--tag=${pkg.tag}`);}
-  if (hasOidc) {args.push('--provenance');}
-  if (registryOverride) {args.push(`--registry=${registryOverride}`);}
-  // #305: pass the synthesized package directory as a positional <folder>
-  // arg to `npm publish`, not as the cwd. npm reads `.npmrc` from cwd
-  // upward, and any auth the consumer wrote alongside their package
-  // (e.g. the `_authToken` entries the e2e workflow writes into
-  // `fixture-tree/.npmrc` to authenticate against Verdaccio, and the
-  // analogous NPM_TOKEN-bootstrap shape consumers use against real npm)
-  // lives at `pkg.path`. Running with `cwd: stagingDir` (a tempdir) lost
-  // that auth — the platform PUTs went out unauthenticated, registry
-  // returned 4xx, the engine reported "npm publish (platform) failed".
-  // Mirrors what npm.ts:publishImpl already does for the main package.
-  args.push(stagingDir);
-
-  try {
-    await execCapture('npm', args, {
-      cwd: pkg.path,
-      // #138: minimal env; don't leak parent process.env to npm.
-      env: buildSubprocessEnv(ctx.env),
-    });
-  } catch (err) {
-    const stderr = err instanceof ExecError ? err.stderr.trim() : undefined;
-    // npm CLI's retry-on-transient-network-error: a successful PUT that
-    // the registry acked but for which npm saw a flaky response (timeout,
-    // 502, connection reset) gets retried with the same payload. The
-    // retry's PUT lands on a registry that already has the new version
-    // and gets E403 "cannot publish over the previously published versions".
-    // The first attempt actually succeeded — the package + provenance are
-    // on the registry — so treat this exact stderr shape as success.
-    if (looksLikePublishOverRace(stderr)) {
-      return;
-    }
-    // Attestation edition of the same retry race: npm re-submits an
-    // identical provenance attestation and Sigstore/Rekor rejects the
-    // duplicate with TLOG_CREATE_ENTRY_ERROR (409). A 409 alone does not
-    // prove the registry upload landed, so re-probe `npm view` before
-    // deciding: present => the publish actually succeeded (benign dup);
-    // absent => a genuine partial publish that a fresh run (new
-    // attestation) resolves.
-    const tlogStderr = matchTlogDuplicate(stderr);
-    if (tlogStderr !== null) {
-      const staged = await readStagedIdentity(stagingDir);
-      if (await platformPublished(staged.name, staged.version, ctx)) {
-        return;
-      }
-      throw new Error(
-        `npm publish (platform) failed: Sigstore transparency-log dedupe ` +
-          `(TLOG_CREATE_ENTRY_ERROR) and ${staged.name}@${staged.version} is not ` +
-          `on the registry — npm's provenance retry re-submitted an identical ` +
-          `attestation. Re-run the release to mint a fresh attestation.` +
-          `\n${tlogStderr}`,
-        { cause: err },
-      );
-    }
-    const base = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `npm publish (platform) failed${stderr ? `:\n${stderr}` : `: ${base}`}`,
-      { cause: err },
-    );
-  }
-}
-
-/**
- * Match the specific stderr npm emits when its internal retry-on-transient-
- * network-error fires after a successful PUT: the second attempt lands on a
- * registry that already has the version and gets `E403 ... You cannot
- * publish over the previously published versions: <ver>`. The package is
- * already where we wanted it; npm just exits non-zero on the duplicate
- * write.
- */
-export function looksLikePublishOverRace(stderr: string | undefined): boolean {
-  if (!stderr) {return false;}
-  return /cannot publish over the previously published versions/i.test(stderr);
-}
-
-/**
- * `npm view <name>@<version>` existence probe. Mirrors
- * `isPlatformPublished`; kept as a separate helper so the publish catch's
- * re-probe path reads independently.
- */
-async function platformPublished(name: string, version: string, ctx: Ctx): Promise<boolean> {
-  try {
-    await execCapture('npm', ['view', `${name}@${version}`, 'version'], {
-      cwd: ctx.cwd,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Read the synthesized platform package's name + version back from its
- *  staged package.json (written by `synthesizePlatformPackage`). */
-async function readStagedIdentity(stagingDir: string): Promise<{ name: string; version: string }> {
-  const pkg = JSON.parse(await readFile(join(stagingDir, 'package.json'), 'utf8')) as {
-    name: string;
-    version: string;
-  };
-  return { name: pkg.name, version: pkg.version };
 }
 
 async function rewriteOptionalDependencies(

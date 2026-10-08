@@ -225,6 +225,13 @@ describe('cli: top-level dispatch', () => {
     expect(stderr.join('')).toMatch(/unknown command/);
   });
 
+  it('follows the unknown-command error with the full usage', async () => {
+    const code = await run(argv('foo'));
+    expect(code).toBe(1);
+    expect(stderr[0]).toBe('putitoutthere: unknown command: foo\n');
+    expect(stderr[1]).toMatch(/^Usage: putitoutthere <command> \[options\]\n/);
+  });
+
   it('surfaces engine errors with a non-zero exit and a friendly prefix', async () => {
     computePlanStatusMock.mockRejectedValue(new Error('boom'));
     const code = await run(argv('plan', '--cwd', '/x'));

@@ -5,11 +5,20 @@
  * cannot satisfy the red set.
  */
 
-import { execFileSync } from 'node:child_process';
+import type * as ChildProcess from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The runner's real `cargo package` took 0.4-10s per crates case and timed
+// out; check-crate-size.integration.test.ts owns that check.
+const realExecFile = (await vi.importActual<typeof ChildProcess>('node:child_process')).execFile;
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof ChildProcess>();
+  return { ...actual, execFile: vi.fn() };
+});
 
 import { runChecks } from '../../src/check.js';
 
@@ -40,6 +49,13 @@ function commitAll(message = 'snapshot'): void {
 
 beforeEach(() => {
   initRepo();
+  vi.mocked(execFile).mockImplementation(((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    if (cmd === 'cargo') {
+      cb(Object.assign(new Error('spawn cargo ENOENT'), { code: 'ENOENT' }), '', '');
+      return undefined as unknown as ChildProcess.ChildProcess;
+    }
+    return (realExecFile as unknown as (...a: unknown[]) => ChildProcess.ChildProcess)(cmd, args, opts, cb);
+  }) as unknown as typeof execFile);
 });
 
 afterEach(() => {
