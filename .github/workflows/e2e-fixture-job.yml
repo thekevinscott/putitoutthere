@@ -25,17 +25,6 @@ on:
         description: 'Fixture directory under tests/fixtures/ to exercise.'
         type: string
         required: true
-      simulate_no_dist:
-        description: >-
-          #304 / #256 repro toggle. When true, the publish job clobbers
-          `dist/` after build but before publish on first-publish rows,
-          producing a tarball whose `files[]`-declared `dist/` directory
-          is empty. The post-publish tarball-verify step is expected to
-          fail on this — that's the demonstration that the assertion
-          catches the cachetta 0.3.x failure mode. Off by default.
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: e2e-${{ github.ref }}-${{ inputs.fixture }}
@@ -575,76 +564,6 @@ jobs:
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: pnpm exec putitoutthere npm-build --cwd fixture-tree --matrix "$MATRIX"
-
-      # TEMPORARY DIAGNOSTIC (#258): assert pre-publish state for each
-      # npm main/noarch package. Fails the step (with the failure
-      # annotation describing what's wrong) when:
-      #   - package.json declares a directory in `files[]` that doesn't
-      #     exist on disk (Build npm packages step didn't produce it), or
-      #   - npm pack --dry-run wouldn't include that directory.
-      # Strip once the verify failure root cause is understood.
-      - name: Pre-publish fixture-tree assertion (diagnostic)
-        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
-        shell: bash
-        env:
-          MATRIX: ${{ needs.plan.outputs.matrix }}
-        run: |
-          set -uo pipefail
-          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
-          fail=0
-          while IFS= read -r row; do
-            pkg_path=$(printf '%s' "$row" | jq -r '.path')
-            pkg_name=$(printf '%s' "$row" | jq -r '.name')
-            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "fixture-tree/${pkg_path}/package.json")
-            for d in "${dirs[@]}"; do
-              local_path="fixture-tree/${pkg_path}/${d}"
-              if [ ! -d "$local_path" ]; then
-                listing=$(find "fixture-tree/${pkg_path}" -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null || true)
-                echo "::error::[${pkg_name}] declared files[${d}] but ${local_path} does not exist after Build step. fixture-tree/${pkg_path} contents: ${listing}"
-                fail=1
-                continue
-              fi
-              count=$(find "$local_path" -type f 2>/dev/null | wc -l)
-              if [ "$count" -eq 0 ]; then
-                echo "::error::[${pkg_name}] ${local_path} exists but is empty"
-                fail=1
-                continue
-              fi
-              echo "OK pre-publish [${pkg_name}] ${local_path}: ${count} file(s)"
-            done
-            pushd "fixture-tree/${pkg_path}" > /dev/null
-            pack=$(npm pack --dry-run 2>&1 || echo "(npm pack failed)")
-            popd > /dev/null
-            for d in "${dirs[@]}"; do
-              if ! printf '%s' "$pack" | grep -q "${d}/"; then
-                pack_compact=$(printf '%s' "$pack" | tr '\n' '|')
-                echo "::error::[${pkg_name}] npm pack --dry-run does NOT include ${d}/. Full pack output: ${pack_compact}"
-                fail=1
-              fi
-            done
-          done <<< "$rows"
-          exit "$fail"
-
-      # #304 / #256: opt-in repro that clobbers dist/ between build and
-      # publish on first-publish rows. The post-publish tarball-verify
-      # step is expected to fail when this runs — that's the
-      # demonstration that the assertion catches missing build output
-      # against an empty registry. Skipped by default.
-      - name: '#256 repro: clobber dist/ before publish (opt-in)'
-        if: inputs.simulate_no_dist && endsWith(inputs.fixture, '-first-publish')
-        shell: bash
-        env:
-          MATRIX: ${{ needs.plan.outputs.matrix }}
-        run: |
-          set -euo pipefail
-          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          for path in $paths; do
-            target="fixture-tree/${path}/dist"
-            if [ -d "$target" ]; then
-              echo "::warning::#256 repro: clobbering ${target}"
-              find "$target" -mindepth 1 -delete
-            fi
-          done
 
       # #304: configure Verdaccio auth for first-publish rows. Waits for the
       # Verdaccio `/-/ping` endpoint to bind, creates an `e2e` user via the

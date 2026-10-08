@@ -41,17 +41,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      simulate_no_dist:
-        description: >-
-          #304 / #256 repro toggle. When true, first-publish fixtures clobber
-          their `dist/` directory after build but before publish, so the
-          post-publish tarball-verify step fails. Use to demonstrate that
-          the verify step actually catches missing build output against
-          the empty Verdaccio. Off by default.
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -86,7 +75,6 @@ jobs:
     secrets: inherit
     with:
       fixture: ${{ matrix.fixture }}
-      simulate_no_dist: ${{ inputs.simulate_no_dist || false }}
 
   # pypa/gh-action-pypi-publish aborts inside reusable workflows
   # (warehouse#11096), so PyPI upload has to live at the caller level.
@@ -104,6 +92,15 @@ jobs:
       # would silently never fire — the same shape of silent miss #694 was.
       have_pypi: ${{ steps.have-pypi.outputs.have_pypi }}
     steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./packages/ci/actions/setup-node
+
+      - uses: ./packages/ci/actions/setup-pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - uses: actions/download-artifact@v8
         with:
           pattern: '*-sdist'
@@ -114,32 +111,10 @@ jobs:
           pattern: '*-wheel-*'
           path: dist/
           merge-multiple: true
-      # #294: discard first-publish wheels/sdists. They carry a literal
-      # `_placeholder` token in the project-name half of the filename
-      # (maturin normalizes the fixture's `-placeholder` suffix to
-      # `_placeholder` in wheel/sdist filenames; the build job's
-      # materialize step does NOT apply the `-placeholder` rewrite, by
-      # design — see e2e-fixture-job.yml's plan/publish materialize
-      # comments). Real PyPI has no Trusted Publisher record for these
-      # uniquified names, so the pypa-publish PUT would 4xx. The
-      # diagnostic surface that the maturin path provides on a
-      # first-publish fixture is the in-job wheel-content guard
-      # (e2e-fixture-job.yml lines ~233-274), not the upload to a
-      # real registry — TP-shaped failure modes are explicitly out of
-      # scope per issue 294.
+      # #294: real PyPI has no Trusted Publisher record for the uniquified
+      # first-publish names, so their upload would 4xx.
       - name: Discard first-publish wheels (no TP record on real PyPI)
-        run: |
-          set -euo pipefail
-          dropped=0
-          while IFS= read -r -d '' f; do
-            rm -f "$f"
-            dropped=$((dropped + 1))
-            echo "  dropped: $(basename "$f")"
-          done < <(find dist/ -maxdepth 1 -type f \
-            \( -name '*_placeholder*' -o -name '*-placeholder*' \) -print0 2>/dev/null)
-          if [ "$dropped" -gt 0 ]; then
-            echo "::warning::Dropped ${dropped} first-publish artifact(s) from dist/ — Trusted Publisher records are not provisioned for uniquified package names. The maturin build path on a first-publish fixture is guarded by the in-job wheel-content guard, not by the real-PyPI upload."
-          fi
+        run: pnpm exec piot-ci discard-first-publish-dists
       - id: have-pypi
         run: |
           if [ -n "$(ls -A dist/ 2>/dev/null)" ]; then
@@ -188,9 +163,9 @@ jobs:
     needs: pypi-publish
     # Mirrors the consumer template's gate (see pypi-tag.yml's usage block)
     # plus the `have_pypi` arm: `pypi-publish` skips its upload when
-    # `dist/` came back empty (#294 drops every first-publish artifact,
-    # and `simulate_no_dist` can empty it outright), and there is nothing
-    # to reconcile against a registry that received nothing.
+    # `dist/` came back empty (#294 drops every first-publish artifact),
+    # and there is nothing to reconcile against a registry that received
+    # nothing.
     if: ${{ !cancelled() && needs.pypi-publish.result == 'success' && needs.pypi-publish.outputs.have_pypi == 'true' }}
     runs-on: ubuntu-latest
     # Read-only: the tags this job cuts are local to $TAG_TREE by design.
