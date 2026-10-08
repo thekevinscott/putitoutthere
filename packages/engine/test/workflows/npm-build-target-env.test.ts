@@ -33,7 +33,7 @@ function findNpmRunBuildStep(steps: Step[]): Step | undefined {
       typeof s.if === 'string' &&
       /matrix\.kind\s*==\s*['"]npm['"]/.test(s.if) &&
       typeof s.run === 'string' &&
-      /npm\s+run\s+build/.test(s.run),
+      /npm\s+run\s+build|putitoutthere npm-build/.test(s.run),
   );
 }
 

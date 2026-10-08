@@ -35,7 +35,7 @@ function isNpmRunBuild(s: Step): boolean {
   return (
     typeof s.if === 'string' &&
     /matrix\.kind\s*==\s*['"]npm['"]/.test(s.if) &&
-    (s.with?.command === 'npm-build' || (typeof s.run === 'string' && /npm\s+run\s+build/.test(s.run)))
+    (s.with?.command === 'npm-build' || (typeof s.run === 'string' && /npm\s+run\s+build|putitoutthere npm-build/.test(s.run)))
   );
 }
 
