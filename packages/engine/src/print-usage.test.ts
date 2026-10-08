@@ -49,6 +49,7 @@ describe('printUsage', () => {
         '  write-version  Bump a package manifest to the planned version (pre-build; #276)',
         '  write-crate-version  Bump a crate Cargo.toml to the planned version (pre-build; #366)',
         '  write-launcher Generate the bundled-cli npm launcher script (pre-build; #299)',
+        '  npm-build      Install an npm package\'s dependencies and run its build',
         '  version        Print CLI version',
         '',
         'Options:',

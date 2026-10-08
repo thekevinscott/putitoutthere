@@ -54,6 +54,15 @@ describe('resolveNpmTarballUrl', () => {
     expect(out.join('')).toBe('  https://registry.npmjs.org/pkg/1.0.0 not readable yet (attempt 1/2); retrying in 3s\n');
   });
 
+  it('sends retry lines to the given log instead of stdout', async () => {
+    vi.useFakeTimers();
+    const lines: string[] = [];
+    fetchMock.mockResolvedValueOnce(respond(404, DOC)).mockResolvedValue(respond(200, DOC));
+    await settle(resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [3], log: (l) => lines.push(l) }));
+    expect(lines).toEqual(['  https://registry.npmjs.org/pkg/1.0.0 not readable yet (attempt 1/2); retrying in 3s\n']);
+    expect(out.join('')).toBe('');
+  });
+
   it('gives up with null once every attempt fails', async () => {
     vi.useFakeTimers();
     fetchMock.mockRejectedValueOnce(new Error('timeout')).mockResolvedValue(respond(200, {}));

@@ -47,12 +47,24 @@ class LocalRegistry {
   readonly packuments = new Map<string, Packument>();
   /** Every successful PUT, in order — what the registry actually got. */
   readonly uploads: Array<{ name: string; version: string }> = [];
+  readonly events: string[] = [];
+  readonly notVisibleFor = new Map<string, number>();
   private server!: Server;
   private port!: number;
 
   async start(): Promise<void> {
     this.server = createServer((req, res) => {
       const name = decodeURIComponent((req.url ?? '/').replace(/^\//, '').split('?')[0]!);
+      const [docName, docVersion] = name.split('/');
+      if (req.method === 'GET' && docVersion !== undefined) {
+        const left = this.notVisibleFor.get(docName!) ?? 0;
+        this.notVisibleFor.set(docName!, left - 1);
+        const meta = left > 0 ? undefined : this.packuments.get(docName!)?.versions[docVersion];
+        this.events.push(`${meta === undefined ? 404 : 200} ${docName}`);
+        res.writeHead(meta === undefined ? 404 : 200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(meta ?? { error: 'Not found' }));
+        return;
+      }
       if (req.method === 'GET') {
         const doc = this.packuments.get(name);
         if (doc === undefined) {
@@ -74,6 +86,7 @@ class LocalRegistry {
           for (const [version, meta] of Object.entries(body.versions ?? {})) {
             this.seed(name, version, meta);
             this.uploads.push({ name, version });
+            this.events.push(`PUT ${name}`);
           }
           res.writeHead(201, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
@@ -156,6 +169,14 @@ function writeRepoFile(rel: string, body: string): void {
  * Async on purpose — see `LocalRegistry`.
  */
 async function publishJson(): Promise<PublishReport> {
+  const { code, stdout, stderr } = await runPublish();
+  if (code !== 0) {
+    throw new Error(`publish exited non-zero.\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+  }
+  return JSON.parse(stdout.trim()) as PublishReport;
+}
+
+async function runPublish(): Promise<{ code: number; stdout: string; stderr: string }> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     // The internal e2e seam (#304): route publish at the local registry
@@ -173,19 +194,16 @@ async function publishJson(): Promise<PublishReport> {
   delete env.GITHUB_REPOSITORY;
   delete env.GITHUB_TOKEN;
 
-  let stdout: string;
   try {
-    ({ stdout } = await pExecFile('node', [CLI, 'publish', '--json', '--cwd', repo], {
+    const { stdout, stderr } = await pExecFile('node', [CLI, 'publish', '--json', '--cwd', repo], {
       env,
       encoding: 'utf8',
-    }));
+    });
+    return { code: 0, stdout, stderr };
   } catch (err) {
-    const e = err as { stdout?: string; stderr?: string };
-    throw new Error(
-      `publish exited non-zero.\nstdout:\n${e.stdout ?? ''}\nstderr:\n${e.stderr ?? ''}`,
-    );
+    const e = err as { code?: number; stdout?: string; stderr?: string };
+    return { code: e.code ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
   }
-  return JSON.parse(stdout.trim()) as PublishReport;
 }
 
 beforeEach(async () => {
@@ -296,5 +314,33 @@ describe('publish report names the platform packages (#625, real CLI + real npm)
     expect(entry!.result.platforms).toBeDefined();
     expect(entry!.result.platforms!.skipped).toEqual(PLATFORM_NAMES);
     expect(entry!.result.platforms!.published).toEqual([]);
+  });
+});
+
+describe('publish waits for platform packages to be visible (#733, real CLI + real npm)', () => {
+  it('uploads the main package only after every platform per-version document resolves', async () => {
+    registry.notVisibleFor.set(PLATFORM_NAMES[1]!, 2);
+
+    await publishJson();
+
+    expect(registry.events).toEqual([
+      `PUT ${PLATFORM_NAMES[0]}`,
+      `PUT ${PLATFORM_NAMES[1]}`,
+      `200 ${PLATFORM_NAMES[0]}`,
+      `404 ${PLATFORM_NAMES[1]}`,
+      `404 ${PLATFORM_NAMES[1]}`,
+      `200 ${PLATFORM_NAMES[1]}`,
+      `PUT ${PKG}`,
+    ]);
+  });
+
+  it('never uploads the main package when a platform package never becomes visible', async () => {
+    registry.notVisibleFor.set(PLATFORM_NAMES[1]!, Infinity);
+
+    const { code, stdout, stderr } = await runPublish();
+
+    expect(code).not.toBe(0);
+    expect(registry.uploads.map((u) => u.name)).toEqual(PLATFORM_NAMES);
+    expect(stdout + stderr).toMatch(new RegExp(`${PLATFORM_NAMES[1]}@${VERSION} .*not publishing the main package`));
   });
 });

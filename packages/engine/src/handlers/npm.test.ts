@@ -15,6 +15,7 @@ vi.mock('../types.js', async () => await vi.importActual<typeof import('../types
 import { TransientError } from '../types.js';
 
 vi.mock('../utils/exec-capture.js');
+vi.mock('./await-platforms-visible.js');
 vi.mock('node:fs/promises');
 
 const execMock = vi.mocked(execCapture);

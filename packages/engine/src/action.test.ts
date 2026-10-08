@@ -62,6 +62,8 @@ describe('action', () => {
     delete process.env.INPUT_BIN;
     delete process.env.INPUT_TARGET;
     delete process.env.INPUT_EXPECT;
+    delete process.env.INPUT_BUILD;
+    delete process.env.INPUT_MATRIX;
   });
 
   it('fails when INPUT_COMMAND is missing', async () => {
@@ -198,6 +200,16 @@ describe('action', () => {
       '--cwd',
       '/repo',
     ]);
+  });
+
+  it('npm-build: forwards the row inputs, or the matrix alone', async () => {
+    Object.assign(process.env, { INPUT_COMMAND: 'npm-build', INPUT_WORKING_DIRECTORY: 'p', INPUT_TARGET: 't', INPUT_BUILD: 'b', INPUT_VERSION: '1' });
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', 'npm-build', '--path', 'p', '--target', 't', '--build', 'b', '--version', '1']);
+    delete process.env.INPUT_BUILD;
+    Object.assign(process.env, { INPUT_WORKING_DIRECTORY: '', INPUT_TARGET: '', INPUT_VERSION: '', INPUT_MATRIX: '[]' });
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', 'npm-build', '--matrix', '[]']);
   });
 
   it('verify-bundle-cli: splits the command and forwards the four flags (#595)', async () => {

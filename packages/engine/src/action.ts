@@ -18,6 +18,8 @@ export async function main(): Promise<void> {
   const bin = process.env.INPUT_BIN ?? '';
   const target = process.env.INPUT_TARGET ?? '';
   const expectInput = process.env.INPUT_EXPECT ?? '';
+  const build = process.env.INPUT_BUILD ?? '';
+  const matrix = process.env.INPUT_MATRIX ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
@@ -41,6 +43,12 @@ export async function main(): Promise<void> {
     if (versionInput) {argv.push('--version', versionInput);}
   } else if (command === 'write-launcher') {
     if (workingDirectory) {argv.push('--path', workingDirectory);}
+  } else if (command === 'npm-build') {
+    if (matrix) {argv.push('--matrix', matrix);}
+    if (workingDirectory) {argv.push('--path', workingDirectory);}
+    if (target) {argv.push('--target', target);}
+    if (build) {argv.push('--build', build);}
+    if (versionInput) {argv.push('--version', versionInput);}
   } else if (command === 'verify-bundle-cli') {
     if (workingDirectory) {argv.push('--path', workingDirectory);}
     if (stageTo) {argv.push('--stage-to', stageTo);}

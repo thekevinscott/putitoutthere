@@ -6,6 +6,7 @@
  */
 
 import { appendFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,6 +15,8 @@ import { advanceV0 } from './advance-v0.js';
 import { parseFlags, run } from './cli.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
+import { npmBuildMatrix } from './npm-build/npm-build-matrix.js';
+import { npmBuildPackage } from './npm-build/npm-build-package.js';
 import { computePlanStatus } from './plan-status.js';
 import { publish } from './publish.js';
 import { readPublishProgress } from './publish-progress.js';
@@ -35,10 +38,13 @@ import type { PlanStatus } from './plan-status-types.js';
 import type { StatusRow } from './status-types.js';
 
 vi.mock('node:fs/promises');
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('./advance-floating-major.js');
 vi.mock('./advance-v0.js');
 vi.mock('./check.js');
 vi.mock('./fold-action-bundle.js');
+vi.mock('./npm-build/npm-build-matrix.js');
+vi.mock('./npm-build/npm-build-package.js');
 vi.mock('./plan-status.js');
 vi.mock('./publish.js');
 vi.mock('./publish-progress.js');
@@ -57,6 +63,8 @@ vi.mock('./write-version.js');
 
 const runChecksMock = vi.mocked(runChecks);
 const computePlanStatusMock = vi.mocked(computePlanStatus);
+const npmBuildMatrixMock = vi.mocked(npmBuildMatrix);
+const npmBuildPackageMock = vi.mocked(npmBuildPackage);
 const publishMock = vi.mocked(publish);
 const computeStatusMock = vi.mocked(computeStatus);
 const reconcileMock = vi.mocked(reconcile);
@@ -622,6 +630,33 @@ describe('cli: write-launcher dispatch', () => {
     expect(stderr.join('')).toMatch(/--path/);
     expect(writeLauncherMock).not.toHaveBeenCalled();
   });
+});
+
+describe('cli: npm-build dispatch', () => {
+  it('builds one package bounded by --cwd, or the whole matrix', async () => {
+    expect(await run(argv('npm-build', '--cwd', '/t', '--path', 'a', '--target', 'x', '--build', 'napi', '--version', '1'))).toBe(0);
+    expect(await run(argv('npm-build', '--cwd', '/t', '--path', 'a', '--target', 'x', '--version', '1'))).toBe(0);
+    expect(await run(argv('npm-build', '--cwd', '/t', '--matrix', '[]', '--path', 'a'))).toBe(0);
+    expect(npmBuildPackageMock.mock.calls).toEqual([
+      [resolve('/t', 'a'), resolve('/t'), { TARGET: 'x', BUILD: 'napi', VERSION: '1' }],
+      [resolve('/t', 'a'), resolve('/t'), { TARGET: 'x', BUILD: '', VERSION: '1' }],
+    ]);
+    expect(npmBuildMatrixMock).toHaveBeenCalledWith('[]', resolve('/t'));
+  });
+
+  it('is listed in --help', async () => {
+    await run(argv('--help'));
+    expect(stderr.join('')).toMatch(/npm-build\s+Install an npm package's dependencies and run its build/);
+  });
+
+  it.each([['--target', 'x', '--version', '1'], ['--path', 'a', '--version', '1'], ['--path', 'a', '--target', 'x']])(
+    'fails without one of --path, --target, --version (%j)',
+    async (...flags) => {
+      expect(await run(argv('npm-build', '--cwd', '/t', ...flags))).toBe(1);
+      expect(stderr.join('')).toContain('--path, --target and --version');
+      expect(npmBuildPackageMock).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('cli: publish dispatch', () => {

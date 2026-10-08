@@ -13,6 +13,8 @@ import { sanitizeArtifactName } from '../config.js';
 import { detectIndent } from './detect-indent.js';
 import { firstFileUnder } from './first-file-under.js';
 import type { Ctx } from '../types.js';
+import { nonEmpty } from '../env.js';
+import { awaitPlatformsVisible } from './await-platforms-visible.js';
 import { isPlatformPublished } from './is-platform-published.js';
 import { publishPlatformPackage } from './publish-platform-package.js';
 
@@ -135,6 +137,9 @@ export async function publishPlatforms(
       }
     }
   }
+
+  const registryOverride = nonEmpty(ctx.env.PIOT_NPM_REGISTRY) ?? nonEmpty(process.env.PIOT_NPM_REGISTRY);
+  await awaitPlatformsVisible(published, version, registryOverride);
 
   await rewriteOptionalDependencies(pkg, version, [...published, ...skipped]);
 

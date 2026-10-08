@@ -42,8 +42,16 @@ interface Registry {
  *  201 on every publish PUT, body retained for inspection. */
 async function startRegistry(): Promise<Registry> {
   const puts: string[] = [];
+  const putPaths = new Set<string>();
   const server = createServer((req, res) => {
+    const [name, version] = (req.url ?? '/').slice(1).split('/');
+    if (req.method === 'GET' && version !== undefined && putPaths.has(name!)) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ dist: { tarball: `http://127.0.0.1/${name}.tgz` } }));
+      return;
+    }
     if (req.method === 'PUT') {
+      putPaths.add(name!);
       const chunks: Buffer[] = [];
       req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
@@ -134,6 +142,7 @@ async function runCli(args: string[]): Promise<{ code: number; stdout: string; s
     // stub. `NPM_CONFIG_USERCONFIG` is on the engine's subprocess-env
     // allowlist (src/env.ts), so it survives the minimal-env spawn.
     NPM_CONFIG_USERCONFIG: join(repo, 'e2e.npmrc'),
+    PIOT_NPM_REGISTRY: registry.url,
   };
   // Unset so the repo-URL-match and repo-visibility pre-flights no-op
   // (they skip when GITHUB_REPOSITORY is absent) and so no OIDC is
