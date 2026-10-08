@@ -83,6 +83,14 @@ inputs:
     description: The plan matrix JSON; `npm-build` builds every npm package in it.
     required: false
     default: ''
+  features:
+    description: Comma-separated cargo features, for `bundle-cli-build`.
+    required: false
+    default: ''
+  no_default_features:
+    description: "'true' passes `--no-default-features` to cargo, for `bundle-cli-build`."
+    required: false
+    default: 'false'
   fail_on_error:
     description: 'If true, non-zero CLI exit codes fail the step.'
     required: false

@@ -2,7 +2,7 @@
  * Workflow-YAML contract: both bundle_cli lanes must produce **dynamically
  * linked** Linux binaries — static-pie has no dynamic loader, so `dlopen` dies
  * with `Dynamic loading not supported` (dirsql#755/#762). npm pins the glibc
- * floor at link time (`zigbuild --target "$RUST_TARGET.$GLIBC_FLOOR"`, 2.17)
+ * floor at link time (`putitoutthere bundle-cli-build`, zigbuild at 2.17)
  * instead of #381's static musl; pypi builds the gnu triple direct (#603/#605).
  */
 
@@ -50,22 +50,6 @@ function gatesOnBundleCliKind(s: Step, kind: Kind): boolean {
 
 function nameMatches(s: Step, pattern: RegExp): boolean {
   return typeof s.name === 'string' && pattern.test(s.name);
-}
-
-function envBindsRustTarget(s: Step): boolean {
-  return Object.values(s.env ?? {}).some((v) => /matrix\.rust_target/.test(String(v)));
-}
-
-/**
- * The text of the `case` arm that handles a declared musl triple: from the
- * `*-linux-musl*` pattern token through the arm's `;;`. Returns undefined when
- * no arm mentions musl at all, which is the shape this file's declared-musl
- * describe rejects.
- */
-function declaredMuslArm(run: string): string | undefined {
-  const arm = run.split(';;').find((segment) => /-linux-musl/.test(segment));
-  if (arm === undefined) return undefined;
-  return arm.slice(arm.indexOf('-linux-musl'));
 }
 
 function findStep(
@@ -133,38 +117,6 @@ describe('reusable workflow: npm bundle_cli Linux binaries are dynamic gnu with 
     ).toMatch(/rustup\s+target\s+add\s+"\$\{?RUST_TARGET\}?"/);
   });
 
-  it.each(paths)('$label: `cargo build` goes through zigbuild pinned to GLIBC_FLOOR on Linux', ({ file, job, kind, label }) => {
-    const steps = loadSteps(file, job);
-    const step = findStep(steps, kind, /cargo build/i);
-    expect(
-      step,
-      `${label}: could not locate the \`bundle_cli — cargo build\` step. ` +
-        'Expected a step gated on this build path whose name contains "cargo build".',
-    ).toBeDefined();
-    const run = step!.run!;
-    expectNoMuslMapping(run, `${label}: cargo-build`);
-    expect(
-      run,
-      `${label}: cargo-build must invoke \`cargo zigbuild\` for Linux targets so the ` +
-        'binary is dynamically linked against a *pinned old* glibc rather than the ' +
-        "runner's (#605). A plain `cargo build` on ubuntu-latest floors the binary " +
-        'at the runner glibc (2.39) and re-introduces the #381 runtime breakage; ' +
-        'static musl cannot dlopen. zigbuild is the only shape that avoids both.',
-    ).toMatch(/\bzigbuild\b/);
-    expect(
-      run,
-      `${label}: the zigbuild target must carry the pinned glibc floor suffix ` +
-        '(`--target "$RUST_TARGET.$GLIBC_FLOOR"`), so the floor is explicit and ' +
-        'testable rather than inherited from the runner (#605).',
-    ).toMatch(/--target\s+"\$\{?RUST_TARGET\}?\.\$\{?GLIBC_FLOOR\}?"/);
-    expect(
-      `${JSON.stringify(step!.env ?? {})}\n${run}`,
-      `${label}: the glibc floor must be pinned at 2.17 (the manylinux2014 ` +
-        'baseline) — old enough to cover every glibc distro since 2012, and the ' +
-        'value the verify step enforces as a symbol ceiling (#605).',
-    ).toMatch(/2\.17/);
-  });
-
   it.each(paths)("$label: stage step reads from the declared triple's target dir", ({ file, job, kind, label }) => {
     const steps = loadSteps(file, job);
     const step = findStep(steps, kind, /stage binary/i, /src=/);
@@ -216,170 +168,6 @@ describe('reusable workflow: npm bundle_cli Linux binaries are dynamic gnu with 
         'With no lane musl-mapping anymore (#603 removed pypi, #605 removes npm), ' +
         'the musl C cross-compiler has no consumer and the step must be removed.',
     ).toBe(-1);
-  });
-});
-
-describe('npm bundle_cli verify: asserts dynamic linkage and the pinned glibc ceiling (#605)', () => {
-  // The #384 verify step asserted the Linux binary was statically linked —
-  // which, post-#605, would enforce the dlopen defect. The contract
-  // inverts and strengthens: a static binary is now the FAILURE case
-  // (it cannot dlopen), and the portability property #384 actually cared
-  // about is enforced directly instead, as a symbol ceiling — the max
-  // versioned GLIBC_* requirement of the staged binary must stay within
-  // the pinned GLIBC_FLOOR the build linked against. The ceiling check
-  // catches a regression to runner-glibc linkage (#381/#189) precisely,
-  // without banning dynamic linkage itself.
-  const paths = [
-    { label: '_matrix.yml', file: '_matrix.yml', job: 'build', kind: 'npm' as Kind },
-    { label: 'e2e-fixture-job.yml', file: 'e2e-fixture-job.yml', job: 'build', kind: 'npm' as Kind },
-  ];
-
-  function verifyStepOf(file: string, job: string): Step | undefined {
-    const steps = loadSteps(file, job);
-    return steps.find(
-      (s) =>
-        gatesOnBundleCliKind(s, 'npm') &&
-        nameMatches(s, /verify/i) &&
-        typeof s.run === 'string',
-    );
-  }
-
-  it.each(paths)('$label: verify fails on a statically linked binary (cannot dlopen)', ({ file, job, label }) => {
-    const step = verifyStepOf(file, job);
-    expect(
-      step,
-      `${label}: could not find the \`bundle_cli — verify\` step. ` +
-        'Expected a step gated on npm/bundled-cli whose name contains "verify" ' +
-        'and whose run block checks the staged binary.',
-    ).toBeDefined();
-    const run = step!.run!;
-    expect(
-      run,
-      `${label} bundle_cli — verify: the run block must treat a statically ` +
-        'linked binary as the FAILURE case — a static (static-pie) binary has ' +
-        'no dynamic loader, so consumer `dlopen` (SQLite extension loading) ' +
-        'fails at runtime (#605, dirsql#762). Expected the shell block to grep ' +
-        'for "statically linked" / "static-pie" and error, mentioning dlopen.',
-    ).toMatch(/statically.linked|static.pie/i);
-    expect(
-      run,
-      `${label} bundle_cli — verify: the static-linkage failure branch must say ` +
-        'WHY static is fatal (dlopen), so the error is actionable (#605).',
-    ).toMatch(/dlopen/i);
-    expect(
-      run,
-      `${label} bundle_cli — verify: the old #384 direction (erroring on ` +
-        '"dynamically linked") must be gone — post-#605 dynamic IS the ' +
-        'required state.',
-    ).not.toMatch(/expected statically-linked musl build/);
-  });
-
-  it.each(paths)('$label: verify enforces the GLIBC_FLOOR symbol ceiling', ({ file, job, label }) => {
-    const step = verifyStepOf(file, job);
-    expect(step, `${label}: \`bundle_cli — verify\` step not found`).toBeDefined();
-    const run = step!.run!;
-    expect(
-      run,
-      `${label} bundle_cli — verify: the run block must read the staged ` +
-        "binary's versioned GLIBC_* symbol requirements (objdump -T) and fail " +
-        'when the max exceeds the pinned GLIBC_FLOOR. This is the portability ' +
-        'guard that replaces the #384 static assert: a binary accidentally ' +
-        "linked against the runner's glibc (2.39) fails here instead of at a " +
-        "consumer's runtime (#381/#189, #605).",
-    ).toMatch(/objdump/);
-    expect(
-      run,
-      `${label} bundle_cli — verify: the ceiling comparison must reference the ` +
-        'GLIBC_ symbol version namespace (#605).',
-    ).toMatch(/GLIBC_/);
-    expect(
-      `${JSON.stringify(step!.env ?? {})}\n${run}`,
-      `${label} bundle_cli — verify: the enforced ceiling must be the same ` +
-        'pinned 2.17 floor the build linked against (#605).',
-    ).toMatch(/2\.17/);
-  });
-});
-
-describe('npm bundle_cli: a consumer-declared `*-musl` target still builds and verifies (#605)', () => {
-  // Declared-musl rows are not the #605 defect (Alpine has no glibc to dlopen
-  // against), but the #605 fix broke them twice: it replaced musl-tools/`musl-gcc`
-  // with a zigbuild install only the gnu arm consumed, and its unconditional
-  // static-linkage assert fails musl output, which is static-pie by construction.
-  const paths = [
-    { label: '_matrix.yml', file: '_matrix.yml', job: 'build' },
-    { label: 'e2e-fixture-job.yml', file: 'e2e-fixture-job.yml', job: 'build' },
-  ];
-
-  it.each(paths)('$label: cargo build routes a declared musl triple through zigbuild', ({ file, job, label }) => {
-    const steps = loadSteps(file, job);
-    const step = findStep(steps, 'npm', /cargo build/i);
-    expect(step, `${label}: \`bundle_cli — cargo build\` step not found`).toBeDefined();
-    const run = step!.run!;
-
-    const arm = declaredMuslArm(run);
-    expect(
-      arm,
-      `${label} bundle_cli — cargo build: no branch handles a consumer-declared ` +
-        '`*-linux-musl*` triple. #605 replaced the musl-tools/`CC_*=musl-gcc` ' +
-        'step — which every Linux row used to get — with a zigbuild install, so ' +
-        'a musl row that falls through to plain `cargo build` has no C ' +
-        'cross-compiler and any crate with C sources fails to link (#605).',
-    ).toBeDefined();
-
-    expect(
-      arm!,
-      `${label} bundle_cli — cargo build: the declared-musl branch must build ` +
-        'via `cargo zigbuild`. zig ships musl and is a C cross-compiler, so it ' +
-        'is what replaces the musl-tools toolchain those rows lost (#605).',
-    ).toMatch(/cargo\s+zigbuild/);
-
-    expect(
-      arm!,
-      `${label} bundle_cli — cargo build: the declared-musl branch must NOT ` +
-        'append the glibc floor to the target. `GLIBC_FLOOR` pins the glibc a ' +
-        'gnu binary links against; a musl triple has no glibc, and ' +
-        '`<triple>.2.17` is not a target zig accepts (#605).',
-    ).not.toMatch(/GLIBC_FLOOR/);
-  });
-
-  it.each(paths)('$label: verify scopes the dlopen/glibc assertions to gnu triples', ({ file, job, label }) => {
-    const steps = loadSteps(file, job);
-    const step = steps.find(
-      (s) => gatesOnBundleCliKind(s, 'npm') && nameMatches(s, /verify/i) && typeof s.run === 'string',
-    );
-    expect(step, `${label}: \`bundle_cli — verify\` step not found`).toBeDefined();
-
-    expect(
-      envBindsRustTarget(step!),
-      `${label} bundle_cli — verify: the step must bind an env var to ` +
-        '`${{ matrix.rust_target }}`. Without the triple it cannot tell a gnu ' +
-        'row (where static linkage is the #605 defect) from a declared-musl row ' +
-        '(where static-pie is the intended artifact), and fails both alike.',
-    ).toBe(true);
-
-    const arm = declaredMuslArm(step!.run!);
-    expect(
-      arm,
-      `${label} bundle_cli — verify: no branch handles a consumer-declared ` +
-        '`*-linux-musl*` triple, so the static-linkage check fires on it. musl ' +
-        'output is static-pie by construction — the row would fail for doing ' +
-        'exactly what it was configured to do, told it "cannot dlopen" when npm ' +
-        'only ships it to musl distros in the first place (#605).',
-    ).toBeDefined();
-
-    expect(
-      arm!,
-      `${label} bundle_cli — verify: the declared-musl branch must not assert ` +
-        'dynamic linkage — that is the gnu lane\'s contract (#605).',
-    ).not.toMatch(/statically.linked|static.pie/i);
-
-    expect(
-      arm!,
-      `${label} bundle_cli — verify: the declared-musl branch must not assert ` +
-        'the GLIBC_* symbol ceiling — a musl binary carries no GLIBC_ symbols, ' +
-        'so the check is vacuous there and its "dynamically linked" success line ' +
-        'would be a false statement about the artifact (#605).',
-    ).not.toMatch(/objdump/);
   });
 });
 
@@ -544,7 +332,7 @@ describe('reusable workflow: npm bundled-cli reads the engine-resolved Rust trip
   const inlineRustTriple = /unknown-linux|apple-darwin|pc-windows-msvc/;
 
   function envReferencesRustTarget(step: Step): boolean {
-    return Object.values(step.env ?? {}).some((v) => /matrix\.rust_target/.test(v));
+    return Object.values({ ...step.env, ...step.with }).some((v) => /matrix\.rust_target/.test(String(v)));
   }
 
   const affectedSteps: { label: string; find: (steps: Step[]) => Step | undefined }[] = [

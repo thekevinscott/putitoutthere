@@ -20,6 +20,8 @@ export async function main(): Promise<void> {
   const expectInput = process.env.INPUT_EXPECT ?? '';
   const build = process.env.INPUT_BUILD ?? '';
   const matrix = process.env.INPUT_MATRIX ?? '';
+  const features = process.env.INPUT_FEATURES ?? '';
+  const noDefaultFeatures = process.env.INPUT_NO_DEFAULT_FEATURES ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
@@ -49,6 +51,12 @@ export async function main(): Promise<void> {
     if (target) {argv.push('--target', target);}
     if (build) {argv.push('--build', build);}
     if (versionInput) {argv.push('--version', versionInput);}
+  } else if (command === 'bundle-cli-build' || command === 'bundle-cli-verify') {
+    if (workingDirectory) {argv.push('--path', workingDirectory);}
+    if (target) {argv.push('--target', target);}
+    if (bin) {argv.push('--bin', bin);}
+    if (features) {argv.push('--features', features);}
+    if (noDefaultFeatures === 'true') {argv.push('--no-default-features');}
   } else if (command === 'verify-bundle-cli') {
     if (workingDirectory) {argv.push('--path', workingDirectory);}
     if (stageTo) {argv.push('--stage-to', stageTo);}

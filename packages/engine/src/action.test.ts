@@ -64,6 +64,8 @@ describe('action', () => {
     delete process.env.INPUT_EXPECT;
     delete process.env.INPUT_BUILD;
     delete process.env.INPUT_MATRIX;
+    delete process.env.INPUT_FEATURES;
+    delete process.env.INPUT_NO_DEFAULT_FEATURES;
   });
 
   it('fails when INPUT_COMMAND is missing', async () => {
@@ -210,6 +212,18 @@ describe('action', () => {
     Object.assign(process.env, { INPUT_WORKING_DIRECTORY: '', INPUT_TARGET: '', INPUT_VERSION: '', INPUT_MATRIX: '[]' });
     await expect(main()).rejects.toThrow(/exit:0/);
     expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', 'npm-build', '--matrix', '[]']);
+  });
+
+  it.each(['bundle-cli-build', 'bundle-cli-verify'])('%s: forwards path, target, bin and the cargo feature inputs', async (command) => {
+    Object.assign(process.env, { INPUT_COMMAND: command, INPUT_WORKING_DIRECTORY: 'c', INPUT_TARGET: 't', INPUT_BIN: 'b', INPUT_FEATURES: 'x,y', INPUT_NO_DEFAULT_FEATURES: 'true' });
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', command, '--path', 'c', '--target', 't', '--bin', 'b', '--features', 'x,y', '--no-default-features']);
+    Object.assign(process.env, { INPUT_FEATURES: '', INPUT_NO_DEFAULT_FEATURES: 'false' });
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', command, '--path', 'c', '--target', 't', '--bin', 'b']);
+    Object.assign(process.env, { INPUT_WORKING_DIRECTORY: '', INPUT_TARGET: '', INPUT_BIN: '' });
+    await expect(main()).rejects.toThrow(/exit:0/);
+    expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', command]);
   });
 
   it('verify-bundle-cli: splits the command and forwards the four flags (#595)', async () => {

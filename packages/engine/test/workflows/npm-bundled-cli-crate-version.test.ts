@@ -42,8 +42,7 @@ function isBundleCliCargoBuild(s: Step, kind: 'npm' | 'pypi'): boolean {
     (kind === 'npm'
       ? /matrix\.build\s*==\s*['"]bundled-cli['"]/.test(s.if)
       : /matrix\.build\s*==\s*['"]maturin['"]/.test(s.if)) &&
-    typeof s.run === 'string' &&
-    /cargo\s+build/.test(s.run)
+    ((typeof s.run === 'string' && /cargo\s+build/.test(s.run)) || s.with?.command === 'bundle-cli-build')
   );
 }
 
