@@ -362,6 +362,11 @@ version = 1   # required; only 1 is valid today
 | `targets` | (string \| object)[]   | Required when `build` is set.                        |
 | `[package.bundle_cli]` | sub-table | Declarative cross-compile for `build = "bundled-cli"` rows. Fields: `bin` (required), `crate_path` (default `"."`), `features` (default `[]`), `no_default_features` (default `false`). See [Recipes → Bundled-CLI npm family](#bundled-cli-npm-family). |
 
+npm packages publish to the public registry (`registry.npmjs.org`) only. A
+registry override in `.npmrc` or `publishConfig.registry` is not supported:
+the already-published check, provenance lookup, and platform-package wait all
+read the public registry.
+
 > [!IMPORTANT]
 > **`package.json` MUST declare a non-empty `repository` field.** `putitoutthere`
 > publishes npm packages with `npm publish --provenance` on the OIDC
