@@ -79,6 +79,14 @@ are grandfathered; splitting them is its own refactor.
 - Workflows call `pnpm exec piot-ci <gate>` or `pnpm exec putitoutthere
   <cmd>`, never a `dist/` path. Keep `packages/ci`'s `prepare` script; the
   bin won't link in a fresh checkout without it.
+- A gate that fans out into jobs exposes `piot-ci <gate> scope --base <ref>`:
+  a JSON array, one object per job, `[]` when nothing is in scope. Build it on
+  `packages/ci/src/utils/scope/`; the gate supplies only `extractRefs`. The
+  workflow fans out with `matrix.include: fromJSON(...)` behind a `[0] != null`
+  guard. CI Gate predicts job names through `putitoutthere resolve`, which
+  today takes no diff, so a diff-dependent `scope` output can't be predicted
+  yet. Solve that (#701) before moving a gate onto `scope`, or every PR's CI
+  Gate goes red.
 
 This covers every workflow and composite action, including the reusable
 release path. A `run:` step may hold a few straight-line commands or a lone
