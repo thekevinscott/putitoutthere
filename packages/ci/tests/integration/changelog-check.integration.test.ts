@@ -1,8 +1,9 @@
 /**
- * Integration test for the changelog-check gate (#452, epic #442). Drives the
- * real `piot-ci changelog-check` dispatch in-process with only the git
- * subprocess seam mocked, so — unlike `src/changelog-check/run.test.ts`, which
- * also mocks `decide` — the real skip-trailer and `::error` output is asserted.
+ * Integration test for the changelog-check gate (#452, epic #442; fragments
+ * #730). Drives the real `piot-ci changelog-check` dispatch in-process with
+ * only the git subprocess seam mocked, so — unlike
+ * `src/changelog-check/run.test.ts`, which also mocks `decide` — the real
+ * fragment, skip-trailer and `::error` output is asserted.
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -40,15 +41,15 @@ afterEach(() => {
 });
 
 // Route the three git reads the gate performs: the commit-log `git log`, the
-// public-surface `git --glob-pathspecs diff`, and the plain changed-files
-// `git diff`.
-function git({ log = '', surface = '', changed = '' }: { log?: string; surface?: string; changed?: string }): void {
+// public-surface `git --glob-pathspecs diff`, and the added-files
+// `git diff --diff-filter=A`.
+function git({ log = '', surface = '', added = '' }: { log?: string; surface?: string; added?: string }): void {
   execFileMock.mockImplementation(((_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
     const a = [...(args ?? [])];
     if (a.includes('log')) {
       cb(null, log, '');
     } else {
-      cb(null, a.includes('--glob-pathspecs') ? surface : changed, '');
+      cb(null, a.includes('--glob-pathspecs') ? surface : added, '');
     }
     return undefined as unknown as ChildProcess.ChildProcess;
   }) as unknown as typeof execFile);
@@ -57,28 +58,32 @@ function git({ log = '', surface = '', changed = '' }: { log?: string; surface?:
 const changelogCheck = (): Promise<number> => run(['node', 'piot-ci', 'changelog-check']);
 
 describe('piot-ci changelog-check (integration)', async () => {
-  it('passes when a public-surface change updates CHANGELOG.md and MIGRATIONS.md', async () => {
+  it('passes when a public-surface change adds a changelog and a migration fragment', async () => {
     git({
       surface: 'packages/engine/src/plan.ts\n',
-      changed: 'packages/engine/src/plan.ts\nCHANGELOG.md\nMIGRATIONS.md\n',
+      added: 'changelog.d/2026-10-05-plan-verdict.md\nmigrations.d/2026-10-05-plan-verdict.md\n',
     });
     await expect(changelogCheck()).resolves.toBe(0);
     expect(out.join('')).toBe(
-      ['Public-surface files changed:', '  - packages/engine/src/plan.ts', '', 'CHANGELOG.md and MIGRATIONS.md both updated. OK.', ''].join(
-        '\n',
-      ),
+      [
+        'Public-surface files changed:',
+        '  - packages/engine/src/plan.ts',
+        '',
+        'Changelog and migration fragments both added. OK.',
+        '',
+      ].join('\n'),
     );
   });
 
-  it('fails, naming the missing files, when a surface change omits the changelog', async () => {
-    git({ surface: 'action.yml\n', changed: 'action.yml\n' });
+  it('fails, naming both folders, when a surface change adds no fragment', async () => {
+    git({ surface: 'action.yml\n' });
     await expect(changelogCheck()).resolves.toBe(1);
     expect(out.join('')).toBe(
       [
         'Public-surface files changed:',
         '  - action.yml',
         '',
-        '::error::This PR changes public-surface files but did not update: CHANGELOG.md MIGRATIONS.md',
+        '::error::This PR changes public-surface files but did not add a fragment to: changelog.d/ migrations.d/',
         "See AGENTS.md > 'Changelog and migration policy'.",
         "If the change has no consumer impact, add a commit with a 'skip-changelog:' trailer.",
         '',
@@ -87,13 +92,13 @@ describe('piot-ci changelog-check (integration)', async () => {
   });
 
   it('is bypassed by a skip-changelog: trailer', async () => {
-    git({ log: 'refactor: internal\n\nskip-changelog: pure refactor\n', surface: 'action.yml\n', changed: 'action.yml\n' });
+    git({ log: 'refactor: internal\n\nskip-changelog: pure refactor\n', surface: 'action.yml\n' });
     await expect(changelogCheck()).resolves.toBe(0);
     expect(out.join('')).toBe("Found 'skip-changelog:' trailer; bypassing check.\n");
   });
 
   it('skips (exit 0) when no public-surface files changed', async () => {
-    git({ surface: '', changed: 'notes/internal.md\n' });
+    git({ surface: '', added: 'notes/internal.md\n' });
     await expect(changelogCheck()).resolves.toBe(0);
     expect(out.join('')).toBe('No public-surface files changed; skipping.\n');
   });

@@ -1,8 +1,9 @@
 /**
- * Integration test for the evidence-check gate (#445, epic #442). Drives the
- * real `piot-ci evidence-check` dispatch in-process with only the OS boundary
- * mocked. These scenarios carry no `(verified by: …)` citations, so the poll
- * returns without touching `gh` or `sleep`; that path is covered at unit tier.
+ * Integration test for the evidence-check gate (#445, epic #442; fragments
+ * #730). Drives the real `piot-ci evidence-check` dispatch in-process with
+ * only the OS boundary mocked. These scenarios carry no `(verified by: …)`
+ * citations, so the poll returns without touching `gh` or `sleep`; that path
+ * is covered at unit tier.
  */
 
 import type * as ChildProcess from 'node:child_process';
@@ -44,37 +45,40 @@ afterEach(() => {
   delete process.env.HEAD_SHA;
 });
 
-// Serve the `git diff` of CHANGELOG.md and the CHANGELOG.md read. `gh` is
-// stubbed defensively but must not be reached in these cases.
-function repo({ diff, changelog }: { diff: string; changelog: string }): void {
-  execFileMock.mockImplementation(((cmd: string, _args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
-    cb(null, cmd === 'gh' ? '{"workflow_runs":[]}' : diff, ''); // git diff (sleep/gh unreached with empty needles)
+// `files` maps each path the PR added under changelog.d/ to its content. The
+// `git diff --diff-filter=A` lists them; any other git read sees nothing, and
+// a read of a path not in the map resolves empty. `gh` is stubbed defensively
+// but must not be reached in these cases.
+function repo(files: Record<string, string>): void {
+  execFileMock.mockImplementation(((cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, out: string, err: string) => void) => {
+    if (cmd === 'gh') {
+      cb(null, '{"workflow_runs":[]}', '');
+    } else {
+      cb(null, [...(args ?? [])].includes('--diff-filter=A') ? Object.keys(files).join('\n') : '', '');
+    }
     return undefined as unknown as ChildProcess.ChildProcess;
   }) as unknown as typeof execFile);
-  read.mockResolvedValue(changelog);
+  read.mockImplementation((path) => Promise.resolve(files[String(path)] ?? ''));
 }
 
 const evidenceCheck = (): Promise<number> => run(['node', 'piot-ci', 'evidence-check']);
 
+const PASSED = 'Evidence check passed for changelog.d/ fragments added between base and head.\n';
+
 describe('piot-ci evidence-check (integration)', async () => {
-  it('passes with the success line when no Unreleased bullets were added', async () => {
-    repo({ diff: '@@ -1,0 +2,1 @@\n+- new', changelog: '# Changelog\n## v1.0.0\n- old' });
+  it('passes with the success line when no fragment was added', async () => {
+    repo({});
     await expect(evidenceCheck()).resolves.toBe(0);
-    expect(out.join('')).toBe('Evidence check passed for CHANGELOG.md additions between base and head.\n');
+    expect(out.join('')).toBe(PASSED);
   });
 
-  it('fails, flagging each added Unreleased bullet that lacks a verified-by clause', async () => {
-    // Fixture mirrors added-bullets: bullets `- a` (line 2) and `- b` (line 3)
-    // fall inside the Unreleased range; `- c` (line 5) is in a later section.
-    repo({
-      diff: '@@ -1,0 +2,2 @@\n+- a\n+- b\n@@ -3,0 +5,1 @@\n+- c',
-      changelog: '## Unreleased\n- a\n- b\n## v1\n- c',
-    });
+  it('fails, flagging each added bullet that lacks a verified-by clause', async () => {
+    repo({ 'changelog.d/2026-10-05-a.md': '- a\n- b\n' });
     await expect(evidenceCheck()).resolves.toBe(1);
     expect(out.join('')).toBe(
       [
-        "::error::CHANGELOG.md:2: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause",
-        "::error::CHANGELOG.md:3: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause",
+        "::error::changelog.d/2026-10-05-a.md:1: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause",
+        "::error::changelog.d/2026-10-05-a.md:2: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause",
         '',
       ].join('\n'),
     );

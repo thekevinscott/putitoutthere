@@ -1,0 +1,1 @@
+- Added: **`PIOT_PUBLISH_EMPTY_PLAN` error code.** Surfaced when `publish` is invoked with an empty matrix. Joins `PIOT_AUTH_NO_TOKEN` in the stable error-code vocabulary; foreign agents debugging a failed publish can fingerprint on the code without parsing prose. (no fixture: moved from CHANGELOG.md by #730; entry predates the verification policy)

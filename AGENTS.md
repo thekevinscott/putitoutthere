@@ -177,8 +177,8 @@ both means CI never runs the test without the fix.
 4. **After the red CI run is visible AND the test contract is
    approved, push the implementation commit on top of the same
    branch.** Watch the same test go from red to green. The
-   implementation commit is where `CHANGELOG.md` and `MIGRATIONS.md`
-   updates live (the test-only commit is a test-only change and on
+   implementation commit is where the `changelog.d/` and
+   `migrations.d/` fragments live (the test-only commit is a test-only change and on
    its own would skip the changelog gate per the policy below; the
    PR as a whole carries the entries).
 5. **The PR merges with both commits.** Squash-on-merge collapses
@@ -223,11 +223,11 @@ single mutant, apply it by hand and run the unit tests.
 
 ## Changelog and migration policy
 
-Every PR that changes public API **must** update both `CHANGELOG.md` and
-`MIGRATIONS.md` in the same PR. This is enforced in CI
+Every PR that changes public API **must** add a fragment to both
+`changelog.d/` and `migrations.d/` in the same PR. This is enforced in CI
 (`.github/workflows/changelog-check.yml`). We are not yet strict about
 semver, so the bar is deliberately wide: any observable change to consumer
-surface — breaking or additive — needs an entry in both files.
+surface — breaking or additive — needs a fragment in both folders.
 
 "Public API" means anything a downstream consumer can observe:
 
@@ -243,11 +243,10 @@ internal refactors, test-only, and docs-only changes, add a
 
 ## Verification policy
 
-Every new bullet under `CHANGELOG.md`'s `## Unreleased` section must carry
-inline evidence that the consumer-visible claim was checked on the PR's HEAD
-commit. This is enforced in CI (`.github/workflows/evidence-check.yml`) by
-diffing `CHANGELOG.md` against the PR base and validating only newly added
-bullets.
+Every bullet in a `changelog.d/` fragment must carry inline evidence that
+the consumer-visible claim was checked on the PR's HEAD commit. This is
+enforced in CI (`.github/workflows/evidence-check.yml`), which validates the
+fragments the PR adds. A fragment with no bullet fails.
 
 Use a trailer-style clause at the end of each new bullet:
 
@@ -264,16 +263,26 @@ the PR HEAD are hard failures. The evidence check is separate from the
 `skip-changelog:` escape hatch: skipping the changelog requirement does not
 skip evidence for bullets that are actually added.
 
-### `CHANGELOG.md`
+### Fragment files
 
-Keep a Changelog format. New entries go under `## Unreleased`, grouped by
-`Added` / `Changed` / `Deprecated` / `Removed` / `Fixed`. Breaking changes
-get a `**BREAKING**` prefix and link to their `MIGRATIONS.md` section.
+One file per PR in each folder, named `YYYY-MM-DD-<slug>.md`: the UTC merge
+date, then a short slug of lowercase letters, digits, and hyphens.
+`changelog-check` rejects an added fragment whose name breaks this. The
+folders are the record. Nothing renders them into a single file, nothing
+batches them at release, and fragments are never deleted. `CHANGELOG.md` and
+`MIGRATIONS.md` hold history from before #730 and are frozen. Each folder's
+`README.md` has the details.
 
-### `MIGRATIONS.md`
+### `changelog.d/`
 
-Single file at the repo root. New entries go under `## Unreleased`. Each
-entry uses this structure:
+Keep a Changelog categories. Each bullet leads with `Added:` / `Changed:` /
+`Deprecated:` / `Removed:` / `Fixed:`. Breaking changes get a `**BREAKING**`
+prefix and link to their `migrations.d/` fragment.
+
+### `migrations.d/`
+
+One fragment per public-surface change, opening with a `#` title. Each
+fragment uses this structure:
 
 1. **Summary** — one paragraph: what changed and why.
 2. **Required changes** — before/after table covering config, reusable
@@ -285,9 +294,6 @@ entry uses this structure:
    behavior (tag format, exit codes, retry semantics, default values).
 5. **Verification** — what the consumer can observe to confirm the upgrade
    worked (a tag push, a release on GitHub, etc.).
-
-When a version is cut, the release process renames `## Unreleased` to
-`## v<OLD> → v<NEW>` in both files and opens a fresh `## Unreleased` block.
 
 ## Red/green workflow at a glance
 

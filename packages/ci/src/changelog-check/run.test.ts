@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 // Route each git call by the subcommand in its args.
-function gitStub(map: { log?: string; surface?: string; changed?: string }): void {
+function gitStub(map: { log?: string; surface?: string; added?: string }): void {
   exec.mockImplementation((_cmd, args) => {
     const a = args.join(' ');
     if (a.includes('log')) {
@@ -46,13 +46,13 @@ function gitStub(map: { log?: string; surface?: string; changed?: string }): voi
     if (a.includes('--glob-pathspecs')) {
       return Promise.resolve({ stdout: map.surface ?? '', stderr: '' });
     }
-    return Promise.resolve({ stdout: map.changed ?? '', stderr: '' });
+    return Promise.resolve({ stdout: map.added ?? '', stderr: '' });
   });
 }
 
 describe('runChangelogCheck', () => {
   it('runs the exact git log / diff commands, including the surface pathspecs', async () => {
-    gitStub({ log: '', surface: '', changed: '' });
+    gitStub({ log: '', surface: '', added: '' });
     await runChangelogCheck();
 
     expect(exec).toHaveBeenNthCalledWith(1, 'git', ['log', '--format=%B', 'aaaa..bbbb']);
@@ -74,25 +74,25 @@ describe('runChangelogCheck', () => {
         ':!docs/guide/migrations.md',
       ],
     );
-    expect(exec).toHaveBeenNthCalledWith(3, 'git', ['diff', '--name-only', 'aaaa', 'bbbb']);
+    expect(exec).toHaveBeenNthCalledWith(3, 'git', ['diff', '--name-only', '--diff-filter=A', 'aaaa', 'bbbb']);
   });
 
   it('parses git output into decide()’s input (splitting on newlines, dropping blanks)', async () => {
     gitStub({
       log: 'feat: x\n',
       surface: 'action.yml\npackages/engine/src/plan.ts\n',
-      changed: 'action.yml\nCHANGELOG.md\n',
+      added: 'action.yml\nchangelog.d/2026-10-05-x.md\n',
     });
     await runChangelogCheck();
     expect(decide).toHaveBeenCalledWith({
       commitLog: 'feat: x\n',
       surfaceFiles: ['action.yml', 'packages/engine/src/plan.ts'],
-      changedFiles: ['action.yml', 'CHANGELOG.md'],
+      addedFiles: ['action.yml', 'changelog.d/2026-10-05-x.md'],
     });
   });
 
   it('writes decide()’s lines verbatim (one per line) and returns its exit code', async () => {
-    gitStub({ log: '', surface: 'action.yml\n', changed: '' });
+    gitStub({ log: '', surface: 'action.yml\n', added: '' });
     decide.mockReturnValue({ exitCode: 1, lines: ['::error::boom', 'second line'] });
     const code = await runChangelogCheck();
     expect(code).toBe(1);
@@ -100,7 +100,7 @@ describe('runChangelogCheck', () => {
   });
 
   it('returns 0 and writes nothing extra when decide passes with no lines', async () => {
-    gitStub({ log: '', surface: '', changed: '' });
+    gitStub({ log: '', surface: '', added: '' });
     decide.mockReturnValue({ exitCode: 0, lines: [] });
     await expect(runChangelogCheck()).resolves.toBe(0);
     expect(out.join('')).toBe('');

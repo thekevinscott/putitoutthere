@@ -1,8 +1,9 @@
 /**
  * Composition-root coverage for the evidence-check gate (#445). Every decision
  * module and the I/O boundary are mocked, so this isolates run's wiring: the
- * env guard, the exact `git diff`, the poll deps (deadline magnitude, injected
- * clock/sleep/log, the gh-api prefetch that keeps `jobsForRun` a sync read).
+ * env guard, the exact `git diff` of added fragments, the poll deps (deadline
+ * magnitude, injected clock/sleep/log, the gh-api prefetch that keeps
+ * `jobsForRun` a sync read).
  */
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +13,7 @@ import { ExecError } from '../utils/exec-error.js';
 
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import { sleep } from '../utils/sleep.js';
-import { addedUnreleasedBullets } from './added-bullets.js';
+import { fragmentBullets } from './fragment-bullets.js';
 import { citedRunNeedles } from './cited-needles.js';
 import { decideEvidenceCheck } from './decide.js';
 import { passedEvidence } from './passed-evidence.js';
@@ -22,7 +23,7 @@ import { runEvidenceCheck } from './run.js';
 vi.mock('../utils/exec-capture.js');
 vi.mock('../utils/sleep.js');
 vi.mock('node:fs/promises');
-vi.mock('./added-bullets.js');
+vi.mock('./fragment-bullets.js');
 vi.mock('./cited-needles.js');
 vi.mock('./decide.js');
 vi.mock('./poll.js');
@@ -31,7 +32,7 @@ vi.mock('./passed-evidence.js');
 const exec = vi.mocked(execCapture);
 const readFileMock = vi.mocked(readFile);
 const sleepMock = vi.mocked(sleep);
-const addedBullets = vi.mocked(addedUnreleasedBullets);
+const bulletsOf = vi.mocked(fragmentBullets);
 const needles = vi.mocked(citedRunNeedles);
 const decide = vi.mocked(decideEvidenceCheck);
 const poll = vi.mocked(pollUntilResolved);
@@ -67,9 +68,9 @@ beforeEach(() => {
   process.env.HEAD_SHA = 'bbbb';
   process.env.GITHUB_REPOSITORY = 'owner/repo';
   routeExec({ git: '' });
-  readFileMock.mockResolvedValue('## Unreleased\n- x\n');
+  readFileMock.mockResolvedValue('- x\n');
   sleepMock.mockResolvedValue(undefined);
-  addedBullets.mockReturnValue([{ line: 2, text: '- x' }]);
+  bulletsOf.mockReturnValue([]);
   needles.mockReturnValue(new Set(['unit/x']));
   decide.mockReturnValue({ exitCode: 0, lines: [] });
 });
@@ -89,7 +90,7 @@ describe('runEvidenceCheck: environment guard', () => {
     expect(out.join('')).toBe('::error::evidence-check: BASE_SHA and HEAD_SHA must be set.\n');
     expect(exec).not.toHaveBeenCalled();
     expect(readFileMock).not.toHaveBeenCalled();
-    expect(addedBullets).not.toHaveBeenCalled();
+    expect(bulletsOf).not.toHaveBeenCalled();
     expect(poll).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
   });
@@ -102,27 +103,43 @@ describe('runEvidenceCheck: environment guard', () => {
 });
 
 describe('runEvidenceCheck: input gathering', () => {
-  it('diffs CHANGELOG.md between the SHAs and reads it, feeding split lines to addedUnreleasedBullets', async () => {
-    routeExec({ git: 'HUNK\n+- a\n' });
-    readFileMock.mockResolvedValue('## Unreleased\n- a\n');
+  it('lists the fragments added under changelog.d/ between the SHAs and reads each one', async () => {
+    routeExec({ git: 'changelog.d/2026-10-05-a.md\r\nchangelog.d/README.md\nchangelog.d/2026-10-05-b.md\n' });
+    readFileMock.mockImplementation((path) => Promise.resolve(`content of ${path as string}`));
     await runEvidenceCheck();
 
-    expect(exec).toHaveBeenNthCalledWith(1, 'git', ['diff', '--unified=0', 'aaaa', 'bbbb', '--', 'CHANGELOG.md']);
-    expect(readFileMock).toHaveBeenCalledWith('CHANGELOG.md', 'utf8');
-    expect(addedBullets).toHaveBeenCalledWith(['## Unreleased', '- a', ''], ['HUNK', '+- a', '']);
+    expect(exec).toHaveBeenNthCalledWith(1, 'git', [
+      'diff',
+      '--name-only',
+      '--diff-filter=A',
+      'aaaa',
+      'bbbb',
+      '--',
+      'changelog.d/',
+    ]);
+    expect(readFileMock.mock.calls).toEqual([
+      ['changelog.d/2026-10-05-a.md', 'utf8'],
+      ['changelog.d/2026-10-05-b.md', 'utf8'],
+    ]);
+    expect(bulletsOf.mock.calls).toEqual([
+      ['changelog.d/2026-10-05-a.md', 'content of changelog.d/2026-10-05-a.md'],
+      ['changelog.d/2026-10-05-b.md', 'content of changelog.d/2026-10-05-b.md'],
+    ]);
   });
 });
 
 describe('runEvidenceCheck: orchestration', () => {
-  it('polls the cited needles with the 20-minute deadline and injected deps', async () => {
-    const bullets = [{ line: 2, text: '- x (verified by: unit/x)' }];
+  it('polls the needles cited across every fragment with the 20-minute deadline and injected deps', async () => {
+    routeExec({ git: 'changelog.d/2026-10-05-a.md\nchangelog.d/2026-10-05-b.md\n' });
+    const a = [{ path: 'changelog.d/2026-10-05-a.md', line: 1, text: '- x (verified by: unit/x)' }];
+    const b = [{ path: 'changelog.d/2026-10-05-b.md', line: 3, text: '- y (verified by: unit/y)' }];
+    bulletsOf.mockReturnValueOnce(a).mockReturnValueOnce(b);
     const needleSet = new Set(['unit/x']);
-    addedBullets.mockReturnValue(bullets);
     needles.mockReturnValue(needleSet);
 
     await runEvidenceCheck();
 
-    expect(needles).toHaveBeenCalledWith(bullets);
+    expect(needles).toHaveBeenCalledWith([...a, ...b]);
     const pollArg = poll.mock.calls[0]?.[0];
     expect(pollArg?.needles).toBe(needleSet);
     expect(pollArg?.deadlineMs).toBe(20 * 60 * 1000);
@@ -134,16 +151,18 @@ describe('runEvidenceCheck: orchestration', () => {
     expect(typeof pollArg?.resetCaches).toBe('function');
   });
 
-  it('feeds the bullets + SHAs to decide, writes its lines, and returns its exit code', async () => {
-    const bullets = [{ line: 2, text: '- x' }];
-    addedBullets.mockReturnValue(bullets);
+  it('feeds the fragments + SHAs to decide, writes its lines, and returns its exit code', async () => {
+    routeExec({ git: 'changelog.d/2026-10-05-a.md\n' });
+    const bullets = [{ path: 'changelog.d/2026-10-05-a.md', line: 2, text: '- x' }];
+    bulletsOf.mockReturnValue(bullets);
     decide.mockReturnValue({ exitCode: 1, lines: ['::error::boom', 'done'] });
 
     const code = await runEvidenceCheck();
 
     expect(code).toBe(1);
     const decideArg = decide.mock.calls[0]?.[0];
-    expect(decideArg?.bullets).toBe(bullets);
+    expect(decideArg?.fragments).toEqual([{ path: 'changelog.d/2026-10-05-a.md', bullets }]);
+    expect(decideArg?.fragments[0]?.bullets).toBe(bullets);
     expect(decideArg?.baseSha).toBe('aaaa');
     expect(decideArg?.headSha).toBe('bbbb');
     expect(typeof decideArg?.passedEvidence).toBe('function');

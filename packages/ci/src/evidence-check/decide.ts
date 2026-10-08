@@ -1,52 +1,56 @@
 /**
  * Decision core for the evidence-check gate (#445). I/O-free: given the
- * newly-added `## Unreleased` bullets, the base/head SHAs, and a
- * `passedEvidence` predicate, decide pass/fail and the lines to emit. Extracted
- * from the inline bash in `.github/workflows/evidence-check.yml`.
+ * `changelog.d/` fragments the PR added (#730), the base/head SHAs, and a
+ * `passedEvidence` predicate, decide pass/fail and the lines to emit.
  */
 import { ALLOWED_BUCKETS } from './buckets.js';
 import { bucketOf } from './bucket-of.js';
-import type { Bullet, EvidenceCheckResult } from './evidence-check-types.js';
+import type { EvidenceCheckResult, Fragment } from './evidence-check-types.js';
 import { parseEvidenceClause } from './parse-evidence.js';
 import { splitCitations } from './split-citations.js';
 
 export interface EvidenceCheckInput {
-  bullets: readonly Bullet[];
+  fragments: readonly Fragment[];
   baseSha: string;
   headSha: string;
   passedEvidence: (citation: string) => boolean;
 }
 
 export function decideEvidenceCheck(input: EvidenceCheckInput): EvidenceCheckResult {
-  const { bullets, baseSha, headSha, passedEvidence } = input;
+  const { fragments, baseSha, headSha, passedEvidence } = input;
   const failures: string[] = [];
 
-  for (const bullet of bullets) {
-    const evidence = parseEvidenceClause(bullet.text);
-    if (evidence === null) {
+  for (const fragment of fragments) {
+    if (fragment.bullets.length === 0) {
       failures.push(
-        `CHANGELOG.md:${bullet.line}: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause`,
+        `${fragment.path}: no '- ' bullet; each changelog entry is a bullet ending in its evidence clause`,
       );
-      continue;
     }
 
-    if (evidence.kind === 'no-fixture') {
-      if (evidence.value === '' || evidence.value === '<reason>') {
-        failures.push(`CHANGELOG.md:${bullet.line}: '(no fixture: ...)' requires a non-empty reason`);
-      }
-      continue;
-    }
-
-    for (const citation of splitCitations(evidence.value)) {
-      const bucket = bucketOf(citation);
-      if (!ALLOWED_BUCKETS.has(bucket)) {
-        failures.push(`CHANGELOG.md:${bullet.line}: unsupported evidence bucket '${bucket}' in '${citation}'`);
+    for (const bullet of fragment.bullets) {
+      const at = `${bullet.path}:${bullet.line}`;
+      const evidence = parseEvidenceClause(bullet.text);
+      if (evidence === null) {
+        failures.push(`${at}: missing trailing '(verified by: ...)' or '(no fixture: ...)' clause`);
         continue;
       }
-      if (!passedEvidence(citation)) {
-        failures.push(
-          `CHANGELOG.md:${bullet.line}: no successful GitHub Actions run or job matched '${citation}' on ${headSha}`,
-        );
+
+      if (evidence.kind === 'no-fixture') {
+        if (evidence.value === '' || evidence.value === '<reason>') {
+          failures.push(`${at}: '(no fixture: ...)' requires a non-empty reason`);
+        }
+        continue;
+      }
+
+      for (const citation of splitCitations(evidence.value)) {
+        const bucket = bucketOf(citation);
+        if (!ALLOWED_BUCKETS.has(bucket)) {
+          failures.push(`${at}: unsupported evidence bucket '${bucket}' in '${citation}'`);
+          continue;
+        }
+        if (!passedEvidence(citation)) {
+          failures.push(`${at}: no successful GitHub Actions run or job matched '${citation}' on ${headSha}`);
+        }
       }
     }
   }
@@ -57,6 +61,6 @@ export function decideEvidenceCheck(input: EvidenceCheckInput): EvidenceCheckRes
 
   return {
     exitCode: 0,
-    lines: [`Evidence check passed for CHANGELOG.md additions between ${baseSha} and ${headSha}.`],
+    lines: [`Evidence check passed for changelog.d/ fragments added between ${baseSha} and ${headSha}.`],
   };
 }
