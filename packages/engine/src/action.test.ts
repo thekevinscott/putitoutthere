@@ -222,6 +222,8 @@ describe('action', () => {
     await expect(main()).rejects.toThrow(/exit:0/);
     expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', command, '--path', 'c', '--target', 't', '--bin', 'b']);
     Object.assign(process.env, { INPUT_WORKING_DIRECTORY: '', INPUT_TARGET: '', INPUT_BIN: '' });
+    delete process.env.INPUT_FEATURES;
+    delete process.env.INPUT_NO_DEFAULT_FEATURES;
     await expect(main()).rejects.toThrow(/exit:0/);
     expect(runMock).toHaveBeenLastCalledWith(['node', 'putitoutthere', command]);
   });
