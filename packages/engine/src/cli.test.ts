@@ -15,6 +15,8 @@ import { advanceV0 } from './advance-v0.js';
 import { parseFlags, run } from './cli.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
+import { bundleCliBuild } from './bundle-cli/bundle-cli-build.js';
+import { bundleCliVerify } from './bundle-cli/bundle-cli-verify.js';
 import { npmBuildMatrix } from './npm-build/npm-build-matrix.js';
 import { npmBuildPackage } from './npm-build/npm-build-package.js';
 import { computePlanStatus } from './plan-status.js';
@@ -43,6 +45,8 @@ vi.mock('./advance-floating-major.js');
 vi.mock('./advance-v0.js');
 vi.mock('./check.js');
 vi.mock('./fold-action-bundle.js');
+vi.mock('./bundle-cli/bundle-cli-build.js');
+vi.mock('./bundle-cli/bundle-cli-verify.js');
 vi.mock('./npm-build/npm-build-matrix.js');
 vi.mock('./npm-build/npm-build-package.js');
 vi.mock('./plan-status.js');
@@ -657,6 +661,43 @@ describe('cli: npm-build dispatch', () => {
       expect(npmBuildPackageMock).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('cli: bundle-cli dispatch', () => {
+  it('builds in the crate dir resolved against --cwd, forwarding features', async () => {
+    expect(await run(argv('bundle-cli-build', '--cwd', '/t', '--path', 'c', '--target', 'x', '--bin', 'b'))).toBe(0);
+    expect(await run(argv('bundle-cli-build', '--cwd', '/t', '--path', 'c', '--target', 'x', '--bin', 'b', '--features', 'f,g', '--no-default-features'))).toBe(0);
+    expect(vi.mocked(bundleCliBuild).mock.calls).toEqual([
+      [resolve('/t', 'c'), { target: 'x', bin: 'b', features: '', noDefaultFeatures: false }],
+      [resolve('/t', 'c'), { target: 'x', bin: 'b', features: 'f,g', noDefaultFeatures: true }],
+    ]);
+  });
+
+  it('verifies the staged dir, exiting 1 when verification fails', async () => {
+    vi.mocked(bundleCliVerify).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    expect(await run(argv('bundle-cli-verify', '--cwd', '/t', '--path', 'd', '--target', 'x', '--bin', 'b'))).toBe(0);
+    expect(await run(argv('bundle-cli-verify', '--cwd', '/t', '--path', 'd', '--target', 'x', '--bin', 'b'))).toBe(1);
+    expect(bundleCliVerify).toHaveBeenCalledWith({ dir: resolve('/t', 'd'), shownDir: 'd', bin: 'b', target: 'x' });
+  });
+
+  it.each(['bundle-cli-build', 'bundle-cli-verify'])('%s is listed in --help', async (cmd) => {
+    await run(argv('--help'));
+    expect(stderr.join('')).toContain(`  ${cmd} `);
+  });
+
+  it.each([
+    ['bundle-cli-build', ['--target', 'x', '--bin', 'b']],
+    ['bundle-cli-build', ['--path', 'c', '--bin', 'b']],
+    ['bundle-cli-build', ['--path', 'c', '--target', 'x']],
+    ['bundle-cli-verify', ['--target', 'x', '--bin', 'b']],
+    ['bundle-cli-verify', ['--path', 'c', '--bin', 'b']],
+    ['bundle-cli-verify', ['--path', 'c', '--target', 'x']],
+  ])('%s fails without one of --path, --target, --bin (%j)', async (cmd, flags) => {
+    expect(await run(argv(cmd, '--cwd', '/t', ...flags))).toBe(1);
+    expect(stderr.join('')).toContain(`${cmd}: --path, --target and --bin are required`);
+    expect(bundleCliBuild).not.toHaveBeenCalled();
+    expect(bundleCliVerify).not.toHaveBeenCalled();
+  });
 });
 
 describe('cli: publish dispatch', () => {

@@ -691,11 +691,7 @@ describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => 
   }
 
   function isCargoBuildStep(step: Step): boolean {
-    if (!gatesOnNpmBundleCli(step.if)) return false;
-    const text = stepText(step);
-    return text.includes('cargo build')
-      && text.includes('matrix.target')
-      && text.includes('matrix.bundle_cli.bin');
+    return gatesOnNpmBundleCli(step.if) && step.with?.command === 'bundle-cli-build';
   }
 
   function isStageStep(step: Step): boolean {
@@ -720,19 +716,7 @@ describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => 
   }
 
   function isBuildGuardStep(step: Step): boolean {
-    if (!gatesOnNpmBundleCli(step.if)) return false;
-    const run = step.run ?? '';
-    const text = stepText(step);
-    // The guard asserts the staged binary exists at the expected
-    // path before upload-artifact runs. `test -f`, `[ -f ... ]`, or
-    // a CLI subcommand all satisfy this contract; what matters is
-    // that the step references the bin and fails if it's missing.
-    const looksLikeFsCheck =
-      run.includes('test -f') ||
-      run.includes('[ -f') ||
-      run.includes('verify-bundle-cli');
-    const referencesBin = text.includes('matrix.bundle_cli.bin');
-    return looksLikeFsCheck && referencesBin;
+    return gatesOnNpmBundleCli(step.if) && step.with?.command === 'bundle-cli-verify';
   }
 
   it('build job has at least one npm consumer-build step (parser sanity)', () => {
@@ -752,7 +736,7 @@ describe('#298 _matrix.yml npm bundle_cli staging + build-content guard', () => 
     });
     expect(
       offenders,
-      `each npm consumer-build step needs a preceding step gated on \`matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'\` that runs \`cargo build --release --target \${{ matrix.target }} --bin \${{ matrix.bundle_cli.bin }}\`:\n${offenders.join('\n')}`,
+      `each npm consumer-build step needs a preceding step gated on \`matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'\` that runs \`putitoutthere bundle-cli-build\`:\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 

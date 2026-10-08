@@ -8,6 +8,7 @@
 import { runActionlintIdToken } from './actionlint-idtoken/run.js';
 import { runCargoRegistry } from './cargo-registry/run.js';
 import { runChangelogCheck } from './changelog-check/run.js';
+import { runDiscardFirstPublishDists } from './discard-first-publish-dists/run.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
 import { runFixtureMatrix } from './fixture-matrix/run.js';
@@ -60,6 +61,9 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
   if (cmd === 'pypi-tag-verify') {
     return runPypiTagVerify(argv);
+  }
+  if (cmd === 'discard-first-publish-dists') {
+    return runDiscardFirstPublishDists();
   }
   process.stderr.write(`piot-ci: unknown command '${cmd}'\n`);
   printUsage();

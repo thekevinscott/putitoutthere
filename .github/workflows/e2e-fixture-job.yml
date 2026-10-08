@@ -25,17 +25,6 @@ on:
         description: 'Fixture directory under tests/fixtures/ to exercise.'
         type: string
         required: true
-      simulate_no_dist:
-        description: >-
-          #304 / #256 repro toggle. When true, the publish job clobbers
-          `dist/` after build but before publish on first-publish rows,
-          producing a tarball whose `files[]`-declared `dist/` directory
-          is empty. The post-publish tarball-verify step is expected to
-          fail on this — that's the demonstration that the assertion
-          catches the cachetta 0.3.x failure mode. Off by default.
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: e2e-${{ github.ref }}-${{ inputs.fixture }}
@@ -321,50 +310,14 @@ jobs:
 
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — cargo build for ${{ matrix.target }} (${{ matrix.bundle_cli.bin }})
-        shell: bash
-        working-directory: fixture-tree/${{ matrix.bundle_cli.crate_path }}
-        env:
-          RUST_TARGET: ${{ matrix.rust_target }}
-          BIN: ${{ matrix.bundle_cli.bin }}
-          GLIBC_FLOOR: "2.17"
-          FEATURES: ${{ join(matrix.bundle_cli.features, ',') }}
-          NO_DEFAULT_FEATURES: ${{ matrix.bundle_cli.no_default_features }}
-        # See _matrix.yml's twin step for the bash-3.2-on-macOS rationale.
-        # #337: pin --target-dir target so the binary lands at
-        # <crate_path>/target/<triple>/release/<bin> regardless of workspace
-        # structure. Mirrors the same fix in _matrix.yml.
-        run: |
-          set -euo pipefail
-          # #387: matrix.rust_target is the engine-resolved Rust triple
-          # (plan.ts maps the npm-flavor matrix.target via toRustTriple).
-          # #605: Linux rows build via cargo-zigbuild with the glibc floor
-          # pinned in the target suffix, so the binary is dynamically
-          # linked (dlopen works — dirsql#762) yet floors at GLIBC_FLOOR
-          # instead of the runner's glibc (#381). zigbuild strips the
-          # suffix from the output dir, so artifacts land at
-          # target/<triple>/release/ either way.
-          case "$RUST_TARGET" in
-            *-linux-gnu*)
-              cmd=(cargo zigbuild --release --target "${RUST_TARGET}.${GLIBC_FLOOR}" --bin "$BIN" --target-dir target)
-              ;;
-            *-linux-musl*)
-              # A consumer that DECLARES a musl triple gets zigbuild too, with
-              # no floor to pin — musl has no glibc, and `<triple>.2.17` is not
-              # a target zig accepts. It still needs zig: zig ships musl, so it
-              # is the C cross-compiler these rows used to get from the apt
-              # `CC_<triple>=musl-gcc` step this one replaced. Falling through
-              # to a plain `cargo build` leaves them with no C toolchain at
-              # all, and every crate with C sources — the ones a musl consumer
-              # is told to vendor — fails to link.
-              cmd=(cargo zigbuild --release --target "$RUST_TARGET" --bin "$BIN" --target-dir target)
-              ;;
-            *)
-              cmd=(cargo build --release --target "$RUST_TARGET" --bin "$BIN" --target-dir target)
-              ;;
-          esac
-          if [ -n "$FEATURES" ]; then cmd+=(--features "$FEATURES"); fi
-          if [ "$NO_DEFAULT_FEATURES" = "true" ]; then cmd+=(--no-default-features); fi
-          "${cmd[@]}"
+        uses: ./
+        with:
+          command: bundle-cli-build
+          working_directory: fixture-tree/${{ matrix.bundle_cli.crate_path }}
+          target: ${{ matrix.rust_target }}
+          bin: ${{ matrix.bundle_cli.bin }}
+          features: ${{ join(matrix.bundle_cli.features, ',') }}
+          no_default_features: ${{ matrix.bundle_cli.no_default_features }}
 
       # #429: mirror of the _matrix.yml napi crate-version bump so the
       # js-napi fixture exercises the same pre-build path a real napi
@@ -395,44 +348,14 @@ jobs:
           version: ${{ matrix.version }}
 
       - if: matrix.kind == 'npm'
-        working-directory: fixture-tree/${{ matrix.path }}
+        name: npm-build — install and build ${{ matrix.name }}
         shell: bash
         env:
-          # napi / bundled-cli fixtures' build scripts read TARGET to know
-          # which per-triple stub binary to stage. Vanilla / main rows
-          # ignore it. Multi-mode fixtures (#dirsql) additionally read
-          # BUILD so the same script can stage either family.
+          PKG_PATH: ${{ matrix.path }}
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
-          # #627: mirror _matrix.yml so harness and workflow can't drift.
           VERSION: ${{ matrix.version }}
-        # #305: mirror the #288 strict-install fallback from _matrix.yml
-        # (the consumer-facing reusable workflow) into the e2e harness.
-        # Without this, the e2e job's install step diverges from what
-        # consumers actually run — and the js-bundled-cli-first-publish
-        # variant (whose pnpm-lock.yaml is deliberately drifted to
-        # reproduce #288) fails the build job at strict-install, even
-        # though production's _matrix.yml would recover via fallback.
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci || {
-              echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
-              npm install
-            }
-          elif [ -f pnpm-lock.yaml ]; then
-            # pnpm for the *consumer's* checkout, not ours. Deliberately a
-            # literal and not ./packages/ci/actions/setup-pnpm: that action installs
-            # our build toolchain, this installs theirs, and a `uses:` step
-            # cannot appear inside a run: script anyway.
-            npm install -g pnpm@11
-            pnpm install --frozen-lockfile --ignore-workspace || {
-              echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-              pnpm install --no-frozen-lockfile --ignore-workspace
-            }
-          else
-            npm install
-          fi
-          npm run build --if-present
+        run: pnpm exec putitoutthere npm-build --cwd fixture-tree --path "$PKG_PATH" --target "$TARGET" --build "$BUILD" --version "$VERSION"
 
       # #384: stage AFTER npm run build so the engine-built binary
       # overwrites any glibc binary the consumer build script staged.
@@ -463,64 +386,12 @@ jobs:
 
       - if: matrix.kind == 'npm' && matrix.build == 'bundled-cli' && matrix.bundle_cli && matrix.target != 'main'
         name: bundle_cli — verify ${{ matrix.artifact_path }}/${{ matrix.bundle_cli.bin }}
-        shell: bash
-        env:
-          DEST_DIR: fixture-tree/${{ matrix.artifact_path }}
-          BIN: ${{ matrix.bundle_cli.bin }}
-          RUST_TARGET: ${{ matrix.rust_target }}
-          GLIBC_FLOOR: "2.17"
-        run: |
-          set -euo pipefail
-          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; else ext=""; fi
-          expected="${DEST_DIR}/${BIN}${ext}"
-          if ! [ -f "$expected" ]; then
-            echo "::error::bundle_cli staged binary missing at ${expected}"
-            ls -la "${DEST_DIR}" || true
-            exit 1
-          fi
-          echo "ok bundle_cli: ${expected} present"
-          # #605: a Linux *gnu* binary must be DYNAMICALLY linked — a static
-          # (static-pie) binary has no dynamic loader, so consumer dlopen
-          # (SQLite extension loading) fails at runtime with `Dynamic
-          # loading not supported` (dirsql#762). The portability property
-          # the old #384 static assert guarded is enforced directly
-          # instead: the binary's max versioned GLIBC_* requirement must
-          # stay within the GLIBC_FLOOR the zigbuild linked against, else
-          # it would fail at runtime on older distros (#381). Both are
-          # gnu-lane contracts, hence the triple check — a consumer who
-          # DECLARES a musl triple gets a static binary on purpose, and npm
-          # ships it only where `libc: ["musl"]` matches.
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            case "$RUST_TARGET" in
-              *-linux-musl*)
-                # A consumer that DECLARES a musl triple asked for a static
-                # binary, and npm only ever installs that sub-package where the
-                # synthesized `libc: ["musl"]` matches — a distro with no glibc
-                # to dlopen against in the first place. The gnu-lane assertions
-                # below would fail the row for being what it was configured to
-                # be, and the ceiling check has no GLIBC_ symbols to read.
-                echo "ok bundle_cli: ${expected} targets musl — static linkage is expected here; the dlopen / glibc-ceiling checks are gnu-lane only"
-                ;;
-              *)
-                command -v file >/dev/null 2>&1 || {
-                  echo "::error::required command 'file' not found on this runner — cannot assert linkage"
-                  exit 1
-                }
-                if file "$expected" | grep -Eq 'statically linked|static-pie linked'; then
-                  echo "::error::bundle_cli binary ${expected} is statically linked — a static binary cannot dlopen, so SQLite extension loading fails at runtime (#605, dirsql#762). Expected a dynamically-linked gnu build pinned to GLIBC_${GLIBC_FLOOR} via cargo-zigbuild."
-                  file "$expected"
-                  exit 1
-                fi
-                max_glibc=$(objdump -T "$expected" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -uV | tail -1)
-                ceiling="GLIBC_${GLIBC_FLOOR}"
-                if [ -n "$max_glibc" ] && [ "$(printf '%s\n' "$max_glibc" "$ceiling" | sort -V | tail -1)" != "$ceiling" ]; then
-                  echo "::error::bundle_cli binary ${expected} requires ${max_glibc}, exceeding the ${ceiling} portability floor — it would fail at runtime on distros older than the runner (#381, #605)."
-                  exit 1
-                fi
-                echo "ok bundle_cli: ${expected} is dynamically linked, glibc ceiling ${max_glibc:-none} within ${ceiling}"
-                ;;
-            esac
-          fi
+        uses: ./
+        with:
+          command: bundle-cli-verify
+          working_directory: fixture-tree/${{ matrix.artifact_path }}
+          target: ${{ matrix.rust_target }}
+          bin: ${{ matrix.bundle_cli.bin }}
 
       # ---- crates ----
       # cargo publish builds on the registry side; no artifact needed
@@ -690,113 +561,9 @@ jobs:
       # carried through as an artifact for vanilla npm rows.
       - name: Build npm packages
         if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
-        shell: bash
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
-        # #305: mirror the #288 strict-install fallback from release.yml
-        # (the consumer-facing reusable workflow's publish job). Same
-        # rationale as the build job's step above — the e2e harness has
-        # to track the production install behavior or first-publish
-        # bundled-cli/napi families fail in e2e while passing for
-        # consumers.
-        run: |
-          set -euo pipefail
-          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          for path in $paths; do
-            echo "::group::npm install + build at fixture-tree/${path}"
-            pushd "fixture-tree/${path}" > /dev/null
-            if [ -f package-lock.json ]; then
-              npm ci || {
-                echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
-                npm install
-              }
-            elif [ -f pnpm-lock.yaml ]; then
-              # pnpm for the *consumer's* checkout, not ours. Deliberately a
-              # literal and not ./packages/ci/actions/setup-pnpm: that action installs
-              # our build toolchain, this installs theirs, and a `uses:` step
-              # cannot appear inside a run: script anyway.
-              npm install -g pnpm@11
-              pnpm install --frozen-lockfile --ignore-workspace || {
-                echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-                pnpm install --no-frozen-lockfile --ignore-workspace
-              }
-            else
-              npm install
-            fi
-            npm run build --if-present
-            popd > /dev/null
-            echo "::endgroup::"
-          done
-
-      # TEMPORARY DIAGNOSTIC (#258): assert pre-publish state for each
-      # npm main/noarch package. Fails the step (with the failure
-      # annotation describing what's wrong) when:
-      #   - package.json declares a directory in `files[]` that doesn't
-      #     exist on disk (Build npm packages step didn't produce it), or
-      #   - npm pack --dry-run wouldn't include that directory.
-      # Strip once the verify failure root cause is understood.
-      - name: Pre-publish fixture-tree assertion (diagnostic)
-        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
-        shell: bash
-        env:
-          MATRIX: ${{ needs.plan.outputs.matrix }}
-        run: |
-          set -uo pipefail
-          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
-          fail=0
-          while IFS= read -r row; do
-            pkg_path=$(printf '%s' "$row" | jq -r '.path')
-            pkg_name=$(printf '%s' "$row" | jq -r '.name')
-            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "fixture-tree/${pkg_path}/package.json")
-            for d in "${dirs[@]}"; do
-              local_path="fixture-tree/${pkg_path}/${d}"
-              if [ ! -d "$local_path" ]; then
-                listing=$(find "fixture-tree/${pkg_path}" -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null || true)
-                echo "::error::[${pkg_name}] declared files[${d}] but ${local_path} does not exist after Build step. fixture-tree/${pkg_path} contents: ${listing}"
-                fail=1
-                continue
-              fi
-              count=$(find "$local_path" -type f 2>/dev/null | wc -l)
-              if [ "$count" -eq 0 ]; then
-                echo "::error::[${pkg_name}] ${local_path} exists but is empty"
-                fail=1
-                continue
-              fi
-              echo "OK pre-publish [${pkg_name}] ${local_path}: ${count} file(s)"
-            done
-            pushd "fixture-tree/${pkg_path}" > /dev/null
-            pack=$(npm pack --dry-run 2>&1 || echo "(npm pack failed)")
-            popd > /dev/null
-            for d in "${dirs[@]}"; do
-              if ! printf '%s' "$pack" | grep -q "${d}/"; then
-                pack_compact=$(printf '%s' "$pack" | tr '\n' '|')
-                echo "::error::[${pkg_name}] npm pack --dry-run does NOT include ${d}/. Full pack output: ${pack_compact}"
-                fail=1
-              fi
-            done
-          done <<< "$rows"
-          exit "$fail"
-
-      # #304 / #256: opt-in repro that clobbers dist/ between build and
-      # publish on first-publish rows. The post-publish tarball-verify
-      # step is expected to fail when this runs — that's the
-      # demonstration that the assertion catches missing build output
-      # against an empty registry. Skipped by default.
-      - name: '#256 repro: clobber dist/ before publish (opt-in)'
-        if: inputs.simulate_no_dist && endsWith(inputs.fixture, '-first-publish')
-        shell: bash
-        env:
-          MATRIX: ${{ needs.plan.outputs.matrix }}
-        run: |
-          set -euo pipefail
-          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          for path in $paths; do
-            target="fixture-tree/${path}/dist"
-            if [ -d "$target" ]; then
-              echo "::warning::#256 repro: clobbering ${target}"
-              find "$target" -mindepth 1 -delete
-            fi
-          done
+        run: pnpm exec putitoutthere npm-build --cwd fixture-tree --matrix "$MATRIX"
 
       # #304: configure Verdaccio auth for first-publish rows. Waits for the
       # Verdaccio `/-/ping` endpoint to bind, creates an `e2e` user via the

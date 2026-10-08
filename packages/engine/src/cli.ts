@@ -13,6 +13,8 @@ import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
 import { emitPlanOutputs } from './emit-plan-outputs.js';
 import { emitReleaseOutputs } from './emit-release-outputs.js';
+import { bundleCliBuild } from './bundle-cli/bundle-cli-build.js';
+import { bundleCliVerify } from './bundle-cli/bundle-cli-verify.js';
 import { npmBuildMatrix } from './npm-build/npm-build-matrix.js';
 import { npmBuildPackage } from './npm-build/npm-build-package.js';
 import { computePlanStatus } from './plan-status.js';
@@ -57,6 +59,8 @@ const COMMANDS = [
   'write-crate-version',
   'write-launcher',
   'npm-build',
+  'bundle-cli-build',
+  'bundle-cli-verify',
 ] as const;
 type Command = (typeof COMMANDS)[number];
 
@@ -105,6 +109,8 @@ interface ParsedFlags {
   stageTo?: string | undefined;
   bin?: string | undefined;
   build?: string | undefined;
+  features?: string | undefined;
+  noDefaultFeatures: boolean;
   perTriple: boolean;
   // `fold-bundle` (#446): the bundle commit's subject line
   // (`chore(release): bundle action` vs `chore(v0): bundle action`).
@@ -121,6 +127,7 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     json: false,
     check: false,
     dryRun: false,
+    noDefaultFeatures: false,
     perTriple: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -144,6 +151,8 @@ export function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--stage-to') {out.stageTo = argv[++i];}
     else if (a === '--bin') {out.bin = argv[++i];}
     else if (a === '--build') {out.build = argv[++i];}
+    else if (a === '--features') {out.features = argv[++i];}
+    else if (a === '--no-default-features') {out.noDefaultFeatures = true;}
     else if (a === '--per-triple') {out.perTriple = true;}
     else if (a === '--dry-run') {out.dryRun = true;}
     else if (a === '--expect') {out.expect = argv[++i];}
@@ -471,6 +480,30 @@ export async function run(argv: readonly string[]): Promise<number> {
           VERSION: flags.version,
         });
         return 0;
+      }
+      case 'bundle-cli-build': {
+        if (!flags.path || !flags.target || !flags.bin) {
+          throw new Error('bundle-cli-build: --path, --target and --bin are required');
+        }
+        await bundleCliBuild(resolve(flags.cwd, flags.path), {
+          target: flags.target,
+          bin: flags.bin,
+          features: flags.features ?? '',
+          noDefaultFeatures: flags.noDefaultFeatures,
+        });
+        return 0;
+      }
+      case 'bundle-cli-verify': {
+        if (!flags.path || !flags.target || !flags.bin) {
+          throw new Error('bundle-cli-verify: --path, --target and --bin are required');
+        }
+        const ok = await bundleCliVerify({
+          dir: resolve(flags.cwd, flags.path),
+          shownDir: flags.path,
+          bin: flags.bin,
+          target: flags.target,
+        });
+        return ok ? 0 : 1;
       }
       case 'write-version': {
         // #276: pre-build hook used by `_matrix.yml`'s maturin steps.

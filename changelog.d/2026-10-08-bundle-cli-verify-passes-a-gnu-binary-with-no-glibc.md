@@ -1,0 +1,1 @@
+- Fixed: the `bundle_cli` verify step no longer fails a dynamically linked gnu binary that requires no versioned `GLIBC_` symbol; it passes with glibc ceiling `none`. #749. (verified by: integration)
