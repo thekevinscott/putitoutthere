@@ -70,10 +70,10 @@ export async function synthesizePlatformPackage(
     cpu,
     files: fileList,
     main: mainFile,
-    ...(libc !== undefined ? { libc } : {}),
-    ...(mainPkg['repository'] !== undefined ? { repository: mainPkg['repository'] } : {}),
-    ...(mainPkg['license'] !== undefined ? { license: mainPkg['license'] } : {}),
-    ...(mainPkg['homepage'] !== undefined ? { homepage: mainPkg['homepage'] } : {}),
+    libc,
+    repository: mainPkg['repository'],
+    license: mainPkg['license'],
+    homepage: mainPkg['homepage'],
   };
   await writeFile(
     join(staging, 'package.json'),

@@ -9,8 +9,7 @@
 // than false-positive on legitimately-hosted forks (provenance still
 // catches them at publish time).
 export function parseOwnerRepo(url: string): string | null {
-  const stripped = url.trim().replace(/^git\+/i, '');
-  const match = stripped.match(
+  const match = url.trim().match(
     /github\.com[/:]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/,
   );
   if (match === null) {return null;}
