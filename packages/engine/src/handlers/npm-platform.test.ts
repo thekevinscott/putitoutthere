@@ -624,6 +624,27 @@ describe('publishPlatforms (napi)', () => {
     expect(pkgJson.optionalDependencies['demo-cli-darwin-arm64']).toBe('0.2.0');
   });
 
+  it('publishes and then removes exactly the directory each unpublished platform was staged in', async () => {
+    execMock.mockImplementation((_cmd, args) => {
+      const a = args as string[];
+      if (a[0] === 'view' && String(a[1]).includes('linux-x64-gnu')) {return Promise.resolve(ok('0.2.0\n'));}
+      if (a[0] === 'view') {return Promise.reject(new ExecError('E404', '', '404', 1));}
+      return Promise.resolve(ok(''));
+    });
+
+    await publishPlatforms(basePkg(), '0.2.0', makeCtx());
+
+    const staged = await Promise.all(vi.mocked(mkdtemp).mock.results.map((r) => r.value as Promise<string>));
+    expect(staged).toHaveLength(1);
+    const publishes = execMock.mock.calls.filter(([, a]) => a[0] === 'publish');
+    expect(publishes.map(([, a]) => a[a.length - 1])).toEqual(staged);
+    expect(vi.mocked(rm).mock.calls).toEqual([[staged[0], { recursive: true, force: true }]]);
+    const stagedJson = vi.mocked(writeFile).mock.calls.filter(([p]) => norm(p).startsWith(norm(staged[0])));
+    expect(stagedJson.map(([, body]) => (JSON.parse(body as string) as { name: string }).name)).toEqual([
+      'demo-cli-darwin-arm64',
+    ]);
+  });
+
   it('throws if any platform publish fails BEFORE rewriting main', async () => {
     // linux view → 404, linux publish → throw.
     // darwin shouldn't even get called.

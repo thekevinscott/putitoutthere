@@ -10,9 +10,13 @@ import { dirname, isAbsolute, join, parse as parsePath, resolve } from 'node:pat
 
 import { parse as parseToml } from 'smol-toml';
 
+import { checkRepoPublic, type RepoVisibilityOptions } from './check-repo-public.js';
+import { collectCratesPackageFindings } from './collect-crates-package-findings.js';
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { expandDirGlob } from './glob.js';
+import { normalizeOwnerRepo } from './normalize-owner-repo.js';
+import { parseOwnerRepo } from './parse-owner-repo.js';
 import { classifyPypiVersionSource } from './pypi-version-source.js';
 import { readDeclaredRepoUrl } from './read-declared-repo-url.js';
 import { readToml } from './read-toml.js';
@@ -705,56 +709,6 @@ export async function checkCargoShape(
   return findings;
 }
 
-async function collectCratesPackageFindings(
-  p: Package & { kind: 'crates' },
-  cwd: string,
-  findings: CargoShapeFinding[],
-): Promise<void> {
-  const cargoTomlPath = join(p.path, 'Cargo.toml');
-  const parsed = await readToml(cargoTomlPath);
-  if (parsed === null) {return;}
-  const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
-  const expectedName = p.crate ?? p.name;
-
-  // CRATES_NAME_MISMATCH
-  if (typeof pkgTable.name === 'string' && pkgTable.name !== expectedName) {
-    findings.push({
-      package: p.name,
-      cargoTomlPath,
-      code: 'PIOT_CRATES_NAME_MISMATCH',
-      detail: `[package].name = "${pkgTable.name}" but configured name is "${expectedName}"`,
-    });
-  }
-
-  // CRATES_FEATURE_NOT_DECLARED — only when features is set on the
-  // configured package.
-  if (p.features !== undefined && p.features.length > 0) {
-    const declared = declaredFeatures(parsed);
-    const missing = p.features.filter((f) => !declared.has(f));
-    if (missing.length > 0) {
-      findings.push({
-        package: p.name,
-        cargoTomlPath,
-        code: 'PIOT_CRATES_FEATURE_NOT_DECLARED',
-        detail: `features = ${JSON.stringify(p.features)} references undeclared feature(s) ${JSON.stringify(missing)}; Cargo.toml [features] declares ${JSON.stringify([...declared])}`,
-      });
-    }
-  }
-
-  // CRATES_WORKSPACE_VERSION_MISMATCH
-  if (versionInheritsWorkspace(pkgTable.version)) {
-    if (!(await workspaceVersionDeclared(cargoTomlPath, cwd))) {
-      findings.push({
-        package: p.name,
-        cargoTomlPath,
-        code: 'PIOT_CRATES_WORKSPACE_VERSION_MISMATCH',
-        detail:
-          '[package].version.workspace = true but no ancestor Cargo.toml declares [workspace.package].version',
-      });
-    }
-  }
-}
-
 async function collectBundleCliCrateFindings(
   p: Package & { kind: 'pypi' },
   bundleCli: NonNullable<(Package & { kind: 'pypi' })['bundle_cli']>,
@@ -794,7 +748,7 @@ async function collectBundleCliCrateFindings(
   }
 }
 
-function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
+export function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
   const features = (cargoToml.features ?? {}) as Record<string, unknown>;
   return new Set(Object.keys(features));
 }
@@ -865,7 +819,7 @@ function collectBinsFromManifest(cargoToml: Record<string, unknown>): string[] {
   return result;
 }
 
-function versionInheritsWorkspace(version: unknown): boolean {
+export function versionInheritsWorkspace(version: unknown): boolean {
   return (
     typeof version === 'object' &&
     version !== null &&
@@ -873,7 +827,7 @@ function versionInheritsWorkspace(version: unknown): boolean {
   );
 }
 
-async function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): Promise<boolean> {
+export async function workspaceVersionDeclared(cargoTomlPath: string, cwd: string): Promise<boolean> {
   // Walk parents until we find a Cargo.toml carrying a [workspace]
   // table; bound the walk at `cwd` so we never escape the repo.
   const cwdAbs = resolve(cwd);
@@ -993,40 +947,6 @@ export async function requireRepoUrlMatch(
   throw new Error(lines.join('\n'));
 }
 
-function normalizeOwnerRepo(value: string | undefined): string | null {
-  if (value === undefined) {return null;}
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {return null;}
-  // Tolerate accidental wrapping (e.g. `https://github.com/owner/repo`
-  // landed in the GITHUB_REPOSITORY env var by misconfiguration); the
-  // GHA-provided value is always `owner/repo` so this is defence in
-  // depth, not a documented surface.
-  const slugMatch = trimmed.match(/^([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/);
-  if (slugMatch) {
-    return `${slugMatch[1]}/${slugMatch[2]}`;
-  }
-  return parseOwnerRepo(trimmed);
-}
-
-// Recognises the canonical GitHub URL shapes the npm / cargo / hatch
-// ecosystems serialise into manifests:
-//   - git+https://github.com/owner/repo(.git)?
-//   - https://github.com/owner/repo(.git)?(/)?
-//   - http://github.com/owner/repo(.git)?(/)?
-//   - git@github.com:owner/repo(.git)?
-//   - ssh://git@github.com/owner/repo(.git)?
-// Non-github hosts return null; the check skips those packages rather
-// than false-positive on legitimately-hosted forks (provenance still
-// catches them at publish time).
-function parseOwnerRepo(url: string): string | null {
-  const stripped = url.trim().replace(/^git\+/i, '');
-  const match = stripped.match(
-    /github\.com[/:]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/,
-  );
-  if (match === null) {return null;}
-  return `${match[1]}/${match[2]}`;
-}
-
 /* ----------------------- repository visibility ----------------------- */
 //
 // Hard-fails when the GitHub repository running the workflow is
@@ -1035,88 +955,8 @@ function parseOwnerRepo(url: string): string | null {
 // attestation, and the same source-visibility expectation underpins
 // the trusted-publisher story on every registry we publish to.
 
-export interface RepoVisibilityOptions {
-  /** `owner/repo` from `GITHUB_REPOSITORY`. When `undefined` or empty
-   *  the check is a no-op. */
-  githubRepository?: string | undefined;
-  /** Token used to authenticate the GitHub API call. Optional — the
-   *  visibility endpoint is reachable unauthenticated for public
-   *  repos, and a missing token plus a 404 disambiguates to
-   *  "private or non-existent" which the check reports either way. */
-  githubToken?: string | undefined;
-  /** Injection seam for tests. Defaults to the global `fetch`. */
-  fetchImpl?: typeof fetch;
-}
-
-export interface RepoVisibilityFinding {
-  /** The `owner/repo` whose visibility check failed. */
-  githubRepository: string;
-  /** Either the API said `private: true`, or the API replied with a
-   *  404 (which for our purposes is indistinguishable from private —
-   *  in both cases consumers cannot dereference a provenance source
-   *  pointer to inspect it). */
-  reason: 'private' | 'not-found-or-private';
-}
-
 const REPO_VISIBILITY_DOC_POINTER =
   'https://thekevinscott.github.io/putitoutthere/guide/public-repo';
-
-export async function checkRepoPublic(
-  options: RepoVisibilityOptions = {},
-): Promise<RepoVisibilityFinding | null> {
-  const githubRepository = options.githubRepository?.trim();
-  if (githubRepository === undefined || githubRepository.length === 0) {
-    return null;
-  }
-  // Fall back to the raw value if normalization fails; the API call
-  // will 404 and the check will report `not-found-or-private`, which
-  // is the right diagnosis for a malformed slug we can't disambiguate.
-  const apiSlug = normalizeOwnerRepo(githubRepository) ?? githubRepository;
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const headers: Record<string, string> = {
-    accept: 'application/vnd.github+json',
-    'user-agent': 'putitoutthere',
-  };
-  if (options.githubToken !== undefined && options.githubToken.length > 0) {
-    headers.authorization = `Bearer ${options.githubToken}`;
-  }
-  const url = `https://api.github.com/repos/${apiSlug}`;
-  let res: Response;
-  try {
-    res = await fetchImpl(url, { method: 'GET', headers });
-  } catch (err) {
-    // A network failure says nothing about repository visibility.
-    // Treat it as indeterminate rather than blocking the release.
-    warnIndeterminate(apiSlug, `request failed (${(err as Error).message})`);
-    return null;
-  }
-  if (res.status === 404) {
-    return { githubRepository: apiSlug, reason: 'not-found-or-private' };
-  }
-  if (res.status === 200) {
-    const body = (await res.json()) as { private?: unknown; visibility?: unknown };
-    const isPrivate =
-      body.private === true ||
-      (typeof body.visibility === 'string' && body.visibility !== 'public');
-    if (isPrivate) {
-      return { githubRepository: apiSlug, reason: 'private' };
-    }
-    return null;
-  }
-  // Any other status (most commonly a 403 from an unauthenticated
-  // rate-limited call, or a transient 5xx) tells us nothing about
-  // visibility. Blocking the publish on "we couldn't reach the API"
-  // is the kind of release surprise this engine exists to prevent —
-  // treat it as indeterminate and non-fatal, with a visible warning.
-  warnIndeterminate(apiSlug, `GitHub API returned ${res.status}`);
-  return null;
-}
-
-function warnIndeterminate(apiSlug: string, detail: string): void {
-  process.stdout.write(
-    `::warning::repository visibility check skipped for ${apiSlug}: ${detail}\n`,
-  );
-}
 
 export async function requireRepoPublic(
   options: RepoVisibilityOptions = {},

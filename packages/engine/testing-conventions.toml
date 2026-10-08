@@ -10,13 +10,12 @@
 # their own threshold — upstream's default (max_lines = 1) stays put. A file
 # fails only when two or more module-scope functions exceed max_lines, so the
 # binding ceiling is the largest *second* function in any one file. Current
-# ceiling on packages/engine/src: npm-platform.ts (synthesizePlatformPackage,
-# 37 lines) and preflight.ts (collectCratesPackageFindings and
-# checkRepoPublic, 36 lines each) — so 40 is the floor until those split.
+# ceiling on packages/engine/src: preflight.ts (checkCratesMetadata, 35
+# lines, beside checkPyprojectShape) — so 35 is the floor until it splits.
 # Ratchet this down as the one-function-per-file refactor (#680)
 # progresses; do not raise.
 [typescript]
-one_function_per_file = { max_lines = 40 }
+one_function_per_file = { max_lines = 35 }
 
 [[typescript.exempt]]
 path = "plan.ts"
