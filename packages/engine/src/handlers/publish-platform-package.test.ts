@@ -9,6 +9,7 @@ import type { PlatformPkg } from './npm-platform.js';
 import { publishPlatformPackage } from './publish-platform-package.js';
 import { readStagedIdentity } from './read-staged-identity.js';
 
+vi.mock('../env.js', async () => await vi.importActual<typeof import('../env.js')>('../env.js'));
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 vi.mock('../utils/exec-capture.js');
 vi.mock('./is-platform-published.js');

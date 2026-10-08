@@ -28,6 +28,7 @@ import { looksLikePublishOverRace as looksLikePublishOverRaceImpl } from './look
 import type { Ctx } from '../types.js';
 import { awaitPlatformsVisible } from './await-platforms-visible.js';
 
+vi.mock('./looks-like-publish-over-race.js', async () => await vi.importActual<typeof import('./looks-like-publish-over-race.js')>('./looks-like-publish-over-race.js'));
 vi.mock('../utils/exec-capture.js');
 vi.mock('./await-platforms-visible.js');
 vi.mock('node:fs/promises');

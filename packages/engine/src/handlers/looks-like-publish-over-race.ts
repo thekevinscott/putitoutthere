@@ -1,4 +1,3 @@
 export function looksLikePublishOverRace(stderr: string | undefined): boolean {
-  if (!stderr) {return false;}
-  return /cannot publish over the previously published versions/i.test(stderr);
+  return stderr?.toLowerCase().includes('cannot publish over the previously published versions') === true;
 }
