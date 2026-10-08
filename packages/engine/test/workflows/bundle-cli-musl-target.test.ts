@@ -198,7 +198,7 @@ describe('reusable workflow: bundle_cli stage binary runs AFTER npm run build (#
       const stageIdx = steps.indexOf(stageStep!);
 
       const npmBuildIdx = steps.findIndex(
-        (s) => s.with?.command === 'npm-build' || (typeof s.run === 'string' && s.run.includes('npm run build --if-present')),
+        (s) => s.with?.command === 'npm-build' || (typeof s.run === 'string' && /npm run build --if-present|putitoutthere npm-build/.test(s.run)),
       );
       expect(
         npmBuildIdx,

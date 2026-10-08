@@ -359,44 +359,14 @@ jobs:
           version: ${{ matrix.version }}
 
       - if: matrix.kind == 'npm'
-        working-directory: fixture-tree/${{ matrix.path }}
+        name: npm-build — install and build ${{ matrix.name }}
         shell: bash
         env:
-          # napi / bundled-cli fixtures' build scripts read TARGET to know
-          # which per-triple stub binary to stage. Vanilla / main rows
-          # ignore it. Multi-mode fixtures (#dirsql) additionally read
-          # BUILD so the same script can stage either family.
+          PKG_PATH: ${{ matrix.path }}
           TARGET: ${{ matrix.target }}
           BUILD: ${{ matrix.build }}
-          # #627: mirror _matrix.yml so harness and workflow can't drift.
           VERSION: ${{ matrix.version }}
-        # #305: mirror the #288 strict-install fallback from _matrix.yml
-        # (the consumer-facing reusable workflow) into the e2e harness.
-        # Without this, the e2e job's install step diverges from what
-        # consumers actually run — and the js-bundled-cli-first-publish
-        # variant (whose pnpm-lock.yaml is deliberately drifted to
-        # reproduce #288) fails the build job at strict-install, even
-        # though production's _matrix.yml would recover via fallback.
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci || {
-              echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
-              npm install
-            }
-          elif [ -f pnpm-lock.yaml ]; then
-            # pnpm for the *consumer's* checkout, not ours. Deliberately a
-            # literal and not ./packages/ci/actions/setup-pnpm: that action installs
-            # our build toolchain, this installs theirs, and a `uses:` step
-            # cannot appear inside a run: script anyway.
-            npm install -g pnpm@11
-            pnpm install --frozen-lockfile --ignore-workspace || {
-              echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-              pnpm install --no-frozen-lockfile --ignore-workspace
-            }
-          else
-            npm install
-          fi
-          npm run build --if-present
+        run: pnpm exec putitoutthere npm-build --cwd fixture-tree --path "$PKG_PATH" --target "$TARGET" --build "$BUILD" --version "$VERSION"
 
       # #384: stage AFTER npm run build so the engine-built binary
       # overwrites any glibc binary the consumer build script staged.
@@ -602,43 +572,9 @@ jobs:
       # carried through as an artifact for vanilla npm rows.
       - name: Build npm packages
         if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
-        shell: bash
         env:
           MATRIX: ${{ needs.plan.outputs.matrix }}
-        # #305: mirror the #288 strict-install fallback from release.yml
-        # (the consumer-facing reusable workflow's publish job). Same
-        # rationale as the build job's step above — the e2e harness has
-        # to track the production install behavior or first-publish
-        # bundled-cli/napi families fail in e2e while passing for
-        # consumers.
-        run: |
-          set -euo pipefail
-          paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          for path in $paths; do
-            echo "::group::npm install + build at fixture-tree/${path}"
-            pushd "fixture-tree/${path}" > /dev/null
-            if [ -f package-lock.json ]; then
-              npm ci || {
-                echo "::warning::package-lock.json drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to npm install"
-                npm install
-              }
-            elif [ -f pnpm-lock.yaml ]; then
-              # pnpm for the *consumer's* checkout, not ours. Deliberately a
-              # literal and not ./packages/ci/actions/setup-pnpm: that action installs
-              # our build toolchain, this installs theirs, and a `uses:` step
-              # cannot appear inside a run: script anyway.
-              npm install -g pnpm@11
-              pnpm install --frozen-lockfile --ignore-workspace || {
-                echo "::warning::pnpm-lock.yaml drift (likely 404 on platform-package optionalDependencies for a brand-new bundled-cli/napi family); falling back to pnpm install --no-frozen-lockfile"
-                pnpm install --no-frozen-lockfile --ignore-workspace
-              }
-            else
-              npm install
-            fi
-            npm run build --if-present
-            popd > /dev/null
-            echo "::endgroup::"
-          done
+        run: pnpm exec putitoutthere npm-build --cwd fixture-tree --matrix "$MATRIX"
 
       # TEMPORARY DIAGNOSTIC (#258): assert pre-publish state for each
       # npm main/noarch package. Fails the step (with the failure
