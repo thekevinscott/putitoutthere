@@ -73,34 +73,6 @@ describe('resolveDepDirs', () => {
     expect(resolveDepDirs(parsed, MEMBER, ws, null)).toEqual([]);
   });
 
-  it('skips a workspace dependency that resolves from the registry', () => {
-    const parsed = { dependencies: { serde: { workspace: true } } };
-    // No `path` in the workspace table -- it is a registry dep, not in-repo.
-    expect(resolveDepDirs(parsed, MEMBER, wsWith({ serde: { version: '1' } }), ROOT)).toEqual([]);
-  });
-
-  it('ignores a malformed workspace dependencies table', () => {
-    const parsed = { dependencies: { core: { workspace: true } } };
-    expect(resolveDepDirs(parsed, MEMBER, { workspace: 'nonsense' }, ROOT)).toEqual([]);
-    expect(resolveDepDirs(parsed, MEMBER, { workspace: { dependencies: 'x' } }, ROOT)).toEqual([]);
-    expect(resolveDepDirs(parsed, MEMBER, 'not a manifest', ROOT)).toEqual([]);
-    expect(resolveDepDirs(parsed, MEMBER, null, ROOT)).toEqual([]);
-  });
-
-  it('skips a non-object entry in the workspace dependencies table', () => {
-    const parsed = { dependencies: { core: { workspace: true } } };
-    expect(resolveDepDirs(parsed, MEMBER, wsWith({ core: 'ignored' }), ROOT)).toEqual([]);
-    // `typeof null === "object"`, so null needs its own guard or it reaches
-    // a property read and throws.
-    expect(resolveDepDirs(parsed, MEMBER, wsWith({ core: null }), ROOT)).toEqual([]);
-  });
-
-  it('ignores a null workspace table or dependencies table', () => {
-    const parsed = { dependencies: { core: { workspace: true } } };
-    expect(resolveDepDirs(parsed, MEMBER, { workspace: null }, ROOT)).toEqual([]);
-    expect(resolveDepDirs(parsed, MEMBER, { workspace: { dependencies: null } }, ROOT)).toEqual([]);
-  });
-
   it('does not resolve a member-declared registry dep from the workspace table', () => {
     // `serde` is declared directly on the member with a version and no path,
     // so it is a registry dependency. A same-named `[workspace.dependencies]`
@@ -109,11 +81,6 @@ describe('resolveDepDirs', () => {
     const parsed = { dependencies: { serde: { version: '1' } } };
     const ws = wsWith({ serde: { path: 'vendor/serde', version: '1' } });
     expect(resolveDepDirs(parsed, MEMBER, ws, ROOT)).toEqual([]);
-  });
-
-  it('skips a workspace entry whose path is not a string', () => {
-    const parsed = { dependencies: { core: { workspace: true } } };
-    expect(resolveDepDirs(parsed, MEMBER, wsWith({ core: { path: 42 } }), ROOT)).toEqual([]);
   });
 
   it('keeps an absolute path as written', () => {

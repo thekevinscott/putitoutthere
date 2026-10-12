@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { readCargoManifest } from './read-cargo-manifest.js';
@@ -20,7 +19,7 @@ describe('readCargoManifest', () => {
       source,
       parsed: { package: { name: 'core' } },
     });
-    expect(readFileMock).toHaveBeenCalledWith(join('/r/core', 'Cargo.toml'), 'utf8');
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringMatching(/^[/\\]r[/\\]core[/\\]Cargo\.toml$/), 'utf8');
   });
 
   it('returns null when the manifest is absent', async () => {

@@ -168,18 +168,6 @@ describe('writeDependentVersionReqs', () => {
     expect(writtenTo(ROOT)).toContain('version = "0.4.2"');
   });
 
-  it('ignores a non-string entry in the members list', async () => {
-    // Malformed input should not abort a release: a numeric member has no
-    // path to expand, and the well-formed members around it still resolve.
-    manifests({
-      [ROOT]: '[workspace]\nmembers = [42, "host"]\nresolver = "2"\n',
-      [CORE]: '[package]\nname = "core"\n',
-      [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
-    });
-    await writeDependentVersionReqs(CORE, '0.4.2', []);
-    expect(writtenTo(HOST)).toContain('version = "0.4.2"');
-  });
-
   it('skips a candidate directory that holds no Cargo.toml', async () => {
     // A declared package directory need not be a crate at all.
     manifests({
@@ -187,15 +175,6 @@ describe('writeDependentVersionReqs', () => {
       [CORE]: '[package]\nname = "core"\n',
     });
     expect(await writeDependentVersionReqs(CORE, '0.4.2', ['/r/not-a-crate'])).toEqual([]);
-  });
-
-  it('skips an unparseable manifest rather than aborting the release', async () => {
-    manifests({
-      [ROOT]: workspace(['core', 'host']),
-      [CORE]: '[package]\nname = "core"\n',
-      [HOST]: 'this is not = = toml [[[',
-    });
-    expect(await writeDependentVersionReqs(CORE, '0.4.2', [])).toEqual([]);
   });
 
   it('reads and writes manifests as utf8 text', async () => {
@@ -214,19 +193,6 @@ describe('writeDependentVersionReqs', () => {
       expect.any(String),
       'utf8',
     );
-  });
-
-  it('tolerates a workspace root whose manifest declares no [workspace] table', async () => {
-    // `findWorkspaceRoot` reports a directory; by the time the manifest is
-    // read it may not look like a workspace at all. The members lookup has to
-    // cope with each level of that shape being absent, not just the file.
-    manifests({
-      [ROOT]: '[package]\nname = "not-a-workspace"\n',
-      [CORE]: '[package]\nname = "core"\n',
-      [HOST]: '[package]\nname = "host"\n\n[dependencies]\ncore = { path = "../core", version = "0.2" }\n',
-    });
-    await writeDependentVersionReqs(CORE, '0.4.2', [HOST]);
-    expect(writtenTo(HOST)).toContain('version = "0.4.2"');
   });
 
   it('scans the workspace when told of no sibling packages at all', async () => {

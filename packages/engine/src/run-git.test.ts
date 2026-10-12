@@ -4,6 +4,7 @@ import { runGit } from './run-git.js';
 import { execCapture } from './utils/exec-capture.js';
 import { ExecError } from './utils/exec-error.js';
 
+vi.mock('./utils/exec-error.js', async () => await vi.importActual<typeof import('./utils/exec-error.js')>('./utils/exec-error.js'));
 vi.mock('./utils/exec-capture.js');
 
 const execMock = vi.mocked(execCapture);
