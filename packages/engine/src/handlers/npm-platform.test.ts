@@ -16,12 +16,9 @@ import {
   DEFAULT_NAME_TEMPLATE,
   looksLikePublishOverRace,
   normalizeBuild,
-  pickMainFile,
   platformArtifactName,
   publishPlatforms,
-  resolvePlatformName,
   targetToOsCpu,
-  toRustTriple,
   type PlatformPkg,
 } from './npm-platform.js';
 import { looksLikePublishOverRace as looksLikePublishOverRaceImpl } from './looks-like-publish-over-race.js';
@@ -31,6 +28,8 @@ import { awaitPlatformsVisible } from './await-platforms-visible.js';
 vi.mock('./looks-like-publish-over-race.js', async () => await vi.importActual<typeof import('./looks-like-publish-over-race.js')>('./looks-like-publish-over-race.js'));
 vi.mock('../utils/exec-capture.js');
 vi.mock('./await-platforms-visible.js');
+vi.mock('./resolve-platform-name.js', async () => await vi.importActual<typeof import('./resolve-platform-name.js')>('./resolve-platform-name.js'));
+vi.mock('./rewrite-optional-dependencies.js', async () => await vi.importActual<typeof import('./rewrite-optional-dependencies.js')>('./rewrite-optional-dependencies.js'));
 vi.mock('node:fs/promises');
 
 const execMock = vi.mocked(execCapture);
@@ -277,58 +276,6 @@ afterEach(() => {
   resetFs();
 });
 
-describe('resolvePlatformName', () => {
-  it('default template + unscoped name → name-triple', () => {
-    expect(
-      resolvePlatformName(DEFAULT_NAME_TEMPLATE, {
-        name: 'demo-cli',
-        triple: 'linux-x64-gnu',
-        mode: 'napi',
-      }),
-    ).toBe('demo-cli-linux-x64-gnu');
-  });
-
-  it('default template + scoped name → @scope/base-triple', () => {
-    expect(
-      resolvePlatformName(DEFAULT_NAME_TEMPLATE, {
-        name: '@acme/demo-cli',
-        triple: 'linux-x64-gnu',
-        mode: 'napi',
-      }),
-    ).toBe('@acme/demo-cli-linux-x64-gnu');
-  });
-
-  it('substitutes {scope} and {base} from a scoped name', () => {
-    expect(
-      resolvePlatformName('@{scope}/lib-{triple}', {
-        name: '@dirsql/core',
-        triple: 'linux-x64-gnu',
-        mode: 'napi',
-      }),
-    ).toBe('@dirsql/lib-linux-x64-gnu');
-  });
-
-  it('{scope} resolves to empty string for unscoped names', () => {
-    expect(
-      resolvePlatformName('{scope}-{base}-{triple}', {
-        name: 'unscoped',
-        triple: 'darwin-arm64',
-        mode: 'napi',
-      }),
-    ).toBe('-unscoped-darwin-arm64');
-  });
-
-  it('substitutes {mode}', () => {
-    expect(
-      resolvePlatformName('{name}-{mode}-{triple}', {
-        name: 'demo',
-        triple: 'linux-x64-gnu',
-        mode: 'bundled-cli',
-      }),
-    ).toBe('demo-bundled-cli-linux-x64-gnu');
-  });
-});
-
 describe('platformArtifactName', () => {
   it('single-mode keeps the historical <safe>-<triple> shape', () => {
     expect(platformArtifactName('demo-cli', 'napi', 'linux-x64-gnu', false)).toBe(
@@ -442,63 +389,6 @@ describe('assertTripleSupported (#170)', () => {
   it('throws naming the offending package and TRIPLE_MAP for an unmapped triple', () => {
     expect(() => assertTripleSupported('riscv64-unknown-linux-gnu', 'demo-cli')).toThrow(
       /demo-cli.*riscv64-unknown-linux-gnu.*TRIPLE_MAP.*src\/handlers\/npm-platform\.ts/,
-    );
-  });
-});
-
-describe('toRustTriple (#387)', () => {
-  // Every napi-rs short form maps to its Rust triple. These are the
-  // triples `rustup target add` / `cargo build --target` consume in the
-  // npm bundled-cli cross-compile; the npm-flavor form they reject.
-  it.each([
-    ['linux-x64-gnu', 'x86_64-unknown-linux-gnu'],
-    ['linux-x64-musl', 'x86_64-unknown-linux-musl'],
-    ['linux-arm64-gnu', 'aarch64-unknown-linux-gnu'],
-    ['linux-arm64-musl', 'aarch64-unknown-linux-musl'],
-    ['linux-arm-gnueabihf', 'armv7-unknown-linux-gnueabihf'],
-    ['linux-arm-musleabihf', 'armv7-unknown-linux-musleabihf'],
-    ['darwin-x64', 'x86_64-apple-darwin'],
-    ['darwin-arm64', 'aarch64-apple-darwin'],
-    ['win32-x64-msvc', 'x86_64-pc-windows-msvc'],
-    ['win32-arm64-msvc', 'aarch64-pc-windows-msvc'],
-  ])('maps napi triple %s → rust triple %s', (napi, rust) => {
-    expect(toRustTriple(napi)).toBe(rust);
-  });
-
-  it('covers every napi key TRIPLE_MAP accepts (no plan-time drift)', () => {
-    // assertTripleSupported gates on TRIPLE_MAP, then plan calls
-    // toRustTriple — so every napi triple a consumer can legally declare
-    // must resolve here. A new TRIPLE_MAP napi entry without a NAPI_TO_RUST
-    // entry would throw mid-plan; this pins the two maps together.
-    const napiKeys = [
-      'linux-x64-gnu',
-      'linux-x64-musl',
-      'linux-arm64-gnu',
-      'linux-arm64-musl',
-      'linux-arm-gnueabihf',
-      'linux-arm-musleabihf',
-      'darwin-x64',
-      'darwin-arm64',
-      'win32-x64-msvc',
-      'win32-arm64-msvc',
-    ];
-    for (const t of napiKeys) {
-      expect(() => toRustTriple(t)).not.toThrow();
-    }
-  });
-
-  it('passes a Rust triple through unchanged (identity)', () => {
-    expect(toRustTriple('x86_64-unknown-linux-gnu')).toBe('x86_64-unknown-linux-gnu');
-    expect(toRustTriple('aarch64-apple-darwin')).toBe('aarch64-apple-darwin');
-  });
-
-  it('is case-insensitive, mirroring targetToOsCpu', () => {
-    expect(toRustTriple('LINUX-X64-GNU')).toBe('x86_64-unknown-linux-gnu');
-  });
-
-  it('throws a descriptive error for unmappable triples', () => {
-    expect(() => toRustTriple('mips64-unknown-linux-gnu')).toThrow(
-      /mips64-unknown-linux-gnu.*NAPI_TO_RUST.*src\/handlers\/npm-platform\.ts/,
     );
   });
 });
@@ -1074,46 +964,6 @@ describe('publishPlatforms (multi-mode, #dirsql)', () => {
       makeCtx(),
     );
     expect(r.published).toEqual(['@dirsql/core-lib-linux-x64-gnu']);
-  });
-});
-
-describe('pickMainFile', () => {
-  // The staged tree the entry names are read from. `pickMainFile` resolves
-  // against it (#626), so each case seeds what it lists.
-  const stage = '/stage';
-  function seedStage(paths: readonly string[]): string[] {
-    mkdirSync(stage, { recursive: true });
-    for (const rel of paths) {writeFileSync(`${stage}/${rel}`, 'x');}
-    return readdirStore(stage);
-  }
-
-  it('napi: picks the .node file when present', async () => {
-    const files = seedStage(['README.md', 'demo.linux-x64-gnu.node']);
-    expect(await pickMainFile(stage, files, 'napi')).toBe('demo.linux-x64-gnu.node');
-  });
-
-  it('napi: falls back to the first file when no .node is present', async () => {
-    // Defensive fallback for a napi artifact missing its .node payload.
-    const files = seedStage(['only-file.txt']);
-    expect(await pickMainFile(stage, files, 'napi')).toBe('only-file.txt');
-  });
-
-  it('bundled-cli: picks the first non-package.json file', async () => {
-    const files = seedStage(['package.json', 'demo-cli']);
-    expect(await pickMainFile(stage, files, 'bundled-cli')).toBe('demo-cli');
-  });
-
-  it('bundled-cli: descends into a directory to name the binary itself', async () => {
-    // #626: the nested layout. `readdir` lists only `bin`, and naming that
-    // directory as `main` is what sent the #365 chmod to the wrong inode.
-    const files = seedStage(['package.json', 'bin/demo-cli']);
-    expect(await pickMainFile(stage, files, 'bundled-cli')).toBe('bin/demo-cli');
-  });
-
-  it('bundled-cli: falls back to the first file when only package.json is present', async () => {
-    // Defensive fallback for a bundled-cli artifact with no payload file.
-    const files = seedStage(['package.json']);
-    expect(await pickMainFile(stage, files, 'bundled-cli')).toBe('package.json');
   });
 });
 

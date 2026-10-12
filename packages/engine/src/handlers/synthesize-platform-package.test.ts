@@ -6,18 +6,19 @@ import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
 import type { Ctx } from '../types.js';
 import {
-  pickMainFile,
   platformArtifactName,
   targetToOsCpu,
   type NpmBuildEntry,
   type PlatformPkg,
 } from './npm-platform.js';
+import { pickMainFile } from './pick-main-file.js';
 import { synthesizePlatformPackage } from './synthesize-platform-package.js';
 
 vi.mock('node:fs/promises');
 vi.mock('node:os');
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('./npm-platform.js');
+vi.mock('./pick-main-file.js');
 
 const STAGING = '/tmp/putitoutthere-plat-abc';
 const ARTIFACT_DIR = join('/repo', 'artifacts', 'widget-linux-x64-gnu');

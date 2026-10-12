@@ -4,12 +4,12 @@ import { join } from 'node:path';
 
 import type { Ctx } from '../types.js';
 import {
-  pickMainFile,
   platformArtifactName,
   targetToOsCpu,
   type NpmBuildEntry,
   type PlatformPkg,
 } from './npm-platform.js';
+import { pickMainFile } from './pick-main-file.js';
 
 export async function synthesizePlatformPackage(
   pkg: PlatformPkg,
