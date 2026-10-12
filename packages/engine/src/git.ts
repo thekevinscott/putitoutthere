@@ -4,8 +4,7 @@
  * --verbose re-run. Issue #9. Plan: §13.6 (no-push tag model), §14.2.
  */
 
-import { execCapture } from './utils/exec-capture.js';
-import { ExecError } from './utils/exec-error.js';
+import { runGit } from './run-git.js';
 import { parseTagVersion, tagGlob } from './tag-template.js';
 import { parseSemver, type Semver } from './version.js';
 
@@ -17,61 +16,21 @@ interface TagOptions extends GitOptions {
   message?: string;
 }
 
-/* ------------------------------ core ------------------------------ */
-
-async function run(args: readonly [string, ...string[]], opts: GitOptions = {}): Promise<string> {
-  try {
-    return (await execCapture('git', args, { cwd: opts.cwd })).stdout.trimEnd();
-  } catch (err) {
-    // execCapture rejects with an ExecError whose `stderr` field carries
-    // git's error output (already a string). Fold it into the thrown
-    // message so tests + logs see the root cause without separate plumbing.
-    const stderr = err instanceof ExecError ? err.stderr.trim() : undefined;
-    const base = err instanceof Error ? err.message : String(err);
-    // `git tag -a` on a runner with no user.name/email surfaces as
-    // "Please tell me who you are" / "unable to auto-detect email
-    // address". Give the adopter an actionable hint instead of the
-    // bare git output. #206.
-    const needsIdentity =
-      stderr !== undefined &&
-      /unable to auto-detect email address|Please tell me who you are/.test(stderr);
-    if (needsIdentity) {
-      throw new Error(
-        [
-          // `args` is a non-empty tuple (`readonly [string, ...string[]]`),
-          // so `args[0]` is always a `string` — no `?? ''` fallback needed.
-          `git ${args[0]}: no committer identity configured.`,
-          'piot cuts annotated tags which require `user.name` + `user.email`.',
-          'Configure them in the publish job before invoking piot:',
-          '  - run: |',
-          '      git config --global user.name "github-actions[bot]"',
-          '      git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"',
-          'See https://thekevinscott.github.io/putitoutthere/guide/runner-prerequisites',
-          '',
-          `Underlying git output:\n${stderr}`,
-        ].join('\n'),
-        { cause: err },
-      );
-    }
-    throw new Error(stderr ? `${base}\n${stderr}` : base, { cause: err });
-  }
-}
-
 /* ---------------------------- observers ---------------------------- */
 
 export async function headCommit(opts: GitOptions = {}): Promise<string> {
-  return run(['rev-parse', 'HEAD'], opts);
+  return runGit(['rev-parse', 'HEAD'], opts);
 }
 
 export async function commitBody(sha: string, opts: GitOptions = {}): Promise<string> {
   // %B = raw body (subject + body, no trailer folding).
-  return run(['log', '-1', '--format=%B', sha], opts);
+  return runGit(['log', '-1', '--format=%B', sha], opts);
 }
 
 export async function commitParents(sha: string, opts: GitOptions = {}): Promise<string[]> {
   // %P = parent SHAs, space-separated. Merge commits have ≥2;
   // plain commits have 1; root commits have 0.
-  const out = await run(['log', '-1', '--format=%P', sha], opts);
+  const out = await runGit(['log', '-1', '--format=%P', sha], opts);
   if (out === '') {return [];}
   return out.split(' ').filter((s) => s.length > 0);
 }
@@ -81,7 +40,7 @@ export async function diffNames(
   to: string,
   opts: GitOptions = {},
 ): Promise<string[]> {
-  const out = await run(['diff', '--name-only', `${from}..${to}`], opts);
+  const out = await runGit(['diff', '--name-only', `${from}..${to}`], opts);
   if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
@@ -89,7 +48,7 @@ export async function diffNames(
 /* ------------------------------ tags ------------------------------ */
 
 export async function tagList(glob: string, opts: GitOptions = {}): Promise<string[]> {
-  const out = await run(['tag', '-l', glob], opts);
+  const out = await runGit(['tag', '-l', glob], opts);
   if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
@@ -100,11 +59,11 @@ export async function createTag(
   opts: TagOptions = {},
 ): Promise<void> {
   const message = opts.message ?? name;
-  await run(['tag', '-a', '-m', message, name, sha], opts);
+  await runGit(['tag', '-a', '-m', message, name, sha], opts);
 }
 
 export async function pushTag(name: string, opts: GitOptions = {}): Promise<void> {
-  await run(['push', 'origin', name], opts);
+  await runGit(['push', 'origin', name], opts);
 }
 
 /**
@@ -115,8 +74,8 @@ export async function pushTag(name: string, opts: GitOptions = {}): Promise<void
  * nothing, which is exactly the state a failed push leaves behind (#717).
  */
 export async function remoteTagExists(name: string, opts: GitOptions = {}): Promise<boolean> {
-  // `run` already trimEnds; no further trimming needed to tell empty from non-empty.
-  const out = await run(['ls-remote', '--tags', 'origin', `refs/tags/${name}`], opts);
+  // `runGit` already trimEnds; no further trimming needed to tell empty from non-empty.
+  const out = await runGit(['ls-remote', '--tags', 'origin', `refs/tags/${name}`], opts);
   return out.length > 0;
 }
 
@@ -128,7 +87,7 @@ export async function remoteTagExists(name: string, opts: GitOptions = {}): Prom
  * floating-major-tag move re-derives "latest release" from local tags.
  */
 export async function fetchTagsForce(opts: GitOptions = {}): Promise<void> {
-  await run(['fetch', '--tags', '--force', 'origin'], opts);
+  await runGit(['fetch', '--tags', '--force', 'origin'], opts);
 }
 
 /**
@@ -137,7 +96,7 @@ export async function fetchTagsForce(opts: GitOptions = {}): Promise<void> {
  * a floating-tag move; pair with `pushTagRefForce` to publish it.
  */
 export async function forceTag(name: string, target: string, opts: GitOptions = {}): Promise<void> {
-  await run(['tag', '-f', name, target], opts);
+  await runGit(['tag', '-f', name, target], opts);
 }
 
 /**
@@ -147,7 +106,7 @@ export async function forceTag(name: string, target: string, opts: GitOptions = 
  * forward), this overwrites the remote tag, which floating tags require.
  */
 export async function pushTagRefForce(name: string, opts: GitOptions = {}): Promise<void> {
-  await run(['push', '--force', 'origin', `refs/tags/${name}`], opts);
+  await runGit(['push', '--force', 'origin', `refs/tags/${name}`], opts);
 }
 
 /**
@@ -156,7 +115,7 @@ export async function pushTagRefForce(name: string, opts: GitOptions = {}): Prom
  * remote dependency (#444). Empty array when HEAD carries no tag.
  */
 export async function tagsPointingAtHead(opts: GitOptions = {}): Promise<string[]> {
-  const out = await run(['tag', '--points-at', 'HEAD'], opts);
+  const out = await runGit(['tag', '--points-at', 'HEAD'], opts);
   if (out === '') {return [];}
   return out.split('\n').filter((l) => l.length > 0);
 }
@@ -171,7 +130,7 @@ export async function tagsPointingAtHead(opts: GitOptions = {}): Promise<string[
  * prevent. Distinct from `pushTag`, which pushes by bare name (#444).
  */
 export async function pushTagRef(name: string, opts: GitOptions = {}): Promise<void> {
-  await run(['push', 'origin', `refs/tags/${name}`], opts);
+  await runGit(['push', 'origin', `refs/tags/${name}`], opts);
 }
 
 /* ---------------------------- staging ---------------------------- */
@@ -182,7 +141,7 @@ export async function pushTagRef(name: string, opts: GitOptions = {}): Promise<v
  * tag commits, so folding it in requires the force flag.
  */
 export async function addForce(pathspec: string, opts: GitOptions = {}): Promise<void> {
-  await run(['add', '-f', pathspec], opts);
+  await runGit(['add', '-f', pathspec], opts);
 }
 
 /**
@@ -193,7 +152,7 @@ export async function addForce(pathspec: string, opts: GitOptions = {}): Promise
  */
 export async function hasStagedChanges(opts: GitOptions = {}): Promise<boolean> {
   try {
-    await run(['diff', '--cached', '--quiet'], opts);
+    await runGit(['diff', '--cached', '--quiet'], opts);
     return false;
   } catch {
     return true;
@@ -209,7 +168,7 @@ export async function hasStagedChanges(opts: GitOptions = {}): Promise<boolean> 
  * notes/handoff/2026-04-24-dist-action.md).
  */
 export async function commitWithBody(subject: string, body: string, opts: GitOptions = {}): Promise<void> {
-  await run(['commit', '-m', subject, '-m', body], opts);
+  await runGit(['commit', '-m', subject, '-m', body], opts);
 }
 
 /* ------------------------------ tags ------------------------------ */
@@ -219,7 +178,7 @@ export async function commitWithBody(subject: string, body: string, opts: GitOpt
  * tag down to the commit it ultimately references.
  */
 export async function tagCommit(name: string, opts: GitOptions = {}): Promise<string> {
-  return run(['rev-list', '-n', '1', name], opts);
+  return runGit(['rev-list', '-n', '1', name], opts);
 }
 
 /* -------------------------- last-tag resolver -------------------------- */

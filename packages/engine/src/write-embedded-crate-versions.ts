@@ -6,21 +6,15 @@
  * version symbol (clap's `#[command(version)]`) stays stale. Artifact's version wins.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { parse as parseToml } from 'smol-toml';
-
+import { collectEmbedded } from './collect-embedded.js';
 import { findWorkspaceRoot } from './find-workspace-root.js';
+import { readCargoManifest } from './read-cargo-manifest.js';
 import { replaceDepVersionReq } from './replace-dep-version-req.js';
 import { resolveDepDirs } from './resolve-dep-dirs.js';
 import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
-
-/** A manifest that exists and parses. Missing or malformed reads as null. */
-interface Manifest {
-  source: string;
-  parsed: unknown;
-}
 
 /**
  * Walk the path-dependency graph out of `startDir`, bump every crate reached to
@@ -45,7 +39,7 @@ export async function writeEmbeddedCrateVersions(
   const found = await findWorkspaceRoot(start);
   const workspaceRoot = typeof found === 'string' ? found : null;
   const workspaceParsed =
-    workspaceRoot === null ? null : (await readManifest(workspaceRoot))?.parsed;
+    workspaceRoot === null ? null : (await readCargoManifest(workspaceRoot))?.parsed;
 
   const embedded = await collectEmbedded(start, workspaceParsed, workspaceRoot);
   const written = new Set<string>();
@@ -53,7 +47,7 @@ export async function writeEmbeddedCrateVersions(
   // 1. Bump each embedded crate. `writeResolvedCargoVersion` follows
   //    `version.workspace = true` up to the workspace root (#428).
   for (const dir of embedded) {
-    const manifest = await readManifest(dir);
+    const manifest = await readCargoManifest(dir);
     // A virtual manifest declares `[workspace]` but no crate to version.
     if (manifest === null || !hasPackageTable(manifest.parsed)) {continue;}
     for (const p of await writeResolvedCargoVersion(dir, manifest.source, version)) {
@@ -69,7 +63,7 @@ export async function writeEmbeddedCrateVersions(
   if (workspaceRoot !== null) {manifestDirs.add(workspaceRoot);}
 
   for (const dir of manifestDirs) {
-    const manifest = await readManifest(dir);
+    const manifest = await readCargoManifest(dir);
     if (manifest === null) {continue;}
 
     let updated = manifest.source;
@@ -92,61 +86,8 @@ export async function writeEmbeddedCrateVersions(
 }
 
 /**
- * Breadth-first walk of path dependencies out of `startDir`. Returns the
- * crates reached, excluding `startDir` — seeding `seen` with it also keeps
- * a dependency cycle back to the start from re-queueing forever.
- */
-async function collectEmbedded(
-  startDir: string,
-  workspaceParsed: unknown,
-  workspaceRoot: string | null,
-): Promise<Set<string>> {
-  const seen = new Set<string>([startDir]);
-  const found = new Set<string>();
-  const queue: string[] = [startDir];
-
-  while (queue.length > 0) {
-    const dir = queue.shift() as string;
-    const manifest = await readManifest(dir);
-    if (manifest === null) {continue;}
-
-    for (const dep of resolveDepDirs(manifest.parsed, dir, workspaceParsed, workspaceRoot)) {
-      if (seen.has(dep.dir)) {continue;}
-      seen.add(dep.dir);
-      found.add(dep.dir);
-      queue.push(dep.dir);
-    }
-  }
-  return found;
-}
-
-/**
- * Read and parse `<dir>/Cargo.toml`. Returns null when the file is absent
- * or unparseable — a path dependency can point at a directory that is not
- * a crate, and an odd-but-writable manifest should not abort the release.
- *
- * ENOENT is caught rather than pre-checked with `existsSync` to avoid the
- * TOCTOU shape CodeQL flags, matching the rest of the version-write path.
- * Any other read failure surfaces unmodified.
- */
-async function readManifest(dir: string): Promise<Manifest | null> {
-  let source: string;
-  try {
-    source = await readFile(join(dir, 'Cargo.toml'), 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {return null;}
-    throw err;
-  }
-  try {
-    return { source, parsed: parseToml(source) };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * A virtual manifest declares `[workspace]` but no crate to version.
- * `parsed` always comes from `readManifest`, which yields a parsed TOML
+ * `parsed` always comes from `readCargoManifest`, which yields a parsed TOML
  * document or null, so the null case never reaches here.
  */
 function hasPackageTable(parsed: unknown): boolean {

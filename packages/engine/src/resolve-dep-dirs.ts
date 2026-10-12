@@ -5,9 +5,8 @@
  * and `path` is relative to the *declaring* manifest's dir — the root, if inherited.
  */
 
-import { isAbsolute, resolve } from 'node:path';
-
 import { cargoDepEntries } from './cargo-dep-entries.js';
+import { absolute, workspaceDepDirs } from './workspace-dep-dirs.js';
 
 /** A dependency entry that resolves to a directory on disk. */
 export interface ResolvedDepDir {
@@ -69,35 +68,4 @@ export function resolveDepDirs(
     });
   }
   return out;
-}
-
-/**
- * `[workspace.dependencies]` entries that carry a `path`, keyed by name and
- * already resolved against `workspaceRoot` — the manifest that declared
- * them, and therefore the base those relative paths are written against.
- */
-function workspaceDepDirs(
-  workspaceParsed: unknown,
-  workspaceRoot: string,
-): Map<string, { dir: string; hasVersionReq: boolean }> {
-  const map = new Map<string, { dir: string; hasVersionReq: boolean }>();
-  // Optional chaining rather than a guard per level: a primitive yields
-  // `undefined` for the next lookup anyway, so only null/undefined need
-  // handling and each `typeof` arm would be unobservable.
-  const workspace = (workspaceParsed as { workspace?: unknown } | null)?.workspace;
-  const deps = (workspace as { dependencies?: unknown } | null)?.dependencies;
-
-  for (const [key, value] of Object.entries((deps ?? {}) as Record<string, unknown>)) {
-    const obj = (value ?? {}) as Record<string, unknown>;
-    if (typeof obj['path'] !== 'string') {continue;}
-    map.set(key, {
-      dir: absolute(obj['path'], workspaceRoot),
-      hasVersionReq: typeof obj['version'] === 'string',
-    });
-  }
-  return map;
-}
-
-function absolute(p: string, base: string): string {
-  return isAbsolute(p) ? p : resolve(base, p);
 }
