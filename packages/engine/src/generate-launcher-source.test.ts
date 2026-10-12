@@ -52,6 +52,16 @@ describe('generateLauncherSource', () => {
     expect(src).toContain('const pkg = `[]my-cli-${triple}`;');
   });
 
+  it('treats a name as scoped only when the whole name is @scope/base', () => {
+    const tpl = { platformNameTemplate: '[{scope}|{base}]-{triple}' };
+    expect(generateLauncherSource(opts({ ...tpl, npmName: 'x@org/cli' }))).toContain(
+      'const pkg = `[|x@org/cli]-${triple}`;',
+    );
+    expect(generateLauncherSource(opts({ ...tpl, npmName: '@org/cli\nx' }))).toContain(
+      'const pkg = `[|@org/cli\nx]-${triple}`;',
+    );
+  });
+
   it('escapes backslashes and quotes in triples table entries', () => {
     const src = generateLauncherSource(opts({ triples: ["linux-x64-o'k\\x"] }));
     expect(src).toContain("  'linux-x64': 'linux-x64-o\\'k\\\\x',");

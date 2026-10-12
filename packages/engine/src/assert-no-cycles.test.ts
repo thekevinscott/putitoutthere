@@ -24,6 +24,13 @@ describe('assertNoCycles', () => {
     ).not.toThrow();
   });
 
+  it('visits each package once, so a deep stack of diamonds stays linear', () => {
+    const layers = Array.from({ length: 40 }, (_, i) =>
+      ['a', 'b'].map((s) => pkg(`n${i}${s}`, i === 0 ? [] : [`n${i - 1}a`, `n${i - 1}b`])),
+    );
+    expect(() => assertNoCycles(layers.flat().reverse())).not.toThrow();
+  });
+
   it('accepts an empty package list', () => {
     expect(() => assertNoCycles([])).not.toThrow();
   });

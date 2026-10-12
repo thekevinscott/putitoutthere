@@ -1,5 +1,3 @@
-import { join, resolve } from 'node:path';
-
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadConfig } from './config.js';
@@ -45,9 +43,10 @@ describe('writeLauncherFromConfig (#299)', () => {
   it('delegates the matched bundled-cli package to writeLauncher and returns its result', async () => {
     withConfig([bundled()]);
     await expect(writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' })).resolves.toEqual(['written']);
-    expect(loadConfigMock).toHaveBeenCalledWith(join('repo', 'putitoutthere.toml'));
-    expect(writeLauncherMock).toHaveBeenCalledWith({
-      pkgDir: resolve('repo', 'packages/ts'),
+    expect(loadConfigMock).toHaveBeenCalledWith(expect.stringMatching(/^repo[\\/]putitoutthere\.toml$/));
+    const { pkgDir, ...rest } = writeLauncherMock.mock.calls[0]![0];
+    expect(pkgDir).toMatch(/repo[\\/]packages[\\/]ts$/);
+    expect(rest).toEqual({
       npmName: 'my-cli',
       bin: 'my-bin',
       platformNameTemplate: '{name}-{triple}',
@@ -105,6 +104,18 @@ describe('writeLauncherFromConfig (#299)', () => {
     expect(writeLauncherMock).not.toHaveBeenCalled();
   });
 
+  it('is a no-op for a non-npm package even when it carries bundled-cli fields', async () => {
+    withConfig([bundled({ kind: 'crates' })]);
+    await expect(writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' })).resolves.toEqual([]);
+    expect(writeLauncherMock).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op for an npm package with bundle_cli but no bundled-cli build entry', async () => {
+    withConfig([bundled({ build: 'napi' })]);
+    await expect(writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' })).resolves.toEqual([]);
+    expect(writeLauncherMock).not.toHaveBeenCalled();
+  });
+
   it('is a no-op when the package is npm but not bundled-cli', async () => {
     withConfig([{ name: 'demo', kind: 'npm', path: 'packages/ts' }]);
     await expect(writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/ts' })).resolves.toEqual([]);
@@ -122,7 +133,7 @@ describe('writeLauncherFromConfig (#299)', () => {
     await expect(
       writeLauncherFromConfig({ cwd: 'repo', packagePath: 'packages/other' }),
     ).rejects.toThrow(
-      new Error(`write-launcher: no [[package]] entry with path "packages/other" in ${join('repo', 'putitoutthere.toml')}`),
+      /^write-launcher: no \[\[package\]\] entry with path "packages\/other" in repo[\\/]putitoutthere\.toml$/,
     );
   });
 
