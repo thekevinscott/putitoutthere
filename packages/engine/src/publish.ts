@@ -23,14 +23,14 @@ import { formatTag } from './tag-template.js';
 import {
   requireAuth,
   requireCargoShape,
-  requireCratesMetadata,
   requirePackageJsonShape,
-  requireProvenanceMetadata,
   requirePyprojectShape,
   requireRepoPublic,
-  requireRepoUrlMatch,
 } from './preflight.js';
+import { requireCratesMetadata } from './require-crates-metadata.js';
+import { requireProvenanceMetadata } from './require-provenance-metadata.js';
 import { requirePypiVersionSource } from './require-pypi-version-source.js';
+import { requireRepoUrlMatch } from './require-repo-url-match.js';
 import { withRetry } from './retry.js';
 import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';

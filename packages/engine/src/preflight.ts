@@ -10,7 +10,6 @@ import { dirname, isAbsolute, join, parse as parsePath, resolve } from 'node:pat
 
 import { parse as parseToml } from 'smol-toml';
 
-import { checkCratesMetadata } from './check-crates-metadata.js';
 import { checkRepoPublic, type RepoVisibilityOptions } from './check-repo-public.js';
 import { collectCratesPackageFindings } from './collect-crates-package-findings.js';
 import type { Package } from './config.js';
@@ -100,12 +99,6 @@ function nonEmpty(v: string | undefined): v is string {
 
 /* ----------------------- npm provenance metadata ----------------------- */
 
-// Anchor for the README section that documents the field requirement.
-// Surfaced verbatim in the thrown error so users have something
-// actionable to follow rather than a code-search target.
-const REPOSITORY_DOC_POINTER =
-  'https://github.com/thekevinscott/putitoutthere#kind--npm';
-
 export interface ProvenanceFinding {
   package: string;
   /** Pkg-relative `package.json` path examined. */
@@ -159,58 +152,7 @@ function hasNonEmptyRepository(value: unknown): boolean {
   return false;
 }
 
-/**
- * Throw with an actionable error when any npm package's `package.json`
- * lacks a non-empty `repository` field. Reports every failing package
- * in one error rather than failing on the first, so consumers fix
- * them all in one round-trip.
- *
- * Always runs (not OIDC-gated): the README demands the field for
- * every npm publish, and `npm publish --provenance` is putitoutthere's
- * blessed publish mode. Even on the token path, missing `repository`
- * is a misconfiguration — fail fast.
- */
-export async function requireProvenanceMetadata(packages: readonly Package[]): Promise<void> {
-  const findings = await checkProvenanceMetadata(packages);
-  if (findings.length === 0) {return;}
-  const lines: string[] = [
-    `[${ErrorCodes.NPM_MISSING_REPOSITORY}] npm publish requires a non-empty \`repository\` field in package.json.`,
-    '',
-    'Failing packages:',
-  ];
-  for (const f of findings) {
-    lines.push(`  - ${f.package}: ${f.packageJsonPath} (${f.reason})`);
-  }
-  lines.push(
-    '',
-    'Why: `npm publish --provenance` (used by putitoutthere on the OIDC trusted-publisher',
-    'path) hard-requires this field so npm can verify the package was built from the repo',
-    'the trusted publisher declares.',
-    '',
-    'Fix: add a `repository` block to each failing package.json. Canonical shape:',
-    '',
-    '  {',
-    '    "repository": {',
-    '      "type": "git",',
-    '      "url": "git+https://github.com/<owner>/<repo>.git",',
-    '      "directory": "<path/to/package>"',
-    '    }',
-    '  }',
-    '',
-    `See ${REPOSITORY_DOC_POINTER}.`,
-  );
-  throw new Error(lines.join('\n'));
-}
-
 /* ----------------------- crates.io required metadata ----------------------- */
-
-// crates.io rejects publish with `400 Bad Request: missing or empty
-// metadata fields: ...` when [package].description is empty/missing
-// or when neither [package].license nor [package].license-file is set.
-// The official cargo manifest reference for what's required vs.
-// recommended.
-const CARGO_DOC_POINTER =
-  'https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata';
 
 export function nonEmptyString(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
@@ -328,48 +270,6 @@ export async function readWorkspacePackageTable(
     dir = parent;
   }
   return undefined;
-}
-
-/**
- * Throw with an actionable error when any crates package's Cargo.toml
- * lacks a required `[package]` metadata field. Reports every failing
- * package + missing fields in one error rather than failing on the
- * first, so consumers fix them all in one round-trip.
- *
- * Why: crates.io's 400 lands after `cargo publish`'s verification
- * build has compiled the crate and every transitive dep — wasting
- * the entire publish job on a precondition checkable in milliseconds.
- * #290.
- */
-export async function requireCratesMetadata(packages: readonly Package[]): Promise<void> {
-  const findings = await checkCratesMetadata(packages);
-  if (findings.length === 0) {return;}
-  const lines: string[] = [
-    `[${ErrorCodes.CRATES_MISSING_METADATA}] cargo publish requires the following Cargo.toml [package] fields: description, and license (or license-file).`,
-    '',
-    'Failing packages:',
-  ];
-  for (const f of findings) {
-    lines.push(
-      `  - ${f.package}: ${f.cargoTomlPath} (missing: ${f.missing.join(', ')})`,
-    );
-  }
-  lines.push(
-    '',
-    'Why: crates.io rejects publish with `400 Bad Request: missing or empty',
-    'metadata fields: ...` after cargo publish has compiled the crate and every',
-    'transitive dep — wasting the full publish job on a precondition checkable',
-    'in milliseconds.',
-    '',
-    'Fix: add the missing fields to each Cargo.toml. Example:',
-    '',
-    '  [package]',
-    '  description = "One-line summary of what the crate does."',
-    '  license = "MIT OR Apache-2.0"',
-    '',
-    `See ${CARGO_DOC_POINTER}.`,
-  );
-  throw new Error(lines.join('\n'));
 }
 
 /* ----------------------- pyproject.toml + Cargo.toml shape (#301) ----------------------- */
@@ -763,12 +663,6 @@ export interface RepoUrlMatchFinding {
   declaredUrl: string;
 }
 
-// User-facing pointer for the manifest-repository-URL recipe. Surfaced
-// verbatim in the thrown error so the consumer has a copy/paste fix
-// instead of a code-search target.
-const REPO_URL_DOC_POINTER =
-  'https://thekevinscott.github.io/putitoutthere/guide/repository-url';
-
 export async function checkRepoUrlMatch(
   packages: readonly Package[],
   options: RepoUrlMatchOptions = {},
@@ -791,40 +685,6 @@ export async function checkRepoUrlMatch(
     });
   }
   return findings;
-}
-
-export async function requireRepoUrlMatch(
-  packages: readonly Package[],
-  options: RepoUrlMatchOptions = {},
-): Promise<void> {
-  const findings = await checkRepoUrlMatch(packages, options);
-  if (findings.length === 0) {return;}
-  const lines: string[] = [
-    `[${ErrorCodes.REPO_URL_MISMATCH}] manifest repository URL does not match GITHUB_REPOSITORY.`,
-    '',
-    'Failing packages:',
-  ];
-  for (const f of findings) {
-    lines.push(
-      `  - ${f.package}: ${f.manifestPath}`,
-      `      declared:  ${f.declaredOwnerRepo}  (${f.declaredUrl})`,
-      `      expected:  ${f.expectedOwnerRepo}  (from GITHUB_REPOSITORY)`,
-    );
-  }
-  lines.push(
-    '',
-    'Why: npm verifies `package.json#repository.url` against the OIDC source claim',
-    'before accepting a `--provenance` publish and rejects mismatches with a 422',
-    'after the artifact has already been uploaded. crates.io and PyPI carry the same',
-    'risk on their trusted-publisher paths.',
-    '',
-    'Fix: either update the manifest URL to match the GitHub repository this workflow',
-    'is running from, or rename the GitHub repository so the slugs line up. Run the',
-    'release again once the manifest and the repo agree.',
-    '',
-    `See ${REPO_URL_DOC_POINTER}.`,
-  );
-  throw new Error(lines.join('\n'));
 }
 
 /* ----------------------- repository visibility ----------------------- */
