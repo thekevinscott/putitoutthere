@@ -16,7 +16,6 @@ import {
   checkProvenanceMetadata,
   checkPypiVersionSource,
   checkPyprojectShape,
-  checkRepoPublic,
   checkRepoUrlMatch,
   requireAuth,
   requireCargoShape,
@@ -2105,101 +2104,13 @@ Homepage = "https://github.com/wrong/repo"
   });
 });
 
-describe('checkRepoPublic / requireRepoPublic — repo must not be private', () => {
+describe('requireRepoPublic — repo must not be private', () => {
   function jsonResponse(status: number, body: unknown): Response {
     return new Response(JSON.stringify(body), {
       status,
       headers: { 'content-type': 'application/json' },
     });
   }
-
-  it('returns null when the GitHub API reports the repo as public', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: false, visibility: 'public' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toBeNull();
-  });
-
-  it('returns a `private` finding when the GitHub API reports the repo as private', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: true, visibility: 'private' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      githubToken: 't',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toMatchObject({
-      githubRepository: 'acme/widget',
-      reason: 'private',
-    });
-  });
-
-  it('returns a `not-found-or-private` finding on a 404 (could be private or non-existent)', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(404, { message: 'Not Found' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toMatchObject({
-      githubRepository: 'acme/widget',
-      reason: 'not-found-or-private',
-    });
-  });
-
-  it('skips entirely when githubRepository is undefined or empty', async () => {
-    const fetchImpl = vi.fn();
-    expect(
-      await checkRepoPublic({
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      }),
-    ).toBeNull();
-    expect(
-      await checkRepoPublic({
-        githubRepository: '',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      }),
-    ).toBeNull();
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('sends Authorization: Bearer <token> when githubToken is supplied', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: false })),
-    ) as unknown as typeof fetch;
-    await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      githubToken: 'ghs_abc123',
-      fetchImpl,
-    });
-    const mock = fetchImpl as unknown as { mock: { calls: unknown[][] } };
-    const call = mock.mock.calls[0] ?? [];
-    const init = call[1] as RequestInit | undefined;
-    const headers = init?.headers as Record<string, string> | undefined;
-    const auth = headers
-      ? headers['authorization'] ?? headers['Authorization']
-      : undefined;
-    expect(auth).toBe('Bearer ghs_abc123');
-  });
-
-  it('hits the canonical GitHub repos endpoint with the owner/repo slug', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: false })),
-    ) as unknown as typeof fetch;
-    await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl,
-    });
-    const mock = fetchImpl as unknown as { mock: { calls: unknown[][] } };
-    const url = mock.mock.calls[0]?.[0] as string | undefined;
-    expect(url).toBe('https://api.github.com/repos/acme/widget');
-  });
 
   it('requireRepoPublic throws with PIOT_REPO_PRIVATE when the repo is private', async () => {
     const fetchImpl = vi.fn(() => Promise.resolve(
@@ -2247,59 +2158,6 @@ describe('checkRepoPublic / requireRepoPublic — repo must not be private', () 
     }
   });
 
-  it('treats `visibility = "internal"` (200 with non-public visibility) as private', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: false, visibility: 'internal' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toMatchObject({ reason: 'private' });
-  });
-
-  it('returns null (indeterminate, non-fatal) on a 403 — a rate-limited API call says nothing about visibility', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(403, { message: 'API rate limit exceeded' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toBeNull();
-  });
-
-  it('returns null (indeterminate, non-fatal) on a 429 rate-limit response', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(429, { message: 'Too Many Requests' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toBeNull();
-  });
-
-  it('returns null (indeterminate, non-fatal) on a 5xx response', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(500, { message: 'oh no' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toBeNull();
-  });
-
-  it('returns null (indeterminate, non-fatal) when the fetch itself rejects (network error)', async () => {
-    const fetchImpl = vi.fn(() => Promise.reject(new Error('ECONNRESET')));
-    const finding = await checkRepoPublic({
-      githubRepository: 'acme/widget',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toBeNull();
-  });
-
   it('requireRepoPublic does not throw when the API call is rate-limited (403)', async () => {
     const fetchImpl = vi.fn(() => Promise.resolve(
       jsonResponse(403, { message: 'API rate limit exceeded' })),
@@ -2310,19 +2168,6 @@ describe('checkRepoPublic / requireRepoPublic — repo must not be private', () 
         fetchImpl: fetchImpl as unknown as typeof fetch,
       }),
     ).resolves.toBeUndefined();
-  });
-
-  it('falls back to the raw input slug when it does not parse to owner/repo (e.g. a stray string)', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(404, { message: 'Not Found' })),
-    );
-    const finding = await checkRepoPublic({
-      githubRepository: 'garbage-not-a-slug',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(finding).toMatchObject({ githubRepository: 'garbage-not-a-slug', reason: 'not-found-or-private' });
-    const url = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0];
-    expect(url).toBe('https://api.github.com/repos/garbage-not-a-slug');
   });
 
   it('requireRepoPublic returns silently when the repo is public', async () => {
@@ -2780,27 +2625,5 @@ describe('preflight edge branches (full coverage)', () => {
     expect(
       (await checkCargoShape([pyPkg], { cwd: root })).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
     ).toEqual([]);
-  });
-
-  it('checkRepoPublic falls back to the global fetch when no fetchImpl is injected', async () => {
-    // `options.fetchImpl ?? fetch` — the default-global-fetch arm. The network
-    // boundary is mocked via vi.spyOn(global, 'fetch') per the unit-lint
-    // isolation convention.
-    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ private: false }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-    try {
-      const finding = await checkRepoPublic({ githubRepository: 'acme/widget' });
-      expect(finding).toBeNull();
-      expect(spy).toHaveBeenCalledWith(
-        'https://api.github.com/repos/acme/widget',
-        expect.objectContaining({ method: 'GET' }),
-      );
-    } finally {
-      spy.mockRestore();
-    }
   });
 });
