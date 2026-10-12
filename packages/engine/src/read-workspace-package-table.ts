@@ -24,12 +24,11 @@ export async function readWorkspacePackageTable(
       // Missing or malformed Cargo.toml at this level — skip it and keep
       // walking up. (Cargo surfaces a real parse error itself; we just
       // don't crash the workspace lookup on an unreadable ancestor.)
-      parsed = undefined;
     }
     if (parsed !== undefined && parsed.workspace !== undefined) {
       const ws = parsed.workspace as Record<string, unknown>;
       const wsPkg = ws.package;
-      if (wsPkg !== undefined && typeof wsPkg === 'object') {
+      if (typeof wsPkg === 'object') {
         return wsPkg as Record<string, unknown>;
       }
       // Workspace root found, but no shared metadata — stop walking.
