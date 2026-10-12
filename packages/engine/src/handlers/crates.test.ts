@@ -11,6 +11,14 @@ import { writeDependentVersionReqs } from '../write-dependent-version-reqs.js';
 
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import { crates, relativeOrSelf } from './crates.js';
+import { cratesIsPublished } from './crates-is-published.js';
+import { cratesLatestVersion } from './crates-latest-version.js';
+import { cratesTrustPosture } from './crates-trust-posture.js';
+import { cratesWriteVersion } from './crates-write-version.js';
+vi.mock('./crates-is-published.js', async () => await vi.importActual<typeof import('./crates-is-published.js')>('./crates-is-published.js'));
+vi.mock('./crates-latest-version.js', async () => await vi.importActual<typeof import('./crates-latest-version.js')>('./crates-latest-version.js'));
+vi.mock('./crates-trust-posture.js', async () => await vi.importActual<typeof import('./crates-trust-posture.js')>('./crates-trust-posture.js'));
+vi.mock('./crates-write-version.js', async () => await vi.importActual<typeof import('./crates-write-version.js')>('./crates-write-version.js'));
 import type { Ctx } from '../types.js';
 
 vi.mock('../utils/exec-capture.js');
@@ -1358,5 +1366,17 @@ describe('relativeOrSelf', () => {
     expect(relativeOrSelf('/repo/crate/Cargo.toml', '/repo/crate/Cargo.toml')).toBe(
       '/repo/crate/Cargo.toml',
     );
+  });
+});
+
+describe('crates handler wiring', () => {
+  it('delegates each read and write to its extracted function', () => {
+    expect(crates).toMatchObject({
+      kind: 'crates',
+      isPublished: cratesIsPublished,
+      latestVersion: cratesLatestVersion,
+      trustPosture: cratesTrustPosture,
+      writeVersion: cratesWriteVersion,
+    });
   });
 });

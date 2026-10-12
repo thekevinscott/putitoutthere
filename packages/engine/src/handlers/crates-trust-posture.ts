@@ -1,6 +1,6 @@
 import { TransientError, type Ctx, type TrustPosture } from '../types.js';
 import { USER_AGENT } from '../version.js';
-import { crateNameFor, REGISTRY } from './crate-name-for.js';
+import { crateNameFor, cratesRegistry } from './crate-name-for.js';
 
 /**
  * Trust posture for a published crate version (#414). crates.io's version
@@ -14,7 +14,7 @@ export async function cratesTrustPosture(
   _ctx: Ctx,
 ): Promise<TrustPosture> {
   const crateName = crateNameFor(pkg);
-  const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
+  const url = `${cratesRegistry()}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
   const res = await fetch(url, { method: 'GET', headers: { 'user-agent': USER_AGENT } });
   if (res.status === 200) {
     const body = (await res.json()) as { version?: { trustpub_data?: unknown } };

@@ -1,6 +1,6 @@
 import { TransientError, type Ctx } from '../types.js';
 import { USER_AGENT } from '../version.js';
-import { crateNameFor, REGISTRY } from './crate-name-for.js';
+import { crateNameFor, cratesRegistry } from './crate-name-for.js';
 
 /**
  * Latest published version of the crate, or null when it has never been
@@ -14,7 +14,7 @@ export async function cratesLatestVersion(
   _ctx: Ctx,
 ): Promise<string | null> {
   const crateName = crateNameFor(pkg);
-  const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}`;
+  const url = `${cratesRegistry()}/api/v1/crates/${encodeURIComponent(crateName)}`;
   const res = await fetch(url, { method: 'GET', headers: { 'user-agent': USER_AGENT } });
   if (res.status === 200) {
     const body = (await res.json()) as { crate?: { newest_version?: string } };

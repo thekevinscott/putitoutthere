@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { TransientError, type Ctx } from '../types.js';
-import { USER_AGENT } from '../version.js';
 import { cratesIsPublished } from './crates-is-published.js';
+
+vi.mock('../types.js', async () => await vi.importActual<typeof import('../types.js')>('../types.js'));
+vi.mock('../version.js', async () => ({
+  ...(await vi.importActual<typeof import('../version.js')>('../version.js')),
+  USER_AGENT: 'piot-test-agent',
+}));
 
 const ctx = {} as Ctx;
 const pkg = { name: 'pkg', crate: 'pkg rs' };
@@ -20,7 +25,7 @@ describe('cratesIsPublished', () => {
   it('GETs the encoded version endpoint and reads 200 as published', async () => {
     const fetchSpy = respond(200);
     await expect(cratesIsPublished(pkg, '1.0.0+b', ctx)).resolves.toBe(true);
-    expect(fetchSpy).toHaveBeenCalledWith(url, { method: 'GET', headers: { 'user-agent': USER_AGENT } });
+    expect(fetchSpy).toHaveBeenCalledWith(url, { method: 'GET', headers: { 'user-agent': 'piot-test-agent' } });
   });
 
   it('reads 404 as unpublished', async () => {

@@ -15,7 +15,7 @@ import { elideMiddle } from '../utils/elide-middle.js';
 import { scanDirtyOutsideManifest } from './scan-dirty-outside-manifest.js';
 import { ExecError } from '../utils/exec-error.js';
 import { matchFirstPublishTpRejection } from './match-first-publish-tp-rejection.js';
-import { crateNameFor, REGISTRY } from './crate-name-for.js';
+import { crateNameFor, cratesRegistry } from './crate-name-for.js';
 import { cratesIsPublished } from './crates-is-published.js';
 import { cratesLatestVersion } from './crates-latest-version.js';
 import { cratesTrustPosture } from './crates-trust-posture.js';
@@ -168,7 +168,7 @@ async function publishImpl(
     status: 'published',
     url: primaryOverride
       ? `${primaryOverride.replace(/\/$/, '')}/api/v1/crates/${crateNameFor(pkg)}/${version}`
-      : `${REGISTRY}/crates/${crateNameFor(pkg)}/${version}`,
+      : `${cratesRegistry()}/crates/${crateNameFor(pkg)}/${version}`,
   };
 }
 

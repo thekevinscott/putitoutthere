@@ -6,6 +6,8 @@ import { ExecError } from '../utils/exec-error.js';
 import { npmIsPublished } from './npm-is-published.js';
 
 vi.mock('../utils/exec-capture.js');
+vi.mock('../types.js', async () => await vi.importActual<typeof import('../types.js')>('../types.js'));
+vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 
 const execMock = vi.mocked(execCapture);
 const ctx = { cwd: '/repo' } as Ctx;

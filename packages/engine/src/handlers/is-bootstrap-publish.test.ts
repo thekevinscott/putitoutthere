@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { isBootstrapPublish } from './is-bootstrap-publish.js';
 
+vi.mock('../version.js', async () => ({
+  ...(await vi.importActual<typeof import('../version.js')>('../version.js')),
+  USER_AGENT: 'piot-test-agent',
+}));
+
 describe('isBootstrapPublish', () => {
   it('unscoped names hit /<name> on the registry', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
@@ -42,6 +47,8 @@ describe('isBootstrapPublish', () => {
     await isBootstrapPublish('demo-npm');
     const call = fetchSpy.mock.calls[0]!;
     const init = call[1] as RequestInit;
+    expect(init.method).toBe('GET');
+    expect(init.headers).toEqual({ 'user-agent': 'piot-test-agent' });
     expect(init.signal).toBeInstanceOf(AbortSignal);
     // AbortSignal.timeout signals aren't aborted at construction time.
     expect(init.signal!.aborted).toBe(false);

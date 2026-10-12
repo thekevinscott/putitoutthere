@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { TransientError, type Ctx } from '../types.js';
-import { USER_AGENT } from '../version.js';
 import { npmLatestVersion } from './npm-latest-version.js';
+
+vi.mock('../types.js', async () => await vi.importActual<typeof import('../types.js')>('../types.js'));
+vi.mock('../version.js', async () => ({
+  ...(await vi.importActual<typeof import('../version.js')>('../version.js')),
+  USER_AGENT: 'piot-test-agent',
+}));
 
 const ctx = {} as Ctx;
 
@@ -20,7 +25,7 @@ describe('npmLatestVersion', () => {
     await expect(npmLatestVersion({ name: 'x', path: '.', npm: '@s/pkg' }, ctx)).resolves.toBe('1.2.3');
     expect(fetchSpy).toHaveBeenCalledWith('https://registry.npmjs.org/@s%2Fpkg', {
       method: 'GET',
-      headers: { 'user-agent': USER_AGENT },
+      headers: { 'user-agent': 'piot-test-agent' },
     });
   });
 

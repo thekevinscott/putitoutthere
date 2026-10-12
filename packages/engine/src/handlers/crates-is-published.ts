@@ -1,6 +1,6 @@
 import { TransientError, type Ctx } from '../types.js';
 import { USER_AGENT } from '../version.js';
-import { crateNameFor, REGISTRY } from './crate-name-for.js';
+import { crateNameFor, cratesRegistry } from './crate-name-for.js';
 
 export async function cratesIsPublished(
   pkg: { name: string; crate?: string },
@@ -8,7 +8,7 @@ export async function cratesIsPublished(
   _ctx: Ctx,
 ): Promise<boolean> {
   const crateName = crateNameFor(pkg);
-  const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
+  const url = `${cratesRegistry()}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
   const res = await fetch(url, {
     method: 'GET',
     headers: { 'user-agent': USER_AGENT },

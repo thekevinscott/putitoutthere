@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { crateNameFor, REGISTRY } from './crate-name-for.js';
+import { crateNameFor, cratesRegistry } from './crate-name-for.js';
 
 describe('crateNameFor', () => {
   it('prefers the crate override', () => {
@@ -12,6 +12,6 @@ describe('crateNameFor', () => {
   });
 
   it('targets crates.io', () => {
-    expect(REGISTRY).toBe('https://crates.io');
+    expect(cratesRegistry()).toBe('https://crates.io');
   });
 });
