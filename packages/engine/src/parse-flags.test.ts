@@ -32,6 +32,22 @@ describe('parseFlags', () => {
     expect(flags.cwd).toBe('/tmp/abs-path-test');
   });
 
+  it('does not normalise an absolute --cwd', () => {
+    expect(parseFlags(['--cwd', '/w/../x/']).cwd).toBe('/w/../x/');
+  });
+
+  it('reads no index past the end of argv', () => {
+    const read: number[] = [];
+    const argv = new Proxy(['--json'], {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) {read.push(Number(key));}
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    parseFlags(argv);
+    expect(read).toEqual([0]);
+  });
+
   it('parses --release-packages', () => {
     const flags = parseFlags(['--release-packages', 'lib-core@minor, lib-js']);
     expect(flags.releasePackages).toBe('lib-core@minor, lib-js');

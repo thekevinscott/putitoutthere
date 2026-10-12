@@ -2,12 +2,6 @@ import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { checkPypiVersionSource } from './preflight.js';
 
-// User-facing recipe for hatch-vcs adoption. Embedded verbatim in the
-// thrown error so users have a copy/paste fix instead of a doc-search
-// target.
-const PYPI_VERSION_DOC_POINTER =
-  'https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions';
-
 /**
  * Throw with an actionable error when any pypi package's pyproject.toml
  * declares a static `[project].version` literal. Reports every failing
@@ -51,7 +45,7 @@ export async function requirePypiVersionSource(packages: readonly Package[]): Pr
     '  source = "vcs"',
     '',
     'setuptools-scm and the maturin (Cargo.toml-driven) path are equally',
-    `valid — see ${PYPI_VERSION_DOC_POINTER}.`,
+    'valid — see https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions.',
   );
   throw new Error(lines.join('\n'));
 }

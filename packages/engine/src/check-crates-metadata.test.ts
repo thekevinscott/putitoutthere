@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { parse } from 'smol-toml';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkCratesMetadata } from './check-crates-metadata.js';
@@ -10,11 +11,16 @@ import { nonEmptyString, readWorkspacePackageTable, resolveInherited } from './p
 vi.mock('node:fs/promises');
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('./preflight.js');
+vi.mock('smol-toml', async () => {
+  const actual = await vi.importActual<typeof import('smol-toml')>('smol-toml');
+  return { ...actual, parse: vi.fn(actual.parse) };
+});
 
 const readFileMock = vi.mocked(readFile);
 const wsTableMock = vi.mocked(readWorkspacePackageTable);
 const resolveMock = vi.mocked(resolveInherited);
 const nonEmptyMock = vi.mocked(nonEmptyString);
+const parseMock = vi.mocked(parse);
 
 const cargoTomlPath = join('/repo/crate', 'Cargo.toml');
 
@@ -28,6 +34,7 @@ function manifest(text: string): void {
 
 beforeEach(() => {
   readFileMock.mockReset();
+  parseMock.mockClear();
   wsTableMock.mockReset().mockResolvedValue(undefined);
   resolveMock.mockReset().mockImplementation((value) => value);
   nonEmptyMock.mockReset().mockImplementation((v) => typeof v === 'string' && v.length > 0);
@@ -49,6 +56,7 @@ describe('checkCratesMetadata', () => {
   it('skips a crate whose Cargo.toml cannot be read', async () => {
     readFileMock.mockRejectedValue(new Error('ENOENT'));
     await expect(checkCratesMetadata([crate()])).resolves.toEqual([]);
+    expect(parseMock).not.toHaveBeenCalled();
     expect(wsTableMock).not.toHaveBeenCalled();
   });
 
