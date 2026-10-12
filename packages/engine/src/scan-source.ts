@@ -1,12 +1,5 @@
 export type EnvSource = Record<string, string | undefined>;
 
-/**
- * Credential-shaped env-var name matcher. Word boundaries (`_` or string
- * edges) keep false positives out — `KEYCLOAK_URL`, `TOKENIZER_MODEL`,
- * `PUBLIC_KEY_PATH`, `PASSTHROUGH`, `PATS_COUNT` must not match (#196).
- * `PASS` is deliberately absent; `PASSWORD` and `PAT` cover real credentials.
- */
-const SECRET_KEY = /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PAT)(?:_|$)|(?:^|_)[A-Z0-9]*KEY$/i;
 const MIN_OPAQUE_LEN = 8;
 
 /**
@@ -38,6 +31,13 @@ export function scanSource(src: EnvSource): readonly string[] {
   const cached = SCAN_CACHE.get(src);
   if (cached !== undefined && cached.sig === sig) {return cached.values;}
 
+  /**
+   * Credential-shaped env-var name matcher. Word boundaries (`_` or string
+   * edges) keep false positives out — `KEYCLOAK_URL`, `TOKENIZER_MODEL`,
+   * `PUBLIC_KEY_PATH`, `PASSTHROUGH`, `PATS_COUNT` must not match (#196).
+   * `PASS` is deliberately absent; `PASSWORD` and `PAT` cover real credentials.
+   */
+  const SECRET_KEY = /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PAT)(?:_|$)|(?:^|_)[A-Z0-9]*KEY$/i;
   const values: string[] = [];
   for (const k of keys) {
     const v = src[k];
