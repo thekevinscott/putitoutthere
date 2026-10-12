@@ -18,6 +18,7 @@ import { rewriteOptionalDependencies } from './rewrite-optional-dependencies.js'
 import { synthesizePlatformPackage } from './synthesize-platform-package.js';
 
 export { looksLikePublishOverRace } from './looks-like-publish-over-race.js';
+export { toRustTriple } from './to-rust-triple.js';
 
 export type NpmBuildMode = 'napi' | 'bundled-cli';
 

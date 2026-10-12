@@ -52,4 +52,16 @@ describe('resolvePlatformName', () => {
       }),
     ).toBe('demo-bundled-cli-linux-x64-gnu');
   });
+
+  it('treats a name as scoped only when the whole name is @scope/base', () => {
+    const vars = { triple: 'linux-x64-gnu', mode: 'napi' } as const;
+    expect(resolvePlatformName('{scope}|{base}', { ...vars, name: 'demo@acme/cli' })).toBe('|demo@acme/cli');
+    expect(resolvePlatformName('{scope}|{base}', { ...vars, name: '@acme/cli\nx' })).toBe('|@acme/cli\nx');
+  });
+
+  it('throws on an unknown placeholder', () => {
+    expect(() =>
+      resolvePlatformName('{name}-{version}', { name: 'demo', triple: 'linux-x64-gnu', mode: 'napi' }),
+    ).toThrow('unknown placeholder {version} in name template');
+  });
 });

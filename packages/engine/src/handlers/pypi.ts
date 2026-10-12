@@ -9,7 +9,7 @@
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { pypiIsPublished } from './pypi-is-published.js';
 import { pypiLatestVersion } from './pypi-latest-version.js';
-import { PYPI_REGISTRY, pypiNameFor } from './pypi-name-for.js';
+import { pypiNameFor } from './pypi-name-for.js';
 import { pypiTrustPosture } from './pypi-trust-posture.js';
 import { pypiWriteVersion } from './pypi-write-version.js';
 
@@ -39,7 +39,7 @@ async function publishImpl(
 
   return {
     status: 'delegated',
-    url: `${PYPI_REGISTRY}/project/${pypiNameFor(pkg)}/${version}/`,
+    url: `https://pypi.org/project/${pypiNameFor(pkg)}/${version}/`,
   };
 }
 

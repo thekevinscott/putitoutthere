@@ -27,7 +27,7 @@ describe('pypiIsPublished', () => {
     expect(await pypiIsPublished(basePkg(), '0.1.0', makeCtx())).toBe(true);
     expect(fetchSpy).toHaveBeenCalledWith(
       'https://pypi.org/pypi/demo-pkg/0.1.0/json',
-      expect.any(Object) as object,
+      { method: 'GET', headers: { 'user-agent': expect.stringMatching(/^putitoutthere\//) as string } },
     );
     fetchSpy.mockRestore();
   });

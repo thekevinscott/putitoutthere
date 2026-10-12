@@ -19,15 +19,18 @@ import {
   platformArtifactName,
   publishPlatforms,
   targetToOsCpu,
+  toRustTriple,
   type PlatformPkg,
 } from './npm-platform.js';
 import { looksLikePublishOverRace as looksLikePublishOverRaceImpl } from './looks-like-publish-over-race.js';
+import { toRustTriple as toRustTripleImpl } from './to-rust-triple.js';
 import type { Ctx } from '../types.js';
 import { awaitPlatformsVisible } from './await-platforms-visible.js';
 
 vi.mock('./looks-like-publish-over-race.js', async () => await vi.importActual<typeof import('./looks-like-publish-over-race.js')>('./looks-like-publish-over-race.js'));
 vi.mock('../utils/exec-capture.js');
 vi.mock('./await-platforms-visible.js');
+vi.mock('./to-rust-triple.js');
 vi.mock('./resolve-platform-name.js', async () => await vi.importActual<typeof import('./resolve-platform-name.js')>('./resolve-platform-name.js'));
 vi.mock('./rewrite-optional-dependencies.js', async () => await vi.importActual<typeof import('./rewrite-optional-dependencies.js')>('./rewrite-optional-dependencies.js'));
 vi.mock('node:fs/promises');
@@ -1080,6 +1083,12 @@ describe('publishPlatforms: staging cleanup is best-effort (#581)', () => {
 describe('looksLikePublishOverRace re-export', () => {
   it('is the same function npm.ts reaches through npm-platform', () => {
     expect(looksLikePublishOverRace).toBe(looksLikePublishOverRaceImpl);
+  });
+});
+
+describe('toRustTriple re-export', () => {
+  it('is the same function plan.ts reaches through npm-platform', () => {
+    expect(toRustTriple).toBe(toRustTripleImpl);
   });
 });
 

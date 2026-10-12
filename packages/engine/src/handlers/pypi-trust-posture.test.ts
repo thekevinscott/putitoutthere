@@ -19,6 +19,8 @@ function basePkg(over: Partial<{ name: string; pypi?: string }> = {}): { name: s
   return { name: 'demo-python', pypi: 'demo-pkg', ...over };
 }
 
+const GET = { method: 'GET', headers: { 'user-agent': expect.stringMatching(/^putitoutthere\//) as string } };
+
 describe('pypiTrustPosture', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -50,8 +52,22 @@ describe('pypiTrustPosture', () => {
     expect(await pypiTrustPosture(basePkg(), '0.1.0', makeCtx())).toBe('token');
   });
 
+  it('reads the version json, then the first file\'s provenance', async () => {
+    mockPypi({ urls: [{ filename: 'demo 0.1.0.tar.gz' }, { filename: 'other.whl' }], provStatus: 200 });
+    await pypiTrustPosture(basePkg(), '0.1.0', makeCtx());
+    expect(vi.mocked(fetch).mock.calls).toEqual([
+      ['https://pypi.org/pypi/demo-pkg/0.1.0/json', GET],
+      ['https://pypi.org/integrity/demo-pkg/0.1.0/demo%200.1.0.tar.gz/provenance', GET],
+    ]);
+  });
+
   it('token when the published version has no files', async () => {
-    mockPypi({ urls: [] });
+    mockPypi({ urls: [], provStatus: 200 });
+    expect(await pypiTrustPosture(basePkg(), '0.1.0', makeCtx())).toBe('token');
+  });
+
+  it('token when the version json lists no urls at all', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
     expect(await pypiTrustPosture(basePkg(), '0.1.0', makeCtx())).toBe('token');
   });
 

@@ -117,6 +117,28 @@ describe('pypiWriteVersion', () => {
     expect(readMock).toHaveBeenCalledWith(expect.stringContaining('pyproject.toml'), 'utf8');
   });
 
+  it('logs how to hand the planned version to the build backend', async () => {
+    readMock.mockResolvedValue(['[project]', 'dynamic = ["version"]', ''].join('\n'));
+    const info = vi.fn();
+    await pypiWriteVersion(
+      { ...basePkg(), path: dir },
+      '0.2.0',
+      makeCtx({ log: { debug: () => {}, info, warn: () => {}, error: () => {} } }),
+    );
+    expect(info.mock.calls).toEqual([
+      [
+        [
+          'pypi: demo-python: detected dynamic version; nothing to rewrite in pyproject.toml.',
+          '  Planned version: 0.2.0. Pass it to the build backend via one of:',
+          '    - SETUPTOOLS_SCM_PRETEND_VERSION=0.2.0  (hatch-vcs / setuptools-scm)',
+          '    - Update [package].version in Cargo.toml  (maturin reading Cargo)',
+          '  Set the env var on the build job, before `python -m build` / `maturin build` runs.',
+          '  See https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions',
+        ].join('\n'),
+      ],
+    ]);
+  });
+
   it('emits a bare "pypi" label in the dynamic-version hint when the package has no name', async () => {
     // The guidance line is prefixed `${pkg.name ? `pypi: ${pkg.name}` : 'pypi'}`.
     // A CLI-direct `write-version` on a nameless package (name is optional on

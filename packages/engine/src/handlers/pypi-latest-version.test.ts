@@ -27,7 +27,7 @@ describe('pypiLatestVersion', () => {
     expect(await pypiLatestVersion(basePkg(), makeCtx())).toBe('3.1.0');
     expect(fetchSpy).toHaveBeenCalledWith(
       'https://pypi.org/pypi/demo-pkg/json',
-      expect.objectContaining({ method: 'GET' }) as object,
+      { method: 'GET', headers: { 'user-agent': expect.stringMatching(/^putitoutthere\//) as string } },
     );
     fetchSpy.mockRestore();
   });
@@ -35,6 +35,14 @@ describe('pypiLatestVersion', () => {
   it('returns null when the 200 body carries no info.version', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ info: {} }), { status: 200 }),
+    );
+    expect(await pypiLatestVersion(basePkg(), makeCtx())).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('returns null when the 200 body carries no info', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 200 }),
     );
     expect(await pypiLatestVersion(basePkg(), makeCtx())).toBeNull();
     fetchSpy.mockRestore();

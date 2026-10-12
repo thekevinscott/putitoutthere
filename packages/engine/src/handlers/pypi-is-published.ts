@@ -1,7 +1,7 @@
 import type { Ctx } from '../types.js';
 import { TransientError } from '../types.js';
 import { USER_AGENT } from '../version.js';
-import { PYPI_REGISTRY, pypiNameFor } from './pypi-name-for.js';
+import { pypiNameFor } from './pypi-name-for.js';
 
 export async function pypiIsPublished(
   pkg: { name: string; pypi?: string },
@@ -9,7 +9,7 @@ export async function pypiIsPublished(
   _ctx: Ctx,
 ): Promise<boolean> {
   const name = pypiNameFor(pkg);
-  const url = `${PYPI_REGISTRY}/pypi/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`;
+  const url = `https://pypi.org/pypi/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`;
   const res = await fetch(url, {
     method: 'GET',
     headers: { 'user-agent': USER_AGENT },

@@ -14,9 +14,9 @@ import {
   assertTripleSupported,
   normalizeBuild,
   platformArtifactName,
+  toRustTriple,
   type NpmBuildField,
 } from './handlers/npm-platform.js';
-import { toRustTriple } from './handlers/to-rust-triple.js';
 import { manylinuxForTriple } from './manylinux-for-triple.js';
 import { resolvePythonVersions } from './python-versions.js';
 import { isVersionIndependentWheel } from './wheel-abi.js';

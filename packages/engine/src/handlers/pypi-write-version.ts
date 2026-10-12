@@ -7,14 +7,13 @@ import { ErrorCodes } from '../error-codes.js';
 import type { Ctx } from '../types.js';
 import { toError } from '../to-error.js';
 
-const DYNAMIC_VERSION_DOC_POINTER =
-  'https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions';
-
 export async function pypiWriteVersion(
   pkg: { name?: string; path: string },
   version: string,
   ctx: Ctx,
 ): Promise<string[]> {
+  const DYNAMIC_VERSION_DOC_POINTER =
+    'https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions';
   const pyProjectPath = join(pkg.path, 'pyproject.toml');
   let original: string;
   try {
@@ -31,7 +30,7 @@ export async function pypiWriteVersion(
   } catch (err) {
     throw new Error(`pyproject.toml: failed to parse ${pyProjectPath}: ${toError(err).message}`, { cause: err });
   }
-  const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } })?.project;
+  const project = (parsed as { project?: { version?: unknown; dynamic?: unknown } }).project;
   if (!project) {
     throw new Error(
       `pyproject.toml has no [project] table -- declare [project].dynamic = ["version"] with hatch-vcs (or setuptools-scm / maturin Cargo.toml). See ${DYNAMIC_VERSION_DOC_POINTER}.`,
