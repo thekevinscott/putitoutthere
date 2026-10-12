@@ -40,6 +40,11 @@ describe('verifyRow', () => {
     expect(pathExistsMock).not.toHaveBeenCalled();
   });
 
+  it('checks a noarch row of any kind but npm', async () => {
+    await verifyRow(row({ target: 'noarch' }), 'artifacts');
+    expect(pathExistsMock).toHaveBeenCalledWith(dir);
+  });
+
   it('checks npm rows that are not noarch', async () => {
     await verifyRow(row({ kind: 'npm', target: 'main' }), 'artifacts');
     expect(pathExistsMock).toHaveBeenCalledWith(dir);

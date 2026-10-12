@@ -1,7 +1,6 @@
 // #dirsql: must mirror ALLOWED_NAME_VARIABLES in src/handlers/npm-platform.ts.
 // `{version}` is intentionally excluded — see resolvePlatformName.
 const NPM_NAME_TEMPLATE_VARS = ['name', 'scope', 'base', 'triple', 'mode'] as const;
-const NPM_NAME_TEMPLATE_PLACEHOLDER_RE = /\{([^}]+)\}/g;
 
 export function validateNameTemplate(template: string): string | null {
   if (template.length === 0) {return 'name template must not be empty';}
@@ -10,7 +9,7 @@ export function validateNameTemplate(template: string): string | null {
   }
   const allowed = new Set<string>(NPM_NAME_TEMPLATE_VARS);
   const unknown: string[] = [];
-  for (const match of template.matchAll(NPM_NAME_TEMPLATE_PLACEHOLDER_RE)) {
+  for (const match of template.matchAll(/\{([^}]+)\}/g)) {
     const v = match[1]!;
     if (!allowed.has(v)) {unknown.push(v);}
   }
