@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { checkPypiVersionSource } from './preflight.js';
+import { checkPypiVersionSource } from './check-pypi-version-source.js';
 import { requirePypiVersionSource } from './require-pypi-version-source.js';
 
-vi.mock('./preflight.js');
+vi.mock('./check-pypi-version-source.js');
 
 const checkMock = vi.mocked(checkPypiVersionSource);
 const packages = [{ name: 'py', kind: 'pypi' }] as unknown as readonly Package[];

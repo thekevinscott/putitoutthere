@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { checkProvenanceMetadata } from './preflight.js';
+import { checkProvenanceMetadata } from './check-provenance-metadata.js';
 import { requireProvenanceMetadata } from './require-provenance-metadata.js';
 
-vi.mock('./preflight.js');
+vi.mock('./check-provenance-metadata.js');
 
 const checkMock = vi.mocked(checkProvenanceMetadata);
 const packages = [{ name: 'web', kind: 'npm' }] as unknown as readonly Package[];

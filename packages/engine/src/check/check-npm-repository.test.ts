@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { checkProvenanceMetadata } from '../preflight.js';
+import { checkProvenanceMetadata } from '../check-provenance-metadata.js';
 import { checkNpmRepository } from './check-npm-repository.js';
 import type { CheckFinding } from '../check.js';
 
-vi.mock('../preflight.js');
+vi.mock('../check-provenance-metadata.js');
 
 import type { Package } from '../config.js';
 

@@ -18,10 +18,10 @@ import {
   requireCargoShape,
   requirePackageJsonShape,
   requirePyprojectShape,
-  requireRepoPublic,
 } from './preflight.js';
 import { requireCratesMetadata } from './require-crates-metadata.js';
 import { requireProvenanceMetadata } from './require-provenance-metadata.js';
+import { requireRepoPublic } from './require-repo-public.js';
 import { requirePypiVersionSource } from './require-pypi-version-source.js';
 import { requireRepoUrlMatch } from './require-repo-url-match.js';
 import { attachPublishProgress } from './publish-progress.js';
@@ -36,6 +36,7 @@ vi.mock('./preflight.js');
 vi.mock('./require-crates-metadata.js');
 vi.mock('./require-provenance-metadata.js');
 vi.mock('./require-pypi-version-source.js');
+vi.mock('./require-repo-public.js');
 vi.mock('./require-repo-url-match.js');
 vi.mock('./completeness.js');
 vi.mock('./normalize-artifacts.js');

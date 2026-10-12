@@ -11,17 +11,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkAuth,
   checkCargoShape,
-  checkPackageJsonShape,
-  checkProvenanceMetadata,
-  checkPypiVersionSource,
   checkPyprojectShape,
   checkRepoUrlMatch,
   requireAuth,
   requireCargoShape,
   requirePackageJsonShape,
   requirePyprojectShape,
-  readWorkspacePackageTable,
-  requireRepoPublic,
   resolveInherited,
   nonEmptyString,
   type AuthStatus,
@@ -339,97 +334,6 @@ describe('requireAuth', () => {
   });
 });
 
-/* ----------------------- npm provenance metadata ----------------------- */
-
-describe('checkProvenanceMetadata (#280)', () => {
-  const dir = '/vfs/prov';
-
-  function npmPkg(name: string, path: string): Package {
-    return pkg('npm', { name, path });
-  }
-
-  function writePkgJson(path: string, body: unknown): void {
-    setFile(j(path, 'package.json'), JSON.stringify(body));
-  }
-
-  it('passes when an npm package has a non-empty repository.url object', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, {
-      name: 'a',
-      version: '0.0.0',
-      repository: { type: 'git', url: 'git+https://github.com/x/y.git' },
-    });
-    expect(await checkProvenanceMetadata([npmPkg('a', p)])).toEqual([]);
-    // Pin the manifest read's encoding so a StringLiteral mutant dropping
-    // 'utf8' from readFile(pkgJsonPath, 'utf8') (preflight.ts:148) is killed.
-    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
-      expect.stringContaining('package.json'),
-      'utf8',
-    );
-  });
-
-  it('passes when repository is the legacy non-empty string form', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, {
-      name: 'a',
-      version: '0.0.0',
-      repository: 'git+https://github.com/x/y.git',
-    });
-    expect(await checkProvenanceMetadata([npmPkg('a', p)])).toEqual([]);
-  });
-
-  it('fails when repository is missing entirely', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { name: 'a', version: '0.0.0' });
-    const findings = await checkProvenanceMetadata([npmPkg('a', p)]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ package: 'a', reason: 'empty' });
-  });
-
-  it('fails when repository is an empty string', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { name: 'a', version: '0.0.0', repository: '' });
-    expect(await checkProvenanceMetadata([npmPkg('a', p)])).toHaveLength(1);
-  });
-
-  it('fails when repository is an object without a url', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { name: 'a', version: '0.0.0', repository: { type: 'git' } });
-    expect(await checkProvenanceMetadata([npmPkg('a', p)])).toHaveLength(1);
-  });
-
-  it('fails when repository.url is whitespace', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, {
-      name: 'a',
-      version: '0.0.0',
-      repository: { type: 'git', url: '   ' },
-    });
-    expect(await checkProvenanceMetadata([npmPkg('a', p)])).toHaveLength(1);
-  });
-
-  it('reports a missing package.json as a finding rather than crashing', async () => {
-    const p = j(dir, 'does-not-exist');
-    const findings = await checkProvenanceMetadata([npmPkg('a', p)]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]!.reason).toBe('missing');
-  });
-
-  it('skips non-npm packages entirely', async () => {
-    expect(await checkProvenanceMetadata([pkg('crates'), pkg('pypi')])).toEqual([]);
-  });
-
-  it('reports every failing npm package, not just the first', async () => {
-    const a = j(dir, 'a');
-    const b = j(dir, 'b');
-    writePkgJson(a, { name: 'a', version: '0.0.0' });
-    writePkgJson(b, { name: 'b', version: '0.0.0' });
-    const findings = await checkProvenanceMetadata([npmPkg('a', a), npmPkg('b', b)]);
-    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
-  });
-
-});
-
 /* ----------------------- crates.io required metadata ----------------------- */
 
 describe('nonEmptyString', () => {
@@ -461,46 +365,6 @@ describe('resolveInherited (#328)', () => {
     expect(resolveInherited('Apache-2.0', ws, 'license')).toBe('Apache-2.0');
     expect(resolveInherited(null, ws, 'license')).toBeNull();
     expect(resolveInherited(table, ws, 'license')).toBe(table);
-  });
-});
-
-describe('readWorkspacePackageTable (#328)', () => {
-  const dir = '/vfs/crates-meta';
-
-  function writeCargoToml(path: string, ...lines: string[]): void {
-    setFile(j(path, 'Cargo.toml'), lines.join('\n') + '\n');
-  }
-
-  it('returns the nearest workspace root\'s [workspace.package] table', async () => {
-    writeCargoToml(dir, '[workspace]', 'members = ["a"]', '', '[workspace.package]', 'license = "MIT"');
-    await expect(readWorkspacePackageTable(j(dir, 'a'))).resolves.toEqual({ license: 'MIT' });
-    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
-      expect.stringMatching(/crates-meta[/\\]Cargo\.toml/),
-      'utf8',
-    );
-  });
-
-  it('walks past missing and malformed ancestors to reach the workspace root', async () => {
-    writeCargoToml(dir, '[workspace]', '[workspace.package]', 'description = "Shared."');
-    writeCargoToml(j(dir, 'nested'), '[[broken');
-    await expect(readWorkspacePackageTable(j(dir, 'nested', 'deeper', 'a'))).resolves.toEqual({
-      description: 'Shared.',
-    });
-  });
-
-  it('stops at a workspace root that declares no [workspace.package] table', async () => {
-    writeCargoToml('/vfs', '[workspace]', '[workspace.package]', 'license = "MIT"');
-    writeCargoToml(dir, '[workspace]', 'members = ["a"]');
-    await expect(readWorkspacePackageTable(j(dir, 'a'))).resolves.toBeUndefined();
-  });
-
-  it('returns undefined when no ancestor is a workspace root', async () => {
-    writeCargoToml(dir, '[package]', 'name = "not-a-workspace"');
-    await expect(readWorkspacePackageTable(j(dir, 'a'))).resolves.toBeUndefined();
-  });
-
-  it('terminates on a relative crate path with no workspace ancestor', async () => {
-    await expect(readWorkspacePackageTable('rel-crate')).resolves.toBeUndefined();
   });
 });
 
@@ -952,39 +816,6 @@ include = [{ path = "a/bin/*", format = "wheel" }]
   });
 });
 
-/* ----------------------- pypi version source (#333) ----------------------- */
-
-describe('checkPypiVersionSource (#333)', () => {
-  const dir = '/vfs/pypi-version';
-
-  function pypiPkg(name: string, path: string): Package {
-    return pkg('pypi', { name, path });
-  }
-
-  function writePyproject(path: string, body: string): void {
-    setFile(j(path, 'pyproject.toml'), body);
-  }
-
-  it('accepts a dynamic-version pyproject (no finding, does not throw)', async () => {
-    const p = j(dir, 'a');
-    writePyproject(p, '[project]\nname = "a"\ndynamic = ["version"]\n');
-    expect(await checkPypiVersionSource([pypiPkg('a', p)])).toEqual([]);
-    // Pin the manifest read's encoding so a StringLiteral mutant dropping
-    // 'utf8' from readFile(pyprojectPath, 'utf8') (preflight.ts:353) is killed.
-    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
-      expect.stringContaining('pyproject.toml'),
-      'utf8',
-    );
-  });
-
-  it('flags a static [project].version literal', async () => {
-    const p = j(dir, 'b');
-    writePyproject(p, '[project]\nname = "b"\nversion = "1.0.0"\n');
-    const findings = await checkPypiVersionSource([pypiPkg('b', p)]);
-    expect(findings).toHaveLength(1);
-  });
-});
-
 /* ----------------------- Cargo.toml shape (#301) ----------------------- */
 
 describe('checkCargoShape / requireCargoShape (#301)', () => {
@@ -1305,7 +1136,7 @@ default = []
 
 /* ----------------------- package.json shape (npm) ----------------------- */
 
-describe('checkPackageJsonShape / requirePackageJsonShape', () => {
+describe('requirePackageJsonShape', () => {
   const dir = '/vfs/pkgjson';
 
   function npmPkg(name: string, path: string, overrides: Partial<Package> = {}): Package {
@@ -1315,81 +1146,6 @@ describe('checkPackageJsonShape / requirePackageJsonShape', () => {
   function writePkgJson(path: string, body: unknown): void {
     setFile(j(path, 'package.json'), JSON.stringify(body));
   }
-
-  it('passes when package.json name matches the configured name', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { name: 'a', version: '0.0.0' });
-    expect(await checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
-    // Pin the manifest read's encoding so a StringLiteral mutant dropping
-    // 'utf8' from readFile(packageJsonPath, 'utf8') (preflight.ts:1338) is killed.
-    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
-      expect.stringContaining('package.json'),
-      'utf8',
-    );
-    await expect(requirePackageJsonShape([npmPkg('a', p)])).resolves.toBeUndefined();
-  });
-
-  it('flags PIOT_NPM_NAME_MISMATCH when package.json name differs from configured name', async () => {
-    const p = j(dir, 'foo');
-    writePkgJson(p, { name: 'foo', version: '0.0.0' });
-    const findings = await checkPackageJsonShape([npmPkg('js/foo', p)]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]!.code).toBe('PIOT_NPM_NAME_MISMATCH');
-    expect(findings[0]!.detail).toContain('foo');
-    expect(findings[0]!.detail).toContain('"js/foo"');
-  });
-
-  it('honors the `npm` override when checking package.json name', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { name: 'pkg-name', version: '0.0.0' });
-    const pkgs = [npmPkg('js/foo', p, { npm: 'pkg-name' })];
-    expect(await checkPackageJsonShape(pkgs)).toEqual([]);
-  });
-
-  it('matches a scoped npm name set via the override', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { name: '@scope/foo', version: '0.0.0' });
-    const pkgs = [npmPkg('js/foo', p, { npm: '@scope/foo' })];
-    expect(await checkPackageJsonShape(pkgs)).toEqual([]);
-  });
-
-  it('flags a scoped-name mismatch when the override disagrees with package.json', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { name: '@scope/foo', version: '0.0.0' });
-    const findings = await checkPackageJsonShape([npmPkg('foo', p, { npm: '@scope/bar' })]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]!.code).toBe('PIOT_NPM_NAME_MISMATCH');
-  });
-
-  it('skips a missing package.json (a different failure surface)', async () => {
-    const p = j(dir, 'does-not-exist');
-    expect(await checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
-  });
-
-  it('skips a malformed package.json (build tooling surfaces those)', async () => {
-    const p = j(dir, 'a');
-    setFile(j(p, 'package.json'), '{ not json');
-    expect(await checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
-  });
-
-  it('skips a package.json with no name field', async () => {
-    const p = j(dir, 'a');
-    writePkgJson(p, { version: '0.0.0' });
-    expect(await checkPackageJsonShape([npmPkg('a', p)])).toEqual([]);
-  });
-
-  it('skips non-npm packages entirely', async () => {
-    expect(await checkPackageJsonShape([pkg('crates'), pkg('pypi')])).toEqual([]);
-  });
-
-  it('reports every failing npm package, not just the first', async () => {
-    const a = j(dir, 'a');
-    const b = j(dir, 'b');
-    writePkgJson(a, { name: 'wrong-a', version: '0.0.0' });
-    writePkgJson(b, { name: 'wrong-b', version: '0.0.0' });
-    const findings = await checkPackageJsonShape([npmPkg('a', a), npmPkg('b', b)]);
-    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
-  });
 
   it('requirePackageJsonShape throws naming the failing package + the error code', async () => {
     const p = j(dir, 'foo');
@@ -1772,159 +1528,6 @@ Homepage = "https://github.com/wrong/repo"
 
 });
 
-describe('requireRepoPublic — repo must not be private', () => {
-  function jsonResponse(status: number, body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { 'content-type': 'application/json' },
-    });
-  }
-
-  it('requireRepoPublic throws with PIOT_REPO_PRIVATE when the repo is private', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: true })),
-    );
-    await expect(
-      requireRepoPublic({
-        githubRepository: 'acme/widget',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      }),
-    ).rejects.toThrow(/PIOT_REPO_PRIVATE/);
-  });
-
-  it('requireRepoPublic error message names the owner/repo and explains why private repos are rejected', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: true })),
-    );
-    try {
-      await requireRepoPublic({
-        githubRepository: 'acme/widget',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      });
-      throw new Error('expected requireRepoPublic to throw');
-    } catch (err) {
-      const msg = (err as Error).message;
-      expect(msg).toContain('acme/widget');
-      expect(msg).toMatch(/provenance|private/i);
-    }
-  });
-
-  it('requireRepoPublic error message distinguishes the 404 path from the explicit-private path', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(404, { message: 'Not Found' })),
-    );
-    try {
-      await requireRepoPublic({
-        githubRepository: 'acme/widget',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      });
-      throw new Error('expected requireRepoPublic to throw');
-    } catch (err) {
-      const msg = (err as Error).message;
-      expect(msg).toContain('PIOT_REPO_PRIVATE');
-      expect(msg).toMatch(/404|private and the configured token lacks access|does not exist/);
-    }
-  });
-
-  it('requireRepoPublic does not throw when the API call is rate-limited (403)', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(403, { message: 'API rate limit exceeded' })),
-    );
-    await expect(
-      requireRepoPublic({
-        githubRepository: 'acme/widget',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      }),
-    ).resolves.toBeUndefined();
-  });
-
-  it('requireRepoPublic returns silently when the repo is public', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(
-      jsonResponse(200, { private: false })),
-    );
-    await expect(
-      requireRepoPublic({
-        githubRepository: 'acme/widget',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      }),
-    ).resolves.toBeUndefined();
-  });
-});
-
-/* ----------------------- pypi dynamic version source ----------------------- */
-
-describe('checkPypiVersionSource', () => {
-  const dir = '/vfs/pypi-version';
-
-  function pypiPkg(name: string, path: string): Package {
-    return pkg('pypi', { name, path });
-  }
-  function writePyproject(path: string, body: string): void {
-    setFile(j(path, 'pyproject.toml'), body);
-  }
-
-  it('flags a static [project].version literal', async () => {
-    const p = j(dir, 'a');
-    writePyproject(p, `[project]\nname = "a"\nversion = "1.2.3"\n`);
-    const findings = (await checkPypiVersionSource([pypiPkg('a', p)]));
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ package: 'a' });
-    expect(findings[0]!.pyprojectPath).toMatch(/[/\\]a[/\\]pyproject\.toml/);
-  });
-
-  it('passes when [project].dynamic includes "version"', async () => {
-    const p = j(dir, 'a');
-    writePyproject(p, `[project]\nname = "a"\ndynamic = ["version"]\n`);
-    expect((await checkPypiVersionSource([pypiPkg('a', p)]))).toEqual([]);
-  });
-
-  it('flags a static version even when dynamic lists other fields (not version)', async () => {
-    // declaresDynamicVersion: dynamic is an array but does not include
-    // "version", so the static literal is still flagged.
-    const p = j(dir, 'a');
-    writePyproject(
-      p,
-      `[project]\nname = "a"\nversion = "1.0.0"\ndynamic = ["classifiers"]\n`,
-    );
-    expect((await checkPypiVersionSource([pypiPkg('a', p)]))).toHaveLength(1);
-  });
-
-  it('passes when [project] declares neither a static version nor dynamic', async () => {
-    // No `version` string at all — "missing version entirely" is a
-    // different check's concern, so this one stays silent.
-    const p = j(dir, 'a');
-    writePyproject(p, `[project]\nname = "a"\n`);
-    expect((await checkPypiVersionSource([pypiPkg('a', p)]))).toEqual([]);
-  });
-
-  it('skips a pyproject with no [project] table', async () => {
-    const p = j(dir, 'a');
-    writePyproject(p, `[build-system]\nbuild-backend = "setuptools.build_meta"\n`);
-    expect((await checkPypiVersionSource([pypiPkg('a', p)]))).toEqual([]);
-  });
-
-  it('skips non-pypi packages entirely', async () => {
-    expect((await checkPypiVersionSource([pkg('crates'), pkg('npm')]))).toEqual([]);
-  });
-
-  it('skips a missing or malformed pyproject.toml', async () => {
-    const missing = j(dir, 'missing');
-    expect((await checkPypiVersionSource([pypiPkg('a', missing)]))).toEqual([]);
-    const m = j(dir, 'malformed');
-    writePyproject(m, '[[broken\nnot toml');
-    expect((await checkPypiVersionSource([pypiPkg('a', m)]))).toEqual([]);
-  });
-
-  it('reports every failing pypi package, not just the first', async () => {
-    const a = j(dir, 'a');
-    const b = j(dir, 'b');
-    writePyproject(a, `[project]\nname = "a"\nversion = "1.0.0"\n`);
-    writePyproject(b, `[project]\nname = "b"\nversion = "2.0.0"\n`);
-    const findings = (await checkPypiVersionSource([pypiPkg('a', a), pypiPkg('b', b)]));
-    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
-  });
-});
-
 /* ----------------------- edge-branch coverage ----------------------- */
 
 describe('preflight edge branches (full coverage)', () => {
@@ -1936,12 +1539,6 @@ describe('preflight edge branches (full coverage)', () => {
   function writePyproject(path: string, body: string): void {
     setFile(j(path, 'pyproject.toml'), body);
   }
-
-  it('checkProvenanceMetadata skips a malformed package.json (parse-error arm)', async () => {
-    const p = j(dir, 'prov-malformed');
-    setFile(j(p, 'package.json'), '{ not json');
-    expect((await checkProvenanceMetadata([pkg('npm', { name: 'a', path: p })]))).toEqual([]);
-  });
 
   it('checkPyprojectShape: maturin include covering a parent dir of stage_to passes', async () => {
     // maturinIncludeCovers: `stage_to.startsWith(normalized + "/")` arm.
