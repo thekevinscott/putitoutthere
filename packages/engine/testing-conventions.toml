@@ -10,9 +10,8 @@
 # their own threshold — upstream's default (max_lines = 1) stays put. A file
 # fails only when two or more module-scope functions exceed max_lines, so the
 # binding ceiling is the largest *second* function in any one file. Current
-# ceiling on packages/engine/src: preflight.ts (requireProvenanceMetadata,
-# 29 lines, beside checkPyprojectShape) and write-launcher.ts
-# (writeLauncherFromConfig, 29 lines) — so 29 is the floor until they split.
+# ceiling on packages/engine/src: write-launcher.ts (writeLauncherFromConfig,
+# 29 lines, beside generateLauncherSource) — so 29 is the floor until it splits.
 # Ratchet this down as the one-function-per-file refactor (#680)
 # progresses; do not raise.
 [typescript]
@@ -20,6 +19,6 @@ one_function_per_file = { max_lines = 29 }
 
 [[typescript.exempt]]
 path = "plan.ts"
-lines = [130]
+lines = [119]
 rules = ["mutation"]
 reason = "`if (cascaded.size === 0) { return []; }` — the ConditionalExpression->false and BlockStatement->{} mutants (which remove the early return) are equivalent. When the cascade set is empty the subsequent row-building loop iterates nothing and returns [] anyway, so removing the early-out produces identical observable output. (The ConditionalExpression->true 'always return []' variant IS killed by the many non-empty-cascade tests.)"
