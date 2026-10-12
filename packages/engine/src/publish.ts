@@ -28,10 +28,10 @@ import {
   requirePackageJsonShape,
   requireProvenanceMetadata,
   requirePyprojectShape,
-  requirePypiVersionSource,
   requireRepoPublic,
   requireRepoUrlMatch,
 } from './preflight.js';
+import { requirePypiVersionSource } from './require-pypi-version-source.js';
 import { withRetry } from './retry.js';
 import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';

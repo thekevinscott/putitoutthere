@@ -29,7 +29,7 @@ afterEach(() => {
 
 describe('parseFlags: verify wheel flags', () => {
   it('parses --target', async () => {
-    const { parseFlags } = await import('./cli.js');
+    const { parseFlags } = await import('./parse-flags.js');
     expect(parseFlags(['--target', 'sdist']).target).toBe('sdist');
   });
 });

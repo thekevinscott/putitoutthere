@@ -29,12 +29,12 @@ afterEach(() => {
 
 describe('parseFlags: verify crate flags', () => {
   it('parses --registry-root', async () => {
-    const { parseFlags } = await import('./cli.js');
+    const { parseFlags } = await import('./parse-flags.js');
     expect(parseFlags(['--registry-root', '/reg']).registryRoot).toBe('/reg');
   });
 
   it('leaves registryRoot unset by default', async () => {
-    const { parseFlags } = await import('./cli.js');
+    const { parseFlags } = await import('./parse-flags.js');
     expect(parseFlags([]).registryRoot).toBeUndefined();
   });
 });

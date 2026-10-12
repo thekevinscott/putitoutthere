@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, parse as parsePath, resolve } from 'node:pat
 
 import { parse as parseToml } from 'smol-toml';
 
+import { checkCratesMetadata } from './check-crates-metadata.js';
 import { checkRepoPublic, type RepoVisibilityOptions } from './check-repo-public.js';
 import { collectCratesPackageFindings } from './collect-crates-package-findings.js';
 import type { Package } from './config.js';
@@ -211,84 +212,11 @@ export async function requireProvenanceMetadata(packages: readonly Package[]): P
 const CARGO_DOC_POINTER =
   'https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata';
 
-/** A required Cargo.toml `[package]` field that crates.io enforces. */
-export type CratesRequiredField = 'description' | 'license';
-
-export interface CratesMetadataFinding {
-  package: string;
-  /** Pkg-relative `Cargo.toml` path examined. */
-  cargoTomlPath: string;
-  /** Required fields that are missing or empty. */
-  missing: readonly CratesRequiredField[];
-}
-
-/**
- * Scan every crates package's `Cargo.toml` for the metadata crates.io
- * hard-requires at publish time: a non-empty `[package].description`, and
- * either `[package].license` or `[package].license-file`. Non-crates packages,
- * a missing `Cargo.toml` and malformed TOML are skipped.
- */
-export async function checkCratesMetadata(
-  packages: readonly Package[],
-): Promise<CratesMetadataFinding[]> {
-  const findings: CratesMetadataFinding[] = [];
-  for (const p of packages) {
-    if (p.kind !== 'crates') {continue;}
-    const cargoTomlPath = join(p.path, 'Cargo.toml');
-    let raw: string;
-    try {
-      raw = await readFile(cargoTomlPath, 'utf8');
-    } catch {
-      // The crates handler surfaces "Cargo.toml not found" with a
-      // clear error; this check owns metadata fields, not file
-      // existence. Skip.
-      continue;
-    }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = parseToml(raw);
-    } catch {
-      // Malformed TOML — cargo's own parser will surface it with a
-      // useful diagnostic. Skip.
-      continue;
-    }
-    const pkgTable = (parsed.package ?? {}) as Record<string, unknown>;
-    // `[workspace.package]` inheritance (#328): cargo resolves
-    // `license.workspace = true` against the workspace root before
-    // upload, so the literal value lands on crates.io. The check has
-    // to do the same — otherwise crates following Cargo's recommended
-    // centralized-metadata pattern false-positive.
-    const wsPkgTable = await readWorkspacePackageTable(p.path);
-    const description = resolveInherited(pkgTable.description, wsPkgTable, 'description');
-    const license = resolveInherited(pkgTable.license, wsPkgTable, 'license');
-    const licenseFile = resolveInherited(
-      pkgTable['license-file'],
-      wsPkgTable,
-      'license-file',
-    );
-    const missing: CratesRequiredField[] = [];
-    if (!nonEmptyString(description)) {missing.push('description');}
-    if (!nonEmptyString(license) && !nonEmptyString(licenseFile)) {
-      missing.push('license');
-    }
-    if (missing.length > 0) {
-      findings.push({ package: p.name, cargoTomlPath, missing });
-    }
-  }
-  return findings;
-}
-
-function nonEmptyString(v: unknown): boolean {
+export function nonEmptyString(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
 /* ----------------------- pypi dynamic version ----------------------- */
-
-// User-facing recipe for hatch-vcs adoption. Embedded verbatim in the
-// thrown error so users have a copy/paste fix instead of a doc-search
-// target.
-const PYPI_VERSION_DOC_POINTER =
-  'https://thekevinscott.github.io/putitoutthere/guide/dynamic-versions';
 
 export interface PypiVersionFinding {
   package: string;
@@ -339,61 +267,13 @@ function declaresDynamicVersion(project: { dynamic?: unknown }): boolean {
 }
 
 /**
- * Throw with an actionable error when any pypi package's pyproject.toml
- * declares a static `[project].version` literal. Reports every failing
- * package in one error rather than failing on the first, so consumers
- * fix them all in one round-trip.
- *
- * The fix shape is the same across hatch-vcs, setuptools-scm, and
- * maturin: declare `dynamic = ["version"]` and let the build backend
- * derive the version from a tagged source (git tag,
- * `SETUPTOOLS_SCM_PRETEND_VERSION`, or sibling `Cargo.toml`).
- */
-export async function requirePypiVersionSource(packages: readonly Package[]): Promise<void> {
-  const findings = await checkPypiVersionSource(packages);
-  if (findings.length === 0) {return;}
-  const lines: string[] = [
-    `[${ErrorCodes.PYPI_STATIC_VERSION}] pyproject.toml must declare \`[project].dynamic = ["version"]\` instead of a static \`[project].version = "..."\` literal.`,
-    '',
-    'Failing packages:',
-  ];
-  for (const f of findings) {
-    lines.push(`  - ${f.package}: ${f.pyprojectPath}`);
-  }
-  lines.push(
-    '',
-    'Why: putitoutthere does not edit pyproject.toml at release time (per the',
-    '"no version computation" design commitment). A static literal silently',
-    'ships the previous release\'s wheel/sdist, because the build backend reads',
-    'whatever is on disk.',
-    '',
-    'Recommended fix (hatch-vcs):',
-    '',
-    '  [build-system]',
-    '  requires = ["hatchling", "hatch-vcs"]',
-    '  build-backend = "hatchling.build"',
-    '',
-    '  [project]',
-    '  name = "<your-package>"',
-    '  dynamic = ["version"]',
-    '',
-    '  [tool.hatch.version]',
-    '  source = "vcs"',
-    '',
-    'setuptools-scm and the maturin (Cargo.toml-driven) path are equally',
-    `valid — see ${PYPI_VERSION_DOC_POINTER}.`,
-  );
-  throw new Error(lines.join('\n'));
-}
-
-/**
  * Return the inherited workspace value when the field is declared as
  * `<field>.workspace = true`; otherwise pass the raw value through.
  * `wsPkgTable` is `undefined` when no parent `Cargo.toml` declares a
  * `[workspace.package]` block — inheritance simply yields `undefined`
  * there, which `nonEmptyString` correctly treats as missing.
  */
-function resolveInherited(
+export function resolveInherited(
   value: unknown,
   wsPkgTable: Record<string, unknown> | undefined,
   key: string,
@@ -415,7 +295,7 @@ function resolveInherited(
  * `undefined` when no workspace root is found or when the workspace
  * defines no shared `[workspace.package]` metadata.
  */
-async function readWorkspacePackageTable(
+export async function readWorkspacePackageTable(
   crateDir: string,
 ): Promise<Record<string, unknown> | undefined> {
   const rootMarker = parsePath(crateDir).root;
