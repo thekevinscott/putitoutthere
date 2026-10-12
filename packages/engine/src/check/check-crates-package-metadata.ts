@@ -1,6 +1,6 @@
 import type { Package } from '../config.js';
 import { ErrorCodes } from '../error-codes.js';
-import { checkCratesMetadata } from '../preflight.js';
+import { checkCratesMetadata } from '../check-crates-metadata.js';
 import type { CheckFinding } from '../check.js';
 
 export async function checkCratesPackageMetadata(

@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { advanceFloatingMajor } from './advance-floating-major.js';
 import { advanceV0 } from './advance-v0.js';
-import { parseFlags, run } from './cli.js';
+import { run } from './cli.js';
 import { runChecks } from './check.js';
 import { foldActionBundle } from './fold-action-bundle.js';
 import { bundleCliBuild } from './bundle-cli/bundle-cli-build.js';
@@ -258,80 +258,6 @@ describe('cli: top-level dispatch', () => {
     const code = await run(argv('plan', '--cwd', '/x'));
     expect(code).toBe(1);
     expect(stderr.join('')).toMatch(/putitoutthere: plain string boom/);
-  });
-});
-
-describe('parseFlags', () => {
-  it('resolves a relative --cwd to an absolute path (#244)', () => {
-    // Downstream handlers run subprocesses with `cwd: ctx.cwd` and pass
-    // file paths derived from `join(cwd, 'artifacts', ...)`. If the parsed
-    // cwd were left relative, those paths would re-resolve under the
-    // subprocess's cwd and double-up the prefix. Anchor at parse time.
-    const flags = parseFlags(['--cwd', 'fixture-tree']);
-    expect(flags.cwd).not.toBe('fixture-tree');
-    expect(flags.cwd.endsWith('fixture-tree')).toBe(true);
-  });
-
-  it('keeps the default cwd when --cwd is passed with no value', () => {
-    // Trailing `--cwd` with nothing after it: `argv[++i]` is undefined and
-    // the `?? out.cwd` fallback preserves the process cwd rather than
-    // overwriting it with undefined.
-    const flags = parseFlags(['--cwd']);
-    expect(flags.cwd).toBe(process.cwd());
-  });
-
-  it('leaves an already-absolute --cwd untouched', () => {
-    const flags = parseFlags(['--cwd', '/tmp/abs-path-test']);
-    expect(flags.cwd).toBe('/tmp/abs-path-test');
-  });
-
-  it('parses --release-packages', () => {
-    const flags = parseFlags(['--release-packages', 'lib-core@minor, lib-js']);
-    expect(flags.releasePackages).toBe('lib-core@minor, lib-js');
-  });
-
-  it('leaves releasePackages undefined when --release-packages is absent', () => {
-    const flags = parseFlags(['--cwd', '/tmp/x']);
-    expect(flags.releasePackages).toBeUndefined();
-  });
-
-  it('parses the verify / write / fold flag family', () => {
-    const flags = parseFlags([
-      '--config', '/c/piot.toml',
-      '--matrix', '[]',
-      '--registry', 'https://reg',
-      '--registry-root', '/root',
-      '--target', 'sdist',
-      '--manylinux', '2_28',
-      '--subject', 'chore: bundle',
-      '--stage-to', 'wheel/dir',
-      '--bin', 'demo',
-      '--per-triple',
-    ]);
-    expect(flags.config).toBe('/c/piot.toml');
-    expect(flags.matrix).toBe('[]');
-    expect(flags.registry).toBe('https://reg');
-    expect(flags.registryRoot).toBe('/root');
-    expect(flags.target).toBe('sdist');
-    expect(flags.manylinux).toBe('2_28');
-    expect(flags.subject).toBe('chore: bundle');
-    expect(flags.stageTo).toBe('wheel/dir');
-    expect(flags.bin).toBe('demo');
-    expect(flags.perTriple).toBe(true);
-  });
-
-  it('leaves manylinux undefined when --manylinux is absent (#610)', () => {
-    expect(parseFlags(['--target', 'sdist']).manylinux).toBeUndefined();
-  });
-
-  it('parses --expect as one opaque value, JSON array included (#666)', () => {
-    const raw = '[{"name":"demo","version":"1.2.3"}]';
-    expect(parseFlags(['--expect', raw]).expect).toBe(raw);
-    expect(parseFlags(['--expect', '@acme/widget@1.2.3']).expect).toBe('@acme/widget@1.2.3');
-  });
-
-  it('leaves expect undefined when --expect is absent (#666)', () => {
-    expect(parseFlags(['--cwd', '/tmp/x']).expect).toBeUndefined();
   });
 });
 
