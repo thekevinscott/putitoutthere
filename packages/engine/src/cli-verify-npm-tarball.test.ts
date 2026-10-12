@@ -37,7 +37,7 @@ afterEach(() => {
 
 describe('parseFlags: verify npm-tarball flags', () => {
   it('parses --matrix, --registry and --per-triple', async () => {
-    const { parseFlags } = await import('./cli.js');
+    const { parseFlags } = await import('./parse-flags.js');
     const f = parseFlags(['--matrix', '[]', '--registry', 'http://r', '--per-triple']);
     expect(f.matrix).toBe('[]');
     expect(f.registry).toBe('http://r');
@@ -45,7 +45,7 @@ describe('parseFlags: verify npm-tarball flags', () => {
   });
 
   it('defaults perTriple to false and leaves matrix/registry unset', async () => {
-    const { parseFlags } = await import('./cli.js');
+    const { parseFlags } = await import('./parse-flags.js');
     const f = parseFlags([]);
     expect(f.perTriple).toBe(false);
     expect(f.matrix).toBeUndefined();
