@@ -443,6 +443,7 @@ describe('crates.publish', () => {
       makeCtx({ cwd: dir, env: { CARGO_REGISTRY_TOKEN: 'secret' } }),
     );
     expect(result.status).toBe('published');
+    expect(result.url).toBe('https://crates.io/crates/demo-crate/0.1.0');
     expect(execMock).toHaveBeenCalledWith(
       'cargo',
       expect.arrayContaining(['publish', '--allow-dirty']) as string[],
