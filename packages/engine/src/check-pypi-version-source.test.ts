@@ -1,12 +1,17 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { parse } from 'smol-toml';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkPypiVersionSource } from './check-pypi-version-source.js';
 import type { Package } from './config.js';
 
 vi.mock('node:fs/promises');
+vi.mock('smol-toml', async () => {
+  const actual = await vi.importActual<typeof import('smol-toml')>('smol-toml');
+  return { ...actual, parse: vi.fn(actual.parse) };
+});
 
 const files = new Map<string, string>();
 
@@ -20,6 +25,7 @@ function writePyproject(path: string, body: string): void {
 
 beforeEach(() => {
   files.clear();
+  vi.mocked(parse).mockClear();
   vi.mocked(readFile).mockReset();
   vi.mocked(readFile).mockImplementation(((path: string) => {
     const found = files.get(path);
@@ -71,6 +77,11 @@ describe('checkPypiVersionSource (#333)', () => {
       pypiPkg('b'),
     ]);
     expect(findings.map((f) => f.package)).toEqual(['b']);
+  });
+
+  it('does not parse anything when pyproject.toml cannot be read', async () => {
+    expect(await checkPypiVersionSource([pypiPkg('missing')])).toEqual([]);
+    expect(parse).not.toHaveBeenCalled();
   });
 
   it('skips non-pypi packages entirely', async () => {

@@ -7,6 +7,7 @@ import type { Package } from './config.js';
 import { declaredFeatures, readDeclaredBinNames, type CargoShapeFinding } from './preflight.js';
 import { readToml } from './read-toml.js';
 
+vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('./preflight.js');
 vi.mock('./read-toml.js');
 

@@ -71,6 +71,16 @@ describe('checkPackageJsonShape', () => {
     expect(findings.map((f) => f.package)).toEqual(['wrong']);
   });
 
+  it('does not parse anything when package.json cannot be read', async () => {
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      expect(await checkPackageJsonShape([npmPkg('missing', 'missing')])).toEqual([]);
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it('skips non-npm packages entirely', async () => {
     const others = [
       { name: 'c', kind: 'crates', path: 'c' },
