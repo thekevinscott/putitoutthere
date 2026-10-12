@@ -15,9 +15,9 @@ export async function runGit(args: readonly [string, ...string[]], opts: GitOpti
     // "Please tell me who you are" / "unable to auto-detect email
     // address". Give the adopter an actionable hint instead of the
     // bare git output. #206.
-    const needsIdentity =
-      stderr !== undefined &&
-      /unable to auto-detect email address|Please tell me who you are/.test(stderr);
+    const needsIdentity = Boolean(
+      stderr?.match(/unable to auto-detect email address|Please tell me who you are/),
+    );
     if (needsIdentity) {
       throw new Error(
         [
