@@ -4,131 +4,29 @@
  * and `writeVersion` and add platform-package orchestration before this.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
-import { normalizeTarget, TransientError, type Ctx, type Handler, type PlatformPublishSummary, type PublishResult, type TargetEntry, type TrustPosture } from '../types.js';
+import { normalizeTarget, TransientError, type Ctx, type Handler, type PlatformPublishSummary, type PublishResult, type TrustPosture } from '../types.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { ExecError } from '../utils/exec-error.js';
-import { classifyNpmViewFailure } from './classify-npm-view-failure.js';
-import { detectIndent } from './detect-indent.js';
+import { assertRepositoryField } from './assert-repository-field.js';
+import { isBootstrapPublish } from './is-bootstrap-publish.js';
 import {
   looksLikePublishOverRace,
   normalizeBuild,
   publishPlatforms,
-  type NpmBuildField,
   type PlatformPkg,
 } from './npm-platform.js';
 import { matchNpmNameTooSimilar } from './match-npm-name-too-similar.js';
 import { matchTlogDuplicate } from './match-tlog-duplicate.js';
+import { npmIsPublished } from './npm-is-published.js';
+import { npmLatestVersion } from './npm-latest-version.js';
+import { npmNameFor, type NpmPkg } from './npm-name-for.js';
+import { npmWriteVersion } from './npm-write-version.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { ErrorCodes } from '../error-codes.js';
-import { toError } from '../to-error.js';
 import { USER_AGENT } from '../version.js';
 
-type NpmPkg = {
-  name: string;
-  path: string;
-  npm?: string;
-  access?: 'public' | 'restricted';
-  tag?: string;
-  // #dirsql: `build` accepts a single mode string ("napi" / "bundled-cli")
-  // for backward compat, OR an array of entries — strings or
-  // `{ mode, name }` objects — to publish multiple platform-package
-  // families per main package. See src/handlers/npm-platform.ts.
-  build?: NpmBuildField;
-  // #159: `targets` entries can be bare triples or `{ triple, runner }`
-  // objects. Only the triple matters at publish time; the `runner`
-  // override is a CI-matrix concern consumed by the planner.
-  targets?: readonly TargetEntry[];
-};
-
-function npmNameFor(pkg: NpmPkg): string {
-  return pkg.npm ?? pkg.name;
-}
-
-async function isPublishedImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<boolean> {
-  const name = npmNameFor(pkg);
-  try {
-    // `--fetch-retries=0`: piot owns the retry decision, npm must not add
-    // an error-blind budget of its own underneath it. npm defaults to two
-    // retries with a 10s-then-60s backoff and applies them to *every*
-    // failure, so a probe against a registry whose hostname does not
-    // resolve — the hermetic `--network none` case — spent ~70s
-    // re-attempting a DNS lookup that cannot start succeeding. Retries the
-    // registry can actually satisfy are still made, one classification
-    // below, where `withRetry` can tell a 503 from a dead name. #650.
-    await execCapture('npm', ['view', `${name}@${version}`, 'version', '--fetch-retries=0'], {
-      cwd: ctx.cwd,
-    });
-    return true;
-  } catch (err) {
-    if (!(err instanceof ExecError)) {
-      // Nothing from the process seam to read npm's code line out of, so
-      // there is nothing to classify — keep the historical reading.
-      return false;
-    }
-    switch (classifyNpmViewFailure(err.stderr)) {
-      case 'unreachable':
-        // No registry was reached, so there is no answer to report. Saying
-        // "not published" here is a guess that reads as fact: `plan` renders
-        // it PUBLISH, promising a publish it never checked. Throwing lets
-        // the read-only caller render UNKNOWN (and `unpublishedKinds` still
-        // counts that as unpublished, so auth is unaffected — #622), and
-        // stops a publish that has no registry to publish to. Not a
-        // `TransientError`: a name that does not resolve will not resolve on
-        // attempt two, so `withRetry` must let this through immediately.
-        throw new Error(
-          `npm view ${name}@${version} failed: the npm registry could not be reached\n${err.stderr.trim()}`,
-          { cause: err },
-        );
-      case 'transient':
-        // Reached and faltered (timeout, reset, 429, 5xx) — exactly what the
-        // retry policy exists for. `withRetry` at the publish call sites
-        // retries; `plan` renders UNKNOWN.
-        throw new TransientError(
-          `npm view ${name}@${version} failed: transient registry error\n${err.stderr.trim()}`,
-        );
-      case 'absent':
-        // The registry answered and the version isn't there (`E404`), or the
-        // failure is one we don't recognise — the historical reading.
-        return false;
-    }
-  }
-}
-
-async function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<string[]> {
-  const p = join(pkg.path, 'package.json');
-  let original: string;
-  try {
-    original = await readFile(p, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`package.json not found at ${p}`, { cause: err });
-    }
-    throw toError(err);
-  }
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(original) as Record<string, unknown>;
-  } catch (err) {
-    throw new Error(
-      `package.json JSON parse error: ${toError(err).message}`,
-      { cause: err },
-    );
-  }
-  if (parsed.version === version) {return [];}
-  parsed.version = version;
-  // Preserve the existing indentation shape (2-space default if we
-  // can't detect) and the trailing newline when present.
-  const indent = detectIndent(original);
-  const trailing = original.endsWith('\n') ? '\n' : '';
-  await writeFile(p, JSON.stringify(parsed, null, indent) + trailing, 'utf8');
-  return [p];
-}
-
 async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<PublishResult> {
-  if (await isPublishedImpl(pkg, version, ctx)) {
+  if (await npmIsPublished(pkg, version, ctx)) {
     return { status: 'already-published' };
   }
 
@@ -232,7 +130,7 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
     // run (new attestation) resolves.
     const tlogStderr = matchTlogDuplicate(stderr);
     if (tlogStderr !== null) {
-      if (await isPublishedImpl(pkg, version, ctx)) {
+      if (await npmIsPublished(pkg, version, ctx)) {
         return withPlatforms({
           status: 'already-published',
           url: `https://www.npmjs.com/package/${name}/v/${version}`,
@@ -308,31 +206,6 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
 
 /* ------------------------------ internals ------------------------------ */
 
-async function assertRepositoryField(path: string): Promise<void> {
-  const pkgJsonPath = join(path, 'package.json');
-  const raw = await readFile(pkgJsonPath, 'utf8');
-  const pkg = JSON.parse(raw) as { repository?: unknown };
-  const repository = pkg.repository;
-  // Accept either the canonical object form (`{ type, url, … }`) or
-  // the legacy single-string form. Both shapes must carry a non-empty
-  // URL after trimming. `!pkg.repository` would pass `{}` and
-  // `{ type: 'git' }` since both are truthy — that's the bug #280
-  // is closing.
-  let ok = false;
-  if (typeof repository === 'string') {
-    ok = repository.trim().length > 0;
-  } else if (repository !== null && typeof repository === 'object') {
-    const url = (repository as { url?: unknown }).url;
-    ok = typeof url === 'string' && url.trim().length > 0;
-  }
-  if (!ok) {
-    throw new Error(
-      `[${ErrorCodes.NPM_MISSING_REPOSITORY}] npm publish --provenance requires a non-empty \`repository\` field in ${pkgJsonPath}. ` +
-        'See https://github.com/thekevinscott/putitoutthere#kind--npm.',
-    );
-  }
-}
-
 /**
  * Heuristic match on npm's auth-related stderr shapes. `E404` belongs here:
  * npm answers an unauthorized publish with not-found, not 401/403, since
@@ -344,62 +217,6 @@ function looksLikeAuthFailure(stderr: string | undefined): stderr is string {
   return /\b(E401|E403|E404|ENEEDAUTH|EAUTH|need auth|not authori[sz]ed|unauthorized|forbidden)\b/i.test(
     stderr,
   );
-}
-
-/**
- * Returns true when the package does not yet exist on the registry
- * (any 404-equivalent from the packument endpoint). Non-404 responses
- * — including network failures and timeouts — return false so we
- * don't misclassify transient errors as the bootstrap case.
- *
- * The fetch is bounded by a 5s AbortSignal.timeout (#142). The hint is
- * advisory: a slow or unreachable registry should fall through to
- * "not a bootstrap publish" rather than hanging the action.
- */
-export async function isBootstrapPublish(name: string): Promise<boolean> {
-  try {
-    // The npm registry expects scoped packages as `@scope%2Fname`: the
-    // `@` prefix stays literal, `/` stays percent-encoded. Unscoped
-    // names have no `@` at all. `replaceAll` keeps the transform safe
-    // against pathological input even though encodeURIComponent can
-    // only produce `%40` at the start of a valid npm name.
-    const res = await fetch(
-      `https://registry.npmjs.org/${encodeURIComponent(name).replaceAll('%40', '@')}`,
-      {
-        method: 'GET',
-        headers: { 'user-agent': USER_AGENT },
-        signal: AbortSignal.timeout(5000),
-      },
-    );
-    return res.status === 404;
-  } catch {
-    // Network failure, timeout, DNS error — treat as "not a bootstrap"
-    // so the caller falls through to the generic auth-error message
-    // rather than hanging or surfacing a misleading hint.
-    return false;
-  }
-}
-
-/**
- * Latest published version of the package, or null when it has never
- * been published (404). GET registry.npmjs.org/{name} (the packument) →
- * `dist-tags.latest`. Reuses `npmNameFor` and the same scoped-name
- * encoding as the bootstrap probe, so this read resolves the npm name
- * exactly as `isPublished` / `publish` do. Any non-200/404 is surfaced
- * as a TransientError; the read-only caller renders that as
- * "unreachable". Unlike `isPublished` (which shells out to `npm view`),
- * this uses a plain unauthenticated GET — `status` needs no npm CLI.
- */
-async function latestVersionImpl(pkg: NpmPkg, _ctx: Ctx): Promise<string | null> {
-  const name = npmNameFor(pkg);
-  const url = `https://registry.npmjs.org/${encodeURIComponent(name).replaceAll('%40', '@')}`;
-  const res = await fetch(url, { method: 'GET', headers: { 'user-agent': USER_AGENT } });
-  if (res.status === 200) {
-    const body = (await res.json()) as { 'dist-tags'?: { latest?: string } };
-    return body['dist-tags']?.latest ?? null;
-  }
-  if (res.status === 404) {return null;}
-  throw new TransientError(`registry.npmjs.org GET ${url} returned ${res.status}`);
 }
 
 /**
@@ -419,9 +236,9 @@ async function trustPostureImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promis
 
 export const npm: Handler = {
   kind: 'npm',
-  isPublished: isPublishedImpl,
-  latestVersion: latestVersionImpl,
+  isPublished: npmIsPublished,
+  latestVersion: npmLatestVersion,
   trustPosture: trustPostureImpl,
-  writeVersion: writeVersionImpl,
+  writeVersion: npmWriteVersion,
   publish: publishImpl,
 };

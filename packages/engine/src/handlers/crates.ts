@@ -5,100 +5,28 @@
  * elided mid-message (#651): GitHub cuts a log line at 64KB from the *front*.
  */
 
-import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
-import type { Ctx, Handler, PublishResult, TrustPosture } from '../types.js';
-import { TransientError } from '../types.js';
+import type { Ctx, Handler, PublishResult } from '../types.js';
 import { ErrorCodes } from '../error-codes.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
-import { toError } from '../to-error.js';
-import { USER_AGENT } from '../version.js';
 import { execCapture } from '../utils/exec-capture.js';
 import { elideMiddle } from '../utils/elide-middle.js';
 import { scanDirtyOutsideManifest } from './scan-dirty-outside-manifest.js';
-import { writeDependentVersionReqs } from '../write-dependent-version-reqs.js';
-import { writeResolvedCargoVersion } from '../write-resolved-cargo-version.js';
 import { ExecError } from '../utils/exec-error.js';
 import { matchFirstPublishTpRejection } from './match-first-publish-tp-rejection.js';
-
-const REGISTRY = 'https://crates.io';
-
-async function isPublishedImpl(
-  pkg: { name: string; crate?: string },
-  version: string,
-  _ctx: Ctx,
-): Promise<boolean> {
-  const crateName = crateNameFor(pkg);
-  const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { 'user-agent': USER_AGENT },
-  });
-  if (res.status === 200) {return true;}
-  if (res.status === 404) {return false;}
-  // 429 (rate limited) is transient: crates.io throttles routine reads, and a
-  // TransientError is what withRetry keys on at the isPublished call site. A
-  // plain Error carries no `status`, so it would hard-fail the publish instead
-  // of retrying. #580.
-  if (res.status === 429 || res.status >= 500) {
-    throw new TransientError(`crates.io GET ${url} returned ${res.status}`);
-  }
-  // Remaining 4xx (400/401/403/…) are hard, non-retryable errors — crates.io
-  // returns 200/404 for this endpoint, so anything else is a genuine fault.
-  throw new Error(`crates.io GET ${url} returned ${res.status}`);
-}
-
-async function writeVersionImpl(
-  pkg: { path: string },
-  version: string,
-  ctx: Ctx,
-): Promise<string[]> {
-  const cargoPath = join(pkg.path, 'Cargo.toml');
-  let original: string;
-  try {
-    original = await readFile(cargoPath, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Cargo.toml not found at ${cargoPath}`, { cause: err });
-    }
-    throw toError(err);
-  }
-  // #639: route through the shared resolver rather than the literal-only
-  // rewriter. A crate that inherits its version (`version.workspace = true`)
-  // has no `[package].version` to rewrite, and the literal path used to walk
-  // past the table and corrupt a dependency's requirement instead. The
-  // resolver detects inheritance and rewrites `[workspace.package].version`
-  // at the workspace root — the same routing `write-version.ts` and
-  // `write-crate-version.ts` have used since #428.
-  //
-  // Returns the manifests this write MANAGES, which is what the pre-publish
-  // dirty-tree guard needs: for an inheriting crate that is a file outside
-  // the package directory, and the guard would otherwise refuse on it.
-  let written: string[];
-  try {
-    written = [...(await writeResolvedCargoVersion(pkg.path, original, version))];
-  } catch (err) {
-    throw toError(err);
-  }
-  // #640: bumping this crate moves it out of range of every in-repo
-  // requirement that pointed at the old version, and cargo then refuses to
-  // resolve the workspace at all — a hard failure before anything compiles,
-  // hit by the next crates.io package in the cascade rather than by this
-  // one. The build-time writers learned this in #621; the publish path is
-  // the other half.
-  written.push(
-    ...(await writeDependentVersionReqs(pkg.path, version, ctx.siblingPackagePaths)),
-  );
-  return written;
-}
+import { crateNameFor, cratesRegistry } from './crate-name-for.js';
+import { cratesIsPublished } from './crates-is-published.js';
+import { cratesLatestVersion } from './crates-latest-version.js';
+import { cratesTrustPosture } from './crates-trust-posture.js';
+import { cratesWriteVersion } from './crates-write-version.js';
 
 async function publishImpl(
   pkg: { name: string; path: string; crate?: string; features?: string[]; no_default_features?: boolean },
   version: string,
   ctx: Ctx,
 ): Promise<PublishResult> {
-  if (await isPublishedImpl(pkg, version, ctx)) {
+  if (await cratesIsPublished(pkg, version, ctx)) {
     return { status: 'already-published' };
   }
 
@@ -240,7 +168,7 @@ async function publishImpl(
     status: 'published',
     url: primaryOverride
       ? `${primaryOverride.replace(/\/$/, '')}/api/v1/crates/${crateNameFor(pkg)}/${version}`
-      : `${REGISTRY}/crates/${crateNameFor(pkg)}/${version}`,
+      : `${cratesRegistry()}/crates/${crateNameFor(pkg)}/${version}`,
   };
 }
 
@@ -260,12 +188,6 @@ function isRateLimited(stderr: string | undefined): boolean {
 
 /* ------------------------------ internals ------------------------------ */
 
-/** The published name. Falls back to the pilot package name if no
- * explicit `crate` field is set. */
-function crateNameFor(pkg: { name: string; crate?: string }): string {
-  return pkg.crate ?? pkg.name;
-}
-
 export function relativeOrSelf(base: string, target: string): string {
   const r = relative(base, target);
   // Normalise to forward slashes: `node:path`'s relative() yields backslashes
@@ -275,54 +197,11 @@ export function relativeOrSelf(base: string, target: string): string {
   return (r === '' ? target : r).replaceAll('\\', '/');
 }
 
-/**
- * Latest published version of the crate, or null when it has never been
- * published (404). GET /api/v1/crates/{name} → `crate.newest_version`.
- * Reuses `crateNameFor` so this read resolves the crates.io name exactly
- * as `isPublished` / `publish` do. Any non-200/404 is surfaced as a
- * TransientError; the read-only caller renders that as "unreachable".
- */
-async function latestVersionImpl(
-  pkg: { name: string; crate?: string },
-  _ctx: Ctx,
-): Promise<string | null> {
-  const crateName = crateNameFor(pkg);
-  const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}`;
-  const res = await fetch(url, { method: 'GET', headers: { 'user-agent': USER_AGENT } });
-  if (res.status === 200) {
-    const body = (await res.json()) as { crate?: { newest_version?: string } };
-    return body.crate?.newest_version ?? null;
-  }
-  if (res.status === 404) {return null;}
-  throw new TransientError(`crates.io GET ${url} returned ${res.status}`);
-}
-
-/**
- * Trust posture for a published crate version (#414). crates.io's version
- * endpoint exposes `trustpub_data` ({provider, repository, …}) when the
- * version was published via Trusted Publishing (OIDC); a token publish
- * leaves it null and names a `published_by` user.
- */
-async function trustPostureImpl(
-  pkg: { name: string; crate?: string },
-  version: string,
-  _ctx: Ctx,
-): Promise<TrustPosture> {
-  const crateName = crateNameFor(pkg);
-  const url = `${REGISTRY}/api/v1/crates/${encodeURIComponent(crateName)}/${encodeURIComponent(version)}`;
-  const res = await fetch(url, { method: 'GET', headers: { 'user-agent': USER_AGENT } });
-  if (res.status === 200) {
-    const body = (await res.json()) as { version?: { trustpub_data?: unknown } };
-    return body.version?.trustpub_data ? 'oidc' : 'token';
-  }
-  throw new TransientError(`crates.io GET ${url} returned ${res.status}`);
-}
-
 export const crates: Handler = {
   kind: 'crates',
-  isPublished: isPublishedImpl,
-  latestVersion: latestVersionImpl,
-  trustPosture: trustPostureImpl,
-  writeVersion: writeVersionImpl,
+  isPublished: cratesIsPublished,
+  latestVersion: cratesLatestVersion,
+  trustPosture: cratesTrustPosture,
+  writeVersion: cratesWriteVersion,
   publish: publishImpl,
 };
