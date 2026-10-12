@@ -60,6 +60,12 @@ describe('rowsForPackage', () => {
     expect(rows.slice(0, 4).every((r) => r.bundle_cli === bundleCli && r.artifact_path === 'pkgs/lib/dist')).toBe(true);
     expect(rows[4]).not.toHaveProperty('bundle_cli');
     expect(rows[4]!.build).toBe('maturin');
+    expect(rows.every((r) => r.kind === 'pypi')).toBe(true);
+  });
+
+  it('emits only the sdist for a maturin package with no targets', async () => {
+    const rows = await rowsForPackage(pkg({ kind: 'pypi', build: 'maturin' }), '1.0.0', '/repo');
+    expect(rows.map((r) => r.target)).toEqual(['sdist']);
   });
 
   it('collapses a version-independent maturin wheel to the newest interpreter', async () => {
@@ -70,10 +76,12 @@ describe('rowsForPackage', () => {
       ['scope__lib-wheel-x86_64-unknown-linux-gnu', '3.12'],
       ['scope__lib-sdist', '3.12'],
     ]);
+    expect(rows[0]).not.toHaveProperty('bundle_cli');
   });
 
-  it('emits sdist plus wheel-any for hatch without probing the wheel ABI', async () => {
-    const rows = await rowsForPackage(pkg({ kind: 'pypi', build: 'hatch' }), '1.0.0', '/repo');
+  it('emits sdist plus wheel-any for hatch, ignoring targets, without probing the wheel ABI', async () => {
+    const p = pkg({ kind: 'pypi', build: 'hatch', targets: ['x86_64-unknown-linux-gnu'] });
+    const rows = await rowsForPackage(p, '1.0.0', '/repo');
     expect(isVersionIndependentWheel).not.toHaveBeenCalled();
     expect(rows.map((r) => [r.target, r.artifact_name, r.build, r.python_version])).toEqual([
       ['sdist', 'scope__lib-sdist', 'hatch', '3.12'],
@@ -112,6 +120,19 @@ describe('rowsForPackage', () => {
     ]);
     expect(rows[1]!.bundle_cli).toBe(bundleCli);
     expect(rows[0]).not.toHaveProperty('bundle_cli');
+    expect(rows.every((r) => r.kind === 'npm')).toBe(true);
+  });
+
+  it('emits only the main row for a built npm package with no targets', async () => {
+    const rows = await rowsForPackage(pkg({ kind: 'npm', build: 'napi' }), '2.0.0', '/repo');
+    expect(rows.map((r) => [r.target, r.build])).toEqual([['main', 'napi']]);
+  });
+
+  it('leaves bundled-cli rows bare when no bundle_cli block is configured', async () => {
+    const p = pkg({ kind: 'npm', build: 'bundled-cli', targets: ['linux-x64-gnu'] });
+    const [row] = await rowsForPackage(p, '2.0.0', '/repo');
+    expect(row).not.toHaveProperty('bundle_cli');
+    expect(row).not.toHaveProperty('rust_target');
   });
 
   it('rejects an unmapped npm triple before emitting any row', async () => {

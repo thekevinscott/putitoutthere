@@ -2,14 +2,6 @@ import { checkCratesMetadata } from './check-crates-metadata.js';
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 
-// crates.io rejects publish with `400 Bad Request: missing or empty
-// metadata fields: ...` when [package].description is empty/missing
-// or when neither [package].license nor [package].license-file is set.
-// The official cargo manifest reference for what's required vs.
-// recommended.
-const CARGO_DOC_POINTER =
-  'https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata';
-
 /**
  * Throw with an actionable error when any crates package's Cargo.toml
  * lacks a required `[package]` metadata field. Reports every failing
@@ -47,7 +39,7 @@ export async function requireCratesMetadata(packages: readonly Package[]): Promi
     '  description = "One-line summary of what the crate does."',
     '  license = "MIT OR Apache-2.0"',
     '',
-    `See ${CARGO_DOC_POINTER}.`,
+    'See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata.',
   );
   throw new Error(lines.join('\n'));
 }

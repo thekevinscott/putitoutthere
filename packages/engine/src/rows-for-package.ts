@@ -64,7 +64,7 @@ export async function rowsForPackage(pkg: Package, version: string, cwd: string)
           : pyVersions;
       const multiPy = wheelPyVersions.length > 1;
       const out: MatrixRow[] = [];
-      if (build === 'maturin' && targets.length > 0) {
+      if (build === 'maturin') {
         for (const entry of targets) {
           const { triple, runner } = normalizeTarget(entry);
           for (const py of wheelPyVersions) {

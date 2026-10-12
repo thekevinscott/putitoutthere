@@ -2,12 +2,6 @@ import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { checkRepoUrlMatch, type RepoUrlMatchOptions } from './preflight.js';
 
-// User-facing pointer for the manifest-repository-URL recipe. Surfaced
-// verbatim in the thrown error so the consumer has a copy/paste fix
-// instead of a code-search target.
-const REPO_URL_DOC_POINTER =
-  'https://thekevinscott.github.io/putitoutthere/guide/repository-url';
-
 export async function requireRepoUrlMatch(
   packages: readonly Package[],
   options: RepoUrlMatchOptions = {},
@@ -37,7 +31,7 @@ export async function requireRepoUrlMatch(
     'is running from, or rename the GitHub repository so the slugs line up. Run the',
     'release again once the manifest and the repo agree.',
     '',
-    `See ${REPO_URL_DOC_POINTER}.`,
+    'See https://thekevinscott.github.io/putitoutthere/guide/repository-url.',
   );
   throw new Error(lines.join('\n'));
 }

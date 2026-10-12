@@ -2,12 +2,6 @@ import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
 import { checkProvenanceMetadata } from './preflight.js';
 
-// Anchor for the README section that documents the field requirement.
-// Surfaced verbatim in the thrown error so users have something
-// actionable to follow rather than a code-search target.
-const REPOSITORY_DOC_POINTER =
-  'https://github.com/thekevinscott/putitoutthere#kind--npm';
-
 /**
  * Throw with an actionable error when any npm package's `package.json`
  * lacks a non-empty `repository` field. Reports every failing package
@@ -46,7 +40,7 @@ export async function requireProvenanceMetadata(packages: readonly Package[]): P
     '    }',
     '  }',
     '',
-    `See ${REPOSITORY_DOC_POINTER}.`,
+    'See https://github.com/thekevinscott/putitoutthere#kind--npm.',
   );
   throw new Error(lines.join('\n'));
 }
