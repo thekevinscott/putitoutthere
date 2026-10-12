@@ -32,7 +32,7 @@ import { verifyNpmTarball } from './verify/npm-tarball/index.js';
 import { computeVerify } from './verify/posture.js';
 import { verifyWheel } from './verify/wheel/index.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
-import { writeLauncherFromConfig } from './write-launcher.js';
+import { writeLauncherFromConfig } from './write-launcher-from-config.js';
 import { writeVersionForBuild } from './write-version.js';
 import type { CheckFinding } from './check.js';
 import type { MatrixRow } from './plan.js';
@@ -62,7 +62,7 @@ vi.mock('./verify/npm-tarball/index.js');
 vi.mock('./verify/posture.js');
 vi.mock('./verify/wheel/index.js');
 vi.mock('./write-crate-version.js');
-vi.mock('./write-launcher.js');
+vi.mock('./write-launcher-from-config.js');
 vi.mock('./write-version.js');
 
 const runChecksMock = vi.mocked(runChecks);
