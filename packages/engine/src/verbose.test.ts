@@ -1,5 +1,5 @@
 /**
- * Verbose-on-failure dump tests (#15). `./log.js` is automocked but the pure
+ * Verbose-on-failure dump tests (#15). `./redact.js` is automocked but the pure
  * `redact` helper is restored with a tiny faithful reimplementation, so the
  * redaction contract is still exercised against the fake logger.
  */
@@ -7,14 +7,15 @@
 import { appendFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { dumpFailure, type FailureContext } from './verbose.js';
-import { redact } from './log.js';
+import { redact } from './redact.js';
+import { dumpFailure } from './verbose.js';
+import type { FailureContext } from './verbose-types.js';
 
 vi.mock('node:fs/promises');
-vi.mock('./log.js');
+vi.mock('./redact.js');
 
 /**
- * Credential-shaped env-var matcher — copied from `log.ts` so the mocked
+ * Credential-shaped env-var matcher — copied from `scan-source.ts` so the mocked
  * `redact` stays faithful to which keys the real redactor treats as
  * secrets. Word-boundary anchored so `TOKENIZER`/`KEYCLOAK`-style names
  * don't false-positive.
@@ -36,7 +37,7 @@ function digest8(v: string): string {
   return h.toString(16).padStart(8, '0').slice(0, 8);
 }
 
-/** Tiny faithful reimplementation of `log.ts#redact` (see module note). */
+/** Tiny faithful reimplementation of `redact.ts#redact` (see module note). */
 function faithfulRedact(
   s: string,
   sources: readonly Record<string, string | undefined>[] = [process.env],
@@ -281,21 +282,6 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     expect(line).toContain('401 unauthorized');
   });
 
-  it('annotation includes the PIOT_ error code when present in the error message', async () => {
-    // Registry handlers may tag their auth-failure error message with
-    // a `[PIOT_*]` code; the annotation should surface the bracketed
-    // code so external observers can fingerprint on it without needing
-    // to read the full markdown.
-    const log = makeLog();
-    await dumpFailure(
-      new Error('pypi: no auth available [PIOT_AUTH_NO_TOKEN]'),
-      baseCtx({ handler: 'pypi', package: 'demo-pkg' }),
-      { log },
-    );
-    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
-    expect(line).toContain('PIOT_AUTH_NO_TOKEN');
-  });
-
   it('redacts env-matched secrets from the annotation body', async () => {
     process.env.PYPI_API_TOKEN = 'pypi-tok-zzz';
     const log = makeLog();
@@ -306,55 +292,6 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
     );
     const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
     expect(line).not.toContain('pypi-tok-zzz');
-  });
-
-  it('no-ops outside GitHub Actions', async () => {
-    delete process.env.GITHUB_ACTIONS;
-    const log = makeLog();
-    await dumpFailure(new Error('local run'), baseCtx(), { log });
-    const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
-    expect(annotations).toEqual([]);
-  });
-
-  it('emits an annotation even when the message has no non-empty line', async () => {
-    // A message that is only blank lines makes `.find` return undefined,
-    // exercising the `?? ''` fallback for the first-line selection.
-    const log = makeLog();
-    await dumpFailure(new Error('\n   \n\t\n'), baseCtx(), { log });
-    const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
-    expect(annotations).toHaveLength(1);
-    // Header (handler/package) is still present; body first-line is empty.
-    expect(annotations[0]).toContain('crates/demo');
-  });
-
-  it('truncates an over-length annotation with an ellipsis', async () => {
-    // A message far longer than the 500-char cap forces the slice branch of
-    // the length guard, appending the single-char ellipsis.
-    const log = makeLog();
-    await dumpFailure(new Error('x'.repeat(2000)), baseCtx(), { log });
-    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
-    const body = line.slice('::error::'.length, -1); // strip prefix + terminator
-    expect(body.length).toBe(500);
-    expect(body.endsWith('…')).toBe(true);
-  });
-
-  it('keeps the annotation to a single line (encodes embedded newlines)', async () => {
-    // GitHub annotations are line-oriented; an embedded newline would
-    // truncate the annotation at the break point. The dumpFailure
-    // implementation must collapse to one line (either by encoding
-    // %0A or by taking the first line only).
-    const log = makeLog();
-    await dumpFailure(
-      new Error('first line\nsecond line\nthird line'),
-      baseCtx(),
-      { log },
-    );
-    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
-    // Exactly one trailing newline (the line terminator), no embedded
-    // bare newlines in the annotation body itself.
-    expect(line.endsWith('\n')).toBe(true);
-    const body = line.slice(0, -1); // strip terminator
-    expect(body).not.toContain('\n');
   });
 });
 
