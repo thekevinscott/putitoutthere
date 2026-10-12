@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { checkPackageJsonShape } from '../preflight.js';
+import { checkPackageJsonShape } from '../check-package-json-shape.js';
 import { checkPackageJsonShapeFindings } from './check-package-json-shape-findings.js';
 import type { CheckFinding } from '../check.js';
 
-vi.mock('../preflight.js');
+vi.mock('../check-package-json-shape.js');
 
 import type { Package } from '../config.js';
 

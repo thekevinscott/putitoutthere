@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { checkPypiVersionSource } from '../preflight.js';
+import { checkPypiVersionSource } from '../check-pypi-version-source.js';
 import { checkPypiVersion } from './check-pypi-version.js';
 import type { CheckFinding } from '../check.js';
 
-vi.mock('../preflight.js');
+vi.mock('../check-pypi-version-source.js');
 
 import type { Package } from '../config.js';
 

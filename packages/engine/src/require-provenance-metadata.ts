@@ -1,6 +1,6 @@
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
-import { checkProvenanceMetadata } from './preflight.js';
+import { checkProvenanceMetadata } from './check-provenance-metadata.js';
 
 /**
  * Throw with an actionable error when any npm package's `package.json`

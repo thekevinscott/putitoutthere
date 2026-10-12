@@ -1,6 +1,6 @@
 import type { Package } from '../config.js';
 import { ErrorCodes } from '../error-codes.js';
-import { checkPypiVersionSource } from '../preflight.js';
+import { checkPypiVersionSource } from '../check-pypi-version-source.js';
 import type { CheckFinding } from '../check.js';
 
 export async function checkPypiVersion(

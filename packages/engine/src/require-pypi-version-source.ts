@@ -1,6 +1,6 @@
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
-import { checkPypiVersionSource } from './preflight.js';
+import { checkPypiVersionSource } from './check-pypi-version-source.js';
 
 /**
  * Throw with an actionable error when any pypi package's pyproject.toml

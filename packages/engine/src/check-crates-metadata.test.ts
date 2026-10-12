@@ -6,11 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkCratesMetadata } from './check-crates-metadata.js';
 import type { Package } from './config.js';
-import { nonEmptyString, readWorkspacePackageTable, resolveInherited } from './preflight.js';
+import { nonEmptyString, resolveInherited } from './preflight.js';
+import { readWorkspacePackageTable } from './read-workspace-package-table.js';
 
 vi.mock('node:fs/promises');
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
 vi.mock('./preflight.js');
+vi.mock('./read-workspace-package-table.js');
 vi.mock('smol-toml', async () => {
   const actual = await vi.importActual<typeof import('smol-toml')>('smol-toml');
   return { ...actual, parse: vi.fn(actual.parse) };

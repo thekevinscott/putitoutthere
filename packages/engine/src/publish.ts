@@ -25,10 +25,10 @@ import {
   requireCargoShape,
   requirePackageJsonShape,
   requirePyprojectShape,
-  requireRepoPublic,
 } from './preflight.js';
 import { requireCratesMetadata } from './require-crates-metadata.js';
 import { requireProvenanceMetadata } from './require-provenance-metadata.js';
+import { requireRepoPublic } from './require-repo-public.js';
 import { requirePypiVersionSource } from './require-pypi-version-source.js';
 import { requireRepoUrlMatch } from './require-repo-url-match.js';
 import { withRetry } from './retry.js';

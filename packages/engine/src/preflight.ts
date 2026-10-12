@@ -6,14 +6,14 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, parse as parsePath, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
-import { checkRepoPublic, type RepoVisibilityOptions } from './check-repo-public.js';
+import { checkPackageJsonShape } from './check-package-json-shape.js';
+import { collectBundleCliCrateFindings } from './collect-bundle-cli-crate-findings.js';
 import { collectCratesPackageFindings } from './collect-crates-package-findings.js';
 import type { Package } from './config.js';
-import { ErrorCodes } from './error-codes.js';
 import { expandDirGlob } from './glob.js';
 import { normalizeOwnerRepo } from './normalize-owner-repo.js';
 import { parseOwnerRepo } from './parse-owner-repo.js';
@@ -97,115 +97,10 @@ function nonEmpty(v: string | undefined): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
-/* ----------------------- npm provenance metadata ----------------------- */
-
-export interface ProvenanceFinding {
-  package: string;
-  /** Pkg-relative `package.json` path examined. */
-  packageJsonPath: string;
-  /** Why the field is unusable: missing entirely, or empty/no-url. */
-  reason: 'missing' | 'empty';
-}
-
-/**
- * Scan every npm package's `package.json` for a non-empty `repository` field;
- * an empty finding list means all are well-formed. Both forms are accepted: the
- * canonical object (`{ type, url, directory? }`, needing a non-empty `url`) and
- * the legacy string (`"git+https://…"`, non-empty after trimming).
- */
-export async function checkProvenanceMetadata(
-  packages: readonly Package[],
-): Promise<ProvenanceFinding[]> {
-  const findings: ProvenanceFinding[] = [];
-  for (const p of packages) {
-    if (p.kind !== 'npm') {continue;}
-    const pkgJsonPath = join(p.path, 'package.json');
-    let raw: string;
-    try {
-      raw = await readFile(pkgJsonPath, 'utf8');
-    } catch {
-      findings.push({ package: p.name, packageJsonPath: pkgJsonPath, reason: 'missing' });
-      continue;
-    }
-    let parsed: { repository?: unknown };
-    try {
-      parsed = JSON.parse(raw) as { repository?: unknown };
-    } catch {
-      // A malformed package.json is a different failure surface;
-      // leave it to the publish step to bubble up. This check only
-      // owns the `repository` field.
-      continue;
-    }
-    if (!hasNonEmptyRepository(parsed.repository)) {
-      findings.push({ package: p.name, packageJsonPath: pkgJsonPath, reason: 'empty' });
-    }
-  }
-  return findings;
-}
-
-function hasNonEmptyRepository(value: unknown): boolean {
-  if (typeof value === 'string') {return value.trim().length > 0;}
-  if (value !== null && typeof value === 'object') {
-    const url = (value as { url?: unknown }).url;
-    return typeof url === 'string' && url.trim().length > 0;
-  }
-  return false;
-}
-
 /* ----------------------- crates.io required metadata ----------------------- */
 
 export function nonEmptyString(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
-}
-
-/* ----------------------- pypi dynamic version ----------------------- */
-
-export interface PypiVersionFinding {
-  package: string;
-  /** Pkg-relative `pyproject.toml` path examined. */
-  pyprojectPath: string;
-}
-
-/**
- * Scan every pypi package's `pyproject.toml` for a static `[project].version`
- * literal, which silently ships the previous release: the backend reads it at
- * build time and piot does not rewrite it (non-goal: version computation).
- * hatch-vcs / setuptools-scm / maturin all accept `dynamic = ["version"]`.
- */
-export async function checkPypiVersionSource(
-  packages: readonly Package[],
-): Promise<PypiVersionFinding[]> {
-  const findings: PypiVersionFinding[] = [];
-  for (const p of packages) {
-    if (p.kind !== 'pypi') {continue;}
-    const pyprojectPath = join(p.path, 'pyproject.toml');
-    let raw: string;
-    try {
-      raw = await readFile(pyprojectPath, 'utf8');
-    } catch {
-      continue;
-    }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = parseToml(raw);
-    } catch {
-      continue;
-    }
-    const project = parsed.project as
-      | { version?: unknown; dynamic?: unknown }
-      | undefined;
-    if (project === undefined) {continue;}
-    if (declaresDynamicVersion(project)) {continue;}
-    if (typeof project.version === 'string') {
-      findings.push({ package: p.name, pyprojectPath });
-    }
-  }
-  return findings;
-}
-
-function declaresDynamicVersion(project: { dynamic?: unknown }): boolean {
-  const { dynamic } = project;
-  return Array.isArray(dynamic) && dynamic.includes('version');
 }
 
 /**
@@ -228,48 +123,6 @@ export function resolveInherited(
     return wsPkgTable?.[key];
   }
   return value;
-}
-
-/**
- * Find the nearest parent `Cargo.toml` whose `[workspace]` table makes
- * it a workspace root and return its `[workspace.package]` table (if
- * any). Walks up from `crateDir` to the filesystem root. Returns
- * `undefined` when no workspace root is found or when the workspace
- * defines no shared `[workspace.package]` metadata.
- */
-export async function readWorkspacePackageTable(
-  crateDir: string,
-): Promise<Record<string, unknown> | undefined> {
-  const rootMarker = parsePath(crateDir).root;
-  let dir = dirname(crateDir);
-  while (dir && dir !== rootMarker) {
-    const manifest = join(dir, 'Cargo.toml');
-    let parsed: Record<string, unknown> | undefined;
-    try {
-      parsed = parseToml(await readFile(manifest, 'utf8'));
-    } catch {
-      // Missing or malformed Cargo.toml at this level — skip it and keep
-      // walking up. (Cargo surfaces a real parse error itself; we just
-      // don't crash the workspace lookup on an unreadable ancestor.)
-      parsed = undefined;
-    }
-    if (parsed !== undefined && parsed.workspace !== undefined) {
-      const ws = parsed.workspace as Record<string, unknown>;
-      const wsPkg = ws.package;
-      if (wsPkg !== undefined && typeof wsPkg === 'object') {
-        return wsPkg as Record<string, unknown>;
-      }
-      // Workspace root found, but no shared metadata — stop walking.
-      return undefined;
-    }
-    // Advance one directory toward the filesystem root. The fixpoint
-    // guard terminates the walk for relative crate paths, where
-    // dirname() settles on '.' rather than reaching rootMarker.
-    const parent = dirname(dir);
-    if (parent === dir) {break;}
-    dir = parent;
-  }
-  return undefined;
 }
 
 /* ----------------------- pyproject.toml + Cargo.toml shape (#301) ----------------------- */
@@ -489,51 +342,12 @@ export async function checkCargoShape(
   return findings;
 }
 
-async function collectBundleCliCrateFindings(
-  p: Package & { kind: 'pypi' },
-  bundleCli: NonNullable<(Package & { kind: 'pypi' })['bundle_cli']>,
-  cwd: string,
-  findings: CargoShapeFinding[],
-): Promise<void> {
-  const cratePathAbs = isAbsolute(bundleCli.crate_path)
-    ? bundleCli.crate_path
-    : resolve(cwd, bundleCli.crate_path);
-  const cargoTomlPath = join(cratePathAbs, 'Cargo.toml');
-  const parsed = await readToml(cargoTomlPath);
-  if (parsed === null) {return;}
-
-  // CRATES_MISSING_BIN
-  const declaredBins = await readDeclaredBinNames(parsed, cargoTomlPath);
-  if (!declaredBins.includes(bundleCli.bin)) {
-    findings.push({
-      package: p.name,
-      cargoTomlPath,
-      code: 'PIOT_CRATES_MISSING_BIN',
-      detail: `bundle_cli.bin = "${bundleCli.bin}" is not declared as a [[bin]] in ${cargoTomlPath}; declared bins: ${declaredBins.length === 0 ? '(none)' : declaredBins.join(', ')}`,
-    });
-  }
-
-  // CRATES_FEATURE_NOT_DECLARED — bundle_cli.features path
-  if (bundleCli.features.length > 0) {
-    const declared = declaredFeatures(parsed);
-    const missing = bundleCli.features.filter((f) => !declared.has(f));
-    if (missing.length > 0) {
-      findings.push({
-        package: p.name,
-        cargoTomlPath,
-        code: 'PIOT_CRATES_FEATURE_NOT_DECLARED',
-        detail: `bundle_cli.features = ${JSON.stringify(bundleCli.features)} references undeclared feature(s) ${JSON.stringify(missing)}; Cargo.toml [features] declares ${JSON.stringify([...declared])}`,
-      });
-    }
-  }
-}
-
 export function declaredFeatures(cargoToml: Record<string, unknown>): Set<string> {
   const features = (cargoToml.features ?? {}) as Record<string, unknown>;
   return new Set(Object.keys(features));
 }
 
-async function readDeclaredBinNames(
+export async function readDeclaredBinNames(
   cargoToml: Record<string, unknown>,
   cargoTomlPath: string,
 ): Promise<string[]> {
@@ -687,44 +501,6 @@ export async function checkRepoUrlMatch(
   return findings;
 }
 
-/* ----------------------- repository visibility ----------------------- */
-//
-// Hard-fails when the GitHub repository running the workflow is
-// private. npm provenance attestations embed a public source-ref
-// pointer; a private repo means consumers cannot verify the
-// attestation, and the same source-visibility expectation underpins
-// the trusted-publisher story on every registry we publish to.
-
-const REPO_VISIBILITY_DOC_POINTER =
-  'https://thekevinscott.github.io/putitoutthere/guide/public-repo';
-
-export async function requireRepoPublic(
-  options: RepoVisibilityOptions = {},
-): Promise<void> {
-  const finding = await checkRepoPublic(options);
-  if (finding === null) {return;}
-  const lines: string[] = [
-    `[${ErrorCodes.REPO_PRIVATE}] refusing to publish from a private GitHub repository (${finding.githubRepository}).`,
-    '',
-    finding.reason === 'private'
-      ? 'The GitHub API reports this repository as private.'
-      : 'The GitHub API returned 404 for this repository slug — either the repo is private and the configured token lacks access, or the slug does not exist.',
-    '',
-    'Why: npm provenance attestations embed a public source-ref pointer that',
-    'consumers cannot dereference on a private repo, and the same source-visibility',
-    'expectation underpins the trusted-publisher story across the registries we',
-    'publish to. Publishing from a private repo silently degrades every consumer\'s',
-    'ability to verify the artifact.',
-    '',
-    'Fix: make the repository public before publishing, or unset the release',
-    'trigger until visibility flips. See',
-    `  ${REPO_VISIBILITY_DOC_POINTER}`,
-    'for the trusted-publisher rationale and the registry-specific failure modes',
-    'this check exists to prevent.',
-  ];
-  throw new Error(lines.join('\n'));
-}
-
 export async function requireCargoShape(
   packages: readonly Package[],
   options: CargoShapeOptions = {},
@@ -758,52 +534,6 @@ export async function requireCargoShape(
 // override). A divergence silently breaks idempotency and can publish
 // under an unexpected name — the npm analogue of PIOT_PYPI_NAME_MISMATCH /
 // PIOT_CRATES_NAME_MISMATCH.
-
-export type NpmShapeCode = 'PIOT_NPM_NAME_MISMATCH';
-
-export interface PackageJsonShapeFinding {
-  package: string;
-  packageJsonPath: string;
-  code: NpmShapeCode;
-  detail: string;
-}
-
-export async function checkPackageJsonShape(
-  packages: readonly Package[],
-): Promise<PackageJsonShapeFinding[]> {
-  const findings: PackageJsonShapeFinding[] = [];
-  for (const p of packages) {
-    if (p.kind !== 'npm') {continue;}
-    const packageJsonPath = join(p.path, 'package.json');
-    let raw: string;
-    try {
-      raw = await readFile(packageJsonPath, 'utf8');
-    } catch {
-      // Missing package.json is a different failure surface:
-      // `checkProvenanceMetadata` reports it, and `check.ts` surfaces it
-      // at PR time. Skip.
-      continue;
-    }
-    let parsed: { name?: unknown };
-    try {
-      parsed = JSON.parse(raw) as { name?: unknown };
-    } catch {
-      // Malformed package.json — let the publish step surface its own
-      // diagnostic. This check only owns the `name` field.
-      continue;
-    }
-    const expectedName = p.npm ?? p.name;
-    if (typeof parsed.name === 'string' && parsed.name !== expectedName) {
-      findings.push({
-        package: p.name,
-        packageJsonPath,
-        code: 'PIOT_NPM_NAME_MISMATCH',
-        detail: `name = "${parsed.name}" but configured name is "${expectedName}"`,
-      });
-    }
-  }
-  return findings;
-}
 
 export async function requirePackageJsonShape(packages: readonly Package[]): Promise<void> {
   const findings = await checkPackageJsonShape(packages);

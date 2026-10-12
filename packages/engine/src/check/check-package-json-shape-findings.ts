@@ -1,5 +1,5 @@
 import type { Package } from '../config.js';
-import { checkPackageJsonShape } from '../preflight.js';
+import { checkPackageJsonShape } from '../check-package-json-shape.js';
 import type { CheckFinding } from '../check.js';
 
 export async function checkPackageJsonShapeFindings(
