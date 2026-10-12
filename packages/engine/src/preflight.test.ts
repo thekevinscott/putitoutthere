@@ -11,7 +11,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkAuth,
   checkCargoShape,
-  checkCratesMetadata,
   checkPackageJsonShape,
   checkProvenanceMetadata,
   checkPypiVersionSource,
@@ -22,7 +21,6 @@ import {
   requireCratesMetadata,
   requirePackageJsonShape,
   requireProvenanceMetadata,
-  requirePypiVersionSource,
   requirePyprojectShape,
   requireRepoPublic,
   requireRepoUrlMatch,
@@ -479,7 +477,7 @@ describe('checkProvenanceMetadata / requireProvenanceMetadata (#280)', () => {
 
 /* ----------------------- crates.io required metadata ----------------------- */
 
-describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
+describe('requireCratesMetadata (#290)', () => {
   const dir = '/vfs/crates-meta';
 
   function cratesPkg(name: string, path: string): Package {
@@ -500,7 +498,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       'description = "A test crate."',
       'license = "MIT"',
     );
-    expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
     // Pin the manifest read's encoding so a StringLiteral mutant dropping
     // 'utf8' from readFile(cargoTomlPath, 'utf8') (preflight.ts:265) is killed.
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(
@@ -520,7 +518,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       'description = "A test crate."',
       'license-file = "LICENSE"',
     );
-    expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
   });
 
   it('reports missing description', async () => {
@@ -532,9 +530,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       'version = "0.0.0"',
       'license = "MIT"',
     );
-    const findings = await checkCratesMetadata([cratesPkg('a', p)]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ package: 'a', missing: ['description'] });
+    await expect(requireCratesMetadata([cratesPkg('a', p)])).rejects.toThrow('(missing: description)');
   });
 
   it('reports missing license when neither license nor license-file is set', async () => {
@@ -546,17 +542,13 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       'version = "0.0.0"',
       'description = "A test crate."',
     );
-    const findings = await checkCratesMetadata([cratesPkg('a', p)]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ package: 'a', missing: ['license'] });
+    await expect(requireCratesMetadata([cratesPkg('a', p)])).rejects.toThrow('(missing: license)');
   });
 
   it('reports both fields together when both are missing', async () => {
     const p = j(dir, 'a');
     writeCargoToml(p, '[package]', 'name = "a"', 'version = "0.0.0"');
-    const findings = await checkCratesMetadata([cratesPkg('a', p)]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]!.missing).toEqual(['description', 'license']);
+    await expect(requireCratesMetadata([cratesPkg('a', p)])).rejects.toThrow('(missing: description, license)');
   });
 
   it('treats whitespace-only fields as empty', async () => {
@@ -569,32 +561,21 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
       'description = "   "',
       'license = ""',
     );
-    const findings = await checkCratesMetadata([cratesPkg('a', p)]);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]!.missing).toEqual(['description', 'license']);
+    await expect(requireCratesMetadata([cratesPkg('a', p)])).rejects.toThrow('(missing: description, license)');
   });
 
   it('skips a missing Cargo.toml (the handler surfaces that error)', async () => {
-    expect(await checkCratesMetadata([cratesPkg('a', j(dir, 'nope'))])).toEqual([]);
+    await expect(requireCratesMetadata([cratesPkg('a', j(dir, 'nope'))])).resolves.toBeUndefined();
   });
 
   it('skips a malformed Cargo.toml (cargo surfaces the diagnostic)', async () => {
     const p = j(dir, 'a');
     writeCargoToml(p, '[[broken', 'this = is not valid toml');
-    expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+    await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
   });
 
   it('skips non-crates packages entirely', async () => {
-    expect(await checkCratesMetadata([pkg('npm'), pkg('pypi')])).toEqual([]);
-  });
-
-  it('reports every failing crates package, not just the first', async () => {
-    const a = j(dir, 'a');
-    const b = j(dir, 'b');
-    writeCargoToml(a, '[package]', 'name = "a"', 'version = "0.0.0"');
-    writeCargoToml(b, '[package]', 'name = "b"', 'version = "0.0.0"');
-    const findings = await checkCratesMetadata([cratesPkg('a', a), cratesPkg('b', b)]);
-    expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
+    await expect(requireCratesMetadata([pkg('npm'), pkg('pypi')])).resolves.toBeUndefined();
   });
 
   it('throws with PIOT_CRATES_MISSING_METADATA when any crates package fails', async () => {
@@ -668,7 +649,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'description = "A test crate."',
         'license.workspace = true',
       );
-      expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+      await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
       // The workspace-root manifest is read via
       // readWorkspacePackageTable's readFile(manifest, 'utf8')
       // (preflight.ts:466). Pin that specific ancestor path's encoding
@@ -698,7 +679,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'description.workspace = true',
         'license = "MIT"',
       );
-      expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+      await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
     });
 
     it('resolves both fields when both inherit from `[workspace.package]`', async () => {
@@ -720,7 +701,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'description.workspace = true',
         'license.workspace = true',
       );
-      expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+      await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
     });
 
     it('accepts license-file inherited from `[workspace.package]`', async () => {
@@ -741,7 +722,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'description = "A test crate."',
         'license-file.workspace = true',
       );
-      expect(await checkCratesMetadata([cratesPkg('a', p)])).toEqual([]);
+      await expect(requireCratesMetadata([cratesPkg('a', p)])).resolves.toBeUndefined();
     });
 
     it('still reports missing when the crate inherits but the workspace root omits the field', async () => {
@@ -765,9 +746,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'description.workspace = true',
         'license.workspace = true',
       );
-      const findings = await checkCratesMetadata([cratesPkg('a', p)]);
-      expect(findings).toHaveLength(1);
-      expect(findings[0]).toMatchObject({ package: 'a', missing: ['license'] });
+      await expect(requireCratesMetadata([cratesPkg('a', p)])).rejects.toThrow('(missing: license)');
     });
 
     it('still reports missing when there is no `[workspace.package]` table to inherit from', async () => {
@@ -784,9 +763,7 @@ describe('checkCratesMetadata / requireCratesMetadata (#290)', () => {
         'description.workspace = true',
         'license.workspace = true',
       );
-      const findings = await checkCratesMetadata([cratesPkg('a', p)]);
-      expect(findings).toHaveLength(1);
-      expect(findings[0]!.missing).toEqual(['description', 'license']);
+      await expect(requireCratesMetadata([cratesPkg('a', p)])).rejects.toThrow('(missing: description, license)');
     });
   });
 });
@@ -1241,7 +1218,7 @@ include = [{ path = "a/bin/*", format = "wheel" }]
 
 /* ----------------------- pypi version source (#333) ----------------------- */
 
-describe('checkPypiVersionSource / requirePypiVersionSource (#333)', () => {
+describe('checkPypiVersionSource (#333)', () => {
   const dir = '/vfs/pypi-version';
 
   function pypiPkg(name: string, path: string): Package {
@@ -1262,17 +1239,13 @@ describe('checkPypiVersionSource / requirePypiVersionSource (#333)', () => {
       expect.stringContaining('pyproject.toml'),
       'utf8',
     );
-    await expect(requirePypiVersionSource([pypiPkg('a', p)])).resolves.toBeUndefined();
   });
 
-  it('flags a static [project].version literal and requires throws on it', async () => {
+  it('flags a static [project].version literal', async () => {
     const p = j(dir, 'b');
     writePyproject(p, '[project]\nname = "b"\nversion = "1.0.0"\n');
     const findings = await checkPypiVersionSource([pypiPkg('b', p)]);
     expect(findings).toHaveLength(1);
-    await expect(requirePypiVersionSource([pypiPkg('b', p)])).rejects.toThrow(
-      /PIOT_PYPI_STATIC_VERSION|static/,
-    );
   });
 });
 
@@ -2185,7 +2158,7 @@ describe('requireRepoPublic — repo must not be private', () => {
 
 /* ----------------------- pypi dynamic version source ----------------------- */
 
-describe('checkPypiVersionSource / requirePypiVersionSource', () => {
+describe('checkPypiVersionSource', () => {
   const dir = '/vfs/pypi-version';
 
   function pypiPkg(name: string, path: string): Package {
@@ -2255,27 +2228,6 @@ describe('checkPypiVersionSource / requirePypiVersionSource', () => {
     const findings = (await checkPypiVersionSource([pypiPkg('a', a), pypiPkg('b', b)]));
     expect(findings.map((f) => f.package).sort()).toEqual(['a', 'b']);
   });
-
-  it('requirePypiVersionSource throws with PIOT_PYPI_STATIC_VERSION naming the failing package', async () => {
-    const p = j(dir, 'a');
-    writePyproject(p, `[project]\nname = "a"\nversion = "1.2.3"\n`);
-    try {
-      await requirePypiVersionSource([pypiPkg('a', p)]);
-      throw new Error('expected requirePypiVersionSource to throw');
-    } catch (err) {
-      const msg = (err as Error).message;
-      expect(msg).toContain('PIOT_PYPI_STATIC_VERSION');
-      expect(msg).toContain('a');
-      expect(msg).toMatch(/[/\\]a[/\\]pyproject\.toml/);
-      expect(msg).toContain('dynamic-versions');
-    }
-  });
-
-  it('requirePypiVersionSource returns silently when every pypi package is dynamic', async () => {
-    const p = j(dir, 'a');
-    writePyproject(p, `[project]\nname = "a"\ndynamic = ["version"]\n`);
-    await expect(requirePypiVersionSource([pypiPkg('a', p)])).resolves.toBeUndefined();
-  });
 });
 
 /* ----------------------- edge-branch coverage ----------------------- */
@@ -2296,17 +2248,15 @@ describe('preflight edge branches (full coverage)', () => {
     expect((await checkProvenanceMetadata([pkg('npm', { name: 'a', path: p })]))).toEqual([]);
   });
 
-  it('checkCratesMetadata reports both fields when Cargo.toml has no [package] table', async () => {
+  it('requireCratesMetadata reports both fields when Cargo.toml has no [package] table', async () => {
     // Exercises the `(parsed.package ?? {})` fallback when the manifest
     // parses but declares no [package] table.
     const p = j(dir, 'crates-nopkg');
     writeCargoToml(p, '[lib]\nname = "x"\n');
-    const findings = (await checkCratesMetadata([pkg('crates', { name: 'a', path: p })]));
-    expect(findings).toHaveLength(1);
-    expect(findings[0]!.missing).toEqual(['description', 'license']);
+    await expect(requireCratesMetadata([pkg('crates', { name: 'a', path: p })])).rejects.toThrow('(missing: description, license)');
   });
 
-  it('checkCratesMetadata resolves a relative crate path with no workspace ancestor', async () => {
+  it('requireCratesMetadata resolves a relative crate path with no workspace ancestor', async () => {
     // Exercises readWorkspacePackageTable's dirname-fixpoint break, which
     // only fires for relative crate paths (dirname settles on `.`).
     const rel = 'rel-crate';
@@ -2314,7 +2264,7 @@ describe('preflight edge branches (full coverage)', () => {
       rel,
       '[package]\nname = "a"\nversion = "0.0.0"\ndescription = "x"\nlicense = "MIT"\n',
     );
-    expect((await checkCratesMetadata([pkg('crates', { name: 'a', path: rel })]))).toEqual([]);
+    await expect(requireCratesMetadata([pkg('crates', { name: 'a', path: rel })])).resolves.toBeUndefined();
   });
 
   it('checkPyprojectShape: maturin include covering a parent dir of stage_to passes', async () => {

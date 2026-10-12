@@ -29,14 +29,14 @@ afterEach(() => {
 
 describe('parseFlags: verify bundle-cli flags', () => {
   it('parses --stage-to and --bin', async () => {
-    const { parseFlags } = await import('./cli.js');
+    const { parseFlags } = await import('./parse-flags.js');
     const flags = parseFlags(['--stage-to', 'dirsql/_binary', '--bin', 'dirsql']);
     expect(flags.stageTo).toBe('dirsql/_binary');
     expect(flags.bin).toBe('dirsql');
   });
 
   it('leaves stageTo and bin unset by default', async () => {
-    const { parseFlags } = await import('./cli.js');
+    const { parseFlags } = await import('./parse-flags.js');
     const flags = parseFlags([]);
     expect(flags.stageTo).toBeUndefined();
     expect(flags.bin).toBeUndefined();
