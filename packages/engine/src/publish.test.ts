@@ -16,14 +16,14 @@ import { type MatrixRow, plan } from './plan.js';
 import {
   requireAuth,
   requireCargoShape,
-  requireCratesMetadata,
   requirePackageJsonShape,
-  requireProvenanceMetadata,
   requirePyprojectShape,
   requireRepoPublic,
-  requireRepoUrlMatch,
 } from './preflight.js';
+import { requireCratesMetadata } from './require-crates-metadata.js';
+import { requireProvenanceMetadata } from './require-provenance-metadata.js';
 import { requirePypiVersionSource } from './require-pypi-version-source.js';
+import { requireRepoUrlMatch } from './require-repo-url-match.js';
 import { attachPublishProgress } from './publish-progress.js';
 import { publish } from './publish.js';
 import { readHandlerMeta, type Ctx, type Handler } from './types.js';
@@ -33,7 +33,10 @@ import { dumpFailure } from './verbose.js';
 vi.mock('./config.js');
 vi.mock('./plan.js');
 vi.mock('./preflight.js');
+vi.mock('./require-crates-metadata.js');
+vi.mock('./require-provenance-metadata.js');
 vi.mock('./require-pypi-version-source.js');
+vi.mock('./require-repo-url-match.js');
 vi.mock('./completeness.js');
 vi.mock('./normalize-artifacts.js');
 vi.mock('./ensure-tag.js');

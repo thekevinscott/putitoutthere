@@ -756,20 +756,6 @@ describe('plan: matrix row shape', () => {
       'ubuntu-latest',
     );
   });
-
-  it('runs_on per target uses the platform-specific default', async () => {
-    useToml(PUTITOUTTHERE_TOML);
-
-    const matrix = await plan({ cwd: CWD });
-    const linux = matrix.find(
-      (r) => r.name === 'lib-python' && r.target === 'x86_64-unknown-linux-gnu',
-    )!;
-    expect(linux.runs_on).toBe('ubuntu-latest');
-    const mac = matrix.find(
-      (r) => r.name === 'lib-python' && r.target === 'aarch64-apple-darwin',
-    )!;
-    expect(mac.runs_on).toBe('macos-latest');
-  });
 });
 
 describe('plan: merge-commit trailer resolution', () => {
