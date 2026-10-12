@@ -83,9 +83,9 @@ describe('rowsForPackage', () => {
     const p = pkg({ kind: 'pypi', build: 'hatch', targets: ['x86_64-unknown-linux-gnu'] });
     const rows = await rowsForPackage(p, '1.0.0', '/repo');
     expect(isVersionIndependentWheel).not.toHaveBeenCalled();
-    expect(rows.map((r) => [r.target, r.artifact_name, r.build, r.python_version])).toEqual([
-      ['sdist', 'scope__lib-sdist', 'hatch', '3.12'],
-      ['any', 'scope__lib-wheel-any', 'hatch', '3.12'],
+    expect(rows.map((r) => [r.kind, r.target, r.artifact_name, r.build, r.python_version])).toEqual([
+      ['pypi', 'sdist', 'scope__lib-sdist', 'hatch', '3.12'],
+      ['pypi', 'any', 'scope__lib-wheel-any', 'hatch', '3.12'],
     ]);
   });
 
