@@ -13,12 +13,10 @@ import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ensureTag } from './ensure-tag.js';
 import { headCommit } from './git.js';
 import { type MatrixRow, plan } from './plan.js';
-import {
-  requireAuth,
-  requireCargoShape,
-  requirePackageJsonShape,
-  requirePyprojectShape,
-} from './preflight.js';
+import { requireAuth } from './require-auth.js';
+import { requireCargoShape } from './require-cargo-shape.js';
+import { requirePackageJsonShape } from './require-package-json-shape.js';
+import { requirePyprojectShape } from './require-pyproject-shape.js';
 import { publishOrder } from './publish-order.js';
 import { requireCratesMetadata } from './require-crates-metadata.js';
 import { requireProvenanceMetadata } from './require-provenance-metadata.js';
@@ -33,7 +31,10 @@ import { dumpFailure } from './verbose.js';
 
 vi.mock('./config.js');
 vi.mock('./plan.js');
-vi.mock('./preflight.js');
+vi.mock('./require-auth.js');
+vi.mock('./require-cargo-shape.js');
+vi.mock('./require-package-json-shape.js');
+vi.mock('./require-pyproject-shape.js');
 vi.mock('./require-crates-metadata.js');
 vi.mock('./require-provenance-metadata.js');
 vi.mock('./require-pypi-version-source.js');

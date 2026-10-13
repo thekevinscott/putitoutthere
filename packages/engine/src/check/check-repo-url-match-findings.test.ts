@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { checkRepoUrlMatch } from '../preflight.js';
+import { checkRepoUrlMatch } from '../check-repo-url-match.js';
 import { checkRepoUrlMatchFindings } from './check-repo-url-match-findings.js';
 import type { CheckFinding } from '../check.js';
 
-vi.mock('../preflight.js');
+vi.mock('../check-repo-url-match.js');
 
 import type { Package } from '../config.js';
 

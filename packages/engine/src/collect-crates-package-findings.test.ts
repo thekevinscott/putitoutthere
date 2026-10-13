@@ -4,16 +4,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { collectCratesPackageFindings } from './collect-crates-package-findings.js';
 import type { Package } from './config.js';
-import {
-  declaredFeatures,
-  versionInheritsWorkspace,
-  workspaceVersionDeclared,
-  type CargoShapeFinding,
-} from './preflight.js';
+import type { CargoShapeFinding } from './cargo-shape-types.js';
+import { declaredFeatures } from './declared-features.js';
+import { versionInheritsWorkspace } from './version-inherits-workspace.js';
+import { workspaceVersionDeclared } from './workspace-version-declared.js';
 import { readToml } from './read-toml.js';
 
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
-vi.mock('./preflight.js');
+vi.mock('./declared-features.js');
+vi.mock('./version-inherits-workspace.js');
+vi.mock('./workspace-version-declared.js');
 vi.mock('./read-toml.js');
 
 const readTomlMock = vi.mocked(readToml);

@@ -1,6 +1,6 @@
 import type { Package } from '../config.js';
 import { ErrorCodes } from '../error-codes.js';
-import { checkRepoUrlMatch } from '../preflight.js';
+import { checkRepoUrlMatch } from '../check-repo-url-match.js';
 import type { CheckFinding } from '../check.js';
 
 export async function checkRepoUrlMatchFindings(

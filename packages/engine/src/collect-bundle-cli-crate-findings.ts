@@ -1,7 +1,9 @@
 import { isAbsolute, join, resolve } from 'node:path';
 
 import type { Package } from './config.js';
-import { declaredFeatures, readDeclaredBinNames, type CargoShapeFinding } from './preflight.js';
+import type { CargoShapeFinding } from './cargo-shape-types.js';
+import { declaredFeatures } from './declared-features.js';
+import { readDeclaredBinNames } from './read-declared-bin-names.js';
 import { readToml } from './read-toml.js';
 
 export async function collectBundleCliCrateFindings(

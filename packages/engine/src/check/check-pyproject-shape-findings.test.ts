@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { checkPyprojectShape } from '../preflight.js';
+import { checkPyprojectShape } from '../check-pyproject-shape.js';
 import { checkPyprojectShapeFindings } from './check-pyproject-shape-findings.js';
 import type { CheckFinding } from '../check.js';
 
-vi.mock('../preflight.js');
+vi.mock('../check-pyproject-shape.js');
 
 import type { Package } from '../config.js';
 

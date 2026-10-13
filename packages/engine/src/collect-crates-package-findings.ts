@@ -1,12 +1,10 @@
 import { join } from 'node:path';
 
 import type { Package } from './config.js';
-import {
-  declaredFeatures,
-  versionInheritsWorkspace,
-  workspaceVersionDeclared,
-  type CargoShapeFinding,
-} from './preflight.js';
+import type { CargoShapeFinding } from './cargo-shape-types.js';
+import { declaredFeatures } from './declared-features.js';
+import { versionInheritsWorkspace } from './version-inherits-workspace.js';
+import { workspaceVersionDeclared } from './workspace-version-declared.js';
 import { readToml } from './read-toml.js';
 
 export async function collectCratesPackageFindings(

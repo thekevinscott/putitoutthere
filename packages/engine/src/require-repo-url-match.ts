@@ -1,6 +1,6 @@
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
-import { checkRepoUrlMatch, type RepoUrlMatchOptions } from './preflight.js';
+import { checkRepoUrlMatch, type RepoUrlMatchOptions } from './check-repo-url-match.js';
 
 export async function requireRepoUrlMatch(
   packages: readonly Package[],
