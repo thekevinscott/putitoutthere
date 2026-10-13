@@ -5,20 +5,20 @@
  * its `optionalDependencies`, so the main package never ships inconsistent.
  */
 
-import { readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 
 import { sanitizeArtifactName } from '../config.js';
-import { detectIndent } from './detect-indent.js';
-import { firstFileUnder } from './first-file-under.js';
 import type { Ctx } from '../types.js';
 import { nonEmpty } from '../env.js';
 import { awaitPlatformsVisible } from './await-platforms-visible.js';
 import { isPlatformPublished } from './is-platform-published.js';
 import { publishPlatformPackage } from './publish-platform-package.js';
+import { resolvePlatformName } from './resolve-platform-name.js';
+import { rewriteOptionalDependencies } from './rewrite-optional-dependencies.js';
 import { synthesizePlatformPackage } from './synthesize-platform-package.js';
 
 export { looksLikePublishOverRace } from './looks-like-publish-over-race.js';
+export { toRustTriple } from './to-rust-triple.js';
 
 export type NpmBuildMode = 'napi' | 'bundled-cli';
 
@@ -147,39 +147,6 @@ export async function publishPlatforms(
 }
 
 /**
- * Resolve a platform-package name template. `{name}`, `{scope}`,
- * `{base}`, `{triple}`, and `{mode}` are substituted; unknown
- * placeholders throw (config-load validation should catch these
- * earlier — this guard is defensive).
- */
-export function resolvePlatformName(
-  template: string,
-  vars: { name: string; triple: string; mode: NpmBuildMode },
-): string {
-  const scopedMatch = /^@([^/]+)\/(.+)$/.exec(vars.name);
-  const scope = scopedMatch ? scopedMatch[1]! : '';
-  const base = scopedMatch ? scopedMatch[2]! : vars.name;
-  return template.replace(/\{(\w+)\}/g, (_match, key: string) => {
-    switch (key) {
-      case 'name':
-        return vars.name;
-      case 'scope':
-        return scope;
-      case 'base':
-        return base;
-      case 'triple':
-        return vars.triple;
-      case 'mode':
-        return vars.mode;
-      /* v8 ignore start -- config-load validation rejects unknown placeholders; this branch is defensive */
-      default:
-        throw new Error(`unknown placeholder {${key}} in name template`);
-    }
-    /* v8 ignore stop */
-  });
-}
-
-/**
  * Plan-time + handler-time: compute the artifact directory name for a
  * given (package, mode, triple). The mode infix is only added when
  * the package has multiple build entries, so single-mode packages keep
@@ -193,31 +160,6 @@ export function platformArtifactName(
 ): string {
   const safe = sanitizeArtifactName(pkgName);
   return isMulti ? `${safe}-${mode}-${triple}` : `${safe}-${triple}`;
-}
-
-/* --------------------------- internals --------------------------- */
-
-async function rewriteOptionalDependencies(
-  pkg: PlatformPkg,
-  version: string,
-  platformPackages: readonly string[],
-): Promise<void> {
-  const p = join(pkg.path, 'package.json');
-  const raw = await readFile(p, 'utf8');
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-  const optionalDeps: Record<string, string> = {};
-  for (const name of platformPackages) {
-    optionalDeps[name] = version;
-  }
-  parsed.optionalDependencies = {
-    ...((parsed.optionalDependencies) ?? {}),
-    ...optionalDeps,
-  };
-
-  const indentArg = detectIndent(raw);
-  const trailing = raw.endsWith('\n') ? '\n' : '';
-  await writeFile(p, JSON.stringify(parsed, null, indentArg) + trailing, 'utf8');
 }
 
 interface OsCpu {
@@ -306,80 +248,4 @@ export function assertTripleSupported(triple: string, packageName: string): void
 
 function unmappedTripleMessage(target: string): string {
   return `Target triple "${target}" is not mapped to npm os/cpu. Add it to TRIPLE_MAP in src/handlers/npm-platform.ts.`;
-}
-
-/**
- * napi-rs short form → Rust target triple. npm `targets` are written in
- * napi-rs short form (`linux-x64-gnu`); the bundled-cli cross-compile path
- * feeds the triple to `rustup target add` / `cargo build --target`, which
- * only understand Rust triples (`x86_64-unknown-linux-gnu`). This is the
- * napi→rust half of the correspondence `TRIPLE_MAP` already encodes for
- * os/cpu — every napi key in `TRIPLE_MAP` has an entry here, so a triple
- * that passes `assertTripleSupported` always resolves.
- *
- * Issue #387.
- */
-const NAPI_TO_RUST: Record<string, string> = {
-  'linux-x64-gnu': 'x86_64-unknown-linux-gnu',
-  'linux-x64-musl': 'x86_64-unknown-linux-musl',
-  'linux-arm64-gnu': 'aarch64-unknown-linux-gnu',
-  'linux-arm64-musl': 'aarch64-unknown-linux-musl',
-  'linux-arm-gnueabihf': 'armv7-unknown-linux-gnueabihf',
-  'linux-arm-musleabihf': 'armv7-unknown-linux-musleabihf',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'win32-x64-msvc': 'x86_64-pc-windows-msvc',
-  'win32-arm64-msvc': 'aarch64-pc-windows-msvc',
-};
-
-/** The Rust triples the map can produce. A consumer who declares
- *  rust-flavor `targets` (the pypi convention, also accepted on npm) gets
- *  identity passthrough — the triple is already what rustup/cargo want. */
-const RUST_TRIPLES: ReadonlySet<string> = new Set(Object.values(NAPI_TO_RUST));
-
-/**
- * Resolve a target triple to its Rust (rustup/cargo) form: a napi-rs short
- * form (`linux-x64-gnu`) maps to its Rust triple, a Rust triple is identity,
- * and anything else throws so an unmappable triple fails at plan time rather
- * than reaching `rustup target add` (#387). Case-insensitive.
- */
-export function toRustTriple(target: string): string {
-  const key = target.toLowerCase();
-  const mapped = NAPI_TO_RUST[key];
-  if (mapped !== undefined) {
-    return mapped;
-  }
-  if (RUST_TRIPLES.has(key)) {
-    return key;
-  }
-  throw new Error(
-    `Target triple "${target}" has no known Rust-triple mapping. ` +
-      `Add it to NAPI_TO_RUST in src/handlers/npm-platform.ts.`,
-  );
-}
-
-/**
- * The package-relative path `package.json#main` should name for a staged
- * platform artifact. `bundled-cli` resolves through directories to a real
- * file: on the nested `<artifact>/bin/<bin>` layout `readdir`'s first entry is
- * the `bin` **directory**, which #365's chmod then restored at 0644 (#626).
- */
-export async function pickMainFile(
-  dir: string,
-  files: readonly string[],
-  mode: NpmBuildMode,
-): Promise<string> {
-  if (mode === 'napi') {
-    const node = files.find((f) => f.endsWith('.node'));
-    return node ?? files[0]!;
-  }
-  // bundled-cli: the first non-package.json entry that resolves to a file,
-  // descending into directories. The `files[0]` fallback keeps the
-  // defensive shape for a payload-less artifact (an empty one is already
-  // rejected upstream) — there is nothing better to name.
-  const binary = await firstFileUnder(
-    dir,
-    files.filter((f) => f !== 'package.json'),
-  );
-  return binary ?? files[0]!;
 }
