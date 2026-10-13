@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,7 +27,7 @@ describe('workspaceMemberManifests', () => {
       join('/repo', 'tools', 'Cargo.toml'),
     ]);
     expect(expandDirGlob).toHaveBeenCalledTimes(2);
-    expect(expandDirGlob).toHaveBeenCalledWith('/repo', 'crates/*');
+    expect(expandDirGlob).toHaveBeenCalledWith(dirname(manifestPath), 'crates/*');
   });
 
   it('returns nothing without a [workspace] table or a members array', async () => {

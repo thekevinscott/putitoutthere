@@ -550,4 +550,83 @@ include = [{ path = "a/bin/*", format = "wheel" }]
       (await checkPyprojectShape(pkgs)).some((f) => f.code === 'PIOT_PYPI_MATURIN_INCLUDE_MISSING'),
     ).toBe(true);
   });
+
+  it('ignores a pyproject that sits under a non-pypi package path', async () => {
+    const p = j(dir, 'not-pypi');
+    writePyproject(p, `[project]\nname = "other"\n`);
+    expect(await checkPyprojectShape([pkg('crates', { name: 'a', path: p })])).toEqual([]);
+  });
+
+  it('pins the BUILD_BACKEND_MISMATCH detail, listing every accepted prefix', async () => {
+    const p = j(dir, 'backend-detail');
+    writePyproject(p, `[build-system]\nbuild-backend = "maturin"\n[project]\nname = "a"\n`);
+    expect(await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })])).toEqual([
+      {
+        package: 'a',
+        pyprojectPath: j(p, 'pyproject.toml'),
+        code: 'PIOT_PYPI_BUILD_BACKEND_MISMATCH',
+        detail: '[build-system].build-backend = "maturin" but build = "hatch" expects "hatchling*" or "hatch*"',
+      },
+    ]);
+  });
+
+  it('accepts a hatch backend that matches only one of the accepted prefixes', async () => {
+    const p = j(dir, 'hatch-only');
+    writePyproject(p, `[build-system]\nbuild-backend = "hatch.build"\n[project]\nname = "a"\n`);
+    expect(await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })])).toEqual([]);
+  });
+
+  it('skips the backend check when build-backend is empty', async () => {
+    const p = j(dir, 'empty-backend');
+    writePyproject(p, `[build-system]\nbuild-backend = ""\n[project]\nname = "a"\n`);
+    expect(await checkPyprojectShape([pypiPkg('a', p, { build: 'setuptools' })])).toEqual([]);
+  });
+
+  it('skips the backend check when build-backend is absent', async () => {
+    const p = j(dir, 'no-backend');
+    writePyproject(p, `[build-system]\nrequires = ["setuptools"]\n[project]\nname = "a"\n`);
+    expect(await checkPyprojectShape([pypiPkg('a', p, { build: 'setuptools' })])).toEqual([]);
+  });
+
+  it('classifies the version source when "version" is one of several dynamic fields', async () => {
+    const p = j(dir, 'dyn-multi');
+    writePyproject(
+      p,
+      `[build-system]\nbuild-backend = "hatchling.build"\n[project]\nname = "a"\ndynamic = ["readme", "version"]\n`,
+    );
+    const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })]);
+    expect(findings.map((f) => f.code)).toEqual(['PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND']);
+  });
+
+  it('does not classify the version source when "version" is not dynamic', async () => {
+    const p = j(dir, 'dyn-readme');
+    writePyproject(
+      p,
+      `[build-system]\nbuild-backend = "hatchling.build"\n[project]\nname = "a"\ndynamic = ["readme"]\n`,
+    );
+    expect(await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })])).toEqual([]);
+  });
+
+  it('treats a non-array [tool.maturin].include as covering nothing, and pins the detail', async () => {
+    const p = j(dir, 'mat-string-include');
+    writePyproject(
+      p,
+      `[build-system]\nbuild-backend = "maturin"\n[project]\nname = "a"\n[tool.maturin]\ninclude = "a/bin"\n`,
+    );
+    const pkgs = [
+      pypiPkg('a', p, {
+        build: 'maturin',
+        targets: ['x86_64-unknown-linux-gnu'],
+        bundle_cli: { bin: 'a', stage_to: 'a/bin', crate_path: '.', features: [], no_default_features: false },
+      }),
+    ];
+    expect(await checkPyprojectShape(pkgs)).toEqual([
+      {
+        package: 'a',
+        pyprojectPath: j(p, 'pyproject.toml'),
+        code: 'PIOT_PYPI_MATURIN_INCLUDE_MISSING',
+        detail: 'bundle_cli.stage_to = "a/bin" is not covered by any [tool.maturin].include entry; the cross-compiled binary will not be packed into the wheel',
+      },
+    ]);
+  });
 });

@@ -21,39 +21,31 @@ export interface PyprojectShapeFinding {
   detail: string;
 }
 
-// Each PYPI_BUILD mode maps to the prefix(es) the upstream build
-// backend identifier should start with. The check is intentionally
-// loose: maturin / setuptools / hatchling all ship multiple backend
-// identifiers across versions, and the failure mode this gate exists
-// to catch is the *kind* mismatch (e.g. `build = "maturin"` but the
-// pyproject declares hatchling), not a backend-version drift.
-const PYPI_BACKEND_PREFIX: Record<'maturin' | 'setuptools' | 'hatch', readonly string[]> = {
-  maturin: ['maturin'],
-  setuptools: ['setuptools'],
-  hatch: ['hatchling', 'hatch'],
-};
-
 export async function checkPyprojectShape(
   packages: readonly Package[],
 ): Promise<PyprojectShapeFinding[]> {
+  // Each PYPI_BUILD mode maps to the prefix(es) the upstream build
+  // backend identifier should start with. The check is intentionally
+  // loose: maturin / setuptools / hatchling all ship multiple backend
+  // identifiers across versions, and the failure mode this gate exists
+  // to catch is the *kind* mismatch (e.g. `build = "maturin"` but the
+  // pyproject declares hatchling), not a backend-version drift.
+  const backendPrefixes: Record<'maturin' | 'setuptools' | 'hatch', readonly string[]> = {
+    maturin: ['maturin'],
+    setuptools: ['setuptools'],
+    hatch: ['hatchling', 'hatch'],
+  };
   const findings: PyprojectShapeFinding[] = [];
   for (const p of packages) {
     if (p.kind !== 'pypi') {continue;}
     const pyprojectPath = join(p.path, 'pyproject.toml');
-    let raw: string;
-    try {
-      raw = await readFile(pyprojectPath, 'utf8');
-    } catch {
-      // Missing pyproject.toml is a different failure surface (the
-      // build tool surfaces it with a clear error, and `check.ts`
-      // catches it at PR time). Skip.
-      continue;
-    }
     let parsed: Record<string, unknown>;
     try {
-      parsed = parseToml(raw);
+      parsed = parseToml(await readFile(pyprojectPath, 'utf8'));
     } catch {
-      // Malformed TOML — let the build tool surface its own diagnostic.
+      // Missing or malformed pyproject.toml is a different failure
+      // surface: the build tool reports it, and `check.ts` catches it
+      // at PR time. Skip.
       continue;
     }
 
@@ -77,7 +69,7 @@ export async function checkPyprojectShape(
     // gate is not meant to police.
     const backend = buildSystem['build-backend'];
     if (typeof backend === 'string' && backend.length > 0) {
-      const allowed = PYPI_BACKEND_PREFIX[p.build];
+      const allowed = backendPrefixes[p.build];
       const ok = allowed.some((prefix) => backend.startsWith(prefix));
       if (!ok) {
         findings.push({
@@ -120,8 +112,7 @@ export async function checkPyprojectShape(
       const stageTo = p.bundle_cli.stage_to;
       const maturin = (tool.maturin ?? {}) as Record<string, unknown>;
       const include = maturin.include;
-      const includes = Array.isArray(include) ? include : [];
-      if (!maturinIncludeCovers(includes, stageTo)) {
+      if (!(Array.isArray(include) && maturinIncludeCovers(include, stageTo))) {
         findings.push({
           package: p.name,
           pyprojectPath,

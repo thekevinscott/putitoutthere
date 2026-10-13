@@ -21,7 +21,7 @@ const TOKEN_ENV: Record<Kind, readonly string[]> = {
   npm: ['NODE_AUTH_TOKEN', 'NPM_TOKEN'],
 };
 
-export const OIDC_ENV = 'ACTIONS_ID_TOKEN_REQUEST_TOKEN';
+const OIDC_ENV = 'ACTIONS_ID_TOKEN_REQUEST_TOKEN';
 
 export interface AuthResult {
   package: string;

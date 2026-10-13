@@ -3,10 +3,8 @@ export function collectBinsFromManifest(cargoToml: Record<string, unknown>): str
   const bins = cargoToml.bin;
   if (Array.isArray(bins)) {
     for (const entry of bins) {
-      if (typeof entry === 'object' && entry !== null) {
-        const name = (entry as { name?: unknown }).name;
-        if (typeof name === 'string') {result.push(name);}
-      }
+      const name = (entry as { name?: unknown } | null | undefined)?.name;
+      if (typeof name === 'string') {result.push(name);}
     }
   }
   // Cargo's implicit-binary rule: a crate without any [[bin]] table

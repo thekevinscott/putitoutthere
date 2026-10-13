@@ -55,4 +55,12 @@ describe('maturinIncludeCovers', () => {
   it('is false for an empty include list', () => {
     expect(maturinIncludeCovers([], 'a/bin')).toBe(false);
   });
+
+  it('strips only a trailing glob, not one mid-path', () => {
+    expect(maturinIncludeCovers(['a/*/bin'], 'a/bin')).toBe(false);
+  });
+
+  it('strips a multi-star trailing glob so the parent covers a nested stage_to', () => {
+    expect(maturinIncludeCovers(['a/**'], 'a/bin/x')).toBe(true);
+  });
 });

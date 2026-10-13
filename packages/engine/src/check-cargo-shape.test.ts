@@ -622,4 +622,18 @@ cli = []
       (await checkCargoShape([pyPkg], { cwd: root })).filter((f) => f.code === 'PIOT_CRATES_MISSING_BIN'),
     ).toEqual([]);
   });
+
+  it('does not inspect bundle_cli.crate_path on an npm package', async () => {
+    const root = dir;
+    writeCargoToml(
+      j(root, 'crates', 'npm-cli'),
+      `[package]\nname = "npm-cli"\nversion = "0.0.0"\n\n[[bin]]\nname = "other-bin"\npath = "src/main.rs"\n`,
+    );
+    const npmPkg = pkg('npm', {
+      name: 'js-lib',
+      path: j(root, 'js'),
+      bundle_cli: { bin: 'my-cli', crate_path: 'crates/npm-cli', features: [], no_default_features: false },
+    });
+    expect(await checkCargoShape([npmPkg], { cwd: root })).toEqual([]);
+  });
 });

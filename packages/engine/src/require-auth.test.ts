@@ -68,4 +68,19 @@ describe('requireAuth', () => {
     }
     throw new Error('expected requireAuth to throw');
   });
+
+  it('lists only the packages without auth, in the full message', () => {
+    process.env.CARGO_REGISTRY_TOKEN = 'x';
+    expect(() => requireAuth([pkg('crates'), pkg('pypi')])).toThrow(
+      new Error(
+        [
+          'Pre-flight auth check failed:',
+          '  - pypi-pkg (pypi) needs PYPI_API_TOKEN (or OIDC via ACTIONS_ID_TOKEN_REQUEST_TOKEN)',
+          '',
+          'Wire the missing env vars in .github/workflows/release.yml under the publish job.',
+          'See https://thekevinscott.github.io/putitoutthere/guide/auth.',
+        ].join('\n'),
+      ),
+    );
+  });
 });
