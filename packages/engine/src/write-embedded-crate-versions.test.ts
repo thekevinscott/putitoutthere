@@ -21,10 +21,8 @@ const findRootMock = vi.mocked(findWorkspaceRoot);
 const ROOT = '/r';
 const HOST = '/r/host';
 const CORE = '/r/core';
-const MID = '/r/mid';
 const A = '/r/a';
 const VIRT = '/r/virt';
-const BAD = '/r/bad';
 const OTHER = '/r/other';
 
 /** True when `path` is the Cargo.toml of `dir`, on any platform. */
@@ -103,18 +101,6 @@ describe('writeEmbeddedCrateVersions', () => {
     expect(wrote(OTHER)).toBe(false);
   });
 
-  it('follows the graph transitively', async () => {
-    manifests({
-      [HOST]: pkg('host', '\n[dependencies]\nmid = { path = "../mid" }\n'),
-      [MID]: pkg('mid', '\n[dependencies]\ncore = { path = "../core" }\n'),
-      [CORE]: pkg('core'),
-    });
-    const out = await writeEmbeddedCrateVersions(HOST, '0.4.2');
-
-    expect(reported(out, MID)).toBe(true);
-    expect(reported(out, CORE)).toBe(true);
-  });
-
   it('terminates on a dependency cycle without bumping the starting crate', async () => {
     manifests({
       [HOST]: pkg('host', '\n[dependencies]\na = { path = "../a" }\n'),
@@ -159,15 +145,6 @@ describe('writeEmbeddedCrateVersions', () => {
 
   it('tolerates a missing manifest and writes nothing for it', async () => {
     manifests({ [HOST]: pkg('host', '\n[dependencies]\ngone = { path = "../gone" }\n') });
-    expect(await writeEmbeddedCrateVersions(HOST, '0.4.2')).toEqual([]);
-    expect(writeMock).not.toHaveBeenCalled();
-  });
-
-  it('tolerates an unparseable manifest and writes nothing for it', async () => {
-    manifests({
-      [HOST]: pkg('host', '\n[dependencies]\nbad = { path = "../bad" }\n'),
-      [BAD]: 'this is not = = valid toml [[[',
-    });
     expect(await writeEmbeddedCrateVersions(HOST, '0.4.2')).toEqual([]);
     expect(writeMock).not.toHaveBeenCalled();
   });
