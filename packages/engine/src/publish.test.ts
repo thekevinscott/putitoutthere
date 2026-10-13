@@ -19,6 +19,7 @@ import {
   requirePackageJsonShape,
   requirePyprojectShape,
 } from './preflight.js';
+import { publishOrder } from './publish-order.js';
 import { requireCratesMetadata } from './require-crates-metadata.js';
 import { requireProvenanceMetadata } from './require-provenance-metadata.js';
 import { requireRepoPublic } from './require-repo-public.js';
@@ -41,6 +42,7 @@ vi.mock('./require-repo-url-match.js');
 vi.mock('./completeness.js');
 vi.mock('./normalize-artifacts.js');
 vi.mock('./ensure-tag.js');
+vi.mock('./publish-order.js');
 vi.mock('./publish-progress.js');
 vi.mock('./git.js');
 vi.mock('./verbose.js');
@@ -121,6 +123,7 @@ beforeEach(() => {
   vi.mocked(headCommit).mockResolvedValue('HEAD-SHA');
   vi.mocked(normalizeArtifactLayout).mockResolvedValue(undefined);
   vi.mocked(readHandlerMeta).mockReturnValue(undefined);
+  vi.mocked(publishOrder).mockImplementation((_packages, selected) => [...selected]);
   // Preflight gates pass by default; individual tests override one to abort.
   // requireAuth is the only synchronous preflight gate.
   vi.mocked(requireAuth).mockReturnValue(undefined);
@@ -448,49 +451,20 @@ describe('publish: writeVersion hands its manifests to publish (#639)', () => {
   });
 });
 
-describe('publish: publish order (toposort)', () => {
-  it('publishes dependencies before dependents', async () => {
+describe('publish: publish order', () => {
+  it('publishes in the order publishOrder returns for the configured packages and the planned names', async () => {
     const a = npmPkg('a', 'packages/a');
-    const b = npmPkg('b', 'packages/b', ['a']);
-    const c = npmPkg('c', 'packages/c', ['a', 'b']);
+    const b = npmPkg('b', 'packages/b');
+    const c = npmPkg('c', 'packages/c');
     configWith(a, b, c);
-    vi.mocked(plan).mockResolvedValue([row(a), row(b), row(c)]);
-    allComplete(a, b, c);
+    vi.mocked(plan).mockResolvedValue([row(a), row(c)]);
+    allComplete(a, c);
+    vi.mocked(publishOrder).mockReturnValue(['c', 'a']);
 
-    const calls: string[] = [];
-    const handler = makeHandler({
-      publish: vi.fn().mockImplementation((pkg: { name: string }) => {
-        calls.push(pkg.name);
-        return Promise.resolve({ status: 'published' as const });
-      }),
-    });
+    const handler = makeHandler();
     const result = await publish({ cwd: CWD, handlerFor: () => handler });
-    expect(result.ok).toBe(true);
-    expect(calls).toEqual(['a', 'b', 'c']);
-  });
-
-  it('orders only the selected set, dropping a dependency that is not planned', async () => {
-    // `b` depends on `a`, but only `b` is planned. publishOrder seeds its
-    // `deps` map for the selected set and filters each package's
-    // depends_on down to it, so `b`'s child-deps are empty and the
-    // toposort's seeded lookup visits only `b` — it never reaches the
-    // unselected `a`.
-    const a = npmPkg('a', 'packages/a');
-    const b = npmPkg('b', 'packages/b', ['a']);
-    configWith(a, b);
-    vi.mocked(plan).mockResolvedValue([row(b)]);
-    allComplete(b);
-
-    const calls: string[] = [];
-    const handler = makeHandler({
-      publish: vi.fn().mockImplementation((pkg: { name: string }) => {
-        calls.push(pkg.name);
-        return Promise.resolve({ status: 'published' as const });
-      }),
-    });
-    const result = await publish({ cwd: CWD, handlerFor: () => handler });
-    expect(result.ok).toBe(true);
-    expect(calls).toEqual(['b']);
+    expect(publishOrder).toHaveBeenCalledWith([a, b, c], ['a', 'c']);
+    expect(result.published.map((r) => r.package)).toEqual(['c', 'a']);
   });
 });
 
@@ -746,32 +720,6 @@ describe('publish: additional branch coverage', () => {
       /raw-string-fail/,
     );
     expect(dumpFailure).toHaveBeenCalledTimes(1);
-  });
-
-  it('ignores configured packages that are absent from the plan when ordering', async () => {
-    // `b` is configured but never planned; publishOrder must skip it
-    // rather than try to publish it.
-    const a = npmPkg('a', 'packages/a');
-    const b = npmPkg('b', 'packages/b');
-    configWith(a, b);
-    vi.mocked(plan).mockResolvedValue([row(a)]);
-    allComplete(a);
-
-    const handler = makeHandler();
-    const result = await publish({ cwd: CWD, handlerFor: () => handler });
-    expect(result.published.map((r) => r.package)).toEqual(['a']);
-  });
-
-  it('tolerates a selected package whose depends_on is undefined', async () => {
-    const p = { ...npmPkg('lib-js', 'packages/ts') };
-    delete (p as { depends_on?: string[] }).depends_on;
-    configWith(p);
-    vi.mocked(plan).mockResolvedValue([row(p)]);
-    allComplete(p);
-
-    const handler = makeHandler();
-    const result = await publish({ cwd: CWD, handlerFor: () => handler });
-    expect(result.ok).toBe(true);
   });
 
   it('exposes ctx.artifacts.get()/has() to handlers', async () => {

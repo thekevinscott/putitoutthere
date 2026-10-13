@@ -9,7 +9,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 
 import {
-  detectCommonMistakes,
   formatZodError,
   loadConfig,
   parseConfig,
@@ -1506,26 +1505,6 @@ ${extra}
         pypi('build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "glibc-2.28"'),
       ),
     ).toThrow(/manylinux must be/);
-  });
-});
-
-describe('detectCommonMistakes (internal): non-object / non-object-entry guards', () => {
-  // `parseConfig` only ever calls this with a parsed-TOML object root, so the
-  // non-object early-return and the per-entry non-object skip never fire
-  // through the public path. Exercised directly to pin the defensive guards.
-  it('returns no hints for a non-object root', () => {
-    expect(detectCommonMistakes('not-an-object')).toEqual([]);
-    expect(detectCommonMistakes(null)).toEqual([]);
-    expect(detectCommonMistakes(['array', 'root'])).toEqual([]);
-  });
-
-  it('skips non-object entries in the package array while still hinting on object ones', () => {
-    const hints = detectCommonMistakes({
-      package: ['a-bare-string', { registry: 'npm', path: '.' }],
-    });
-    // The string entry is skipped (index 0); the object entry (index 1)
-    // still produces the registry→kind hint.
-    expect(hints).toEqual([expect.stringMatching(/registry.*kind/)]);
   });
 });
 

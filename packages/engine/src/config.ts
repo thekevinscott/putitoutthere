@@ -9,8 +9,10 @@ import { readFile } from 'node:fs/promises';
 import { parse as parseToml } from 'smol-toml';
 import { z, type ZodError } from 'zod';
 
+import { detectCommonMistakes } from './detect-common-mistakes.js';
 import { DEFAULT_TAG_FORMAT } from './tag-template.js';
 import { toError } from './to-error.js';
+import { validateNameTemplate } from './validate-name-template.js';
 
 /* ------------------------------ artifact-name encoding ------------------------------ */
 
@@ -231,28 +233,6 @@ const NPM_BUNDLE_CLI = z
 
 const NPM_BUILD_MODE = z.enum(['napi', 'bundled-cli']);
 
-// #dirsql: must mirror ALLOWED_NAME_VARIABLES in src/handlers/npm-platform.ts.
-// `{version}` is intentionally excluded — see resolvePlatformName.
-const NPM_NAME_TEMPLATE_VARS = ['name', 'scope', 'base', 'triple', 'mode'] as const;
-const NPM_NAME_TEMPLATE_PLACEHOLDER_RE = /\{([^}]+)\}/g;
-
-function validateNameTemplate(template: string): string | null {
-  if (template.length === 0) {return 'name template must not be empty';}
-  if (!template.includes('{triple}')) {
-    return 'name template must contain {triple} (otherwise platform packages would collide)';
-  }
-  const allowed = new Set<string>(NPM_NAME_TEMPLATE_VARS);
-  const unknown: string[] = [];
-  for (const match of template.matchAll(NPM_NAME_TEMPLATE_PLACEHOLDER_RE)) {
-    const v = match[1]!;
-    if (!allowed.has(v)) {unknown.push(v);}
-  }
-  if (unknown.length > 0) {
-    return `name template contains unknown placeholder(s): ${[...new Set(unknown)].map((u) => `{${u}}`).join(', ')} (allowed: ${NPM_NAME_TEMPLATE_VARS.map((v) => `{${v}}`).join(', ')})`;
-  }
-  return null;
-}
-
 // Object form of a build entry: explicit mode + a `name` template the
 // consumer fully controls. String form (a bare mode) implies the
 // historical `{name}-{triple}` template — backward-compat with the
@@ -439,43 +419,6 @@ export async function loadConfig(path: string): Promise<Config> {
 }
 
 /* ----------------------------- internals ----------------------------- */
-
-// Common consumer typos that zod's raw output describes too obliquely to
-// recover from without re-reading the schema. Each detection names both
-// the mistake and the fix so the failing CI log is self-explanatory.
-// Triggered by the integration failure in #integration-2026-05.
-export function detectCommonMistakes(raw: unknown): string[] {
-  const hints: string[] = [];
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {return hints;}
-  const root = raw as Record<string, unknown>;
-
-  if (!('putitoutthere' in root) && 'version' in root) {
-    hints.push(
-      'missing [putitoutthere] table — move `version` under it: `[putitoutthere]\\nversion = 1`',
-    );
-  }
-  if ('packages' in root && !('package' in root)) {
-    hints.push(
-      'top-level table is `[[packages]]` (plural) but should be `[[package]]` (singular)',
-    );
-  }
-
-  const pkgs = root.package ?? root.packages;
-  if (Array.isArray(pkgs)) {
-    pkgs.forEach((p, i) => {
-      if (typeof p !== 'object' || p === null) {return;}
-      const pp = p as Record<string, unknown>;
-      if ('registry' in pp && !('kind' in pp)) {
-        hints.push(`package[${i}]: \`registry = ...\` is not a valid field; did you mean \`kind\`?`);
-      }
-      if ('files' in pp && !('globs' in pp)) {
-        hints.push(`package[${i}]: \`files = ...\` is not a valid field; did you mean \`globs\`?`);
-      }
-    });
-  }
-
-  return hints;
-}
 
 function assertUniqueNames(packages: readonly Package[]): void {
   const seen = new Set<string>();
