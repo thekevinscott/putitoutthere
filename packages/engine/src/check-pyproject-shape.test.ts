@@ -560,7 +560,8 @@ include = [{ path = "a/bin/*", format = "wheel" }]
   it('pins the BUILD_BACKEND_MISMATCH detail, listing every accepted prefix', async () => {
     const p = j(dir, 'backend-detail');
     writePyproject(p, `[build-system]\nbuild-backend = "maturin"\n[project]\nname = "a"\n`);
-    expect(await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })])).toEqual([
+    const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'hatch' })]);
+    expect(findings.map((f) => ({ ...f, pyprojectPath: norm(f.pyprojectPath) }))).toEqual([
       {
         package: 'a',
         pyprojectPath: j(p, 'pyproject.toml'),
@@ -568,6 +569,13 @@ include = [{ path = "a/bin/*", format = "wheel" }]
         detail: '[build-system].build-backend = "maturin" but build = "hatch" expects "hatchling*" or "hatch*"',
       },
     ]);
+  });
+
+  it('flags a setuptools package whose backend is hatchling', async () => {
+    const p = j(dir, 'setuptools-hatch');
+    writePyproject(p, `[build-system]\nbuild-backend = "hatchling.build"\n[project]\nname = "a"\n`);
+    const findings = await checkPyprojectShape([pypiPkg('a', p, { build: 'setuptools' })]);
+    expect(findings.map((f) => f.code)).toEqual(['PIOT_PYPI_BUILD_BACKEND_MISMATCH']);
   });
 
   it('accepts a hatch backend that matches only one of the accepted prefixes', async () => {
@@ -620,7 +628,8 @@ include = [{ path = "a/bin/*", format = "wheel" }]
         bundle_cli: { bin: 'a', stage_to: 'a/bin', crate_path: '.', features: [], no_default_features: false },
       }),
     ];
-    expect(await checkPyprojectShape(pkgs)).toEqual([
+    const findings = await checkPyprojectShape(pkgs);
+    expect(findings.map((f) => ({ ...f, pyprojectPath: norm(f.pyprojectPath) }))).toEqual([
       {
         package: 'a',
         pyprojectPath: j(p, 'pyproject.toml'),

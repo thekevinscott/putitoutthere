@@ -63,4 +63,8 @@ describe('maturinIncludeCovers', () => {
   it('strips a multi-star trailing glob so the parent covers a nested stage_to', () => {
     expect(maturinIncludeCovers(['a/**'], 'a/bin/x')).toBe(true);
   });
+
+  it('strips a trailing slash so the parent covers a nested stage_to', () => {
+    expect(maturinIncludeCovers(['a/'], 'a/x')).toBe(true);
+  });
 });
