@@ -1,4 +1,4 @@
-import { assertNoCycles } from '../cascade.js';
+import { assertNoCycles } from '../assert-no-cycles.js';
 import type { Package } from '../config.js';
 import { toError } from '../to-error.js';
 import type { CheckFinding } from '../check.js';

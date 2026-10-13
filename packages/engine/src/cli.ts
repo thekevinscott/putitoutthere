@@ -35,7 +35,7 @@ import { verifyNpmTarball } from './verify/npm-tarball/index.js';
 import { verifyWheel } from './verify/wheel/index.js';
 import { computeVerify } from './verify/posture.js';
 import { writeCrateVersionForBuild } from './write-crate-version.js';
-import { writeLauncherFromConfig } from './write-launcher.js';
+import { writeLauncherFromConfig } from './write-launcher-from-config.js';
 import { writeVersionForBuild } from './write-version.js';
 import { VERSION } from './version.js';
 

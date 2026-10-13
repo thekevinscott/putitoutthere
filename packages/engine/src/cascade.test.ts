@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeCascade, assertNoCycles, type ChangedFilesByPackage } from './cascade.js';
+import { computeCascade, type ChangedFilesByPackage } from './cascade.js';
 import type { Package } from './config.js';
 
 /**
@@ -236,37 +236,5 @@ describe('computeCascade: depends_on validation', () => {
     expect(() => computeCascade(pkgs, everyPkgSees(pkgs, ['a/x']))).toThrow(
       /does-not-exist|unknown/i,
     );
-  });
-});
-
-describe('assertNoCycles', () => {
-  it('accepts an acyclic graph', () => {
-    expect(() =>
-      assertNoCycles([
-        pkg('a', ['a/**']),
-        pkg('b', ['b/**'], ['a']),
-        pkg('c', ['c/**'], ['a', 'b']),
-      ]),
-    ).not.toThrow();
-  });
-
-  it('accepts disconnected components', () => {
-    expect(() =>
-      assertNoCycles([
-        pkg('a', ['a/**']),
-        pkg('b', ['b/**']),
-        pkg('c', ['c/**'], ['a']),
-        pkg('d', ['d/**'], ['b']),
-      ]),
-    ).not.toThrow();
-  });
-
-  it('rejects a cycle', () => {
-    expect(() =>
-      assertNoCycles([
-        pkg('a', ['a/**'], ['b']),
-        pkg('b', ['b/**'], ['a']),
-      ]),
-    ).toThrow(/cycle/i);
   });
 });
