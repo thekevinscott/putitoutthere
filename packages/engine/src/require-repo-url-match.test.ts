@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { checkRepoUrlMatch } from './preflight.js';
+import { checkRepoUrlMatch } from './check-repo-url-match.js';
 import { requireRepoUrlMatch } from './require-repo-url-match.js';
 
-vi.mock('./preflight.js');
+vi.mock('./check-repo-url-match.js');
 
 const checkMock = vi.mocked(checkRepoUrlMatch);
 const packages = [{ name: 'web', kind: 'npm' }] as unknown as readonly Package[];

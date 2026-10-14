@@ -4,11 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { collectBundleCliCrateFindings } from './collect-bundle-cli-crate-findings.js';
 import type { Package } from './config.js';
-import { declaredFeatures, readDeclaredBinNames, type CargoShapeFinding } from './preflight.js';
+import type { CargoShapeFinding } from './cargo-shape-types.js';
+import { declaredFeatures } from './declared-features.js';
+import { readDeclaredBinNames } from './read-declared-bin-names.js';
 import { readToml } from './read-toml.js';
 
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
-vi.mock('./preflight.js');
+vi.mock('./declared-features.js');
+vi.mock('./read-declared-bin-names.js');
 vi.mock('./read-toml.js');
 
 type PypiPackage = Package & { kind: 'pypi' };

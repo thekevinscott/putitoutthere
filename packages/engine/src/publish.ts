@@ -21,12 +21,10 @@ import { publishOrder } from './publish-order.js';
 import { attachPublishProgress } from './publish-progress.js';
 import { ensureTag } from './ensure-tag.js';
 import { formatTag } from './tag-template.js';
-import {
-  requireAuth,
-  requireCargoShape,
-  requirePackageJsonShape,
-  requirePyprojectShape,
-} from './preflight.js';
+import { requireAuth } from './require-auth.js';
+import { requireCargoShape } from './require-cargo-shape.js';
+import { requirePackageJsonShape } from './require-package-json-shape.js';
+import { requirePyprojectShape } from './require-pyproject-shape.js';
 import { requireCratesMetadata } from './require-crates-metadata.js';
 import { requireProvenanceMetadata } from './require-provenance-metadata.js';
 import { requireRepoPublic } from './require-repo-public.js';

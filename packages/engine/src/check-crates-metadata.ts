@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import type { Package } from './config.js';
-import { nonEmptyString, resolveInherited } from './preflight.js';
+import { nonEmptyString } from './non-empty-string.js';
+import { resolveInherited } from './resolve-inherited.js';
 import { readWorkspacePackageTable } from './read-workspace-package-table.js';
 
 /** A required Cargo.toml `[package]` field that crates.io enforces. */

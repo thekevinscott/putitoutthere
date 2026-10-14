@@ -1,5 +1,5 @@
 import type { Package } from '../config.js';
-import { checkPyprojectShape } from '../preflight.js';
+import { checkPyprojectShape } from '../check-pyproject-shape.js';
 import type { CheckFinding } from '../check.js';
 
 export async function checkPyprojectShapeFindings(
