@@ -12,10 +12,8 @@ export async function resolveTrailer(head: string, cwd: string): Promise<Trailer
   const direct = parseTrailer(await commitBody(head, { cwd }));
   if (direct) {return direct;}
   const parents = await commitParents(head, { cwd });
-  if (parents.length < 2) {return null;}
-  for (let i = 1; i < parents.length; i++) {
-    const parentSha = parents[i]!;
-    const t = parseTrailer(await commitBody(parentSha, { cwd }));
+  for (const sha of parents.slice(1)) {
+    const t = parseTrailer(await commitBody(sha, { cwd }));
     if (t) {return t;}
   }
   return null;

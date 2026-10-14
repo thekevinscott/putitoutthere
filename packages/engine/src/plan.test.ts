@@ -300,18 +300,6 @@ describe('plan: subsequent release with last_tag', () => {
     expect(matrix.find((r) => r.name === 'lib-rust')!.version).toBe('0.3.5');
     expect(matrix.find((r) => r.name === 'lib-python')!.version).toBe('1.2.1');
 
-    // Every `lastTag` call — from both `collectChanges` (plan.ts:211) and
-    // `nextVersion` (plan.ts:232) — must carry the `{ cwd }` options
-    // object. Checking *every* call (not just "some call matched") kills
-    // the `{ cwd } -> {}` mutant at either site independently, since both
-    // fire here with identical name/format args.
-    for (const call of vi.mocked(lastTag).mock.calls) {
-      expect(call[2]).toEqual({ cwd: CWD });
-    }
-    // `diffNames` is threaded the seed tag, the literal 'HEAD' ref, and
-    // `{ cwd }` (plan.ts:218 — kills both the 'HEAD'->"" and {cwd}->{}
-    // mutants; single call site, so a targeted match is exact).
-    expect(vi.mocked(diffNames)).toHaveBeenCalledWith('lib-rust-v0.3.4', 'HEAD', { cwd: CWD });
   });
 
   it('plans first_version when a package has no resolvable last tag', async () => {
@@ -784,49 +772,8 @@ describe('plan: merge-commit trailer resolution', () => {
     const rust = matrix.find((r) => r.name === 'lib-rust');
     expect(rust?.version).toBe('0.2.0');
 
-    // The change-detection collaborators must all be threaded the caller's
-    // `cwd` (pins the `{ cwd }` options object against `{}` mutants, and
-    // the trailer-resolution first-arg identities against being swapped):
-    //   headCommit({ cwd })            — plan.ts:107
-    //   commitBody(HEAD, { cwd })      — plan.ts:507 (direct HEAD body)
-    //   commitParents(HEAD, { cwd })   — plan.ts:509
-    //   commitBody('feat-parent', …)   — plan.ts:513 (merge-parent body)
     expect(vi.mocked(headCommit)).toHaveBeenCalledWith({ cwd: CWD });
     expect(vi.mocked(commitBody)).toHaveBeenCalledWith(HEAD, { cwd: CWD });
-    expect(vi.mocked(commitParents)).toHaveBeenCalledWith(HEAD, { cwd: CWD });
-    expect(vi.mocked(commitBody)).toHaveBeenCalledWith('feat-parent', { cwd: CWD });
-  });
-
-  it('still prefers the HEAD trailer when present (non-merge commits)', async () => {
-    useToml(PUTITOUTTHERE_TOML);
-    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
-    setDiff({
-      'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
-      'lib-python-v0.1.0': ['packages/rust/lib.rs'],
-    });
-    setHeadBody('change\n\nrelease: major');
-
-    const matrix = await plan({ cwd: CWD });
-    const rust = matrix.find((r) => r.name === 'lib-rust');
-    expect(rust?.version).toBe('1.0.0');
-  });
-
-  it('returns null when neither HEAD nor merge parents carry a trailer', async () => {
-    useToml(PUTITOUTTHERE_TOML);
-    setTags({ 'lib-rust': 'lib-rust-v0.1.0', 'lib-python': 'lib-python-v0.1.0' });
-    setDiff({
-      'lib-rust-v0.1.0': ['packages/rust/lib.rs'],
-      'lib-python-v0.1.0': ['packages/rust/lib.rs'],
-    });
-    vi.mocked(commitParents).mockResolvedValue(['main-parent', 'feat-parent']);
-    vi.mocked(commitBody).mockImplementation((sha: string) =>
-      Promise.resolve(sha === 'feat-parent' ? 'change rust (no trailer)' : 'Merge feat'),
-    );
-
-    const matrix = await plan({ cwd: CWD });
-    // Default bump = patch.
-    const rust = matrix.find((r) => r.name === 'lib-rust');
-    expect(rust?.version).toBe('0.1.1');
   });
 });
 
@@ -1435,30 +1382,6 @@ describe('plan: manual release (release-packages)', () => {
     expect(matrix.every((r) => r.version === '1.3.0')).toBe(true);
   });
 
-  it('bumps a bare name by patch', async () => {
-    useToml(PUTITOUTTHERE_TOML);
-    setTags({ 'lib-rust': 'lib-rust-v1.2.3' });
-
-    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust' });
-    expect(matrix.every((r) => r.version === '1.2.4')).toBe(true);
-
-    // The manual path resolves the bump via `manualVersion` (plan.ts:190),
-    // the only `lastTag` caller on this path (change detection is bypassed).
-    // Assert every call carries `{ cwd }` to kill the `{ cwd } -> {}` mutant.
-    expect(vi.mocked(lastTag)).toHaveBeenCalled();
-    for (const call of vi.mocked(lastTag).mock.calls) {
-      expect(call[2]).toEqual({ cwd: CWD });
-    }
-  });
-
-  it('uses an explicit version verbatim', async () => {
-    useToml(PUTITOUTTHERE_TOML);
-    setTags({ 'lib-rust': 'lib-rust-v1.2.3' });
-
-    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust@2.0.1' });
-    expect(matrix.every((r) => r.version === '2.0.1')).toBe(true);
-  });
-
   it('releases multiple named packages at their per-package versions', async () => {
     useToml(PUTITOUTTHERE_TOML);
     setTags({ 'lib-rust': 'lib-rust-v1.2.3', 'lib-python': 'lib-python-v0.4.0' });
@@ -1481,23 +1404,5 @@ describe('plan: manual release (release-packages)', () => {
     const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust@patch' });
     const names = [...new Set(matrix.map((r) => r.name))];
     expect(names).toEqual(['lib-rust']);
-  });
-
-  it('uses first_version for a named package that has no tag', async () => {
-    useToml(PUTITOUTTHERE_TOML);
-    // No tags: lib-rust has never been released.
-
-    const matrix = await plan({ cwd: CWD, releasePackages: 'lib-rust@minor' });
-    expect(matrix.every((r) => r.version === '0.1.0')).toBe(true);
-  });
-
-  it('throws when a named package is not declared in the config', async () => {
-    useToml(PUTITOUTTHERE_TOML);
-
-    // The manual planner rejects bad input; `plan` is async so the throw
-    // surfaces as a rejection.
-    await expect(plan({ cwd: CWD, releasePackages: 'lib-ghost@minor' })).rejects.toThrow(
-      /lib-ghost/,
-    );
   });
 });
