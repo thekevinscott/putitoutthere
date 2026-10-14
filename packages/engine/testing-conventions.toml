@@ -16,9 +16,3 @@
 # progresses; do not raise.
 [typescript]
 one_function_per_file = { max_lines = 18 }
-
-[[typescript.exempt]]
-path = "plan.ts"
-lines = [119]
-rules = ["mutation"]
-reason = "`if (cascaded.size === 0) { return []; }` — the ConditionalExpression->false and BlockStatement->{} mutants (which remove the early return) are equivalent. When the cascade set is empty the subsequent row-building loop iterates nothing and returns [] anyway, so removing the early-out produces identical observable output. (The ConditionalExpression->true 'always return []' variant IS killed by the many non-empty-cascade tests.)"

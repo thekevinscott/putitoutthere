@@ -8,13 +8,15 @@
 import { join } from 'node:path';
 
 import { computeCascade } from './cascade.js';
-import { loadConfig, type Package } from './config.js';
-import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
+import { collectChanges } from './collect-changes.js';
+import { loadConfig } from './config.js';
+import { headCommit } from './git.js';
+import { nextVersion } from './next-version.js';
+import { planManual } from './plan-manual.js';
+import { parseReleasePackages } from './release-packages.js';
+import { resolveTrailer } from './resolve-trailer.js';
 import { rowsForPackage } from './rows-for-package.js';
-import type { Bump, Kind } from './types.js';
-import { parseTrailer, type Trailer } from './trailer.js';
-import { parseReleasePackages, type ReleasePackagesEntry } from './release-packages.js';
-import { bump as bumpVersion, firstVersion, formatSemver } from './version.js';
+import type { Kind } from './types.js';
 
 export interface MatrixRow {
   name: string;
@@ -116,8 +118,6 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   const forced = new Set(trailer?.packages ?? []);
   for (const name of forced) {cascaded.add(name);}
 
-  if (cascaded.size === 0) {return [];}
-
   const rows: MatrixRow[] = [];
   for (const p of config.packages) {
     if (!cascaded.has(p.name)) {continue;}
@@ -126,133 +126,4 @@ export async function plan(opts: PlanOptions): Promise<MatrixRow[]> {
     rows.push(...pkgRows);
   }
   return rows;
-}
-
-/* ----------------------------- internals ----------------------------- */
-
-/**
- * Manual-release planner. Emits a matrix for exactly the packages named
- * in the `release_packages` spec — no change detection, no cascade.
- * Each named package is versioned per its entry: an explicit semver is
- * used verbatim, a bump keyword bumps the last tag (or first_version
- * when the package has no tag yet).
- */
-async function planManual(
-  packages: readonly Package[],
-  manual: ReadonlyMap<string, ReleasePackagesEntry>,
-  cwd: string,
-): Promise<MatrixRow[]> {
-  const known = new Set(packages.map((p) => p.name));
-  for (const name of manual.keys()) {
-    if (!known.has(name)) {
-      throw new Error(
-        `release-packages: "${name}" is not declared in putitoutthere.toml`,
-      );
-    }
-  }
-  // Iterate config order so the matrix shape matches the change-
-  // detected path for the same package set.
-  const rows: MatrixRow[] = [];
-  for (const p of packages) {
-    const entry = manual.get(p.name);
-    if (entry === undefined) {continue;}
-    rows.push(...(await rowsForPackage(p, await manualVersion(p, entry, cwd), cwd)));
-  }
-  return rows;
-}
-
-async function manualVersion(
-  pkg: Package,
-  entry: ReleasePackagesEntry,
-  cwd: string,
-): Promise<string> {
-  // Explicit semver is used as-is. It is intentionally NOT compared
-  // against the last tag: re-releasing the same version is valid when
-  // the prior publish failed before reaching the registry, and the
-  // publish-phase `isPublished` check is the right place to refuse a
-  // genuine collision.
-  if (entry.version !== undefined) {return entry.version;}
-
-  // A bump keyword bumps the last tag, or first_version when the named
-  // package has never been released. `lastTag` hands back the parsed
-  // version, so there's nothing left to re-parse.
-  const last = await lastTag(pkg.name, pkg.tag_format, { cwd });
-  if (last === null) {return firstVersion(pkg);}
-  return bumpVersion(formatSemver(last.version), entry.bump!);
-}
-
-async function collectChanges(
-  packages: readonly Package[],
-  cwd: string,
-): Promise<{
-  changesByPackage: ReadonlyMap<string, ReadonlySet<string>>;
-  firstRelease: ReadonlySet<string>;
-}> {
-  const changesByPackage = new Map<string, ReadonlySet<string>>();
-  const firstRelease = new Set<string>();
-  // Packages in a polyglot repo typically tag together, so many of them
-  // point at the same `last_tag-v*` SHA. Memoize `git diff --name-only
-  // <tag>..HEAD` by tag so we spawn one `git diff` per unique tag
-  // instead of one per package (#140).
-  const diffCache = new Map<string, ReadonlySet<string>>();
-  for (const p of packages) {
-    const last = await lastTag(p.name, p.tag_format, { cwd });
-    if (last === null) {
-      firstRelease.add(p.name);
-      continue;
-    }
-    const tag = last.tag;
-    let diff = diffCache.get(tag);
-    if (diff === undefined) {
-      diff = new Set(await diffNames(tag, 'HEAD', { cwd }));
-      diffCache.set(tag, diff);
-    }
-    changesByPackage.set(p.name, diff);
-  }
-  return { changesByPackage, firstRelease };
-}
-
-async function nextVersion(
-  pkg: Package,
-  trailerBump: Bump | 'skip' | undefined,
-  cwd: string,
-  trailerPackages: ReadonlySet<string>,
-): Promise<string> {
-  const last = await lastTag(pkg.name, pkg.tag_format, { cwd });
-  if (last === null) {
-    return firstVersion(pkg);
-  }
-  const lastVersion = formatSemver(last.version);
-
-  // Trailer bump applies to every cascaded package, OR specifically to
-  // packages listed in [trailer.packages]. If the trailer scoped the
-  // list, only listed packages get the trailer's bump; unlisted
-  // cascaded packages still go at default patch.
-  const wantsBump =
-    trailerBump !== undefined &&
-    trailerBump !== 'skip' &&
-    (trailerPackages.size === 0 || trailerPackages.has(pkg.name));
-
-  const bumpType: Bump = wantsBump ? trailerBump : 'patch';
-  return bumpVersion(lastVersion, bumpType);
-}
-
-/**
- * Read the release trailer starting from `head`. If `head` carries no
- * trailer but is a merge commit, fall back to the non-first-parent — by
- * GitHub convention that's the feature branch tip whose commit message
- * the operator actually wrote the trailer into. Without this fallback,
- * merge-commit merges silently strand every release.
- */
-async function resolveTrailer(head: string, cwd: string): Promise<Trailer | null> {
-  const direct = parseTrailer(await commitBody(head, { cwd }));
-  if (direct) {return direct;}
-  const parents = await commitParents(head, { cwd });
-  if (parents.length < 2) {return null;}
-  for (let i = 1; i < parents.length; i++) {
-    const parentSha = parents[i]!;
-    const t = parseTrailer(await commitBody(parentSha, { cwd }));
-    if (t) {return t;}
-  }
-  return null;
 }
