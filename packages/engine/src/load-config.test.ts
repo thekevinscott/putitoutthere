@@ -37,4 +37,11 @@ describe('loadConfig', () => {
     expect((err as Error).cause).toBe(cause);
     expect(parseConfigMock).not.toHaveBeenCalled();
   });
+
+  it('wraps a non-Error read failure in the same message', async () => {
+    readFileMock.mockRejectedValue('disk gremlins');
+    await expect(loadConfig('putitoutthere.toml')).rejects.toThrow(
+      'putitoutthere.toml: cannot read putitoutthere.toml: disk gremlins',
+    );
+  });
 });
