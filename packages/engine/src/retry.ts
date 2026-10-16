@@ -5,7 +5,10 @@
  * `AuthError` or any other 4xx. A 429 honours the error's `retryAfter` hint.
  */
 
-import { AuthError, TransientError } from './types.js';
+import { isRetryable } from './is-retryable.js';
+import { jitterOffset } from './jitter-offset.js';
+import { retryAfterMs } from './retry-after-ms.js';
+import { sleep } from './utils/sleep.js';
 
 export interface RetryOptions {
   retries?: number;      // total attempts (not additional retries). Default 3.
@@ -14,18 +17,17 @@ export interface RetryOptions {
   jitter?: number;       // ±jitter fraction. Default 0.25 for ±25%.
 }
 
-const DEFAULTS: Required<RetryOptions> = {
-  retries: 3,
-  initialDelayMs: 1000,
-  multiplier: 2,
-  jitter: 0.25,
-};
-
 export async function withRetry<T>(
   fn: () => Promise<T>,
   opts: RetryOptions = {},
 ): Promise<T> {
-  const { retries, initialDelayMs, multiplier, jitter } = { ...DEFAULTS, ...opts };
+  const defaults: Required<RetryOptions> = {
+    retries: 3,
+    initialDelayMs: 1000,
+    multiplier: 2,
+    jitter: 0.25,
+  };
+  const { retries, initialDelayMs, multiplier, jitter } = { ...defaults, ...opts };
 
   // The final attempt (`attempt >= retries`) rethrows inside the catch, so a
   // positive `retries` always exits by returning or throwing from within the
@@ -48,43 +50,4 @@ export async function withRetry<T>(
   // `undefined` (the caller capped attempts at zero, so `fn` is never run).
   const nothingAttempted: unknown = undefined;
   throw nothingAttempted;
-}
-
-function isRetryable(err: unknown): boolean {
-  if (err instanceof AuthError) {return false;}
-  if (err instanceof TransientError) {return true;}
-  // Network-ish error codes used by Node's net/http stack.
-  const code = extractProp(err, 'code');
-  if (code === 'ECONNRESET' || code === 'ETIMEDOUT') {return true;}
-  // HTTP-status-tagged errors: retry 5xx and 429.
-  const status = extractProp(err, 'status');
-  if (typeof status === 'number') {
-    if (status === 429) {return true;}
-    if (status >= 500 && status < 600) {return true;}
-  }
-  return false;
-}
-
-function retryAfterMs(err: unknown): number {
-  const ra = extractProp(err, 'retryAfter');
-  if (typeof ra === 'number' && ra > 0) {return ra * 1000;}
-  return 0;
-}
-
-function extractProp(err: unknown, key: string): unknown {
-  if (err && typeof err === 'object' && key in err) {
-    return (err as Record<string, unknown>)[key];
-  }
-  return undefined;
-}
-
-function jitterOffset(baseDelay: number, fraction: number): number {
-  if (fraction <= 0) {return 0;}
-  // ±fraction of the base delay.
-  const amp = baseDelay * fraction;
-  return (Math.random() * 2 - 1) * amp;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
