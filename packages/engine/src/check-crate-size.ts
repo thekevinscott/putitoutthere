@@ -10,19 +10,10 @@ import { join } from 'node:path';
 import type { CheckFinding } from './check.js';
 import type { Package } from './config.js';
 import { ErrorCodes } from './error-codes.js';
-import { execCapture } from './utils/exec-capture.js';
-import { ExecError } from './utils/exec-error.js';
+import { packagedCrateBytes } from './packaged-crate-bytes.js';
 
 // crates.io rejects any `.crate` upload over this size.
 const CRATES_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-
-const CARGO_SIZE_UNIT_BYTES: Record<string, number> = {
-  B: 1,
-  KiB: 1024,
-  MiB: 1024 ** 2,
-  GiB: 1024 ** 3,
-  TiB: 1024 ** 4,
-};
 
 /**
  * One finding per `kind = "crates"` package whose `cargo package`
@@ -47,50 +38,6 @@ export async function checkCratesPackageSize(
     }
   }
   return findings;
-}
-
-/**
- * Compressed size in bytes of the `.crate` `cargo package` would
- * upload, or null when it can't be determined — cargo is absent, cargo
- * rejected the manifest, or its output carried no size line. Null means
- * "can't verify": the check skips rather than inventing a size finding,
- * mirroring the null-means-skip shape `listTrackedFiles` uses outside a
- * git repo.
- */
-async function packagedCrateBytes(cargoTomlPath: string): Promise<number | null> {
-  let stderr: string;
-  let status: number | null;
-  try {
-    const r = await execCapture('cargo', [
-      'package', '--no-verify', '--allow-dirty', '--manifest-path', cargoTomlPath,
-    ]);
-    stderr = r.stderr;
-    status = 0;
-  } catch (err) {
-    // cargo absent (ENOENT → status null) or a non-zero exit both mean
-    // "can't verify"; skip rather than invent a size finding.
-    if (!(err instanceof ExecError)) {return null;}
-    stderr = err.stderr;
-    status = err.status;
-  }
-  if (status !== 0) {return null;}
-  return parseCargoCompressedBytes(stderr);
-}
-
-/**
- * Pull the compressed `.crate` size out of `cargo package`'s summary
- * line, which cargo writes to stderr:
- *   `    Packaged 7 files, 24.0KiB (8.9KiB compressed)`
- */
-function parseCargoCompressedBytes(cargoStderr: string): number | null {
-  const m = /Packaged\b[^\n]*?\(\s*(\d+(?:\.\d+)?)\s*([A-Za-z]+)\s+compressed\s*\)/.exec(
-    cargoStderr,
-  );
-  if (m === null) {return null;}
-  const [, rawValue, rawUnit] = m as unknown as [string, string, string];
-  const unit = CARGO_SIZE_UNIT_BYTES[rawUnit];
-  if (unit === undefined) {return null;}
-  return Math.round(Number.parseFloat(rawValue) * unit);
 }
 
 function formatMiB(bytes: number): string {
