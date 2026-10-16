@@ -20,9 +20,9 @@ export function parseTrailer(commitBody: string): Trailer | null {
     const line = lines[i]!;
     // Anchored with `^\s*` so indented trailers still count (§10 is silent on
     // indentation; real commit bodies rarely indent trailers, be lenient).
-    const key = /^\s*release\s*:/i.exec(line);
-    if (!key) {continue;}
-    return parseTrailerPayload(line.slice(key[0].length));
+    const match = /^\s*release\s*:(.*)/i.exec(line);
+    if (!match) {continue;}
+    return parseTrailerPayload(match[1]!);
   }
   return null;
 }

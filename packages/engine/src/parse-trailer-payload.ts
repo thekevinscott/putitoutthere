@@ -1,10 +1,9 @@
 import { parsePackageList } from './parse-package-list.js';
 import type { Trailer } from './trailer.js';
 
-const isValidValue = (s: string): s is Trailer['bump'] => new Set(['patch', 'minor', 'major', 'skip']).has(s);
-
 /** Parse a trailer payload: `<value>` or `<value> [pkg, pkg, ...]`. */
 export function parseTrailerPayload(payload: string): Trailer | null {
+  const isValidValue = (s: string): s is Trailer['bump'] => new Set(['patch', 'minor', 'major', 'skip']).has(s);
   const bracketIdx = payload.indexOf('[');
   const valueText = (bracketIdx === -1 ? payload : payload.slice(0, bracketIdx)).trim();
 
