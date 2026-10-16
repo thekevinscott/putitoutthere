@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { packagedCrateBytes } from './packaged-crate-bytes.js';
@@ -34,11 +36,11 @@ describe('checkCratesPackageSize (#362)', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]!.package).toBe('rust-lib');
     expect(findings[0]!.message).toMatch(/PIOT_CRATES_PACKAGE_TOO_LARGE/);
-    expect(findings[0]!.message).toMatch(/packages\/pkg\/Cargo\.toml/);
+    expect(findings[0]!.message).toContain(join('packages/pkg', 'Cargo.toml'));
     expect(findings[0]!.message).toMatch(/133\.6 MiB/);
     expect(findings[0]!.message).toMatch(/10\.0 MiB \(10485760-byte\)/);
     expect(findings[0]!.message).toMatch(/413 Payload Too Large/);
-    expect(bytesMock).toHaveBeenCalledWith('packages/pkg/Cargo.toml');
+    expect(bytesMock).toHaveBeenCalledWith(join('packages/pkg', 'Cargo.toml'));
   });
 
   it('does not flag a .crate exactly at the limit', async () => {
