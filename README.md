@@ -83,7 +83,7 @@ Trusted Publisher feature filters OIDC tokens by `repository_owner` /
 TP registered against `thekevinscott/putitoutthere` is filtered out
 before `job_workflow_ref` is even checked. Running `pypa/gh-action-pypi-publish`
 in your workflow context aligns the claims with your TP registration.
-`pypi-tag` cuts the git tag for what that upload published — the release
+`pypi-tag` cuts the git tag and GitHub Release for what that upload published — the release
 job deliberately leaves a PyPI package untagged until its upload lands,
 so a run that fails on some other registry can't leave behind a tag for
 a version nobody uploaded. Both jobs are skipped automatically for repos
