@@ -7,9 +7,9 @@
 
 import type { PublishOutput } from './publish.js';
 
-const PROGRESS_KEY = '__piotPublishProgress';
+export const PROGRESS_KEY = '__piotPublishProgress';
 
-type Carrier = Error & { [PROGRESS_KEY]?: PublishOutput['published'] };
+export type Carrier = Error & { [PROGRESS_KEY]?: PublishOutput['published'] };
 
 /** Attach the packages processed so far and return the same Error. */
 export function attachPublishProgress<E extends Error>(
@@ -18,10 +18,4 @@ export function attachPublishProgress<E extends Error>(
 ): E {
   (err as E & Carrier)[PROGRESS_KEY] = published;
   return err;
-}
-
-/** Read attached progress; `[]` for non-Errors and unannotated Errors. */
-export function readPublishProgress(value: unknown): PublishOutput['published'] {
-  if (!(value instanceof Error)) {return [];}
-  return (value as Carrier)[PROGRESS_KEY] ?? [];
 }
