@@ -1,7 +1,7 @@
 import { sanitizeArtifactName, type Package } from './config.js';
 import { defaultRunsOn } from './default-runs-on.js';
+import { assertTripleSupported } from './handlers/assert-triple-supported.js';
 import {
-  assertTripleSupported,
   normalizeBuild,
   platformArtifactName,
   toRustTriple,
