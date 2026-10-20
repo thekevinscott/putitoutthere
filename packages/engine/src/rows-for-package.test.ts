@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
 import { defaultRunsOn } from './default-runs-on.js';
+import { assertTripleSupported } from './handlers/assert-triple-supported.js';
 import { resolvePythonVersions } from './python-versions.js';
 import { rowsForPackage } from './rows-for-package.js';
 import { isVersionIndependentWheel } from './wheel-abi.js';
 
 vi.mock('./default-runs-on.js');
+vi.mock('./handlers/assert-triple-supported.js');
 vi.mock('./python-versions.js');
 vi.mock('./wheel-abi.js');
 
@@ -17,6 +19,7 @@ function pkg(fields: Record<string, unknown>): Package {
 }
 
 beforeEach(() => {
+  vi.mocked(assertTripleSupported).mockReset();
   vi.mocked(defaultRunsOn).mockReset().mockImplementation((t) => `runner-for-${t}`);
   vi.mocked(resolvePythonVersions).mockReset().mockResolvedValue(['3.11', '3.12']);
   vi.mocked(isVersionIndependentWheel).mockReset().mockResolvedValue(false);
@@ -135,8 +138,21 @@ describe('rowsForPackage', () => {
     expect(row).not.toHaveProperty('rust_target');
   });
 
+  it('asserts every npm triple against the package name', async () => {
+    const p = pkg({ kind: 'npm', build: 'napi', targets: ['linux-x64-gnu', { triple: 'darwin-arm64', runner: 'macos-14' }] });
+    await rowsForPackage(p, '2.0.0', '/repo');
+    expect(vi.mocked(assertTripleSupported).mock.calls).toEqual([
+      ['linux-x64-gnu', 'scope/lib'],
+      ['darwin-arm64', 'scope/lib'],
+    ]);
+  });
+
   it('rejects an unmapped npm triple before emitting any row', async () => {
+    vi.mocked(assertTripleSupported).mockImplementation(() => {
+      throw new Error('unmapped plan9-mips');
+    });
     const p = pkg({ kind: 'npm', build: 'napi', targets: ['plan9-mips'] });
-    await expect(rowsForPackage(p, '2.0.0', '/repo')).rejects.toThrow();
+    await expect(rowsForPackage(p, '2.0.0', '/repo')).rejects.toThrow(new Error('unmapped plan9-mips'));
+    expect(defaultRunsOn).not.toHaveBeenCalled();
   });
 });

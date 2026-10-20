@@ -5,19 +5,9 @@
  * its `optionalDependencies`, so the main package never ships inconsistent.
  */
 
-import { rm } from 'node:fs/promises';
-
-import { sanitizeArtifactName } from '../config.js';
-import type { Ctx } from '../types.js';
-import { nonEmpty } from '../env.js';
-import { awaitPlatformsVisible } from './await-platforms-visible.js';
-import { isPlatformPublished } from './is-platform-published.js';
-import { publishPlatformPackage } from './publish-platform-package.js';
-import { resolvePlatformName } from './resolve-platform-name.js';
-import { rewriteOptionalDependencies } from './rewrite-optional-dependencies.js';
-import { synthesizePlatformPackage } from './synthesize-platform-package.js';
-
 export { looksLikePublishOverRace } from './looks-like-publish-over-race.js';
+export { platformArtifactName } from './platform-artifact-name.js';
+export { publishPlatforms } from './publish-platforms.js';
 export { toRustTriple } from './to-rust-triple.js';
 
 export type NpmBuildMode = 'napi' | 'bundled-cli';
@@ -76,93 +66,7 @@ export interface PlatformPkg {
   targets: readonly string[];
 }
 
-/**
- * Publish every per-platform package across every build entry, then
- * rewrite the main package.json to add `optionalDependencies`. Returns
- * the list of published platform names so the caller can log them.
- *
- * On any failure, throws before the main package.json is modified.
- */
-export async function publishPlatforms(
-  pkg: PlatformPkg,
-  version: string,
-  ctx: Ctx,
-): Promise<{ published: string[]; skipped: string[] }> {
-  const mainName = pkg.npm ?? pkg.name;
-  const published: string[] = [];
-  const skipped: string[] = [];
-  const isMulti = pkg.build.length > 1;
-
-  for (const entry of pkg.build) {
-    for (const target of pkg.targets) {
-      const platformName = resolvePlatformName(entry.name, {
-        name: mainName,
-        triple: target,
-        mode: entry.mode,
-      });
-      if (await isPlatformPublished(platformName, version, ctx)) {
-        skipped.push(platformName);
-        continue;
-      }
-      const stagingDir = await synthesizePlatformPackage(
-        pkg,
-        entry,
-        target,
-        platformName,
-        version,
-        ctx,
-        isMulti,
-      );
-      try {
-        await publishPlatformPackage(stagingDir, pkg, ctx);
-        published.push(platformName);
-      } finally {
-        // Cleanup is best-effort. The publish already happened, and the
-        // all-or-nothing-per-package guarantee is about the publish, not
-        // the staging tempdir. Awaiting `rm` in `finally` would let a
-        // cleanup rejection (EBUSY/EPERM on Windows runners even with
-        // force:true) REPLACE the block's outcome and mask a successful
-        // publish, misreporting `published`. Swallow the failure with a
-        // warning instead — a leaked tempdir on an ephemeral runner is
-        // genuinely cosmetic; the already-published artifact is what
-        // matters.
-        try {
-          await rm(stagingDir, { recursive: true, force: true });
-        } catch (err) {
-          ctx.log.warn(
-            `failed to clean up platform staging directory ${stagingDir}`,
-            { error: err },
-          );
-        }
-      }
-    }
-  }
-
-  const registryOverride = nonEmpty(ctx.env.PIOT_NPM_REGISTRY) ?? nonEmpty(process.env.PIOT_NPM_REGISTRY);
-  await awaitPlatformsVisible(published, version, registryOverride);
-
-  await rewriteOptionalDependencies(pkg, version, [...published, ...skipped]);
-
-  return { published, skipped };
-}
-
-/**
- * Plan-time + handler-time: compute the artifact directory name for a
- * given (package, mode, triple). The mode infix is only added when
- * the package has multiple build entries, so single-mode packages keep
- * their historical `<safe>-<triple>` artifact layout byte-for-byte.
- */
-export function platformArtifactName(
-  pkgName: string,
-  mode: NpmBuildMode,
-  triple: string,
-  isMulti: boolean,
-): string {
-  const safe = sanitizeArtifactName(pkgName);
-  return isMulti ? `${safe}-${mode}-${triple}` : `${safe}-${triple}`;
-}
-
-interface OsCpu {
+export interface OsCpu {
   os: string[];
   cpu: string[];
   libc?: string[];
@@ -212,40 +116,4 @@ const TRIPLE_MAP: Record<string, { os: string[]; cpu: string[]; libc?: string[] 
   'aarch64-pc-windows-msvc': { os: ['win32'], cpu: ['arm64'] },
 };
 
-/**
- * Maps a napi-rs or Rust target triple to npm `os`/`cpu`/`libc` fields.
- *
- * Lookup is exact (case-insensitive). Unmapped triples throw so broken
- * platform packages — which would otherwise publish with empty `os`/
- * `cpu` filters and install everywhere — never reach the registry.
- */
-export function targetToOsCpu(target: string): OsCpu {
-  const entry = TRIPLE_MAP[target.toLowerCase()];
-  if (!entry) {
-    throw new Error(unmappedTripleMessage(target));
-  }
-  return entry.libc !== undefined
-    ? { os: entry.os, cpu: entry.cpu, libc: entry.libc }
-    : { os: entry.os, cpu: entry.cpu };
-}
-
-/**
- * Plan-time guard: assert a napi target triple is mapped in `TRIPLE_MAP`
- * before any CI matrix row is emitted for it. Throws with the same
- * vocabulary as `targetToOsCpu`, plus the offending package name so the
- * user knows which `[[package]]` entry to fix.
- *
- * Issue #170 follow-up: failing fast at plan time beats failing
- * mid-publish after a matrix has already run.
- */
-export function assertTripleSupported(triple: string, packageName: string): void {
-  if (TRIPLE_MAP[triple.toLowerCase()] === undefined) {
-    throw new Error(
-      `Package "${packageName}": ${unmappedTripleMessage(triple)}`,
-    );
-  }
-}
-
-function unmappedTripleMessage(target: string): string {
-  return `Target triple "${target}" is not mapped to npm os/cpu. Add it to TRIPLE_MAP in src/handlers/npm-platform.ts.`;
-}
+export { TRIPLE_MAP };
