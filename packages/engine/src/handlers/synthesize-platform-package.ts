@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import type { Ctx } from '../types.js';
 import {
   platformArtifactName,
-  targetToOsCpu,
   type NpmBuildEntry,
   type PlatformPkg,
 } from './npm-platform.js';
 import { pickMainFile } from './pick-main-file.js';
+import { targetToOsCpu } from './target-to-os-cpu.js';
 
 export async function synthesizePlatformPackage(
   pkg: PlatformPkg,
