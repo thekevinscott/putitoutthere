@@ -7,8 +7,8 @@
 
 import { isAbsolute, join, resolve } from 'node:path';
 
-import type { Package } from './config.js';
 import { loadConfig } from './load-config.js';
+import { groupByPackage } from './group-by-package.js';
 import { mustGet } from './must-get.js';
 import { packagesByName } from './packages-by-name.js';
 import { checkCompleteness } from './completeness.js';
@@ -17,7 +17,7 @@ import { ErrorCodes } from './error-codes.js';
 import { headCommit } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
-import { plan, type MatrixRow } from './plan.js';
+import { plan } from './plan.js';
 import { publishOrder } from './publish-order.js';
 import { attachPublishProgress } from './publish-progress.js';
 import { ensureTag } from './ensure-tag.js';
@@ -311,17 +311,4 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
 
 function artifactsRoot(cwd: string): string {
   return join(cwd, 'artifacts');
-}
-
-function groupByPackage(
-  rows: readonly MatrixRow[],
-  _packages: readonly Package[],
-): Map<string, MatrixRow[]> {
-  const out = new Map<string, MatrixRow[]>();
-  for (const r of rows) {
-    const arr = out.get(r.name) ?? [];
-    arr.push(r);
-    out.set(r.name, arr);
-  }
-  return out;
 }

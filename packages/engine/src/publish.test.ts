@@ -12,6 +12,7 @@ import { checkCompleteness } from './completeness.js';
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ensureTag } from './ensure-tag.js';
 import { headCommit } from './git.js';
+import { groupByPackage } from './group-by-package.js';
 import { healPublishedTag } from './heal-published-tag.js';
 import { type MatrixRow, plan } from './plan.js';
 import { requireAuth } from './require-auth.js';
@@ -48,6 +49,10 @@ vi.mock('./heal-published-tag.js');
 vi.mock('./publish-order.js');
 vi.mock('./publish-progress.js');
 vi.mock('./git.js');
+vi.mock('./group-by-package.js', async () => {
+  const actual = await vi.importActual<typeof import('./group-by-package.js')>('./group-by-package.js');
+  return { groupByPackage: vi.fn(actual.groupByPackage) };
+});
 vi.mock('./verbose.js');
 // The dump recognises the seam's error by `instanceof`, so a substitute
 // class would make the assertions below vacuous — declare the mock, resolve
@@ -464,6 +469,20 @@ describe('publish: publish order', () => {
     const result = await publish({ cwd: CWD, handlerFor: () => handler });
     expect(publishOrder).toHaveBeenCalledWith([a, b, c], ['a', 'c']);
     expect(result.published.map((r) => r.package)).toEqual(['c', 'a']);
+  });
+
+  it('orders the packages groupByPackage builds from the planned rows', async () => {
+    const a = npmPkg('a', 'packages/a');
+    const c = npmPkg('c', 'packages/c');
+    configWith(a, c);
+    const rows = [row(a), row(c)];
+    vi.mocked(plan).mockResolvedValue(rows);
+    allComplete(a, c);
+    vi.mocked(groupByPackage).mockReturnValueOnce(new Map([['c', [rows[1]!]], ['a', [rows[0]!]]]));
+
+    await publish({ cwd: CWD, handlerFor: () => makeHandler() });
+    expect(groupByPackage).toHaveBeenCalledWith(rows, [a, c]);
+    expect(publishOrder).toHaveBeenCalledWith([a, c], ['c', 'a']);
   });
 });
 
