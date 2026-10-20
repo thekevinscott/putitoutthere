@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 
-import { expandDirGlob } from './glob.js';
+import { expandDirGlob } from './expand-dir-glob.js';
 
 /**
  * Every manifest that could declare a requirement on the released crate: the

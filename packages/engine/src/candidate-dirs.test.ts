@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { candidateDirs } from './candidate-dirs.js';
-import { expandDirGlob } from './glob.js';
+import { expandDirGlob } from './expand-dir-glob.js';
 
-vi.mock('./glob.js');
+vi.mock('./expand-dir-glob.js');
 
 const portable = (dirs: Set<string>): string[] =>
   [...dirs].map((d) => d.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''));
