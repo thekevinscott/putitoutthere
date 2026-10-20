@@ -6,7 +6,6 @@ import { ensureTag } from './ensure-tag.js';
 import { lastTag, remoteTagExists, tagList } from './git.js';
 import { healPublishedTag } from './heal-published-tag.js';
 import type { Logger } from './types.js';
-import { parseSemver } from './version.js';
 
 vi.mock('./git.js');
 vi.mock('./commit-file-sets.js');
@@ -26,7 +25,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   remoteTagExistsMock.mockResolvedValue(false);
   tagListMock.mockResolvedValue([]);
-  lastTagMock.mockResolvedValue({ tag: 'lib-v1.0.0', version: parseSemver('1.0.0') });
+  lastTagMock.mockResolvedValue({ tag: 'lib-v1.0.0', version: { major: 1, minor: 0, patch: 0 } });
 });
 
 describe('healPublishedTag', () => {
@@ -44,10 +43,13 @@ describe('healPublishedTag', () => {
 
     const run = healPublishedTag(lib, [lib], '1.0.1', 'headsha', opts, log);
 
-    await expect(run).rejects.toThrow('[PIOT_HEAL_UNRELEASED_CHANGES] lib@1.0.1 is live on the registry but untagged');
-    await expect(run).rejects.toThrow('2 commits since lib-v1.0.0 touch lib');
-    await expect(run).rejects.toThrow('git tag -a lib-v1.0.1 <sha> && git push origin lib-v1.0.1');
-    await expect(run).rejects.toThrow('putitoutthere reconcile --expect lib@1.0.1');
+    await expect(run).rejects.toThrow(
+      '[PIOT_HEAL_UNRELEASED_CHANGES] lib@1.0.1 is live on the registry but untagged, and HEAD has ' +
+        'unreleased changes: 2 commits since lib-v1.0.0 touch lib, so the published commit cannot be told ' +
+        'apart from later ones, and tagging HEAD would mark unreleased code as 1.0.1. Tag the commit that ' +
+        'was actually published, by hand (`git tag -a lib-v1.0.1 <sha> && git push origin lib-v1.0.1`) or ' +
+        'by running `putitoutthere reconcile --expect lib@1.0.1` from a checkout of that commit, then rerun.',
+    );
     expect(ensureTagMock).not.toHaveBeenCalled();
   });
 
