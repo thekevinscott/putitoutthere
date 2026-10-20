@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import { ErrorCodes } from './error-codes.js';
+import { isDynamicVersion } from './is-dynamic-version.js';
 import { toError } from './to-error.js';
 import { writeEmbeddedCrateVersions } from './write-embedded-crate-versions.js';
 import { writeResolvedCargoVersion } from './write-resolved-cargo-version.js';
@@ -80,9 +81,4 @@ export async function writeVersionForBuild(pkgDir: string, version: string): Pro
   // this pyo3 crate), its `CARGO_PKG_VERSION` is what `--version` prints.
   const embedded = await writeEmbeddedCrateVersions(pkgDir, version);
   return [...new Set([...written, ...embedded])];
-}
-
-function isDynamicVersion(project: { dynamic?: unknown }): boolean {
-  const { dynamic } = project;
-  return Array.isArray(dynamic) && dynamic.includes('version');
 }
