@@ -11,6 +11,7 @@ import { ExecError } from '../utils/exec-error.js';
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import { npm } from './npm.js';
 import { npmTrustPosture } from './npm-trust-posture.js';
+vi.mock('./npm-trust-posture.js', async () => await vi.importActual<typeof import('./npm-trust-posture.js')>('./npm-trust-posture.js'));
 import type { Ctx } from '../types.js';
 vi.mock('../types.js', async () => await vi.importActual<typeof import('../types.js')>('../types.js'));
 import { TransientError } from '../types.js';
