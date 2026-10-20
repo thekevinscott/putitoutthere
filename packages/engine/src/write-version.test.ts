@@ -9,14 +9,17 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { findWorkspaceRoot } from './find-workspace-root.js';
+import { isDynamicVersion } from './is-dynamic-version.js';
 import { writeVersionForBuild } from './write-version.js';
 
 vi.mock('node:fs/promises');
 vi.mock('./find-workspace-root.js');
+vi.mock('./is-dynamic-version.js');
 
 const readFileMock = vi.mocked(readFile);
 const writeMock = vi.mocked(writeFile);
 const findRootMock = vi.mocked(findWorkspaceRoot);
+const isDynamicMock = vi.mocked(isDynamicVersion);
 
 const dynamicPyproject = [
   '[project]',
@@ -31,6 +34,7 @@ const dynamicPyproject = [
 
 beforeEach(() => {
   vi.resetAllMocks();
+  isDynamicMock.mockReturnValue(true);
 });
 
 describe('writeVersionForBuild (#276, #428)', () => {
@@ -48,6 +52,7 @@ describe('writeVersionForBuild (#276, #428)', () => {
 
     const written = await writeVersionForBuild('pkg', '1.2.3');
 
+    expect(isDynamicMock).toHaveBeenCalledWith({ name: 'template-lib', dynamic: ['version'] });
     expect(written).toHaveLength(1);
     expect(written[0]!.endsWith('Cargo.toml')).toBe(true);
     // Both manifests are read as utf8 text, from their respective filenames.
@@ -143,6 +148,7 @@ describe('writeVersionForBuild (#276, #428)', () => {
   });
 
   it('throws on a static [project].version literal (#333)', async () => {
+    isDynamicMock.mockReturnValue(false);
     readFileMock.mockImplementation((p) =>
       Promise.resolve(
         (p as string).endsWith('pyproject.toml')
@@ -154,6 +160,7 @@ describe('writeVersionForBuild (#276, #428)', () => {
   });
 
   it('throws when [project] declares no version source', async () => {
+    isDynamicMock.mockReturnValue(false);
     readFileMock.mockImplementation((p) =>
       Promise.resolve((p as string).endsWith('pyproject.toml') ? '[project]\nname = "lib"\n' : ''),
     );
