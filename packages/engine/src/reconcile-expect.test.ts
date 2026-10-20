@@ -168,6 +168,7 @@ describe('reconcileExpected', () => {
     await expect(
       reconcileExpected('core-py@2.0.0', config, byName, '/repo', false, log),
     ).rejects.toThrow('reconcile --expect: core-py@2.0.0 not found on the pypi registry');
+    expect(log.info).toHaveBeenCalledWith('core-py@2.0.0 not visible on the registry yet; retrying in 5s');
     expect(ensureTag).not.toHaveBeenCalled();
   });
 

@@ -1,17 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { awaitPublished, PUBLISH_VISIBILITY_SLEEPS_S } from './await-published.js';
+import { awaitPublished } from './await-published.js';
 import { withRetry } from './retry.js';
 import type { Logger } from './types.js';
 import { sleep } from './utils/sleep.js';
 
 vi.mock('./utils/sleep.js');
-vi.mock('./retry.js', () => ({ withRetry: vi.fn(<T>(fn: () => Promise<T>) => fn()) }));
+vi.mock('./retry.js');
 
 const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(withRetry).mockImplementation((fn) => fn());
 });
 
 function answers(...values: boolean[]): () => Promise<boolean> {
@@ -56,10 +57,9 @@ describe('awaitPublished', () => {
   it('defaults to a schedule of about three minutes', async () => {
     const check = answers();
     await awaitPublished(check, 'a@1', log);
-    expect(PUBLISH_VISIBILITY_SLEEPS_S).toEqual([5, 10, 15, 30, 60, 60]);
-    expect(vi.mocked(sleep).mock.calls.map(([ms]) => ms)).toEqual(
-      PUBLISH_VISIBILITY_SLEEPS_S.map((s) => s * 1000),
-    );
+    expect(vi.mocked(sleep).mock.calls.map(([ms]) => ms)).toEqual([
+      5000, 10000, 15000, 30000, 60000, 60000,
+    ]);
   });
 
   it('propagates a read error that outlasts its retries', async () => {
