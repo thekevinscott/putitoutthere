@@ -1,5 +1,5 @@
 import type { Package } from '../config.js';
-import { assertTripleSupported } from '../handlers/npm-platform.js';
+import { assertTripleSupported } from '../handlers/assert-triple-supported.js';
 import { toError } from '../to-error.js';
 import { normalizeTarget, type TargetEntry } from '../types.js';
 import type { CheckFinding } from '../check.js';

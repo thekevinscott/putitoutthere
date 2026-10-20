@@ -1,11 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkRepoPublic } from './check-repo-public.js';
 import { normalizeOwnerRepo } from './normalize-owner-repo.js';
+import { warnIndeterminate } from './warn-indeterminate.js';
 
 vi.mock('./normalize-owner-repo.js');
+vi.mock('./warn-indeterminate.js');
 
 const normalizeMock = vi.mocked(normalizeOwnerRepo);
+const warnMock = vi.mocked(warnIndeterminate);
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -22,16 +25,10 @@ function requestInit(fetchImpl: ReturnType<typeof vi.fn>): RequestInit {
   return fetchImpl.mock.calls[0]![1] as RequestInit;
 }
 
-let stdout: MockInstance<typeof process.stdout.write>;
-
 beforeEach(() => {
   normalizeMock.mockReset();
   normalizeMock.mockReturnValue('acme/widget');
-  stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-});
-
-afterEach(() => {
-  stdout.mockRestore();
+  warnMock.mockReset();
 });
 
 describe('checkRepoPublic', () => {
@@ -40,7 +37,7 @@ describe('checkRepoPublic', () => {
     await expect(
       checkRepoPublic({ githubRepository: 'acme/widget', fetchImpl: fetchImpl as unknown as typeof fetch }),
     ).resolves.toBeNull();
-    expect(stdout).not.toHaveBeenCalled();
+    expect(warnMock).not.toHaveBeenCalled();
   });
 
   it('returns a `private` finding when the GitHub API reports the repo as private', async () => {
@@ -76,7 +73,7 @@ describe('checkRepoPublic', () => {
     await expect(
       checkRepoPublic({ githubRepository: 'acme/widget', fetchImpl: fetchImpl as unknown as typeof fetch }),
     ).resolves.toEqual({ githubRepository: 'acme/widget', reason: 'not-found-or-private' });
-    expect(stdout).not.toHaveBeenCalled();
+    expect(warnMock).not.toHaveBeenCalled();
   });
 
   it('skips without a request when githubRepository is undefined, empty, or blank', async () => {
@@ -138,9 +135,7 @@ describe('checkRepoPublic', () => {
     await expect(
       checkRepoPublic({ githubRepository: 'acme/widget', fetchImpl: fetchImpl as unknown as typeof fetch }),
     ).resolves.toBeNull();
-    expect(stdout).toHaveBeenCalledWith(
-      `::warning::repository visibility check skipped for acme/widget: GitHub API returned ${status}\n`,
-    );
+    expect(warnMock).toHaveBeenCalledWith('acme/widget', `GitHub API returned ${status}`);
   });
 
   it('returns null and warns when the request itself rejects', async () => {
@@ -148,9 +143,7 @@ describe('checkRepoPublic', () => {
     await expect(
       checkRepoPublic({ githubRepository: 'acme/widget', fetchImpl: fetchImpl as unknown as typeof fetch }),
     ).resolves.toBeNull();
-    expect(stdout).toHaveBeenCalledWith(
-      '::warning::repository visibility check skipped for acme/widget: request failed (ECONNRESET)\n',
-    );
+    expect(warnMock).toHaveBeenCalledWith('acme/widget', 'request failed (ECONNRESET)');
   });
 
   it('falls back to the global fetch when no fetchImpl is injected', async () => {
