@@ -257,8 +257,8 @@ jobs:
 
       # The engine cuts tags but not GitHub Releases; backfill them here.
       # A pypi package's upload and tag belong to the caller's jobs (#623),
-      # so its Release is cut by the next run, once the tag exists. The
-      # no-fetch / ref-scoped-push contract lives in code (#436, #437).
+      # so pypi-tag.yml cuts its Release (#798). The no-fetch /
+      # ref-scoped-push contract lives in code (#436, #437).
       - name: Create GitHub Release(s) for new tag(s)
         uses: thekevinscott/putitoutthere@v0
         env:

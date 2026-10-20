@@ -102,3 +102,12 @@ jobs:
           # pre-#694 shape keeps bare discovery rather than asserting an
           # empty set of packages.
           expect: ${{ inputs.expect }}
+
+      # release.yml's release-github step ran before this tag existed, so
+      # the Release for it is cut here, where the tag is on HEAD (#798).
+      - name: Create GitHub Release(s) for new tag(s)
+        uses: thekevinscott/putitoutthere@v0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          command: release-github
