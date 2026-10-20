@@ -4,8 +4,6 @@ import { join } from 'node:path';
 import { matchesGlob } from './glob.js';
 import { pathExists } from './utils/path-exists.js';
 
-const GLOB_META = /[*?[\]{}]/;
-
 /**
  * Expand a relative path glob against the filesystem, returning the
  * directories it matches. Mirrors how cargo resolves `[workspace].members`
@@ -15,10 +13,11 @@ const GLOB_META = /[*?[\]{}]/;
  * against the real directory tree, so only existing directories come back.
  */
 export async function expandDirGlob(baseDir: string, pattern: string): Promise<string[]> {
+  const globMeta = /[*?[\]{}]/;
   const segments = pattern.split('/').filter((s) => s.length > 0);
   let dirs = [baseDir];
   for (const segment of segments) {
-    if (!GLOB_META.test(segment)) {
+    if (!globMeta.test(segment)) {
       dirs = dirs.map((d) => join(d, segment));
       continue;
     }
