@@ -26,8 +26,16 @@ import { run } from '../../src/cli.js';
 const pointer = new Map<string, string>();
 const published = new Map<string, Set<string>>();
 let pointerStatus: number | null = null;
+/** Per-version reads that 404 before a live version shows up (#777). */
+let lagReads = 0;
+let perVersionReads = 0;
 
 function isLive(name: string, version: string): boolean {
+  perVersionReads++;
+  if (lagReads > 0) {
+    lagReads--;
+    return false;
+  }
   return published.get(name)?.has(version) ?? false;
 }
 
@@ -142,6 +150,8 @@ afterEach(() => {
   pointer.clear();
   published.clear();
   pointerStatus = null;
+  lagReads = 0;
+  perVersionReads = 0;
   rmSync(repo, { recursive: true, force: true });
   rmSync(remote, { recursive: true, force: true });
 });
@@ -283,5 +293,52 @@ describe('piot reconcile --expect: a stale latest pointer cannot skip the tag (#
 
     expect(code, output()).not.toBe(0);
     expect(output()).toContain('not-a-package');
+  });
+});
+
+async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
+  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  try {
+    const p = fn();
+    let done = false;
+    void p.then(
+      () => { done = true; },
+      () => { done = true; },
+    );
+    while (!done) {
+      await vi.advanceTimersByTimeAsync(200_000);
+      await Promise.resolve();
+    }
+    return await p;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+describe('piot reconcile --expect: waits out per-version lag after an upload (#777)', () => {
+  it('cuts the tag once the per-version endpoint catches up', async () => {
+    stalePointerAfterUpload();
+    lagReads = 3;
+
+    const code = await withFakeTimers(() =>
+      run(['node', 'piot', 'reconcile', '--expect', 'mycrate-py@0.0.2', '--cwd', repo]),
+    );
+
+    expect(code, output()).toBe(0);
+    expect(hasTag('mycrate-py-v0.0.2'), output()).toBe(true);
+    expect(perVersionReads).toBe(4);
+  });
+
+  it('still refuses a version that never appears, after a bounded wait', async () => {
+    stalePointerAfterUpload();
+    published.set('mycrate-py', new Set(['0.0.1']));
+
+    const code = await withFakeTimers(() =>
+      run(['node', 'piot', 'reconcile', '--expect', 'mycrate-py@0.0.2', '--cwd', repo]),
+    );
+
+    expect(code, output()).not.toBe(0);
+    expect(hasTag('mycrate-py-v0.0.2'), output()).toBe(false);
+    expect(perVersionReads).toBeGreaterThan(1);
   });
 });

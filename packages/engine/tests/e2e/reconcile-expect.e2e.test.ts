@@ -111,10 +111,13 @@ describe('piot reconcile --expect against pypi.org (#666)', () => {
     expect(tags(), output).toContain(`fixture-py-v${LIVE_VERSION}`);
   });
 
-  it('exits non-zero when pypi.org does not confirm the expected version', () => {
+  it('exits non-zero when pypi.org does not confirm the expected version', { timeout: 300_000 }, () => {
     // A real 404 from the immutable per-version endpoint. Reporting
     // success here is what #666 is about: the caller said it uploaded
     // this, PyPI says otherwise, and the tag must not be invented.
+    // A fresh upload 404s here for a while too (#777), so the refusal
+    // only comes after a bounded wait for the version to show up.
+    const started = Date.now();
     const { code, stdout, stderr } = runCli([
       'reconcile',
       '--expect',
@@ -125,6 +128,7 @@ describe('piot reconcile --expect against pypi.org (#666)', () => {
     const output = `${stdout}\n${stderr}`;
 
     expect(code, output).not.toBe(0);
+    expect(Date.now() - started, output).toBeGreaterThanOrEqual(120_000);
     expect(output).toContain(ABSENT_VERSION);
     expect(tags(), output).not.toContain(`fixture-py-v${ABSENT_VERSION}`);
   });
