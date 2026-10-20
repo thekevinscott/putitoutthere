@@ -89,6 +89,21 @@ tag_format = "{name}-{bogus}-v{version}"
     ).toThrow(/unknown placeholder/);
   });
 
+  it.each(['{}v{version}', '{names}-v{version}'])('rejects tag_format %s as an unknown placeholder', (fmt) => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name       = "app"
+kind       = "crates"
+path       = "."
+globs      = ["**"]
+tag_format = "${fmt}"
+`),
+    ).toThrow(/unknown placeholder/);
+  });
+
   it('applies default pypi build = "setuptools" when omitted (#129)', () => {
     const cfg = parseConfig(`
 [putitoutthere]
