@@ -127,3 +127,27 @@ describe('publish-path auto-heal against crates.io (#407)', () => {
     expect(tags, `publish output:\n${stdout}\n${stderr}`).toContain(`fixture-rust-v${version}`);
   });
 });
+
+describe('publish-path auto-heal with unreleased changes at HEAD (#776)', () => {
+  it('exits non-zero without tagging HEAD when crate changes landed after the live version could have shipped', async () => {
+    const version = await liveVersion();
+    const [major, minor, patch] = version.split('.').map(Number) as [number, number, number];
+    expect(patch, `live version ${version} has no patch predecessor`).toBeGreaterThan(0);
+    const previous = `${major}.${minor}.${patch - 1}`;
+
+    git(['tag', '-a', `fixture-rust-v${previous}`, '-m', 'previous release']);
+    git(['push', '-q', 'origin', 'main', `fixture-rust-v${previous}`]);
+    writeRepoFile('packages/rust/src/lib.rs', '// shipped');
+    git(['commit', '-q', '-am', 'fix: shipped change']);
+    writeRepoFile('packages/rust/src/lib.rs', '// never shipped');
+    git(['commit', '-q', '-am', 'fix: unreleased change']);
+
+    const { code, stdout, stderr } = runCli(['publish', '--cwd', repo]);
+    const output = `publish output:\n${stdout}\n${stderr}`;
+
+    expect(code, output).not.toBe(0);
+    expect(stdout + stderr, output).toContain(`fixture-rust@${version}`);
+    expect(git(['tag', '-l', `fixture-rust-v${version}`]), output).toBe('');
+    expect(git(['ls-remote', '--tags', 'origin', `fixture-rust-v${version}`]), output).toBe('');
+  });
+});
