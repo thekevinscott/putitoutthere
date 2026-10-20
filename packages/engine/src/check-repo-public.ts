@@ -1,4 +1,5 @@
 import { normalizeOwnerRepo } from './normalize-owner-repo.js';
+import { warnIndeterminate } from './warn-indeterminate.js';
 
 export interface RepoVisibilityOptions {
   /** `owner/repo` from `GITHUB_REPOSITORY`. When `undefined` or empty
@@ -72,10 +73,4 @@ export async function checkRepoPublic(
   // treat it as indeterminate and non-fatal, with a visible warning.
   warnIndeterminate(apiSlug, `GitHub API returned ${res.status}`);
   return null;
-}
-
-function warnIndeterminate(apiSlug: string, detail: string): void {
-  process.stdout.write(
-    `::warning::repository visibility check skipped for ${apiSlug}: ${detail}\n`,
-  );
 }
