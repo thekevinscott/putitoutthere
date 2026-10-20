@@ -8,13 +8,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { lastTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { computeStatus } from './status.js';
 import type { Ctx, Handler, PackageConfig } from './types.js';
 
-vi.mock('./config.js');
+vi.mock('./load-config.js');
 vi.mock('./git.js');
 vi.mock('./handlers/index.js');
 

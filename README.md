@@ -1374,6 +1374,7 @@ line. Grep the run log for the code, then look it up here.
 | `PIOT_PYPI_MATURIN_INCLUDE_MISSING` | `bundle_cli` is set on a maturin package but `[tool.maturin].include` doesn't cover `bundle_cli.stage_to`. The cross-compiled binary wouldn't land in any wheel. | PR-time and publish-time. |
 | `PIOT_AUTH_NO_TOKEN` | The publish job reached the registry-auth step with no token resolved (neither an OIDC-minted token nor a caller-provided long-lived token). Almost always means the reusable workflow's trusted-publisher exchange failed silently or the caller-provided secret was empty. | Publish-time only. |
 | `PIOT_PUBLISH_EMPTY_PLAN` | `publish` was invoked but `plan` returned zero rows for a reason other than `release: skip`. The reusable workflow's gate normally prevents this; if it fires, the gate was bypassed or the engine is inconsistent. | Publish-time only. |
+| `PIOT_HEAL_UNRELEASED_CHANGES` | `publish` found the planned version already live with no tag, and more than one commit since the last tag touches the package. Tagging HEAD could mark unreleased changes as that version. Tag the published commit by hand, or run `reconcile --expect <name>@<version>` from a checkout of it, then rerun. See [Auto-heal](#auto-heal). | Publish-time only. |
 
 ## Release health
 
@@ -1582,6 +1583,14 @@ by an earlier half-failed run recovers on its **next release run** — it
 has no tag, so it's force-selected into the plan, found already-published,
 and tagged. No manual tag surgery. Idempotent: already-tagged packages
 are untouched.
+
+Auto-heal tags HEAD only when at most one commit since the package's last
+tag touches it (its globs, or a `depends_on` package's). With more than
+one, the published version could have been built from any of them, so
+tagging HEAD could mark unreleased changes as released. `publish` fails
+instead with `PIOT_HEAL_UNRELEASED_CHANGES`: tag the commit that was
+actually published, by hand or by running `reconcile --expect
+<name>@<version>` from a checkout of that commit, then rerun.
 
 If the repo has nothing else to release, don't wait for the next run —
 heal the stuck package now with the `reconcile` command above, or trigger
