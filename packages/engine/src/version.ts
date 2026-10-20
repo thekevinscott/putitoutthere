@@ -6,38 +6,20 @@
  */
 
 import pkg from '../package.json' with { type: 'json' };
+import { formatSemver } from './format-semver.js';
+import { parseSemver } from './parse-semver.js';
 import type { Bump } from './types.js';
+
+export { firstVersion } from './first-version.js';
+export { formatSemver } from './format-semver.js';
+export { parseSemver } from './parse-semver.js';
+export type { Semver } from './version-types.js';
 
 /** CLI version, read from package.json at build time. */
 export const VERSION: string = pkg.version;
 
 /** Canonical User-Agent for all outbound HTTP calls. */
 export const USER_AGENT: string = `putitoutthere/${VERSION}`;
-
-export interface Semver {
-  major: number;
-  minor: number;
-  patch: number;
-}
-
-// Strict: no leading v, no pre-release, no build metadata, no leading zeros.
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-
-export function parseSemver(s: string): Semver {
-  const m = SEMVER.exec(s);
-  if (!m) {
-    throw new Error(`invalid semver: ${s}`);
-  }
-  return {
-    major: Number(m[1]),
-    minor: Number(m[2]),
-    patch: Number(m[3]),
-  };
-}
-
-export function formatSemver(v: Semver): string {
-  return `${v.major}.${v.minor}.${v.patch}`;
-}
 
 export function bump(lastVersion: string, bumpType: Bump): string {
   const v = parseSemver(lastVersion);
@@ -55,13 +37,3 @@ export function bump(lastVersion: string, bumpType: Bump): string {
   }
 }
 
-/**
- * First-release version. Uses `package.first_version` when set, else
- * the repo-wide default of `0.1.0`. Either way the value is validated
- * against strict semver so typos fail loud before we tag.
- */
-export function firstVersion(pkg: { first_version?: string }): string {
-  const candidate = pkg.first_version ?? '0.1.0';
-  parseSemver(candidate); // throws on invalid
-  return candidate;
-}

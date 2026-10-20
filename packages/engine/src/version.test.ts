@@ -9,59 +9,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import pkg from '../package.json' with { type: 'json' };
-import { bump, firstVersion, parseSemver, USER_AGENT, VERSION } from './version.js';
+import { bump, USER_AGENT, VERSION } from './version.js';
 
 // `../package.json` is the collaborator `version.ts` reads its VERSION from.
 // The options-form `{ spy: true }` mock (not a factory) intercepts the module
 // for unit isolation while passing the real values through, so VERSION/USER_AGENT
 // still reflect the actual package.json — the contract under test.
 vi.mock('../package.json', { spy: true });
-
-describe('parseSemver', () => {
-  it('parses a plain semver', () => {
-    expect(parseSemver('1.2.3')).toEqual({ major: 1, minor: 2, patch: 3 });
-  });
-
-  it('parses zero-valued semver', () => {
-    expect(parseSemver('0.0.0')).toEqual({ major: 0, minor: 0, patch: 0 });
-  });
-
-  it('parses large numbers', () => {
-    expect(parseSemver('100.200.300')).toEqual({ major: 100, minor: 200, patch: 300 });
-  });
-
-  it('rejects too few components', () => {
-    expect(() => parseSemver('1.2')).toThrow();
-  });
-
-  it('rejects too many components', () => {
-    expect(() => parseSemver('1.2.3.4')).toThrow();
-  });
-
-  it('rejects a pre-release suffix in v0', () => {
-    // Pre-release dist-tags (`-rc`, `-beta`, `-alpha`) are deferred
-    // to v0.2 (plan.md §26.2). The parser should refuse to accept
-    // them rather than silently drop the suffix.
-    expect(() => parseSemver('1.2.3-rc.1')).toThrow();
-  });
-
-  it('rejects non-numeric components', () => {
-    expect(() => parseSemver('1.x.3')).toThrow();
-    expect(() => parseSemver('a.b.c')).toThrow();
-  });
-
-  it('rejects leading-zero components (not strict semver)', () => {
-    expect(() => parseSemver('1.02.3')).toThrow();
-  });
-
-  it('rejects leading v prefix', () => {
-    expect(() => parseSemver('v1.2.3')).toThrow();
-  });
-
-  it('rejects empty input', () => {
-    expect(() => parseSemver('')).toThrow();
-  });
-});
 
 describe('bump: patch', () => {
   it('0.1.0 → 0.1.1', () => {
@@ -111,20 +65,6 @@ describe('bump: input validation', () => {
   it('rejects an invalid bump type', () => {
     // @ts-expect-error — testing runtime guard
     expect(() => bump('1.0.0', 'huge')).toThrow();
-  });
-});
-
-describe('firstVersion', () => {
-  it('returns the package default when set', () => {
-    expect(firstVersion({ first_version: '0.3.0' })).toBe('0.3.0');
-  });
-
-  it('returns the fallback 0.1.0 when unset', () => {
-    expect(firstVersion({})).toBe('0.1.0');
-  });
-
-  it('rejects an invalid first_version value', () => {
-    expect(() => firstVersion({ first_version: 'not-a-semver' })).toThrow();
   });
 });
 

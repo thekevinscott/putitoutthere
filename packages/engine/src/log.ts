@@ -9,6 +9,7 @@
 
 import type { Writable } from 'node:stream';
 
+import { formatPretty } from './format-pretty.js';
 import { redact } from './redact.js';
 import type { EnvSource } from './scan-source.js';
 import type { Logger } from './types.js';
@@ -63,19 +64,4 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
 
 function isTty(stream: Writable): boolean {
   return Boolean((stream as { isTTY?: boolean }).isTTY);
-}
-
-function formatPretty(record: Record<string, unknown>): string {
-  const { level, time: _t, msg, ...fields } = record;
-  const pairs = Object.entries(fields)
-    .map(([k, v]) => `${k}=${formatScalar(v)}`)
-    .join(' ');
-  const prefix = `[${String(level).toUpperCase()}]`;
-  return pairs.length > 0 ? `${prefix} ${String(msg)}  ${pairs}\n` : `${prefix} ${String(msg)}\n`;
-}
-
-function formatScalar(v: unknown): string {
-  if (typeof v === 'string') {return v;}
-  if (typeof v === 'number' || typeof v === 'boolean' || v === null) {return String(v);}
-  return JSON.stringify(v);
 }
