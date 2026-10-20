@@ -4,6 +4,10 @@
  * dispatcher), #13 (completeness), #14 (pre-flight), #16–#19 (handlers).
  */
 
+export { attachHandlerMeta } from './attach-handler-meta.js';
+export { normalizeTarget } from './normalize-target.js';
+export { readHandlerMeta } from './read-handler-meta.js';
+
 export type Kind = 'crates' | 'pypi' | 'npm';
 
 export type Bump = 'patch' | 'minor' | 'major';
@@ -18,19 +22,6 @@ export type Bump = 'patch' | 'minor' | 'major';
  * onto the free native `ubuntu-24.04-arm` runner. Issue #159.
  */
 export type TargetEntry = string | { triple: string; runner?: string };
-
-/**
- * Normalizes a `TargetEntry` into its canonical object shape. Callers
- * that only need the triple can destructure; callers that drive the CI
- * matrix read `.runner` and fall back to the hardcoded mapping when
- * it's absent.
- */
-export function normalizeTarget(entry: TargetEntry): { triple: string; runner?: string } {
-  if (typeof entry === 'string') {return { triple: entry };}
-  return entry.runner !== undefined
-    ? { triple: entry.triple, runner: entry.runner }
-    : { triple: entry.triple };
-}
 
 /**
  * Shape handlers see. Optional fields explicitly allow `undefined` so
@@ -200,22 +191,4 @@ export interface HandlerErrorMeta {
    *  `npm`, `cargo`. Capture is best-effort — keys may be absent if
    *  the tool isn't on PATH or its version probe failed. */
   toolVersions?: Record<string, string>;
-}
-
-const HANDLER_META_KEY = '__piotHandlerMeta';
-
-/** Attach handler-failure metadata to an Error and return the same
- *  Error (so callers can `throw attachHandlerMeta(new Error(...), {...})`). */
-export function attachHandlerMeta<E extends Error>(err: E, meta: HandlerErrorMeta): E {
-  (err as E & { [HANDLER_META_KEY]?: HandlerErrorMeta })[HANDLER_META_KEY] = meta;
-  return err;
-}
-
-/** Read handler-failure metadata from a possibly-Error value. Returns
- *  undefined for non-Error values, plain Errors, and Errors without
- *  attached meta. */
-export function readHandlerMeta(value: unknown): HandlerErrorMeta | undefined {
-  if (!(value instanceof Error)) {return undefined;}
-  const carrier = value as Error & { [HANDLER_META_KEY]?: HandlerErrorMeta };
-  return carrier[HANDLER_META_KEY];
 }
