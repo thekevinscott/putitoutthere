@@ -7,14 +7,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { handlerFor } from './handlers/index.js';
 import type { MatrixRow } from './plan.js';
 import { plan } from './plan.js';
 import { computePlanStatus } from './plan-status.js';
 import type { Ctx, Handler } from './types.js';
 
-vi.mock('./config.js');
+vi.mock('./load-config.js');
 vi.mock('./plan.js');
 vi.mock('./handlers/index.js');
 
