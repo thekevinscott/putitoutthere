@@ -10,9 +10,10 @@
 # their own threshold — upstream's default (max_lines = 1) stays put. A file
 # fails only when two or more module-scope functions exceed max_lines, so the
 # binding ceiling is the largest *second* function in any one file. Current
-# ceiling on packages/engine/src: handlers/npm-platform.ts (targetToOsCpu) and
-# publish.ts (groupByPackage) — so 7 is the floor until they split.
+# ceiling on packages/engine/src: eight 2-line helpers that still share a file
+# (write-version.ts, publish-progress.ts, handlers/crates.ts, and others) — so 2
+# is the floor until they split.
 # Ratchet this down as the one-function-per-file refactor (#680)
 # progresses; do not raise.
 [typescript]
-one_function_per_file = { max_lines = 7 }
+one_function_per_file = { max_lines = 2 }
