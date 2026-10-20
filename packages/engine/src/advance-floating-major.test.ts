@@ -6,11 +6,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { advanceFloatingMajor } from './advance-floating-major.js';
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { forceMoveTag } from './force-move-tag.js';
 import { fetchTagsForce, lastTag, tagCommit, tagList } from './git.js';
 
-vi.mock('./config.js');
+vi.mock('./load-config.js');
 vi.mock('./git.js');
 vi.mock('./force-move-tag.js');
 

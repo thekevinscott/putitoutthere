@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { writeLauncher } from './write-launcher.js';
 import { writeLauncherFromConfig } from './write-launcher-from-config.js';
 
-vi.mock('./config.js');
+vi.mock('./load-config.js');
 vi.mock('./write-launcher.js');
 
 const loadConfigMock = vi.mocked(loadConfig);
