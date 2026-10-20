@@ -16,6 +16,7 @@ import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
+import { withFakeTimers } from './with-fake-timers.js';
 
 /* --------------------------- registry mocks --------------------------- *
  * Two PyPI reads deliberately allowed to disagree — that disagreement IS the
@@ -26,8 +27,16 @@ import { run } from '../../src/cli.js';
 const pointer = new Map<string, string>();
 const published = new Map<string, Set<string>>();
 let pointerStatus: number | null = null;
+/** Per-version reads that 404 before a live version shows up (#777). */
+let lagReads = 0;
+let perVersionReads = 0;
 
 function isLive(name: string, version: string): boolean {
+  perVersionReads++;
+  if (lagReads > 0) {
+    lagReads--;
+    return false;
+  }
   return published.get(name)?.has(version) ?? false;
 }
 
@@ -142,6 +151,8 @@ afterEach(() => {
   pointer.clear();
   published.clear();
   pointerStatus = null;
+  lagReads = 0;
+  perVersionReads = 0;
   rmSync(repo, { recursive: true, force: true });
   rmSync(remote, { recursive: true, force: true });
 });
@@ -206,15 +217,9 @@ describe('piot reconcile --expect: a stale latest pointer cannot skip the tag (#
     stalePointerAfterUpload();
     published.set('mycrate-py', new Set(['0.0.1'])); // 0.0.2 never landed
 
-    const code = await run([
-      'node',
-      'piot',
-      'reconcile',
-      '--expect',
-      'mycrate-py@0.0.2',
-      '--cwd',
-      repo,
-    ]);
+    const code = await withFakeTimers(() =>
+      run(['node', 'piot', 'reconcile', '--expect', 'mycrate-py@0.0.2', '--cwd', repo]),
+    );
 
     expect(code, output()).not.toBe(0);
     expect(output()).toContain('mycrate-py');
@@ -283,5 +288,33 @@ describe('piot reconcile --expect: a stale latest pointer cannot skip the tag (#
 
     expect(code, output()).not.toBe(0);
     expect(output()).toContain('not-a-package');
+  });
+});
+
+describe('piot reconcile --expect: waits out per-version lag after an upload (#777)', () => {
+  it('cuts the tag once the per-version endpoint catches up', async () => {
+    stalePointerAfterUpload();
+    lagReads = 3;
+
+    const code = await withFakeTimers(() =>
+      run(['node', 'piot', 'reconcile', '--expect', 'mycrate-py@0.0.2', '--cwd', repo]),
+    );
+
+    expect(code, output()).toBe(0);
+    expect(hasTag('mycrate-py-v0.0.2'), output()).toBe(true);
+    expect(perVersionReads).toBe(4);
+  });
+
+  it('still refuses a version that never appears, after a bounded wait', async () => {
+    stalePointerAfterUpload();
+    published.set('mycrate-py', new Set(['0.0.1']));
+
+    const code = await withFakeTimers(() =>
+      run(['node', 'piot', 'reconcile', '--expect', 'mycrate-py@0.0.2', '--cwd', repo]),
+    );
+
+    expect(code, output()).not.toBe(0);
+    expect(hasTag('mycrate-py-v0.0.2'), output()).toBe(false);
+    expect(perVersionReads).toBeGreaterThan(1);
   });
 });

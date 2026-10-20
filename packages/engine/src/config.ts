@@ -5,11 +5,12 @@
  * are a hard error at every level via Zod `.strict()` — no silent drops.
  */
 
-import { readFile } from 'node:fs/promises';
 import { parse as parseToml } from 'smol-toml';
-import { z, type ZodError } from 'zod';
+import { z } from 'zod';
 
+import { assertUniqueNames } from './assert-unique-names.js';
 import { detectCommonMistakes } from './detect-common-mistakes.js';
+import { formatZodError } from './format-zod-error.js';
 import { DEFAULT_TAG_FORMAT } from './tag-template.js';
 import { toError } from './to-error.js';
 import { validateNameTemplate } from './validate-name-template.js';
@@ -403,38 +404,4 @@ export function parseConfig(toml: string): Config {
     putitoutthere: parsed.putitoutthere,
     packages: parsed.package,
   };
-}
-
-export async function loadConfig(path: string): Promise<Config> {
-  let text: string;
-  try {
-    text = await readFile(path, 'utf8');
-  } catch (err) {
-    throw new Error(
-      `putitoutthere.toml: cannot read ${path}: ${toError(err).message}`,
-      { cause: err },
-    );
-  }
-  return parseConfig(text);
-}
-
-/* ----------------------------- internals ----------------------------- */
-
-function assertUniqueNames(packages: readonly Package[]): void {
-  const seen = new Set<string>();
-  for (const p of packages) {
-    if (seen.has(p.name)) {
-      throw new Error(`putitoutthere.toml: duplicate package name: ${p.name}`);
-    }
-    seen.add(p.name);
-  }
-}
-
-export function formatZodError(error: ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const path = issue.path.length > 0 ? issue.path.join('.') : '<root>';
-      return `${path}: ${issue.message}`;
-    })
-    .join('; ');
 }

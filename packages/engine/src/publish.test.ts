@@ -7,11 +7,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { checkCompleteness } from './completeness.js';
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ensureTag } from './ensure-tag.js';
 import { headCommit } from './git.js';
+import { healPublishedTag } from './heal-published-tag.js';
 import { type MatrixRow, plan } from './plan.js';
 import { requireAuth } from './require-auth.js';
 import { requireCargoShape } from './require-cargo-shape.js';
@@ -29,7 +30,7 @@ import { readHandlerMeta, type Ctx, type Handler } from './types.js';
 import { ExecError } from './utils/exec-error.js';
 import { dumpFailure } from './verbose.js';
 
-vi.mock('./config.js');
+vi.mock('./load-config.js');
 vi.mock('./plan.js');
 vi.mock('./require-auth.js');
 vi.mock('./require-cargo-shape.js');
@@ -43,6 +44,7 @@ vi.mock('./require-repo-url-match.js');
 vi.mock('./completeness.js');
 vi.mock('./normalize-artifacts.js');
 vi.mock('./ensure-tag.js');
+vi.mock('./heal-published-tag.js');
 vi.mock('./publish-order.js');
 vi.mock('./publish-progress.js');
 vi.mock('./git.js');
@@ -201,15 +203,11 @@ describe('publish: happy path', () => {
     const result = await publish({ cwd: CWD, handlerFor: () => handler });
 
     expect(handler.publish).not.toHaveBeenCalled();
-    // Skip path still ensures the tag (auto-heal #407).
-    expect(ensureTag).toHaveBeenCalledTimes(1);
-    // The auto-heal tag write (publish.ts:223) must thread `{ cwd }` as its
-    // 5th positional arg — pins the options object against the `{}` mutant
-    // on the skip branch (distinct from the success-path ensureTag at :236,
-    // asserted by the happy-path test).
-    expect(ensureTag).toHaveBeenCalledWith(
-      '{name}-v{version}',
-      'lib-js',
+    expect(ensureTag).not.toHaveBeenCalled();
+    expect(healPublishedTag).toHaveBeenCalledTimes(1);
+    expect(healPublishedTag).toHaveBeenCalledWith(
+      p,
+      [p],
       '0.1.0',
       'HEAD-SHA',
       { cwd: CWD },

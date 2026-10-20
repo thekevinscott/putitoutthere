@@ -135,3 +135,19 @@ describe('publish-path auto-heal (#407)', () => {
     expect(tags).toContain('lib-js-v0.1.0');
   });
 });
+
+describe('publish-path auto-heal with unreleased changes at HEAD (#776)', () => {
+  it('fails without tagging HEAD when package changes landed after the live version could have shipped', async () => {
+    gitInRepo(['tag', '-a', 'lib-js-v0.1.0', '-m', 'Release lib-js-v0.1.0']);
+    gitInRepo(['push', '-q', 'origin', 'main', 'lib-js-v0.1.0']);
+    writeRepoFile('packages/ts/index.ts', 'shipped as 0.1.1');
+    gitInRepo(['commit', '-q', '-am', 'fix: shipped change']);
+    writeRepoFile('packages/ts/index.ts', 'never shipped');
+    gitInRepo(['commit', '-q', '-am', 'fix: unreleased change']);
+
+    await expect(publish({ cwd: repo })).rejects.toThrow(/lib-js@0\.1\.1/);
+
+    expect(gitInRepo(['tag', '-l', 'lib-js-v0.1.1'])).toBe('');
+    expect(gitInRepo(['ls-remote', '--tags', 'origin', 'lib-js-v0.1.1'])).toBe('');
+  });
+});

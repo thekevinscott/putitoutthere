@@ -21,7 +21,8 @@ import { checkPyprojectAndBundleCli } from './check/check-pyproject-and-bundle-c
 import { checkPyprojectShapeFindings } from './check/check-pyproject-shape-findings.js';
 import { checkRepoUrlMatchFindings } from './check/check-repo-url-match-findings.js';
 import { checkTagTemplateCollisions } from './check/check-tag-template-collisions.js';
-import { loadConfig, type Package } from './config.js';
+import type { Package } from './config.js';
+import { loadConfig } from './load-config.js';
 import { toError } from './to-error.js';
 import { pathExists } from './utils/path-exists.js';
 
