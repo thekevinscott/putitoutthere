@@ -16,6 +16,7 @@ import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { run } from '../../src/cli.js';
+import { withFakeTimers } from './with-fake-timers.js';
 
 /* --------------------------- registry mocks --------------------------- *
  * Two PyPI reads deliberately allowed to disagree — that disagreement IS the
@@ -216,15 +217,9 @@ describe('piot reconcile --expect: a stale latest pointer cannot skip the tag (#
     stalePointerAfterUpload();
     published.set('mycrate-py', new Set(['0.0.1'])); // 0.0.2 never landed
 
-    const code = await run([
-      'node',
-      'piot',
-      'reconcile',
-      '--expect',
-      'mycrate-py@0.0.2',
-      '--cwd',
-      repo,
-    ]);
+    const code = await withFakeTimers(() =>
+      run(['node', 'piot', 'reconcile', '--expect', 'mycrate-py@0.0.2', '--cwd', repo]),
+    );
 
     expect(code, output()).not.toBe(0);
     expect(output()).toContain('mycrate-py');
@@ -295,25 +290,6 @@ describe('piot reconcile --expect: a stale latest pointer cannot skip the tag (#
     expect(output()).toContain('not-a-package');
   });
 });
-
-async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
-  vi.useFakeTimers({ toFake: ['setTimeout'] });
-  try {
-    const p = fn();
-    let done = false;
-    void p.then(
-      () => { done = true; },
-      () => { done = true; },
-    );
-    while (!done) {
-      await vi.advanceTimersByTimeAsync(200_000);
-      await Promise.resolve();
-    }
-    return await p;
-  } finally {
-    vi.useRealTimers();
-  }
-}
 
 describe('piot reconcile --expect: waits out per-version lag after an upload (#777)', () => {
   it('cuts the tag once the per-version endpoint catches up', async () => {

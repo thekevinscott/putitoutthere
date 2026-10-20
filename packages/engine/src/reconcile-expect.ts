@@ -5,6 +5,7 @@
  * bare `reconcile` after a delegated upload can cut no tag at all (#666).
  */
 
+import { awaitPublished } from './await-published.js';
 import type { Config, Package } from './config.js';
 import { ensureTag } from './ensure-tag.js';
 import { tagList } from './git.js';
@@ -40,7 +41,13 @@ export async function reconcileExpected(
     // Already tagged => idempotent no-op, matching bare reconcile. No
     // need to confirm against the registry at all.
     if ((await tagList(tag, { cwd })).length > 0) {continue;}
-    const confirmed = await defaultHandlerFor(pkg.kind).isPublished(pkg, version, ctx);
+    // The per-version endpoint itself 404s for minutes after an upload (#777).
+    const handler = defaultHandlerFor(pkg.kind);
+    const confirmed = await awaitPublished(
+      () => handler.isPublished(pkg, version, ctx),
+      `${pkg.name}@${version}`,
+      log,
+    );
     if (!confirmed) {
       throw new Error(
         `reconcile --expect: ${pkg.name}@${version} not found on the ${pkg.kind} registry`,

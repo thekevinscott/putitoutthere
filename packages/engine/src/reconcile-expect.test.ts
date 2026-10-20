@@ -20,6 +20,7 @@ vi.mock('./ensure-tag.js');
 vi.mock('./git.js');
 vi.mock('./handlers/index.js');
 vi.mock('./resolve-tag-commit.js');
+vi.mock('./utils/sleep.js');
 
 /** Tags that exist locally; `tagList` is answered from this set. */
 const existingTags = new Set<string>();
