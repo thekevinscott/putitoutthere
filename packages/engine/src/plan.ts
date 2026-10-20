@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 import { computeCascade } from './cascade.js';
 import { collectChanges } from './collect-changes.js';
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { headCommit } from './git.js';
 import { nextVersion } from './next-version.js';
 import { planManual } from './plan-manual.js';

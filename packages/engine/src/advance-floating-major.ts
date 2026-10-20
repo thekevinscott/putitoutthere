@@ -7,7 +7,7 @@
 
 import { join } from 'node:path';
 
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { forceMoveTag } from './force-move-tag.js';
 import { fetchTagsForce, lastTag, tagCommit, tagList } from './git.js';
 

@@ -5,6 +5,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
@@ -23,7 +24,7 @@ vi.mock('./python-versions.js');
 vi.mock('./wheel-abi.js');
 
 // The planner treats `cwd` opaquely (it only threads it into the mocked
-// collaborators), so any string does. No path literals are asserted.
+// collaborators), so any string does.
 const CWD = 'repo';
 const HEAD = 'HEADSHA';
 
@@ -112,6 +113,20 @@ targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 globs      = ["packages/python/**"]
 depends_on = ["lib-rust"]
 `;
+
+describe('plan: config path', () => {
+  it('reads putitoutthere.toml under cwd by default', async () => {
+    useToml(PUTITOUTTHERE_TOML);
+    await plan({ cwd: CWD });
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(join(CWD, 'putitoutthere.toml'), 'utf8');
+  });
+
+  it('reads configPath when given', async () => {
+    useToml(PUTITOUTTHERE_TOML);
+    await plan({ cwd: CWD, configPath: 'alt.toml' });
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith('alt.toml', 'utf8');
+  });
+});
 
 describe('plan: first release (no tags)', () => {
   it('cascades every package and uses first_version', async () => {
