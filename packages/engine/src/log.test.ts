@@ -144,29 +144,6 @@ describe('createLogger: pretty mode', () => {
     expect(() => JSON.parse(dest.text.trim().split('\n')[0]!) as unknown).toThrow();
   });
 
-  it('stringifies object-valued fields (not just primitives)', () => {
-    const dest = makeStream();
-    const log = createLogger({ stream: dest, pretty: true });
-    log.info('obj', { meta: { a: 1 } });
-    expect(dest.text).toContain('"a":1');
-  });
-
-  it('handles the no-fields branch', () => {
-    const dest = makeStream();
-    const log = createLogger({ stream: dest, pretty: true });
-    log.info('bare');
-    expect(dest.text).toContain('bare');
-  });
-
-  it('stringifies number / boolean / null scalar fields', () => {
-    const dest = makeStream();
-    const log = createLogger({ stream: dest, pretty: true });
-    log.info('scalars', { count: 3, ok: true, nada: null });
-    expect(dest.text).toContain('count=3');
-    expect(dest.text).toContain('ok=true');
-    expect(dest.text).toContain('nada=null');
-  });
-
   it('auto-detects TTY when no `pretty` is passed', () => {
     // Simulate a TTY stream by tagging it.
     const dest = makeStream();

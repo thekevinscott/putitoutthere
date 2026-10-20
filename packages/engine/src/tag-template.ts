@@ -5,6 +5,7 @@
  * `v{version}`. Defaults to `{name}-v{version}`, the historical shape.
  */
 
+import { templateToRegex } from './template-to-regex.js';
 import { parseSemver } from './version.js';
 
 export const DEFAULT_TAG_FORMAT = '{name}-v{version}';
@@ -42,33 +43,4 @@ export function parseTagVersion(
     return null;
   }
   return versionPart;
-}
-
-/**
- * Validate a template string. Returns an error message when invalid,
- * `null` when ok. Separated from Zod so `config.ts` can reuse the same
- * check if needed and tests can probe the rule directly.
- */
-export function validateTagFormat(template: string): string | null {
-  if (!template.includes('{version}')) {
-    return 'tag_format must contain {version}';
-  }
-  // Reject unknown placeholders to catch typos early.
-  const unknown = template.match(/\{(?!name\}|version\})[^}]*\}/g);
-  if (unknown && unknown.length > 0) {
-    return `tag_format contains unknown placeholder(s): ${unknown.join(', ')}`;
-  }
-  return null;
-}
-
-function templateToRegex(template: string, name: string): RegExp {
-  const escaped = template.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = escaped
-    .replace(/\\\{name\\\}/g, escapeRegex(name))
-    .replace(/\\\{version\\\}/g, '(.+)');
-  return new RegExp(`^${pattern}$`);
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

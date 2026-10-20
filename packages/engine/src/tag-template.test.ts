@@ -7,13 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  DEFAULT_TAG_FORMAT,
-  formatTag,
-  parseTagVersion,
-  tagGlob,
-  validateTagFormat,
-} from './tag-template.js';
+import { DEFAULT_TAG_FORMAT, formatTag, parseTagVersion, tagGlob } from './tag-template.js';
 
 describe('formatTag', () => {
   it('renders the default template', () => {
@@ -26,6 +20,12 @@ describe('formatTag', () => {
 
   it('supports hyphenated package names', () => {
     expect(formatTag(DEFAULT_TAG_FORMAT, { name: 'my-pkg', version: '1.0.0' })).toBe('my-pkg-v1.0.0');
+  });
+
+  it('substitutes every occurrence of each placeholder verbatim', () => {
+    expect(
+      formatTag('{name}/{name}@{version}+{version}', { name: '@scope/a.b', version: '1.0.0-rc.1' }),
+    ).toBe('@scope/a.b/@scope/a.b@1.0.0-rc.1+1.0.0-rc.1');
   });
 });
 
@@ -60,23 +60,5 @@ describe('parseTagVersion', () => {
   it('handles hyphenated names without confusing regex', () => {
     expect(parseTagVersion(DEFAULT_TAG_FORMAT, 'my-pkg', 'my-pkg-v2.0.0')).toBe('2.0.0');
     expect(parseTagVersion(DEFAULT_TAG_FORMAT, 'my', 'my-pkg-v2.0.0')).toBeNull();
-  });
-});
-
-describe('validateTagFormat', () => {
-  it('accepts the default', () => {
-    expect(validateTagFormat(DEFAULT_TAG_FORMAT)).toBeNull();
-  });
-
-  it('accepts `v{version}`', () => {
-    expect(validateTagFormat('v{version}')).toBeNull();
-  });
-
-  it('requires {version}', () => {
-    expect(validateTagFormat('{name}-v')).toMatch(/must contain \{version\}/);
-  });
-
-  it('rejects unknown placeholders', () => {
-    expect(validateTagFormat('{name}-{bogus}-v{version}')).toMatch(/unknown placeholder/);
   });
 });
