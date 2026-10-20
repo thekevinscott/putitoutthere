@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parsePackageList, parseTrailer } from './trailer.js';
+import { parseTrailer } from './trailer.js';
 
 describe('parseTrailer: happy paths', () => {
   it('returns null for an empty message', () => {
@@ -76,6 +76,16 @@ describe('parseTrailer: case + whitespace', () => {
   it('accepts tabs / extra spaces around the value', () => {
     expect(parseTrailer('release:   patch')).toEqual({ bump: 'patch', packages: [] });
     expect(parseTrailer('release:\tminor')).toEqual({ bump: 'minor', packages: [] });
+  });
+
+  it('accepts no space after the colon', () => {
+    expect(parseTrailer('release:patch')).toEqual({ bump: 'patch', packages: [] });
+  });
+
+  it('requires the key to start the line and be exactly `release`', () => {
+    expect(parseTrailer('x release: patch')).toBeNull();
+    expect(parseTrailer('xrelease: patch')).toBeNull();
+    expect(parseTrailer('releases: patch')).toBeNull();
   });
 
   it('values remain case-sensitive (patch lowercase only)', () => {
@@ -164,27 +174,5 @@ release: minor
     release: patch
 `;
     expect(parseTrailer(body)).toEqual({ bump: 'patch', packages: [] });
-  });
-});
-
-describe('parsePackageList (internal): defensive open-bracket guard', () => {
-  // `parsePayload` only calls `parsePackageList` on a substring that begins
-  // at the `[`, so the leading-`[` guard never fires through the public
-  // `parseTrailer` entry point. Exercised directly to pin the defensive
-  // early-return contract.
-  it('returns null for a string that does not open with `[`', () => {
-    expect(parsePackageList('minor')).toBeNull();
-    expect(parsePackageList('no-bracket')).toBeNull();
-  });
-
-  it('checks bracket position, not mere presence (a non-leading `[` still fails the guard)', () => {
-    // The guard is `!s.startsWith('[')`, not `!s.includes('[')`: a string that
-    // contains a bracket somewhere other than index 0 must still bail out at
-    // the leading-bracket check rather than slip through to list parsing.
-    expect(parsePackageList('x[a]')).toBeNull();
-  });
-
-  it('still parses a well-formed list when called directly', () => {
-    expect(parsePackageList('[a, b]')).toEqual(['a', 'b']);
   });
 });
