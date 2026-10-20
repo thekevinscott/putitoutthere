@@ -8,7 +8,8 @@
 
 import { join } from 'node:path';
 
-import { loadConfig, type Package } from './config.js';
+import type { Package } from './config.js';
+import { loadConfig } from './load-config.js';
 import { handlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan } from './plan.js';

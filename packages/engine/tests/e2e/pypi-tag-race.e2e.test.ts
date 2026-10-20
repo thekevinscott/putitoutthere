@@ -190,7 +190,7 @@ describe('pypi-tag tags the upload it was told about (#694)', () => {
     expect(tags(), output).toEqual([`fixture-py-v${LIVE_VERSION}`]);
   });
 
-  it('fails the job when pypi.org does not confirm the reported upload', () => {
+  it('fails the job when pypi.org does not confirm the reported upload', { timeout: 300_000 }, () => {
     // The upload step uploaded nothing. A real 404 from the immutable
     // per-version endpoint. Exiting 0 here — and worse, tagging whatever
     // the latest pointer happens to name — records success for a release

@@ -5,22 +5,9 @@
  * Issue #5. Plan: plan.md §6.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
-import {
-  formatZodError,
-  loadConfig,
-  parseConfig,
-  sanitizeArtifactName,
-} from './config.js';
-
-// `loadConfig`'s only collaborator is `node:fs/promises`; mock it so the loader/parser
-// is isolated from disk. The real read is covered at the integration + e2e
-// tiers.
-vi.mock('node:fs/promises');
-
-const readFileMock = vi.mocked(readFile);
+import { parseConfig, sanitizeArtifactName } from './config.js';
 
 const MINIMAL = `
 [putitoutthere]
@@ -731,27 +718,6 @@ describe('parseConfig: TOML errors', () => {
       expect(err).toBeInstanceOf(Error);
       expect((err as Error).cause).toBeInstanceOf(Error);
     }
-  });
-});
-
-describe('loadConfig: filesystem', () => {
-  beforeEach(() => {
-    readFileMock.mockReset();
-  });
-
-  it('reads a valid config from disk', async () => {
-    readFileMock.mockResolvedValue(MINIMAL);
-    const cfg = await loadConfig('putitoutthere.toml');
-    expect(cfg.packages[0]!.name).toBe('app');
-    // The config file is read as utf8 text, from the given path.
-    expect(readFileMock).toHaveBeenCalledWith('putitoutthere.toml', 'utf8');
-  });
-
-  it('throws a clear error when the file does not exist', async () => {
-    readFileMock.mockRejectedValue(
-      Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }),
-    );
-    await expect(loadConfig('does-not-exist.toml')).rejects.toThrow(/cannot read/);
   });
 });
 
@@ -1505,39 +1471,5 @@ ${extra}
         pypi('build = "maturin"\ntargets = ["x86_64-unknown-linux-gnu"]\nmanylinux = "glibc-2.28"'),
       ),
     ).toThrow(/manylinux must be/);
-  });
-});
-
-describe('formatZodError (internal): root-path label', () => {
-  // formatZodError only reads `error.issues[].path` / `.message`, so pass a
-  // ZodError-shaped stub rather than importing `zod` — an unmocked collaborator
-  // the unit-lint isolation gate forbids in a unit test.
-  type ZodErrorLike = Parameters<typeof formatZodError>[0];
-  const zodErrorLike = (
-    issues: { path: (string | number)[]; message: string }[],
-  ): ZodErrorLike => ({ issues }) as unknown as ZodErrorLike;
-
-  it('labels an empty issue path as <root>', () => {
-    const err = zodErrorLike([{ path: [], message: 'whole-document problem' }]);
-    expect(formatZodError(err)).toBe('<root>: whole-document problem');
-  });
-
-  it('joins a non-empty issue path with dots', () => {
-    const err = zodErrorLike([{ path: ['package', 0, 'name'], message: 'bad field' }]);
-    expect(formatZodError(err)).toBe('package.0.name: bad field');
-  });
-
-  it('labels the empty-path issue <root> when mixed with nested-path issues', () => {
-    // Both ternary arms fire within a single formatted string: the empty path
-    // takes the `<root>` alternate while the nested path takes the dot-join,
-    // and the two are `; `-joined. Pins the `<root>` label alongside a
-    // real path so the branch is exercised in composition, not just alone.
-    const err = zodErrorLike([
-      { path: [], message: 'whole-document problem' },
-      { path: ['package', 1, 'globs'], message: 'expected array' },
-    ]);
-    expect(formatZodError(err)).toBe(
-      '<root>: whole-document problem; package.1.globs: expected array',
-    );
   });
 });
