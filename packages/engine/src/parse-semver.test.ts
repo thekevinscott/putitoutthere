@@ -16,31 +16,31 @@ describe('parseSemver', () => {
   });
 
   it('rejects too few components', () => {
-    expect(() => parseSemver('1.2')).toThrow();
+    expect(() => parseSemver('1.2')).toThrow('invalid semver: 1.2');
   });
 
   it('rejects too many components', () => {
-    expect(() => parseSemver('1.2.3.4')).toThrow();
+    expect(() => parseSemver('1.2.3.4')).toThrow('invalid semver: 1.2.3.4');
   });
 
   it('rejects a pre-release suffix in v0', () => {
-    expect(() => parseSemver('1.2.3-rc.1')).toThrow();
+    expect(() => parseSemver('1.2.3-rc.1')).toThrow('invalid semver: 1.2.3-rc.1');
   });
 
   it('rejects non-numeric components', () => {
-    expect(() => parseSemver('1.x.3')).toThrow();
-    expect(() => parseSemver('a.b.c')).toThrow();
+    expect(() => parseSemver('1.x.3')).toThrow('invalid semver: 1.x.3');
+    expect(() => parseSemver('a.b.c')).toThrow('invalid semver: a.b.c');
   });
 
   it('rejects leading-zero components (not strict semver)', () => {
-    expect(() => parseSemver('1.02.3')).toThrow();
+    expect(() => parseSemver('1.02.3')).toThrow('invalid semver: 1.02.3');
   });
 
   it('rejects leading v prefix', () => {
-    expect(() => parseSemver('v1.2.3')).toThrow();
+    expect(() => parseSemver('v1.2.3')).toThrow('invalid semver: v1.2.3');
   });
 
   it('rejects empty input', () => {
-    expect(() => parseSemver('')).toThrow();
+    expect(() => parseSemver('')).toThrow('invalid semver: ');
   });
 });
