@@ -158,6 +158,11 @@ export const ErrorCodes = {
    *  is not done until its tag is visible on the remote, so `publish` and
    *  `reconcile` must not exit 0 having silently left one unpushed. */
   TAG_PUSH_FAILED: 'PIOT_TAG_PUSH_FAILED',
+  /** `publish` found the planned version already live with no tag, and more
+   *  than one commit since the last tag touches the package (#776). The
+   *  published commit is unknowable, so tagging HEAD could mark unreleased
+   *  code as released. */
+  HEAL_UNRELEASED_CHANGES: 'PIOT_HEAL_UNRELEASED_CHANGES',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -188,4 +193,5 @@ export const ALL_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCodes.REPO_URL_MISMATCH,
   ErrorCodes.REPO_PRIVATE,
   ErrorCodes.TAG_PUSH_FAILED,
+  ErrorCodes.HEAL_UNRELEASED_CHANGES,
 ];
