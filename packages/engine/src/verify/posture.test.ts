@@ -8,11 +8,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { computeVerify } from './posture.js';
-import { type Config, loadConfig } from '../config.js';
+import type { Config } from '../config.js';
+import { loadConfig } from '../load-config.js';
 import { handlerFor } from '../handlers/index.js';
 import type { Ctx } from '../types.js';
 
-vi.mock('../config.js');
+vi.mock('../load-config.js');
 vi.mock('../handlers/index.js');
 vi.mock('../log.js');
 

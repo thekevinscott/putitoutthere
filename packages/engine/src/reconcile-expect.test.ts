@@ -20,6 +20,7 @@ vi.mock('./ensure-tag.js');
 vi.mock('./git.js');
 vi.mock('./handlers/index.js');
 vi.mock('./resolve-tag-commit.js');
+vi.mock('./utils/sleep.js');
 
 /** Tags that exist locally; `tagList` is answered from this set. */
 const existingTags = new Set<string>();
@@ -167,6 +168,7 @@ describe('reconcileExpected', () => {
     await expect(
       reconcileExpected('core-py@2.0.0', config, byName, '/repo', false, log),
     ).rejects.toThrow('reconcile --expect: core-py@2.0.0 not found on the pypi registry');
+    expect(log.info).toHaveBeenCalledWith('core-py@2.0.0 not visible on the registry yet; retrying in 5s');
     expect(ensureTag).not.toHaveBeenCalled();
   });
 

@@ -51,6 +51,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { main } from '../../src/action.js';
 import { run } from '../../src/cli.js';
+import { withFakeTimers } from './with-fake-timers.js';
 
 /* --------------------------- registry mocks --------------------------- *
  * The two PyPI reads reconcile can make, deliberately allowed to
@@ -261,7 +262,7 @@ describe('pypi-tag tags what the upload shipped, not what discovery can see (#69
     // for a release that did not happen.
     writeConfig();
 
-    const code = await runAction({ expect: 'mycrate-py@0.0.0' });
+    const code = await withFakeTimers(() => runAction({ expect: 'mycrate-py@0.0.0' }));
 
     expect(code, output()).not.toBe(0);
     expect(output()).toContain('mycrate-py');
