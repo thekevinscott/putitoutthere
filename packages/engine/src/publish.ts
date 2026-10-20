@@ -7,7 +7,8 @@
 
 import { isAbsolute, join, resolve } from 'node:path';
 
-import { loadConfig, type Package } from './config.js';
+import type { Package } from './config.js';
+import { loadConfig } from './load-config.js';
 import { mustGet } from './must-get.js';
 import { packagesByName } from './packages-by-name.js';
 import { checkCompleteness } from './completeness.js';
