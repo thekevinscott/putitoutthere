@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { ensureTag } from './ensure-tag.js';
 import { tagList } from './git.js';
 import { reconcile } from './reconcile.js';
@@ -17,7 +17,7 @@ import { resolveTagCommit } from './resolve-tag-commit.js';
 import { computeStatus } from './status.js';
 import type { StatusRow } from './status-types.js';
 
-vi.mock('./config.js');
+vi.mock('./load-config.js');
 vi.mock('./ensure-tag.js');
 vi.mock('./git.js');
 vi.mock('./reconcile-expect.js');

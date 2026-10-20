@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Package } from './config.js';
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { checkCompleteness } from './completeness.js';
 import { normalizeArtifactLayout } from './normalize-artifacts.js';
 import { ensureTag } from './ensure-tag.js';
@@ -30,7 +30,7 @@ import { readHandlerMeta, type Ctx, type Handler } from './types.js';
 import { ExecError } from './utils/exec-error.js';
 import { dumpFailure } from './verbose.js';
 
-vi.mock('./config.js');
+vi.mock('./load-config.js');
 vi.mock('./plan.js');
 vi.mock('./require-auth.js');
 vi.mock('./require-cargo-shape.js');

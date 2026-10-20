@@ -1,6 +1,7 @@
 import { isAbsolute, join, resolve } from 'node:path';
 
-import { loadConfig, type NpmPackage } from './config.js';
+import type { NpmPackage } from './config.js';
+import { loadConfig } from './load-config.js';
 import { normalizeBuild } from './handlers/npm-platform.js';
 import { writeLauncher } from './write-launcher.js';
 
