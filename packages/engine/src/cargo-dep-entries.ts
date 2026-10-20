@@ -5,21 +5,11 @@
  * or `[workspace.dependencies]` fails resolution identically.
  */
 
-/** One dependency declaration, normalized to its object form. */
-export interface CargoDepEntry {
-  /** The key as written — a rename, not necessarily the crate name. */
-  key: string;
-  /** `path = "…"` as written (relative to the manifest's directory). */
-  path?: string | undefined;
-  /** True when the entry carries a `version = "…"` requirement. */
-  hasVersionReq: boolean;
-  /** True when the entry defers to `[workspace.dependencies]`. */
-  inheritsFromWorkspace: boolean;
-}
+import type { CargoDepEntry } from './cargo-dep-entries-types.js';
+import { collectDepTables } from './collect-dep-tables.js';
+import { toCargoDepEntry } from './to-cargo-dep-entry.js';
 
-interface DepTable {
-  [key: string]: unknown;
-}
+export type { CargoDepEntry } from './cargo-dep-entries-types.js';
 
 /**
  * Flatten every dependency entry in `parsed`, including target-specific
@@ -36,59 +26,10 @@ export function cargoDepEntries(parsed: unknown): CargoDepEntry[] {
   const root = (parsed ?? {}) as Record<string, unknown>;
   const out: CargoDepEntry[] = [];
 
-  for (const table of collectTables(root)) {
+  for (const table of collectDepTables(root)) {
     for (const [key, value] of Object.entries(table)) {
-      out.push(toEntry(key, value));
+      out.push(toCargoDepEntry(key, value));
     }
   }
   return out;
-}
-
-const DEP_TABLE_NAMES = ['dependencies', 'dev-dependencies', 'build-dependencies'] as const;
-
-/** Every dependency-bearing table: top level, per-target, and workspace. */
-function collectTables(root: Record<string, unknown>): DepTable[] {
-  const tables: DepTable[] = [];
-
-  const push = (v: unknown): void => {
-    if (v !== null && typeof v === 'object') {tables.push(v as DepTable);}
-  };
-
-  for (const name of DEP_TABLE_NAMES) {push(root[name]);}
-
-  // `[target.'cfg(unix)'.dependencies]` and friends. The cfg expression is
-  // an arbitrary string key, so every value under `target` is inspected.
-  const target = root['target'];
-  if (target !== null && typeof target === 'object') {
-    for (const perTarget of Object.values(target as Record<string, unknown>)) {
-      const tables_ = (perTarget ?? {}) as Record<string, unknown>;
-      for (const name of DEP_TABLE_NAMES) {
-        push(tables_[name]);
-      }
-    }
-  }
-
-  // `[workspace.dependencies]` — where an inheriting member's requirement
-  // actually lives, so the rewrite has to reach it.
-  const workspace = root['workspace'];
-  if (workspace !== null && typeof workspace === 'object') {
-    push((workspace as Record<string, unknown>)['dependencies']);
-  }
-
-  return tables;
-}
-
-function toEntry(key: string, value: unknown): CargoDepEntry {
-  // `serde = "1"` — a bare version requirement; never a path dependency.
-  if (typeof value === 'string') {
-    return { key, hasVersionReq: true, inheritsFromWorkspace: false };
-  }
-  const obj = (value ?? {}) as Record<string, unknown>;
-  const path = typeof obj['path'] === 'string' ? obj['path'] : undefined;
-  return {
-    key,
-    path,
-    hasVersionReq: typeof obj['version'] === 'string',
-    inheritsFromWorkspace: obj['workspace'] === true,
-  };
 }
