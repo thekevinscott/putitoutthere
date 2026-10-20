@@ -5,13 +5,14 @@
  * secrets never leak. Auto-emitted on failure; never on success.
  */
 
-import { appendFile } from 'node:fs/promises';
 import { emitGhaAnnotation } from './emit-gha-annotation.js';
 import { redact } from './redact.js';
 import { renderMarkdown } from './render-markdown.js';
 import type { EnvSource } from './scan-source.js';
+import { truncateSummary } from './truncate-summary.js';
 import type { Logger } from './types.js';
 import type { FailureContext } from './verbose-types.js';
+import { writeSummary } from './write-summary.js';
 
 export interface DumpOptions {
   log: Logger;
@@ -27,9 +28,6 @@ export interface DumpOptions {
   envSources?: readonly EnvSource[];
 }
 
-const SUMMARY_CAP = 4 * 1024 * 1024; // GHA job-summary ceiling: 1 MiB per step, 20 MiB total. Cap at 4 MiB to stay well under on a single failure.
-const TRUNC_NOTE = '\n\n_… truncated. Run `gh run view --log` for the full log._\n';
-
 export async function dumpFailure(
   err: Error,
   ctx: FailureContext,
@@ -44,7 +42,7 @@ export async function dumpFailure(
       ? [process.env, ...opts.envSources]
       : undefined;
   const md = redact(renderMarkdown(err, ctx), sources);
-  await writeSummary(truncate(md));
+  await writeSummary(truncateSummary(md));
 
   // Phase 3 / Idea 6. The markdown summary above is auth-gated on
   // private repos and not always reachable to a foreign agent helping
@@ -63,18 +61,4 @@ export async function dumpFailure(
     exitCode: ctx.exitCode,
     command: ctx.command.join(' '),
   });
-}
-
-function truncate(md: string): string {
-  if (md.length <= SUMMARY_CAP) {return md;}
-  // Keep the head (error + command + versions) — the most useful
-  // bytes. Tail bytes are usually repeated noise at this size.
-  const head = md.slice(0, SUMMARY_CAP - TRUNC_NOTE.length);
-  return head + TRUNC_NOTE;
-}
-
-async function writeSummary(md: string): Promise<void> {
-  const path = process.env.GITHUB_STEP_SUMMARY;
-  if (!path) {return;} // local runs / non-GHA CI — summary is a no-op
-  await appendFile(path, md, 'utf8');
 }

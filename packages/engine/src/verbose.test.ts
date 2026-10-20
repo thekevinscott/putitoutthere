@@ -4,15 +4,17 @@
  * redaction contract is still exercised against the fake logger.
  */
 
-import { appendFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { redact } from './redact.js';
+import { truncateSummary } from './truncate-summary.js';
 import { dumpFailure } from './verbose.js';
 import type { FailureContext } from './verbose-types.js';
+import { writeSummary } from './write-summary.js';
 
-vi.mock('node:fs/promises');
 vi.mock('./redact.js');
+vi.mock('./truncate-summary.js');
+vi.mock('./write-summary.js');
 
 /**
  * Credential-shaped env-var matcher — copied from `scan-source.ts` so the mocked
@@ -72,11 +74,11 @@ function makeLog() {
   };
 }
 
-/** The markdown handed to `appendFile` for the job summary. */
+/** The markdown handed to `writeSummary` for the job summary. */
 function writtenSummary(): string {
-  const calls = vi.mocked(appendFile).mock.calls;
+  const calls = vi.mocked(writeSummary).mock.calls;
   expect(calls.length).toBeGreaterThan(0);
-  return calls[calls.length - 1]?.[1] as string;
+  return calls[calls.length - 1]?.[0] as string;
 }
 
 const ENV_BAK = { ...process.env };
@@ -84,10 +86,7 @@ const ENV_BAK = { ...process.env };
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(redact).mockImplementation(faithfulRedact);
-  // A truthy path so `writeSummary` reaches `appendFile`; no real
-  // file is touched (fs is mocked). Bare basename — no separator, so
-  // nothing here is OS-specific.
-  process.env.GITHUB_STEP_SUMMARY = 'summary.md';
+  vi.mocked(truncateSummary).mockImplementation((md) => md);
 });
 
 afterEach(() => {
@@ -122,16 +121,6 @@ describe('dumpFailure: GitHub step summary', () => {
     expect(md).toContain('some output');
     expect(md).toContain('some error');
     expect(md).toContain('cargo 1.78.0');
-    // The summary is appended as utf8 text.
-    expect(vi.mocked(appendFile)).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'utf8');
-  });
-
-  it('no-ops when $GITHUB_STEP_SUMMARY is unset', async () => {
-    delete process.env.GITHUB_STEP_SUMMARY;
-    const log = makeLog();
-    // Should not throw, and should not write the summary.
-    await dumpFailure(new Error('nope'), baseCtx(), { log });
-    expect(appendFile).not.toHaveBeenCalled();
   });
 
   it('includes handler-specific extras when supplied', async () => {
@@ -295,13 +284,15 @@ describe('dumpFailure: GHA workflow-command annotation', () => {
   });
 });
 
-describe('dumpFailure: size cap (4MB)', () => {
-  it('truncates oversized stdout and notes the truncation', async () => {
-    const big = 'x'.repeat(5 * 1024 * 1024);
+describe('dumpFailure: size cap', () => {
+  it('writes the truncated redacted summary, not the raw one', async () => {
+    process.env.NPM_SECRET = 'super-secret-xyz';
+    vi.mocked(truncateSummary).mockReturnValue('truncated-md');
     const log = makeLog();
-    await dumpFailure(new Error('huge'), baseCtx({ stdout: big }), { log });
-    const md = writtenSummary();
-    expect(md.length).toBeLessThanOrEqual(4 * 1024 * 1024);
-    expect(md).toMatch(/truncated/i);
+    await dumpFailure(new Error('huge'), baseCtx({ stdout: 'big super-secret-xyz' }), { log });
+    const truncated = vi.mocked(truncateSummary).mock.calls[0]?.[0];
+    expect(truncated).toContain('big [REDACTED:');
+    expect(truncated).not.toContain('super-secret-xyz');
+    expect(writeSummary).toHaveBeenCalledWith('truncated-md');
   });
 });
