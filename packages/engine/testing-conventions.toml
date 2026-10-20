@@ -10,9 +10,9 @@
 # their own threshold — upstream's default (max_lines = 1) stays put. A file
 # fails only when two or more module-scope functions exceed max_lines, so the
 # binding ceiling is the largest *second* function in any one file. Current
-# ceiling on packages/engine/src: check-crate-size.ts (packagedCrateBytes,
-# beside checkCratesPackageSize) — so 14 is the floor until it splits.
+# ceiling on packages/engine/src: trailer.ts (parsePayload and
+# parsePackageList, beside parseTrailer) — so 12 is the floor until it splits.
 # Ratchet this down as the one-function-per-file refactor (#680)
 # progresses; do not raise.
 [typescript]
-one_function_per_file = { max_lines = 14 }
+one_function_per_file = { max_lines = 12 }
