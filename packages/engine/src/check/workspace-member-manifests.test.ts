@@ -1,11 +1,11 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { expandDirGlob } from '../glob.js';
+import { expandDirGlob } from '../expand-dir-glob.js';
 import { workspaceMemberManifests } from './workspace-member-manifests.js';
 
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
-vi.mock('../glob.js');
+vi.mock('../expand-dir-glob.js');
 
 describe('workspaceMemberManifests', () => {
   it('returns empty when the manifest has no [workspace] table', async () => {

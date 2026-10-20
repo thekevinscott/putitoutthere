@@ -2,11 +2,11 @@ import { dirname, join } from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { expandDirGlob } from './glob.js';
+import { expandDirGlob } from './expand-dir-glob.js';
 import { workspaceMemberManifests } from './workspace-member-manifests.js';
 
 vi.mock('node:path', async () => await vi.importActual<typeof import('node:path')>('node:path'));
-vi.mock('./glob.js');
+vi.mock('./expand-dir-glob.js');
 
 const manifestPath = join('/repo', 'Cargo.toml');
 

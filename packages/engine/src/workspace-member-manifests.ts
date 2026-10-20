@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path';
 
-import { expandDirGlob } from './glob.js';
+import { expandDirGlob } from './expand-dir-glob.js';
 
 export async function workspaceMemberManifests(
   cargoToml: Record<string, unknown>,
