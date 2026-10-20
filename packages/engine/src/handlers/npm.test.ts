@@ -10,6 +10,8 @@ import { ExecError } from '../utils/exec-error.js';
 
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
 import { npm } from './npm.js';
+import { npmTrustPosture } from './npm-trust-posture.js';
+vi.mock('./npm-trust-posture.js', async () => await vi.importActual<typeof import('./npm-trust-posture.js')>('./npm-trust-posture.js'));
 import type { Ctx } from '../types.js';
 vi.mock('../types.js', async () => await vi.importActual<typeof import('../types.js')>('../types.js'));
 import { TransientError } from '../types.js';
@@ -1703,27 +1705,8 @@ describe('npm.publish', () => {
   });
 });
 
-describe('npm.trustPosture', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('oidc when the provenance attestations endpoint returns 200', async () => {
-    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
-    expect(await npm.trustPosture(basePkg(), '0.1.0', makeCtx())).toBe('oidc');
-    expect(spy).toHaveBeenCalledWith(
-      'https://registry.npmjs.org/-/npm/v1/attestations/demo-npm@0.1.0',
-      expect.any(Object) as object,
-    );
-  });
-
-  it('token when the attestations endpoint returns 404', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
-    expect(await npm.trustPosture(basePkg(), '0.1.0', makeCtx())).toBe('token');
-  });
-
-  it('throws on a registry error', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 503 }));
-    await expect(npm.trustPosture(basePkg(), '0.1.0', makeCtx())).rejects.toThrow(/503/);
+describe('npm handler wiring', () => {
+  it('delegates trustPosture to its extracted function', () => {
+    expect(npm.trustPosture).toBe(npmTrustPosture);
   });
 });
