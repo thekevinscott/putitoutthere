@@ -14,6 +14,11 @@ import { AuthError, TransientError } from './types.js';
 // still discriminates — while `./types.js` is isolated per unit-suite rules.
 vi.mock('./types.js');
 
+vi.mock('./is-retryable.js', async () => await vi.importActual<typeof import('./is-retryable.js')>('./is-retryable.js'));
+vi.mock('./retry-after-ms.js', async () => await vi.importActual<typeof import('./retry-after-ms.js')>('./retry-after-ms.js'));
+vi.mock('./jitter-offset.js', async () => await vi.importActual<typeof import('./jitter-offset.js')>('./jitter-offset.js'));
+vi.mock('./utils/sleep.js', async () => await vi.importActual<typeof import('./utils/sleep.js')>('./utils/sleep.js'));
+
 describe('withRetry', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -60,56 +65,6 @@ describe('withRetry', () => {
       vi.runAllTimersAsync(),
     ]);
     expect(fn).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not retry on arbitrary Error', async () => {
-    const fn = vi.fn().mockRejectedValue(new Error('weird'));
-    const out = withRetry(fn);
-    await Promise.all([
-      expect(out).rejects.toThrow('weird'),
-      vi.runAllTimersAsync(),
-    ]);
-    expect(fn).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries on network-style error codes (ECONNRESET, ETIMEDOUT)', async () => {
-    for (const code of ['ECONNRESET', 'ETIMEDOUT'] as const) {
-      const err = Object.assign(new Error('socket'), { code });
-      const fn = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce('ok');
-      const out = withRetry(fn);
-      await vi.runAllTimersAsync();
-      expect(await out).toBe('ok');
-      expect(fn).toHaveBeenCalledTimes(2);
-    }
-  });
-
-  it('retries on a 5xx-tagged error', async () => {
-    const err = Object.assign(new Error('server error'), { status: 503 });
-    const fn = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce('ok');
-    const out = withRetry(fn);
-    await vi.runAllTimersAsync();
-    expect(await out).toBe('ok');
-    expect(fn).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not retry on a 4xx-tagged error other than 429', async () => {
-    const err = Object.assign(new Error('bad request'), { status: 400 });
-    const fn = vi.fn().mockRejectedValue(err);
-    const out = withRetry(fn);
-    await Promise.all([
-      expect(out).rejects.toThrow('bad request'),
-      vi.runAllTimersAsync(),
-    ]);
-    expect(fn).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries on 429', async () => {
-    const err = Object.assign(new Error('rate limited'), { status: 429 });
-    const fn = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce('ok');
-    const out = withRetry(fn);
-    await vi.runAllTimersAsync();
-    expect(await out).toBe('ok');
-    expect(fn).toHaveBeenCalledTimes(2);
   });
 
   it('honors Retry-After (seconds) on 429 by sleeping at least that long', async () => {

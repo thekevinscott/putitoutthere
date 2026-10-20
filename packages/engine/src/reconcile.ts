@@ -45,7 +45,8 @@
 
 import { join } from 'node:path';
 
-import { loadConfig, type Package } from './config.js';
+import type { Package } from './config.js';
+import { loadConfig } from './load-config.js';
 import { ensureTag } from './ensure-tag.js';
 import { tagList } from './git.js';
 import { createLogger } from './log.js';

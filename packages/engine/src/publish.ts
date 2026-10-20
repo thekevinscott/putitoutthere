@@ -7,7 +7,8 @@
 
 import { isAbsolute, join, resolve } from 'node:path';
 
-import { loadConfig, type Package } from './config.js';
+import type { Package } from './config.js';
+import { loadConfig } from './load-config.js';
 import { mustGet } from './must-get.js';
 import { packagesByName } from './packages-by-name.js';
 import { checkCompleteness } from './completeness.js';
@@ -20,6 +21,7 @@ import { plan, type MatrixRow } from './plan.js';
 import { publishOrder } from './publish-order.js';
 import { attachPublishProgress } from './publish-progress.js';
 import { ensureTag } from './ensure-tag.js';
+import { healPublishedTag } from './heal-published-tag.js';
 import { formatTag } from './tag-template.js';
 import { requireAuth } from './require-auth.js';
 import { requireCargoShape } from './require-cargo-shape.js';
@@ -220,7 +222,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         // Auto-heal (#407): a version live on the registry but missing
         // its tag (e.g. an earlier run died before tagging) would never
         // self-heal — the skip path used to return before any tagging.
-        await ensureTag(pkg.tag_format, name, version, head, { cwd }, log);
+        await healPublishedTag(pkg, config.packages, version, head, { cwd }, log);
         continue;
       }
       // #639: the crates handler's dirty-tree guard needs to know which

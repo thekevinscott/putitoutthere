@@ -7,7 +7,7 @@
 
 import { join } from 'node:path';
 
-import { loadConfig } from './config.js';
+import { loadConfig } from './load-config.js';
 import { lastTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
