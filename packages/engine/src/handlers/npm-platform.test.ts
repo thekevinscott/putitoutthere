@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_NAME_TEMPLATE,
@@ -8,6 +8,9 @@ import {
 } from './npm-platform.js';
 import { looksLikePublishOverRace as looksLikePublishOverRaceImpl } from './looks-like-publish-over-race.js';
 import { toRustTriple as toRustTripleImpl } from './to-rust-triple.js';
+
+vi.mock('./looks-like-publish-over-race.js');
+vi.mock('./to-rust-triple.js');
 
 describe('normalizeBuild', () => {
   it('returns [] for undefined', () => {

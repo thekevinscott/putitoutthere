@@ -16,6 +16,7 @@ import { publishPlatforms } from './publish-platforms.js';
 import type { Ctx } from '../types.js';
 import { awaitPlatformsVisible } from './await-platforms-visible.js';
 
+vi.mock('./npm-platform.js', async () => await vi.importActual<typeof import('./npm-platform.js')>('./npm-platform.js'));
 vi.mock('./looks-like-publish-over-race.js', async () => await vi.importActual<typeof import('./looks-like-publish-over-race.js')>('./looks-like-publish-over-race.js'));
 vi.mock('../utils/exec-capture.js');
 vi.mock('./await-platforms-visible.js');
