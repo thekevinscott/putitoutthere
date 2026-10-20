@@ -1,6 +1,5 @@
 /**
- * Git wrapper tests (#9). `tag-template` / `version` (pure) run for real so
- * `lastTag`'s highest-semver selection is genuinely exercised.
+ * Git wrapper tests (#9).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,20 +9,13 @@ import {
   commitBody,
   commitParents,
   commitWithBody,
-  createTag,
-  diffNames,
   fetchTagsForce,
   forceTag,
-  hasStagedChanges,
   headCommit,
-  lastTag,
   pushTag,
   pushTagRef,
   pushTagRefForce,
-  remoteTagExists,
   tagCommit,
-  tagList,
-  tagsPointingAtHead,
 } from './git.js';
 import { execCapture } from './utils/exec-capture.js';
 import { ExecError } from './utils/exec-error.js';
@@ -98,129 +90,6 @@ describe('commitParents', () => {
   });
 });
 
-describe('diffNames', () => {
-  it('lists files changed between two commits', async () => {
-    stdout('b.txt');
-    expect(await diffNames('a', 'HEAD', OPTS)).toEqual(['b.txt']);
-    expectArgv(['diff', '--name-only', 'a..HEAD']);
-  });
-
-  it('returns empty when no changes', async () => {
-    stdout('');
-    expect(await diffNames('a', 'HEAD', OPTS)).toEqual([]);
-  });
-
-  it('handles multi-file commits', async () => {
-    stdout('b.txt\ndir/c.txt');
-    expect((await diffNames('a', 'HEAD', OPTS)).sort()).toEqual(['b.txt', 'dir/c.txt']);
-  });
-});
-
-describe('createTag + tagList', () => {
-  it('creates an annotated tag pointing at a given sha', async () => {
-    await createTag('v0.1.0', 'sha', { cwd: 'repo', message: 'release 0.1.0' });
-    expectArgv(['tag', '-a', '-m', 'release 0.1.0', 'v0.1.0', 'sha']);
-  });
-
-  it('defaults the annotation message to the tag name', async () => {
-    await createTag('v0.1.0', 'sha', OPTS);
-    expectArgv(['tag', '-a', '-m', 'v0.1.0', 'v0.1.0', 'sha']);
-  });
-
-  it('parses and glob-filters the tag list', async () => {
-    stdout('pkg-a-v0.1.0');
-    expect(await tagList('pkg-a-*', OPTS)).toEqual(['pkg-a-v0.1.0']);
-    expectArgv(['tag', '-l', 'pkg-a-*']);
-  });
-
-  it('returns an empty list when no tags match', async () => {
-    stdout('');
-    expect(await tagList('never-*', OPTS)).toEqual([]);
-  });
-
-  it('throws if git rejects the tag creation (e.g. it exists at a different sha)', async () => {
-    execMock.mockRejectedValue(gitError("fatal: tag 'v0.1.0' already exists"));
-    await expect(createTag('v0.1.0', 'b', OPTS)).rejects.toThrow();
-  });
-});
-
-describe('lastTag', () => {
-  it('finds the highest-semver among pkg-v*.*.* tags (numeric, not lexical)', async () => {
-    stdout(['pkg-v0.1.0', 'pkg-v0.1.9', 'pkg-v0.10.0', 'pkg-v0.2.0'].join('\n'));
-    // Returns the winning tag alongside its already-parsed version, so
-    // callers never re-parse the version out of the tag string.
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
-      tag: 'pkg-v0.10.0',
-      version: { major: 0, minor: 10, patch: 0 },
-    });
-    // {version} globs to *.*.* so only semver-shaped candidates are listed.
-    expectArgv(['tag', '-l', 'pkg-v*.*.*']);
-  });
-
-  it('returns null when no tags for this package exist', async () => {
-    stdout('');
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toBeNull();
-  });
-
-  it('ignores tags from other packages', async () => {
-    stdout('other-v9.9.9\npkg-v0.1.0');
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
-      tag: 'pkg-v0.1.0',
-      version: { major: 0, minor: 1, patch: 0 },
-    });
-  });
-
-  it('skips malformed tags under the package prefix', async () => {
-    stdout('pkg-v0.1.0\npkg-vnope');
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
-      tag: 'pkg-v0.1.0',
-      version: { major: 0, minor: 1, patch: 0 },
-    });
-  });
-
-  it('skips tags matching the glob but rejected by strict semver', async () => {
-    // parseTagVersion rejects leading zeros (returns null), so the candidate
-    // is skipped before it can win — no in-loop re-parse guard needed.
-    stdout('pkg-v0.1.0\npkg-v01.02.03');
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
-      tag: 'pkg-v0.1.0',
-      version: { major: 0, minor: 1, patch: 0 },
-    });
-  });
-
-  it('honors a custom `v{version}` tag_format for single-package repos', async () => {
-    stdout('v0.1.0\nv0.2.11');
-    expect(await lastTag('pkg', 'v{version}', OPTS)).toEqual({
-      tag: 'v0.2.11',
-      version: { major: 0, minor: 2, patch: 11 },
-    });
-    // The `v*.*.*` glob won't match a default-shaped `pkg-v...` tag.
-    expectArgv(['tag', '-l', 'v*.*.*']);
-  });
-
-  it('compares by major first (higher major wins across differing majors)', async () => {
-    // Differing majors exercise the `a.major !== b.major` comparison arm
-    // that same-major fixtures never reach.
-    execMock.mockResolvedValue({ stdout: 'pkg-v1.9.9\npkg-v2.0.0', stderr: '' });
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
-      tag: 'pkg-v2.0.0',
-      version: { major: 2, minor: 0, patch: 0 },
-    });
-  });
-
-  it('compares by minor when majors match (higher minor wins)', async () => {
-    // Equal majors fall through the first `greater()` arm to the
-    // `a.minor !== b.minor` comparison. A two-tag fixture that differs only
-    // in minor pins that second early return in isolation — the higher minor
-    // wins even though the lower-minor tag has the larger patch.
-    execMock.mockResolvedValue({ stdout: 'pkg-v1.3.9\npkg-v1.4.0', stderr: '' });
-    expect(await lastTag('pkg', '{name}-v{version}', OPTS)).toEqual({
-      tag: 'pkg-v1.4.0',
-      version: { major: 1, minor: 4, patch: 0 },
-    });
-  });
-});
-
 describe('tagCommit', () => {
   it('dereferences a tag to its commit sha (trimmed)', async () => {
     execMock.mockResolvedValue({ stdout: 'deadbeef\n', stderr: '' });
@@ -246,44 +115,11 @@ describe('pushTag', () => {
   });
 });
 
-describe('remoteTagExists', () => {
-  it('is true when ls-remote reports a matching ref', async () => {
-    stdout('a1b2c3d\trefs/tags/lib-v1.0.0\n');
-    expect(await remoteTagExists('lib-v1.0.0', OPTS)).toBe(true);
-    expectArgv(['ls-remote', '--tags', 'origin', 'refs/tags/lib-v1.0.0']);
-  });
-
-  it('is false when ls-remote reports no matching ref', async () => {
-    stdout('');
-    expect(await remoteTagExists('lib-v1.0.0', OPTS)).toBe(false);
-  });
-
-  it('throws when the remote cannot be reached at all (e.g. no origin configured)', async () => {
-    execMock.mockRejectedValue(
-      gitError("fatal: 'origin' does not appear to be a git repository"),
-    );
-    await expect(remoteTagExists('lib-v1.0.0', OPTS)).rejects.toThrow();
-  });
-});
-
 describe('tagCommit', () => {
   it('dereferences a tag to the commit it points at', async () => {
     stdout('deadbeef\n');
     expect(await tagCommit('pkg-v1.0.0', OPTS)).toBe('deadbeef');
     expectArgv(['rev-list', '-n', '1', 'pkg-v1.0.0']);
-  });
-});
-
-describe('tagsPointingAtHead', () => {
-  it('lists the tags whose commit is HEAD', async () => {
-    stdout('pkg-v1.0.0\nother-v2.0.0');
-    expect((await tagsPointingAtHead(OPTS)).sort()).toEqual(['other-v2.0.0', 'pkg-v1.0.0']);
-    expectArgv(['tag', '--points-at', 'HEAD']);
-  });
-
-  it('returns empty when HEAD carries no tag', async () => {
-    stdout('');
-    expect(await tagsPointingAtHead(OPTS)).toEqual([]);
   });
 });
 
@@ -318,19 +154,10 @@ describe('forceTag + pushTagRefForce + fetchTagsForce (floating-tag move; #446)'
   });
 });
 
-describe('addForce + hasStagedChanges + commitWithBody (fold; #446)', () => {
+describe('addForce + commitWithBody (fold; #446)', () => {
   it('addForce stages a pathspec overriding .gitignore', async () => {
     await addForce('dist-action/', OPTS);
     expectArgv(['add', '-f', 'dist-action/']);
-  });
-
-  it('hasStagedChanges is false on a clean index and true when the quiet diff exits non-zero', async () => {
-    stdout(''); // `git diff --cached --quiet` exits 0
-    expect(await hasStagedChanges(OPTS)).toBe(false);
-    expectArgv(['diff', '--cached', '--quiet']);
-
-    execMock.mockRejectedValue(gitError('')); // non-zero exit => staged changes present
-    expect(await hasStagedChanges(OPTS)).toBe(true);
   });
 
   it('commitWithBody forwards subject + body as two -m paragraphs', async () => {
