@@ -21,7 +21,7 @@ import { parseFlags } from './parse-flags.js';
 import { computePlanStatus } from './plan-status.js';
 import { printUsage } from './print-usage.js';
 import { publish } from './publish.js';
-import { readPublishProgress } from './publish-progress.js';
+import { readPublishProgress } from './read-publish-progress.js';
 import { reconcile } from './reconcile.js';
 import { reconcileSkipWarnings } from './reconcile-skip-warnings.js';
 import { releaseGithub } from './release-github/index.js';
