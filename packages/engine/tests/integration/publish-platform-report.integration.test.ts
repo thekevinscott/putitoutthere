@@ -30,10 +30,14 @@ const execMock = vi.mocked(execFile);
 
 const events: string[] = [];
 const notVisibleFor = new Map<string, number>();
+const lagMs = new Map<string, number>();
+const firstSeen = new Map<string, number>();
 const fetchMock = vi.fn<typeof fetch>((input) => {
   const [name, version] = String(input).replace('https://registry.npmjs.org/', '').split('/');
   const left = notVisibleFor.get(name!) ?? 0;
-  if (version === undefined || left > 0) {
+  if (!firstSeen.has(name!)) firstSeen.set(name!, Date.now());
+  const lagging = Date.now() - firstSeen.get(name!)! < (lagMs.get(name!) ?? 0);
+  if (version === undefined || left > 0 || lagging) {
     notVisibleFor.set(name!, left - 1);
     events.push(`404 ${name}`);
     return Promise.resolve(new Response('{}', { status: 404 }));
@@ -117,7 +121,7 @@ function wireNpm(alreadyPublished: readonly string[]): void {
 }
 
 async function withFakeTimers<T>(fn: () => Promise<T>): Promise<T> {
-  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
   try {
     const p = fn();
     let done = false;
@@ -126,7 +130,7 @@ async function withFakeTimers<T>(fn: () => Promise<T>): Promise<T> {
       () => { done = true; },
     );
     while (!done) {
-      await vi.advanceTimersByTimeAsync(300_000);
+      await vi.advanceTimersToNextTimerAsync();
       await new Promise((r) => setImmediate(r));
     }
     return await p;
@@ -227,6 +231,8 @@ beforeEach(() => {
   process.env.NODE_AUTH_TOKEN = 'tok';
   events.length = 0;
   notVisibleFor.clear();
+  lagMs.clear();
+  firstSeen.clear();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -319,6 +325,36 @@ describe('publish waits for platform packages to be visible (#733)', () => {
       `200 ${PLATFORM_NAMES[1]}`,
       'publish demo-cli',
     ]);
+  });
+
+  it('waits out a 16-minute npm recording lag before publishing the main package (#785)', async () => {
+    wireNpm([]);
+
+    lagMs.set(PLATFORM_NAMES[1]!, 16 * 60_000);
+
+    const report = await withFakeTimers(publishJson);
+
+    expect(report.published[0]!.result.status).toBe('published');
+    expect(events.at(-1)).toBe('publish demo-cli');
+  });
+
+  it('gives up within one 20-minute deadline shared across platforms (#785)', async () => {
+    wireNpm([]);
+    lagMs.set(PLATFORM_NAMES[0]!, 15 * 60_000);
+    notVisibleFor.set(PLATFORM_NAMES[1]!, Infinity);
+
+    let elapsed = 0;
+    const { code } = await withFakeTimers(async () => {
+      const start = Date.now();
+      const result = await runPublish();
+      elapsed = Date.now() - start;
+      return result;
+    });
+
+    expect(code).not.toBe(0);
+    expect(events).not.toContain('publish demo-cli');
+    expect(elapsed).toBeGreaterThanOrEqual(20 * 60_000);
+    expect(elapsed).toBeLessThan(22 * 60_000);
   });
 
   it('does not publish the main package when a platform package never becomes visible', async () => {
