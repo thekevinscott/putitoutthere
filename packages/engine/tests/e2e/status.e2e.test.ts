@@ -1,7 +1,6 @@
 /**
- * `status` against the REAL registries, pointed at piot's own fixture
- * packages (`piot-fixture-zzz-*`, published to the real registries by the CI
- * e2e suite; see tests/fixtures/README.md). Issues #403, #406.
+ * `status` against the REAL registries, pointed at live packages
+ * (see fixtures/status/putitoutthere.toml). Issues #403, #406.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -78,11 +77,10 @@ describe('piot status against live registries (#403)', () => {
     for (const name of ['fixture-rust', 'fixture-npm', 'fixture-py']) {
       const row = byName[name]!;
       expect(row.registryUnreachable).toBe(false);
-      // A real version came back from the live registry, in the fixture
-      // suite's `0.0.{unix_seconds}` scheme — proof the field-shape parse
-      // is correct against reality (the assertion the mocked integration
-      // test structurally cannot make).
-      expect(row.registry).toMatch(/^0\.0\.\d+$/);
+      // A real version came back from the live registry: proof the
+      // field-shape parse is correct against reality (the assertion the
+      // mocked integration test structurally cannot make).
+      expect(row.registry).toMatch(/^\d+\.\d+\.\d+$/);
       expect(row.state).toBe('published, untagged');
       expect(row.drift).toBe(true);
     }
