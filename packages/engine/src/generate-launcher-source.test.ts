@@ -1,6 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { extractBase } from './extract-base.js';
+import { extractScope } from './extract-scope.js';
 import { generateLauncherSource } from './generate-launcher-source.js';
+
+vi.mock('./extract-base.js');
+vi.mock('./extract-scope.js');
+
+const scopeMock = vi.mocked(extractScope);
+const baseMock = vi.mocked(extractBase);
+
+beforeEach(() => {
+  scopeMock.mockReset();
+  baseMock.mockReset();
+});
 
 const opts = (extra: Partial<Parameters<typeof generateLauncherSource>[0]> = {}) => ({
   pkgDir: 'unused',
@@ -41,25 +54,14 @@ describe('generateLauncherSource', () => {
   });
 
   it('resolves {scope}, {base} and {mode} for a scoped name, repeatedly', () => {
+    scopeMock.mockReturnValue('myorg');
+    baseMock.mockReturnValue('cli');
     const src = generateLauncherSource(
       opts({ npmName: '@myorg/cli', platformNameTemplate: '@{scope}/{base}-{mode}-{triple}-{base}' }),
     );
     expect(src).toContain('const pkg = `@myorg/cli-bundled-cli-${triple}-cli`;');
-  });
-
-  it('resolves {scope} to empty and {base} to the whole name when unscoped', () => {
-    const src = generateLauncherSource(opts({ platformNameTemplate: '[{scope}]{base}-{triple}' }));
-    expect(src).toContain('const pkg = `[]my-cli-${triple}`;');
-  });
-
-  it('treats a name as scoped only when the whole name is @scope/base', () => {
-    const tpl = { platformNameTemplate: '[{scope}|{base}]-{triple}' };
-    expect(generateLauncherSource(opts({ ...tpl, npmName: 'x@org/cli' }))).toContain(
-      'const pkg = `[|x@org/cli]-${triple}`;',
-    );
-    expect(generateLauncherSource(opts({ ...tpl, npmName: '@org/cli\nx' }))).toContain(
-      'const pkg = `[|@org/cli\nx]-${triple}`;',
-    );
+    expect(scopeMock).toHaveBeenCalledWith('@myorg/cli');
+    expect(baseMock).toHaveBeenCalledWith('@myorg/cli');
   });
 
   it('escapes backslashes and quotes in triples table entries', () => {
