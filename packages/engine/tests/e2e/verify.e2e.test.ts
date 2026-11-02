@@ -1,6 +1,6 @@
 /**
- * `piot verify` against the REAL registries; fixtures are OIDC-published, so
- * each must classify `oidc` from public trust attribution, no secrets:
+ * `piot verify` against the REAL registries; every package in the status
+ * fixture is OIDC-published (iniconfig included), so each must classify `oidc` from public trust attribution, no secrets:
  * crates.io `version.trustpub_data`, npm provenance-attestations endpoint,
  * PyPI integrity/provenance endpoint. Issues #403, #414.
  */
@@ -66,7 +66,7 @@ interface VerifyRow {
 }
 
 describe('piot verify against live registries (#414)', () => {
-  it('classifies every OIDC-published piot fixture as oidc', () => {
+  it('classifies every OIDC-published package as oidc', () => {
     const { code, stdout, stderr } = runCli(['verify', '--json', '--cwd', repo]);
     const rows = JSON.parse(stdout) as VerifyRow[];
     const byPkg = Object.fromEntries(rows.map((r) => [r.package, r]));
@@ -77,7 +77,7 @@ describe('piot verify against live registries (#414)', () => {
         row.posture,
         `${name} should be OIDC (published via trusted publisher). output:\n${stdout}\n${stderr}`,
       ).toBe('oidc');
-      expect(row.version).toMatch(/^0\.0\.\d+$/);
+      expect(row.version).toMatch(/^\d+\.\d+\.\d+$/);
     }
     expect(code).toBe(0);
   });
