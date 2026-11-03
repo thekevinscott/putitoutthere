@@ -2,9 +2,14 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Ctx } from '../types.js';
+import { declaresDynamicVersion } from '../utils/declares-dynamic-version.js';
 import { pypiWriteVersion } from './pypi-write-version.js';
 
 vi.mock('node:fs/promises');
+vi.mock('../utils/declares-dynamic-version.js', async () => {
+  const actual = await vi.importActual<typeof import('../utils/declares-dynamic-version.js')>('../utils/declares-dynamic-version.js');
+  return { declaresDynamicVersion: vi.fn(actual.declaresDynamicVersion) };
+});
 
 const readMock = vi.mocked(readFile);
 const writeMock = vi.mocked(writeFile);
@@ -34,6 +39,14 @@ beforeEach(() => {
 
 describe('pypiWriteVersion', () => {
   const dir = '/wv';
+
+  it('skips the rewrite when the [project] table declares a dynamic version', async () => {
+    readMock.mockResolvedValue(['[project]', 'name = "demo"', 'version = "0.1.0"', ''].join('\n'));
+    vi.mocked(declaresDynamicVersion).mockReturnValueOnce(true);
+    expect(await pypiWriteVersion({ ...basePkg(), path: dir }, '0.2.0', makeCtx())).toEqual([]);
+    expect(declaresDynamicVersion).toHaveBeenCalledWith({ name: 'demo', version: '0.1.0' });
+    expect(writeMock).not.toHaveBeenCalled();
+  });
 
   it('rejects a static [project].version literal with PIOT_PYPI_STATIC_VERSION (#333)', async () => {
     // After #333, pyproject.toml MUST declare `dynamic = ["version"]`.
