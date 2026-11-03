@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
+import { declaresDynamicVersion } from '../utils/declares-dynamic-version.js';
 import { ErrorCodes } from '../error-codes.js';
 import type { Ctx } from '../types.js';
 import { toError } from '../to-error.js';
@@ -36,7 +37,7 @@ export async function pypiWriteVersion(
       `pyproject.toml has no [project] table -- declare [project].dynamic = ["version"] with hatch-vcs (or setuptools-scm / maturin Cargo.toml). See ${DYNAMIC_VERSION_DOC_POINTER}.`,
     );
   }
-  if (projectDynamicIncludesVersion(project)) {
+  if (declaresDynamicVersion(project)) {
     // Dynamic-version: hatch-vcs / setuptools-scm read the version
     // from a git tag or `SETUPTOOLS_SCM_PRETEND_VERSION`; maturin
     // reads it from `Cargo.toml`'s `[package].version`. In every case
@@ -74,9 +75,4 @@ export async function pypiWriteVersion(
   throw new Error(
     `pyproject.toml at ${pyProjectPath}: [project] table declares no version source -- add \`dynamic = ["version"]\`. See ${DYNAMIC_VERSION_DOC_POINTER}.`,
   );
-}
-
-function projectDynamicIncludesVersion(project: { dynamic?: unknown }): boolean {
-  const { dynamic } = project;
-  return Array.isArray(dynamic) && dynamic.includes('version');
 }
