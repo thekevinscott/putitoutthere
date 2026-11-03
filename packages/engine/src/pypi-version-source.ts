@@ -6,6 +6,7 @@
  */
 
 import { buildRequiresDeclares } from './build-requires-declares.js';
+import { isTable } from './is-table.js';
 
 export type PypiUnreachableVersionCode =
   | 'PIOT_PYPI_HATCH_VERSION_PATH'
@@ -78,8 +79,4 @@ export function classifyPypiVersionSource(
     code: 'PIOT_PYPI_DYNAMIC_VERSION_NO_BACKEND',
     detail: noVersionTable,
   };
-}
-
-function isTable(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

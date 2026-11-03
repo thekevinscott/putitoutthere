@@ -5,7 +5,7 @@
  * elided mid-message (#651): GitHub cuts a log line at 64KB from the *front*.
  */
 
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { ErrorCodes } from '../error-codes.js';
@@ -20,6 +20,8 @@ import { cratesIsPublished } from './crates-is-published.js';
 import { cratesLatestVersion } from './crates-latest-version.js';
 import { cratesTrustPosture } from './crates-trust-posture.js';
 import { cratesWriteVersion } from './crates-write-version.js';
+import { isRateLimited } from './is-rate-limited.js';
+import { relativeOrSelf } from './relative-or-self.js';
 
 async function publishImpl(
   pkg: { name: string; path: string; crate?: string; features?: string[]; no_default_features?: boolean },
@@ -170,31 +172,6 @@ async function publishImpl(
       ? `${primaryOverride.replace(/\/$/, '')}/api/v1/crates/${crateNameFor(pkg)}/${version}`
       : `${cratesRegistry()}/crates/${crateNameFor(pkg)}/${version}`,
   };
-}
-
-/**
- * Match cargo's 429 stderr shape. crates.io renders this verbatim under
- * a `Caused by:` block:
- *   the remote server responded with an error (status 429 Too Many Requests):
- *   You have published too many versions of this crate in the last 24 hours
- * The two-anchor match (status + 429) keeps false positives out: an
- * unrelated "429 in 10 minutes" string in some other failure mode
- * wouldn't trigger the fallback.
- */
-function isRateLimited(stderr: string | undefined): boolean {
-  if (!stderr) {return false;}
-  return /status\s+429\b/i.test(stderr) || /429\s+Too\s+Many\s+Requests/i.test(stderr);
-}
-
-/* ------------------------------ internals ------------------------------ */
-
-export function relativeOrSelf(base: string, target: string): string {
-  const r = relative(base, target);
-  // Normalise to forward slashes: `node:path`'s relative() yields backslashes
-  // on Windows, but this feeds a human-readable error message that should read
-  // consistently across platforms (and matches the repo's forward-slash path
-  // convention).
-  return (r === '' ? target : r).replaceAll('\\', '/');
 }
 
 export const crates: Handler = {

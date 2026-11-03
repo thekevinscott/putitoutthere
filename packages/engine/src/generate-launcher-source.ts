@@ -1,3 +1,5 @@
+import { extractBase } from './extract-base.js';
+import { extractScope } from './extract-scope.js';
 import { nodePlatformKey } from './node-platform-key.js';
 import type { WriteLauncherOptions } from './write-launcher.js';
 
@@ -41,16 +43,6 @@ export function generateLauncherSource(opts: WriteLauncherOptions): string {
     `process.exit(result.status ?? 1);`,
     ``,
   ].join('\n');
-}
-
-function extractScope(npmName: string): string {
-  const m = /^@([^/]+)\/(.+)$/.exec(npmName);
-  return m ? m[1]! : '';
-}
-
-function extractBase(npmName: string): string {
-  const m = /^@([^/]+)\/(.+)$/.exec(npmName);
-  return m ? m[2]! : npmName;
 }
 
 function jsString(s: string): string {

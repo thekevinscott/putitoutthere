@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { attachPublishProgress, readPublishProgress } from './publish-progress.js';
+import { attachPublishProgress, type Carrier } from './publish-progress.js';
 import type { PublishOutput } from './publish.js';
 
 const entry = (
@@ -14,10 +14,10 @@ const entry = (
 });
 
 describe('publish progress carried through a throw (#623)', () => {
-  it('reads back exactly what was attached', () => {
+  it('stores exactly what was attached under the progress key', () => {
     const progress = [entry('lib-py', 'delegated'), entry('lib-rust', 'published')];
     const err = attachPublishProgress(new Error('npm publish failed'), progress);
-    expect(readPublishProgress(err)).toEqual(progress);
+    expect((err as Carrier).__piotPublishProgress).toBe(progress);
   });
 
   it('returns the same Error so callers can annotate and rethrow inline', () => {
@@ -55,16 +55,6 @@ describe('publish progress carried through a throw (#623)', () => {
     expect(annotations).toEqual(['__piotHandlerMeta', '__piotPublishProgress']);
     // Neither annotation clobbers the other.
     expect(err.__piotHandlerMeta).toEqual({ toolVersions: { npm: '12.0.0' } });
-    expect(readPublishProgress(err)).toEqual([entry('lib-py', 'delegated')]);
-  });
-
-  it('reports no progress for an Error that was never annotated', () => {
-    expect(readPublishProgress(new Error('preflight failed'))).toEqual([]);
-  });
-
-  it('reports no progress for non-Error throws', () => {
-    expect(readPublishProgress('a string')).toEqual([]);
-    expect(readPublishProgress(undefined)).toEqual([]);
-    expect(readPublishProgress(null)).toEqual([]);
+    expect((err as Carrier).__piotPublishProgress).toEqual([entry('lib-py', 'delegated')]);
   });
 });

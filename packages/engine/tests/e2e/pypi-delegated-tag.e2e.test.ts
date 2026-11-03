@@ -1,6 +1,6 @@
 /**
  * Delegated PyPI publishes must not be tagged by the publish job (#623),
- * against real pypi.org. The live fixture project at a version that will
+ * against real pypi.org. iniconfig at a version that will
  * never exist 404s, which is what makes the run take the delegation path —
  * and that path uploads nothing by construction.
  */
@@ -13,8 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const CLI = join(fileURLToPath(import.meta.url), '..', '..', '..', 'dist', 'cli-bin.js');
-const PROJECT = 'piot-fixture-zzz-python-sdist';
-// Far past anything the fixture will ever publish, so pypi.org answers
+const PROJECT = 'iniconfig';
+// Far past anything iniconfig will ever publish, so pypi.org answers
 // the handler's `isPublished` GET with a genuine 404.
 const VERSION = '999.999.999';
 

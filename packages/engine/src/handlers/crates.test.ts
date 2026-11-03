@@ -10,7 +10,7 @@ import { ExecError } from '../utils/exec-error.js';
 import { writeDependentVersionReqs } from '../write-dependent-version-reqs.js';
 
 vi.mock('../utils/exec-error.js', async () => await vi.importActual<typeof import('../utils/exec-error.js')>('../utils/exec-error.js'));
-import { crates, relativeOrSelf } from './crates.js';
+import { crates } from './crates.js';
 import { cratesIsPublished } from './crates-is-published.js';
 import { cratesLatestVersion } from './crates-latest-version.js';
 import { cratesTrustPosture } from './crates-trust-posture.js';
@@ -1355,18 +1355,6 @@ describe('crates.publish dirty-tree guard (#135)', () => {
       ),
     ).rejects.toThrow(/unexpected dirty|README\.md/);
     fetchSpy.mockRestore();
-  });
-});
-
-describe('relativeOrSelf', () => {
-  it('returns the relative path when base and target differ', () => {
-    expect(relativeOrSelf('/repo', '/repo/crate/Cargo.toml')).toBe('crate/Cargo.toml');
-  });
-
-  it('returns the target verbatim when base equals target (relative is empty)', () => {
-    expect(relativeOrSelf('/repo/crate/Cargo.toml', '/repo/crate/Cargo.toml')).toBe(
-      '/repo/crate/Cargo.toml',
-    );
   });
 });
 

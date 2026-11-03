@@ -1,7 +1,7 @@
 /**
  * `reconcile --expect` against real pypi.org (#666) — the bug is a property
  * of pypi.org's actual cache behaviour, so only an unmocked read shows it.
- * Both scenarios pin `0.0.1`, a permanently published version that is NOT
+ * Both scenarios pin iniconfig `1.0.0`, a permanently published version that is NOT
  * latest, so the CDN-cached `info.version` pointer can never name it.
  */
 
@@ -13,9 +13,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const CLI = join(fileURLToPath(import.meta.url), '..', '..', '..', 'dist', 'cli-bin.js');
-const PYPI_PROJECT = 'piot-fixture-zzz-python-sdist';
+const PYPI_PROJECT = 'iniconfig';
 /** Published, immutable, and never the project's latest. */
-const LIVE_VERSION = '0.0.1';
+const LIVE_VERSION = '1.0.0';
 /** Never published, and never will be — a real 404 from pypi.org. */
 const ABSENT_VERSION = '999.999.999';
 
@@ -26,12 +26,7 @@ function git(args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
 }
 
-/**
- * Tag names as a list, never as one blob. The fixture's live versions are
- * timestamp-suffixed (`0.0.1788209490`), so a substring assertion for
- * `fixture-py-v0.0.1` matches the tag for a completely different release
- * and passes without the expectation path existing at all.
- */
+/** Tag names as a list, never as one blob: `fixture-py-v1.0.0` is a substring of `fixture-py-v1.0.0.post1`. */
 function tags(): string[] {
   return git(['tag', '-l']).split('\n').filter(Boolean);
 }
@@ -94,10 +89,10 @@ afterEach(() => {
 
 describe('piot reconcile --expect against pypi.org (#666)', () => {
   it('tags a version the live latest pointer does not name', () => {
-    // 0.0.1 is live on PyPI and has no tag here, but PyPI's
+    // 1.0.0 is live on PyPI and has no tag here, but PyPI's
     // `info.version` names a much newer release — exactly the shape a
     // stale edge produces post-upload, without having to race a CDN.
-    // Discovery can never reach 0.0.1; the expectation must.
+    // Discovery can never reach 1.0.0; the expectation must.
     const { code, stdout, stderr } = runCli([
       'reconcile',
       '--expect',

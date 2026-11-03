@@ -1,8 +1,7 @@
-# Live, piot-owned fixture packages published to the real registries by
-# the CI e2e suite (inventory in tests/fixtures/README.md). Their versions
-# follow the suite's `0.0.{unix_seconds}` scheme. `status` reads each
-# one's real latest version; with no local tag, each is
-# published-but-untagged.
+# Live packages on the real registries. The npm and crates rows are piot
+# fixtures (tests/fixtures/README.md); the PyPI row is a third-party project,
+# read-only, because CI no longer uploads to PyPI (#815). `status` reads each
+# one's real latest version; with no local tag, each is published-but-untagged.
 [putitoutthere]
 version = 1
 
@@ -23,7 +22,7 @@ globs = ["packages/npm/**"]
 [[package]]
 name  = "fixture-py"
 kind  = "pypi"
-pypi  = "piot-fixture-zzz-python-hatch"
+pypi  = "iniconfig"
 build = "hatch"
 path  = "packages/py"
 globs = ["packages/py/**"]
