@@ -165,7 +165,7 @@ describe('verifyNpmTarballMain', () => {
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '' });
     const text = out.join('');
-    expect(text).toContain('registry.npmjs.org never returned a tarball URL after 8 attempts');
+    expect(text).toContain('registry.npmjs.org never returned a tarball URL within 20 minutes');
     expect(code).toBe(1);
     expect(downloadMock).not.toHaveBeenCalled();
   });
