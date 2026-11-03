@@ -110,7 +110,7 @@ function wire(
  * scheduled sleep land, until the run settles.
  */
 async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
   try {
     const p = fn();
     let done = false;
@@ -119,8 +119,8 @@ async function withFakeTimers(fn: () => Promise<number>): Promise<number> {
       () => { done = true; },
     );
     while (!done) {
-      await vi.advanceTimersByTimeAsync(200_000);
-      await Promise.resolve();
+      await vi.advanceTimersToNextTimerAsync();
+      await new Promise((r) => setImmediate(r));
     }
     return await p;
   } finally {
@@ -250,6 +250,27 @@ describe('piot verify npm-tarball: main/noarch files[] (#443)', () => {
     const text = out.join('');
     expect(text).toContain('http://localhost:4873/@scope%2Fpkg/1.0.0 not readable yet (attempt 1/5)');
     expect(text).toContain('ok: package/dist/ (1 file(s))');
+    expect(code).toBe(0);
+  });
+  it('waits out a 16-minute npm recording lag on the public registry (#785)', async () => {
+    writePkg('packages/npm', { name: '@scope/pkg', files: ['dist'] }, { dist: 'index.js' });
+    wire({ '@scope/pkg@1.0.0': 'https://reg/pkg.tgz' }, { 'https://reg/pkg.tgz': tgz.withDist! });
+    const recorded = vi.mocked(fetch);
+    let visibleAt: number | undefined;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      visibleAt ??= Date.now() + 16 * 60_000;
+      return Date.now() < visibleAt ? Promise.resolve(new Response('{}', { status: 404 })) : recorded(url);
+    }));
+
+    const code = await withFakeTimers(() =>
+      run([
+        'node', 'piot', 'verify', 'npm-tarball',
+        '--matrix', JSON.stringify([mainRow()]),
+        '--cwd', repo,
+      ]),
+    );
+
+    expect(out.join('')).toContain('ok: package/dist/ (1 file(s))');
     expect(code).toBe(0);
   });
 });

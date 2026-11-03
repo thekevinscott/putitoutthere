@@ -1,15 +1,16 @@
 import { resolveNpmTarballUrl } from '../verify/npm-tarball/resolve-url.js';
+import { npmVisibilityBudget } from '../verify/npm-tarball/visibility-budget.js';
 
 export async function awaitPlatformsVisible(
   names: readonly string[],
   version: string,
   registry: string | undefined,
 ): Promise<void> {
-  const sleeps = registry ? [1, 2, 5, 10] : [5, 15, 30, 60, 120, 180, 300];
+  const budget = npmVisibilityBudget(registry);
   for (const name of names) {
     const url = await resolveNpmTarballUrl(name, version, {
       registry,
-      sleeps,
+      ...budget,
       log: (line) => process.stderr.write(line),
     });
     if (url === null) {

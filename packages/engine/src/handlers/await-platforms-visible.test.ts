@@ -42,8 +42,8 @@ describe('awaitPlatformsVisible', () => {
     ]);
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).toEqual([
-      '  https://registry.npmjs.org/@s%2Flib-a/1.2.3 not readable yet (attempt 1/8); retrying in 5s\n',
-      '  https://registry.npmjs.org/@s%2Flib-a/1.2.3 not readable yet (attempt 2/8); retrying in 15s\n',
+      '  https://registry.npmjs.org/@s%2Flib-a/1.2.3 not readable yet (attempt 1); retrying in 5s\n',
+      '  https://registry.npmjs.org/@s%2Flib-a/1.2.3 not readable yet (attempt 2); retrying in 15s\n',
     ]);
   });
 

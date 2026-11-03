@@ -13,6 +13,7 @@ import { listFilesRecursive } from '../../utils/list-files-recursive.js';
 import { pathExists } from '../../utils/path-exists.js';
 import { localDirState } from './local-dir-state.js';
 import { resolveNpmTarballUrl } from './resolve-url.js';
+import { NPM_VISIBILITY_DEADLINE_MS, npmVisibilityBudget } from './visibility-budget.js';
 import type { TarballRow, VerifyNpmTarballOptions } from './types.js';
 
 export async function verifyNpmTarballMain(
@@ -26,7 +27,7 @@ export async function verifyNpmTarballMain(
   }
 
   const registry = opts.registry;
-  const sleeps = registry ? [1, 2, 5, 10] : [5, 15, 30, 60, 120, 180, 300];
+  const budget = npmVisibilityBudget(registry);
   const registryLabel = registry ? registry : 'registry.npmjs.org';
 
   let fail = 0;
@@ -47,10 +48,10 @@ export async function verifyNpmTarballMain(
       `[${pkgName}@${version}] verifying tarball at ${registryLabel} contains: ${dirs.join(' ')}\n`,
     );
 
-    const url = await resolveNpmTarballUrl(pkgName, version, { registry, sleeps });
+    const url = await resolveNpmTarballUrl(pkgName, version, { registry, ...budget });
     if (url === null) {
       process.stdout.write(
-        `::error::[${pkgName}@${version}] ${registryLabel} never returned a tarball URL after ${sleeps.length + 1} attempts. Either the publish didn't actually publish, or npm took longer than the budget to record it.\n`,
+        `::error::[${pkgName}@${version}] ${registryLabel} never returned a tarball URL ${budget.deadline === undefined ? `after ${budget.sleeps.length + 1} attempts` : `within ${NPM_VISIBILITY_DEADLINE_MS / 60_000} minutes`}. Either the publish didn't actually publish, or npm took longer than the budget to record it.\n`,
       );
       fail = 1;
       continue;

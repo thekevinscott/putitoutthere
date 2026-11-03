@@ -69,4 +69,34 @@ describe('resolveNpmTarballUrl', () => {
     expect(await settle(resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [1, 1] }))).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it('keeps polling at the last interval until the deadline, then gives up', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    fetchMock.mockResolvedValue(respond(404, DOC));
+    const start = Date.now();
+    const p = resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [1, 4], deadline: start + 10_000 });
+    expect(await settle(p)).toBeNull();
+    expect(Date.now() - start).toBe(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(out.join('')).toContain('(attempt 4); retrying in 1s\n');
+  });
+
+  it('resolves past the schedule while the deadline still allows', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    fetchMock
+      .mockResolvedValueOnce(respond(404, DOC))
+      .mockResolvedValueOnce(respond(404, DOC))
+      .mockResolvedValueOnce(respond(404, DOC))
+      .mockResolvedValue(respond(200, DOC));
+    const p = resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [1], deadline: Date.now() + 60_000 });
+    expect(await settle(p)).toBe('https://reg/pkg.tgz');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('gives up after one attempt when the deadline has already passed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    fetchMock.mockResolvedValue(respond(404, DOC));
+    expect(await settle(resolveNpmTarballUrl('pkg', '1.0.0', { sleeps: [1], deadline: Date.now() }))).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
