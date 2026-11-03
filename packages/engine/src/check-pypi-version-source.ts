@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 
+import { declaresDynamicVersion } from './utils/declares-dynamic-version.js';
 import type { Package } from './config.js';
 
 export interface PypiVersionFinding {
@@ -46,9 +47,4 @@ export async function checkPypiVersionSource(
     }
   }
   return findings;
-}
-
-function declaresDynamicVersion(project: { dynamic?: unknown }): boolean {
-  const { dynamic } = project;
-  return Array.isArray(dynamic) && dynamic.includes('version');
 }

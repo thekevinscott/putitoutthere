@@ -6,8 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkPypiVersionSource } from './check-pypi-version-source.js';
 import type { Package } from './config.js';
+import { declaresDynamicVersion } from './utils/declares-dynamic-version.js';
 
 vi.mock('node:fs/promises');
+vi.mock('./utils/declares-dynamic-version.js', async () => {
+  const actual = await vi.importActual<typeof import('./utils/declares-dynamic-version.js')>('./utils/declares-dynamic-version.js');
+  return { declaresDynamicVersion: vi.fn(actual.declaresDynamicVersion) };
+});
 vi.mock('smol-toml', async () => {
   const actual = await vi.importActual<typeof import('smol-toml')>('smol-toml');
   return { ...actual, parse: vi.fn(actual.parse) };
@@ -34,6 +39,13 @@ beforeEach(() => {
 });
 
 describe('checkPypiVersionSource (#333)', () => {
+  it('skips a package whose [project] table declares a dynamic version', async () => {
+    writePyproject('a', '[project]\nname = "a"\nversion = "1.0.0"\n');
+    vi.mocked(declaresDynamicVersion).mockReturnValueOnce(true);
+    expect(await checkPypiVersionSource([pypiPkg('a')])).toEqual([]);
+    expect(declaresDynamicVersion).toHaveBeenCalledWith({ name: 'a', version: '1.0.0' });
+  });
+
   it('flags a static [project].version literal', async () => {
     writePyproject('a', '[project]\nname = "a"\nversion = "1.2.3"\n');
     expect(await checkPypiVersionSource([pypiPkg('a')])).toEqual([
