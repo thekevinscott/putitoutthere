@@ -1,0 +1,1 @@
+- Fixed: publishing an npm package with platform packages, and `verify npm-tarball`, no longer give up while npm is still recording a new version. They used to stop after about 12 minutes; npm has taken over 16. Both now poll public npm until a 20-minute deadline, shared across all platform packages in one publish. #785. (verified by: integration, unit/ubuntu-latest)

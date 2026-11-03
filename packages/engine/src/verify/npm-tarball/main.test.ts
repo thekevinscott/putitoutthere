@@ -165,8 +165,17 @@ describe('verifyNpmTarballMain', () => {
 
     const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '' });
     const text = out.join('');
-    expect(text).toContain('registry.npmjs.org never returned a tarball URL after 8 attempts');
+    expect(text).toContain('registry.npmjs.org never returned a tarball URL within 20 minutes');
     expect(code).toBe(1);
     expect(downloadMock).not.toHaveBeenCalled();
+  });
+
+  it('counts attempts against an override registry when no URL ever resolves', async () => {
+    readFileMock.mockResolvedValue(pkgJson(['dist']));
+    resolveMock.mockResolvedValue(null);
+
+    const code = await verifyNpmTarballMain([row], { cwd: '/cwd', matrix: '', registry: 'http://r' });
+    expect(out.join('')).toContain('::error::[@scope/pkg@1.0.0] http://r never returned a tarball URL after 5 attempts.');
+    expect(code).toBe(1);
   });
 });
