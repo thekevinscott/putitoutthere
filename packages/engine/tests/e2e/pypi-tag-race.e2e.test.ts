@@ -19,11 +19,11 @@
  *    that loses a tag has to be observable against a registry that really
  *    does refuse to answer — see `UNREADABLE_PROJECT` below.
  *
- * Both tagging scenarios pin to `0.0.1` of the live fixture project: a
+ * Both tagging scenarios pin to `1.0.0` of iniconfig: a
  * permanently published version that is NOT the project's latest, so the
- * mutable `info.version` pointer never names it and a `fixture-py-v0.0.1`
+ * mutable `info.version` pointer never names it and a `fixture-py-v1.0.0`
  * tag can only have come from the expectation path. Nothing here reads the
- * latest pointer for an assertion, so nothing moves when the fixture
+ * latest pointer for an assertion, so nothing moves when iniconfig
  * publishes again mid-run.
  *
  * No publish, no auth, no build: reconcile only reads the registry and
@@ -52,9 +52,9 @@ const CLI = join(PKG_ROOT, 'dist', 'cli-bin.js');
 // ncc writes the action bundle to the workspace root, not the package.
 const ACTION = join(PKG_ROOT, '..', '..', 'dist-action', 'index.js');
 
-const PYPI_PROJECT = 'piot-fixture-zzz-python-sdist';
+const PYPI_PROJECT = 'iniconfig';
 /** Published, immutable, and never the project's latest. */
-const LIVE_VERSION = '0.0.1';
+const LIVE_VERSION = '1.0.0';
 /** Never published, and never will be — a real 404 from pypi.org. */
 const ABSENT_VERSION = '999.999.999';
 
@@ -65,12 +65,7 @@ function git(args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trimEnd();
 }
 
-/**
- * Tag names as a list, never as one blob. The fixture's live versions are
- * timestamp-suffixed (`0.0.1788209490`), so a substring assertion for
- * `fixture-py-v0.0.1` matches the tag for a completely different release
- * and would pass with no expectation path at all.
- */
+/** Tag names as a list, never as one blob: `fixture-py-v1.0.0` is a substring of `fixture-py-v1.0.0.post1`. */
 function tags(): string[] {
   return git(['tag', '-l']).split('\n').filter(Boolean);
 }
@@ -170,9 +165,9 @@ describe('pypi-tag tags the upload it was told about (#694)', () => {
   it("cuts the tag from the release job's delegated_packages, through the action", () => {
     // The wiring verbatim: `pypi-tag.yml` forwards the release job's
     // `delegated_packages` output — `[{"name","version","tag"}, …]` — to
-    // the action, unreshaped. 0.0.1 is live and untagged here, and PyPI's
+    // the action, unreshaped. 1.0.0 is live and untagged here, and PyPI's
     // `info.version` names a far newer release, so discovery can never
-    // reach it. A `fixture-py-v0.0.1` tag proves the expectation
+    // reach it. A `fixture-py-v1.0.0` tag proves the expectation
     // travelled all the way through the bundle.
     writeConfig(PYPI_PROJECT);
 

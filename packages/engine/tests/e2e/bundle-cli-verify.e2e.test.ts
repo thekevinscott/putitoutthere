@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const CLI = join(fileURLToPath(import.meta.url), '../../../dist/cli-bin.js');
+// Ubuntu < 26 ships /sbin/ldconfig as a shell wrapper around the static-pie .real binary.
+const STATIC_PIE = existsSync('/sbin/ldconfig.real') ? '/sbin/ldconfig.real' : '/sbin/ldconfig';
 
 function verify(binary: string | undefined, target: string): { code: number; stdout: string } {
   const dir = mkdtempSync(join(tmpdir(), 'piot-bundle-cli-verify-e2e-'));
@@ -27,13 +29,13 @@ describe.runIf(process.platform === 'linux')('bundle-cli-verify against real bin
   });
 
   it('fails a static-pie gnu binary, which cannot dlopen', () => {
-    const { code, stdout } = verify('/sbin/ldconfig.real', 'x86_64-unknown-linux-gnu');
+    const { code, stdout } = verify(STATIC_PIE, 'x86_64-unknown-linux-gnu');
     expect(code).toBe(1);
     expect(stdout).toContain('is statically linked — a static binary cannot dlopen');
   });
 
   it('accepts the same static binary for a declared musl triple', () => {
-    const { code, stdout } = verify('/sbin/ldconfig.real', 'x86_64-unknown-linux-musl');
+    const { code, stdout } = verify(STATIC_PIE, 'x86_64-unknown-linux-musl');
     expect(code).toBe(0);
     expect(stdout).toContain('targets musl — static linkage is expected here');
   });

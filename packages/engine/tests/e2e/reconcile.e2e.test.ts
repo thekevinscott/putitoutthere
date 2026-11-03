@@ -16,7 +16,7 @@ import type { ReconcileAction, ReconcileResult } from '../../src/reconcile-types
 
 const CLI = join(fileURLToPath(import.meta.url), '..', '..', '..', 'dist', 'cli-bin.js');
 const CRATE = 'piot-fixture-zzz-poly-rust';
-const PYPI_PROJECT = 'piot-fixture-zzz-python-sdist';
+const PYPI_PROJECT = 'iniconfig';
 const UA = 'piot-e2e-reconcile';
 
 let repo: string;
