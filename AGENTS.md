@@ -273,9 +273,10 @@ skip evidence for bullets that are actually added.
 
 ### Fragment files
 
-One file per PR in each folder, named `YYYY-MM-DD-engine-<slug>.md`: the UTC
-merge date, the package directory name, then a short slug of lowercase
-letters, digits, and hyphens. The testing-conventions `changelog` check
+One file per PR in each folder, named `YYYY-MM-DD-<pkg>-<slug>.md`: the UTC
+merge date, the directory name of the package whose code changed (`engine`
+or `ci`), then a short slug of lowercase letters, digits, and hyphens. A PR
+touching both packages adds one fragment per package. The testing-conventions `changelog` check
 requires the package segment for pooled fragment folders (#820), and
 rejects an added fragment whose name breaks this. The
 folders are the record. Nothing renders them into a single file, nothing
