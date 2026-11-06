@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runActionlintIdToken } from './actionlint-idtoken/run.js';
 import { runCargoRegistry } from './cargo-registry/run.js';
-import { runChangelogCheck } from './changelog-check/run.js';
 import { runDiscardFirstPublishDists } from './discard-first-publish-dists/run.js';
 import { run } from './cli.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
@@ -16,7 +15,6 @@ import { runVerdaccioAuth } from './verdaccio-auth/run.js';
 
 vi.mock('./actionlint-idtoken/run.js');
 vi.mock('./cargo-registry/run.js');
-vi.mock('./changelog-check/run.js');
 vi.mock('./discard-first-publish-dists/run.js');
 vi.mock('./evidence-check/run.js');
 vi.mock('./fixture-materialize/run.js');
@@ -68,14 +66,6 @@ describe('piot-ci dispatcher', () => {
     expect(code).toBe(1);
     expect(err.join('')).toContain("piot-ci: unknown command 'bogus'");
     expect(out.join('')).toContain('Usage: piot-ci <command>');
-  });
-
-  it('dispatches changelog-check to its gate and returns its exit code', async () => {
-    vi.mocked(runChangelogCheck).mockResolvedValue(1);
-    const code = await run(argv('changelog-check'));
-    expect(code).toBe(1);
-    expect(runChangelogCheck).toHaveBeenCalledOnce();
-    expect(err.join('')).toBe('');
   });
 
   it('dispatches discard-first-publish-dists to its gate and returns its exit code', async () => {

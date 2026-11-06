@@ -180,15 +180,14 @@ both means CI never runs the test without the fix.
 2. **Push the test-only commit and open the PR**, titled `test:`, labelled
    `red-test`, body linking the issue and showing the failing run.
 3. **Wait for red on your new test.** Lint, typecheck, flake, or
-   `Changelog check` failures are a different problem; fix unrelated
+   `CHANGELOG + MIGRATIONS touched` failures are a different problem; fix unrelated
    failures too. Then wait for review of the test contract.
 4. **After the red CI run is visible AND the test contract is
    approved, push the implementation commit on top of the same
    branch.** Watch the same test go from red to green. The
    implementation commit is where the `changelog.d/` and
-   `migrations.d/` fragments live (the test-only commit is a test-only change and on
-   its own would skip the changelog gate per the policy below; the
-   PR as a whole carries the entries).
+   `migrations.d/` fragments live (the test-only commit owes none on its
+   own; the PR as a whole carries the entries).
 5. **The PR merges with both commits.** Squash-on-merge collapses
    to one commit on `main`; the two-commit history on the PR
    itself is what gives the workflow its diagnostic power.
@@ -231,11 +230,16 @@ single mutant, apply it by hand and run the unit tests.
 
 ## Changelog and migration policy
 
-Every PR that changes public API **must** add a fragment to both
-`changelog.d/` and `migrations.d/` in the same PR. This is enforced in CI
-(`.github/workflows/changelog-check.yml`). We are not yet strict about
-semver, so the bar is deliberately wide: any observable change to consumer
-surface — breaking or additive — needs a fragment in both folders.
+The testing-conventions `changelog` check (run by `conventions.yml`)
+enforces fragments. Any non-test change under `packages/engine` or
+`packages/ci` needs a `changelog.d/` fragment for that package. A commit
+carrying a `breaking: <summary>` line also requires a `migrations.d/`
+fragment.
+
+Add a `migrations.d/` fragment whenever a consumer has something to do or
+notice: breaking changes, new inputs, and runtime behavior changes such as
+retry timing or exit codes. Add the `breaking:` line when the consumer must act.
+Nothing checks for a fragment on a non-breaking change, so this is on review.
 
 "Public API" means anything a downstream consumer can observe:
 
@@ -245,8 +249,10 @@ surface — breaking or additive — needs a fragment in both folders.
 - The `resolve` CLI output (#683), which willfire consumes.
 
 The rest of the CLI, `action.yml`, and `src/` exports are internal. For
-internal refactors, test-only, and docs-only changes, add a
-`skip-changelog: <reason>` trailer to a commit. Use it sparingly.
+internal refactors, add a `skip-changelog: <reason>` line to a commit.
+`packages/ci` is internal too, but the line waives the whole PR, so a PR
+that also changes the engine adds a `ci-` fragment instead. Docs-only and
+test-only changes owe nothing.
 
 
 ## Verification policy
@@ -292,7 +298,8 @@ prefix and link to their `migrations.d/` fragment.
 
 ### `migrations.d/`
 
-One fragment per public-surface change, opening with a `#` title. Each
+One fragment per change a consumer must act on or notice (see the policy
+above), opening with a `#` title. Each
 fragment uses this structure:
 
 1. **Summary** — one paragraph: what changed and why.

@@ -1,9 +1,9 @@
 # Migration fragments
 
-One file per public-surface change, added in the PR that makes it. This
-folder *is* the migration record. Every change to public API gets one,
-additive changes as well as breaking ones, because versioning is not yet
-strictly semver. Filenames follow `YYYY-MM-DD-<pkg>-<slug>.md` (UTC merge date;
+One file per change a consumer must act on or notice, added in the PR that
+makes it. This folder *is* the migration record. CI requires one only when
+a commit carries a `breaking: <summary>` line; additive and behavior
+changes get one by review, because versioning is not yet strictly semver. Filenames follow `YYYY-MM-DD-<pkg>-<slug>.md` (UTC merge date;
 conventions in [`../changelog.d/README.md`](../changelog.d/README.md)), and
 fragments are never deleted or rewritten. Notes for releases before #730
 stay in [`../MIGRATIONS.md`](../MIGRATIONS.md).
