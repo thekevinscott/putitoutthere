@@ -7,7 +7,6 @@
 
 import { runActionlintIdToken } from './actionlint-idtoken/run.js';
 import { runCargoRegistry } from './cargo-registry/run.js';
-import { runChangelogCheck } from './changelog-check/run.js';
 import { runDiscardFirstPublishDists } from './discard-first-publish-dists/run.js';
 import { runEvidenceCheck } from './evidence-check/run.js';
 import { runFixtureMaterialize } from './fixture-materialize/run.js';
@@ -28,9 +27,6 @@ export async function run(argv: readonly string[]): Promise<number> {
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') {
     printUsage();
     return 0;
-  }
-  if (cmd === 'changelog-check') {
-    return runChangelogCheck();
   }
   if (cmd === 'tdd-lint') {
     return runTddLint();

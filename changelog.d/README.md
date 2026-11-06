@@ -24,8 +24,8 @@ accumulate as the permanent record. Entries released before #730 stay in
   "which release shipped X", map the fragment's date against tags:
   `git log --tags --simplify-by-decoration --format='%cI %d'`.
 
-Enforced by `changelog-check.yml`: a PR that changes public surface must
-add a fragment here and one in [`../migrations.d/`](../migrations.d/), and
-every added fragment must follow the filename rule. `evidence-check.yml`
-checks the evidence clauses. Bypass the fragment requirement with a
-`skip-changelog:` git trailer for changes with no consumer impact.
+Enforced by the testing-conventions `changelog` check in `conventions.yml`:
+a non-test change under `packages/engine` or `packages/ci` must add a
+fragment here, named for that package. `evidence-check.yml` checks the
+evidence clauses. Bypass with a `skip-changelog:` line for changes with no
+consumer impact.
