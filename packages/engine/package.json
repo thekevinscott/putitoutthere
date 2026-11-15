@@ -45,10 +45,10 @@
     "@vercel/ncc": "^0.45.0",
     "@vitest/coverage-v8": "^4.1.12",
     "eslint": "^10.14.0",
-    "msw": "^3.0.3",
+    "msw": "^3.0.5",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1",
-    "vite": "^8.3.5",
+    "typescript-eslint": "^8.72.2",
+    "vite": "^8.3.8",
     "vitest": "^4.1.12",
     "yaml": "^2.9.1"
   },
